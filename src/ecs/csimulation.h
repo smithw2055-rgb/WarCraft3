@@ -1,0 +1,123 @@
+#pragma once
+#include <cstdint>
+#include <vector>
+#include <memory>
+#include <unordered_map>
+#include <functional>
+#include "ecs/fwd.h"
+#include "ecs/unit.h"
+#include "ecs/pathing/pathfinding.h"
+#include "ecs/player.h"
+#include "ecs/handle_id.h"
+#include "ecs/combat/combat_system.h"
+#include "data/gameplay_constants.h"
+
+class AudioSystem;
+
+class CSimulation {
+public:
+    CSimulation();
+    ~CSimulation();
+
+    // System registration
+    void SetUnitData(CUnitData* data) { unitData_ = data; }
+    CUnitData* GetUnitData() const { return unitData_; }
+    void SetGameplayConstants(const CGameplayConstants& c) { gameplayConstants_ = c; }
+
+    // Game loop
+    void Update();
+
+    // Unit management
+    virtual CUnit* CreateUnit(War3ID typeId, int playerIndex, float x, float y, float facing);
+    CUnit* GetUnit(int handleId) const;
+    virtual void RemoveUnit(CUnit* unit);
+    const std::vector<CUnit*>& GetUnits() const { return units_; }
+    std::vector<CUnit*>& GetUnits() { return units_; }
+
+    // Player management
+    CPlayer* GetPlayer(int index) const;
+    int GetPlayerCount() const { return (int)players_.size(); }
+    void AddPlayer(std::unique_ptr<CPlayer> player);
+
+    // Timing
+    int GetGameTurnTick() const { return gameTurnTick_; }
+    float GetSimStepTime() const { return SIM_STEP_TIME; }
+    static constexpr float SIM_STEP_TIME = 0.1f;
+
+    // Game time
+    float GetGameTimeOfDay() const { return gameTimeOfDay_; }
+    void SetGameTimeOfDay(float t) { gameTimeOfDay_ = t; }
+    void AdvanceGameTime(float dt);
+
+    // Day/night
+    bool IsDaytime() const { return daytime_; }
+    bool IsNighttime() const { return !daytime_; }
+
+    // Audio
+    void SetAudioSystem(AudioSystem* audio) { audio_ = audio; }
+    AudioSystem* GetAudioSystem() const { return audio_; }
+
+    // Pathing
+    CWorldCollision* GetWorldCollision() const { return worldCollision_.get(); }
+    CPathfindingProcessor* GetPathfinding() const { return pathfindingProcessor_.get(); }
+    void SetPathingMap(const WpmData* wpm) { if (pathfindingProcessor_) pathfindingProcessor_->SetPathingMap(wpm); }
+
+    // Combat
+    CCombatSystem* GetCombatSystem() { return &combatSystem_; }
+    const CCombatSystem* GetCombatSystem() const { return &combatSystem_; }
+
+    // Item ID allocation
+    int CreateItemId() { return handleIdAlloc_.CreateId(); }
+
+    // Callbacks
+    void AddPostUpdateCallback(std::function<void()> cb);
+    void SetUnitDeathCallback(std::function<void(int unitHandle, int killerHandle, int playerIndex)> cb) {
+        unitDeathCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, int)>& GetUnitDeathCallback() const { return unitDeathCallback_; }
+    void SetUnitDamageCallback(std::function<void(int unitHandle, int sourceHandle, float damage)> cb) {
+        unitDamageCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, float)>& GetUnitDamageCallback() const { return unitDamageCallback_; }
+    void SetUnitOrderCallback(std::function<void(int unitHandle, int orderId, int targetHandle, float x, float y)> cb) {
+        unitOrderCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, int, float, float)>& GetUnitOrderCallback() const { return unitOrderCallback_; }
+
+private:
+    void ProcessUnitRemovals();
+    void ProcessNewUnits();
+
+    int gameTurnTick_ = 0;
+
+    // Game state
+    float gameTimeOfDay_ = 12.0f; // noon
+    bool daytime_ = true;
+    CGameplayConstants gameplayConstants_;
+
+    // Unit lists (using raw pointers managed by unique_ptr in maps)
+    std::vector<CUnit*> units_;
+    std::vector<CUnit*> newUnits_;
+    std::vector<CUnit*> removedUnits_;
+    std::unordered_map<int, std::unique_ptr<CUnit>> unitMap_;
+
+    // Players
+    std::vector<std::unique_ptr<CPlayer>> players_;
+
+    // Systems
+    CUnitData* unitData_ = nullptr;
+    CAbilityData* abilityData_ = nullptr;
+    CItemData* itemData_ = nullptr;
+
+    CCombatSystem combatSystem_;
+    std::unique_ptr<CWorldCollision> worldCollision_;
+    std::unique_ptr<CPathfindingProcessor> pathfindingProcessor_;
+    AudioSystem* audio_ = nullptr;
+    HandleIdAllocator handleIdAlloc_;
+
+    // Post-update callbacks
+    std::vector<std::function<void()>> postUpdateCallbacks_;
+    std::function<void(int, int, int)> unitDeathCallback_;
+    std::function<void(int, int, float)> unitDamageCallback_;
+    std::function<void(int, int, int, float, float)> unitOrderCallback_;
+};

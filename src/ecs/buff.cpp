@@ -1,0 +1,50 @@
+#include "buff.h"
+#include "ecs/unit.h"
+#include "ecs/csimulation.h"
+
+CBuff::CBuff(War3ID id, float duration, bool isPositive)
+    : id_(id), duration_(duration), remaining_(duration), isPositive_(isPositive) {}
+
+bool CBuff::AddStack() {
+    if (stackCount_ < maxStacks_) {
+        stackCount_++;
+        RefreshDuration();
+        return true;
+    }
+    RefreshDuration();
+    return false;
+}
+
+void CBuff::RemoveStack() {
+    if (stackCount_ > 0) {
+        stackCount_--;
+    }
+}
+
+void CBuff::OnApply(CSimulation& game, CUnit* target) {
+    (void)game; (void)target;
+}
+
+void CBuff::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game; (void)target;
+}
+
+void CBuff::OnTick(CSimulation& game, CUnit* target) {
+    (void)game; (void)target;
+    // Update remaining duration
+    float dt = game.GetSimStepTime();
+    remaining_ -= dt;
+
+    // Handle periodic effects
+    if (periodic_) {
+        periodicTimer_ += dt;
+        if (periodicTimer_ >= periodicInterval_) {
+            periodicTimer_ -= periodicInterval_;
+            OnPeriodic(game, target);
+        }
+    }
+}
+
+void CBuff::OnPeriodic(CSimulation& game, CUnit* target) {
+    (void)game; (void)target;
+}

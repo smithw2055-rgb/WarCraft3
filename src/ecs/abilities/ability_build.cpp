@@ -1,0 +1,134 @@
+#include "ability_build.h"
+#include "ecs/unit.h"
+#include "ecs/csimulation.h"
+#include "ecs/behaviors/behavior_build.h"
+#include "ecs/player.h"
+#include "data/unitdata.h"
+#include <cmath>
+#include <iostream>
+
+CAbilityBuild::CAbilityBuild(int handleId, War3ID code, CBuildRace race)
+    : CAbility(handleId, code, CAbilityCategory::BUILD), race_(race) {
+    iconShowing_ = true;
+}
+
+int CAbilityBuild::GetBaseOrderId() const {
+    switch (race_) {
+        case CBuildRace::HUMAN:     return OrderIds::HUMAN_BUILD;
+        case CBuildRace::ORC:       return OrderIds::ORC_BUILD;
+        case CBuildRace::UNDEAD:    return OrderIds::UNDEAD_BUILD;
+        case CBuildRace::NIGHT_ELF: return OrderIds::NIGHT_ELF_BUILD;
+        default: return OrderIds::HUMAN_BUILD;
+    }
+}
+
+void CAbilityBuild::OnAdd(CSimulation& game, CUnit* unit) {
+    (void)game; (void)unit;
+    // Build ability doesn't create persistent behaviors on add
+    // Behaviors are created per-order in Begin()
+}
+
+void CAbilityBuild::OnRemove(CSimulation& game, CUnit* unit) {
+    (void)game; (void)unit;
+}
+
+bool CAbilityBuild::CheckCanTargetPoint(CSimulation& game, CUnit* unit, int orderId, float x, float y) const {
+    (void)game; (void)unit; (void)orderId; (void)x; (void)y;
+    if (IsDisabled()) return false;
+    // The actual building type validation happens in Begin()
+    return true;
+}
+
+bool CAbilityBuild::CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const {
+    (void)game; (void)unit;
+    if (IsDisabled()) return false;
+    // Cancel build
+    return orderId == OrderIds::CANCEL;
+}
+
+CBehavior* CAbilityBuild::Begin(CSimulation& game, CUnit* caster, int orderId, float x, float y) {
+    (void)orderId;
+    // Snap to grid
+    RoundBuildPosition(x, y);
+
+    // The orderId encodes which building to build
+    // For now, we use the orderId directly as the building type
+    // In a full implementation, the UI would pass the building type
+    War3ID buildingTypeId(static_cast<uint32_t>(orderId));
+
+    // Validate placement
+    if (IsBuildLocationObstructed(game, x, y, caster->GetPlayerIndex(), buildingTypeId)) {
+        std::cout << "Build location obstructed!" << std::endl;
+        return nullptr;
+    }
+
+    // Check if player can afford it
+    auto* player = game.GetPlayer(caster->GetPlayerIndex());
+    auto* unitData = game.GetUnitData();
+    if (player && unitData) {
+        auto* buildType = unitData->GetUnitType(buildingTypeId);
+        if (buildType) {
+            if (player->GetGold() < buildType->GetGoldCost()) {
+                std::cout << "Not enough gold!" << std::endl;
+                return nullptr;
+            }
+            if (player->GetLumber() < buildType->GetLumberCost()) {
+                std::cout << "Not enough lumber!" << std::endl;
+                return nullptr;
+            }
+        }
+    }
+
+    // Create build behavior
+    auto* behavior = new CBehaviorBuild();
+    behavior->SetUnit(caster);
+    behavior->SetBuildTarget(x, y, buildingTypeId, race_);
+    return behavior;
+}
+
+CBehavior* CAbilityBuild::BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) {
+    (void)game; (void)caster; (void)orderId;
+    return nullptr;
+}
+
+void CAbilityBuild::RoundBuildPosition(float& x, float& y) {
+    // Snap to 64-unit grid (standard WC3 building grid)
+    x = std::round(x / 64.0f) * 64.0f;
+    y = std::round(y / 64.0f) * 64.0f;
+}
+
+bool CAbilityBuild::IsBuildLocationObstructed(CSimulation& game, float x, float y,
+                                               int playerIndex, War3ID buildingTypeId) {
+    (void)playerIndex;
+    auto* unitData = game.GetUnitData();
+    if (!unitData) return true;
+
+    auto* buildType = unitData->GetUnitType(buildingTypeId);
+    if (!buildType) return true;
+
+    // Check collision size of the building
+    float collisionSize = buildType->GetCollisionSize();
+    if (collisionSize <= 0) collisionSize = 64.0f;
+
+    // Check pathing map
+    auto* pathfinding = game.GetPathfinding();
+    if (pathfinding) {
+        // Check if the area is walkable (not blocked by terrain/cliffs)
+        // This is a simplified check - full implementation would check
+        // preventedPathingTypes against the pathing grid
+    }
+
+    // Check for overlapping units
+    for (auto* unit : game.GetUnits()) {
+        if (unit->IsDead()) continue;
+        float dx = unit->GetX() - x;
+        float dy = unit->GetY() - y;
+        float dist = std::sqrt(dx * dx + dy * dy);
+        float minDist = collisionSize + unit->GetCollisionSize();
+        if (dist < minDist) {
+            return true; // obstructed
+        }
+    }
+
+    return false;
+}

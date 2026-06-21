@@ -1,0 +1,35 @@
+#pragma once
+#include "ecs/behaviors/behavior.h"
+#include "ecs/abilities/ability_harvest.h"
+#include <deque>
+
+// CBehaviorReturnResources - worker carries resources back to town hall
+class CBehaviorReturnResources : public CBehavior {
+public:
+    CBehaviorReturnResources();
+    CBehaviorCategory GetCategory() const override { return CBehaviorCategory::RETURN_RESOURCES; }
+
+    void SetTarget(CWidget* target);
+    void SetHarvestAbility(const CAbilityHarvest* ability) { harvestAbility_ = ability; }
+
+    // Find nearest dropoff point (town hall)
+    void FindNearestDropoff(CSimulation& simulation);
+
+    bool Update(CSimulation& simulation) override;
+    void Begin(CSimulation& simulation) override;
+    void End(CSimulation& simulation) override;
+
+private:
+    CWidget* target_ = nullptr;
+    const CAbilityHarvest* harvestAbility_ = nullptr;
+
+    // State
+    bool movingToDropoff_ = true;
+    bool depositing_ = false;
+    float depositTimer_ = 0;
+    float depositDuration_ = 0.5f;
+
+    // Pathfinding
+    std::deque<std::pair<float,float>> waypoints_;
+    int pathRecalcCooldown_ = 0;
+};
