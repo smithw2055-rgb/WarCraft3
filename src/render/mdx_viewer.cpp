@@ -24,6 +24,8 @@ static bool ShouldLogModelDebug(const std::string& name) {
     return false;
 }
 
+static int g_mdxLoadTraceCount = 0;
+
 namespace {
 static bool IsSuspiciousViewHandle(sg_view view) {
     if (!view.id) {
@@ -161,6 +163,32 @@ static int FindBestBirthSequenceIndex(const MdxModel& model) {
     return fallbackBirth;
 }
 
+MdxViewer::MdxViewer()
+    : shader_{0}
+    , pipeline_{0}
+    , batches_{}
+    , name_{}
+    , mpq_{nullptr}
+    , center_{0, 0, 0}
+    , radius_{0.0f}
+    , modelData_{}
+    , ownsModelData_{false}
+    , ownsBatchGpuResources_{true}
+    , modelSource_{nullptr}
+    , animator_{}
+    , hasAnimations_{false}
+    , hasAnimatedMaterials_{false}
+    , initializedAnimator_{false}
+    , animatedGeosetStates_{}
+    , animatedLayerAlphas_{}
+    , cachedBoneView_{0}
+    , cachedBoneTexId_{0}
+    , particles_{}
+    , hasParticles_{false}
+    , pendingStandSequenceAfterCurrent_{false}
+    , sharedSource_{nullptr} {
+}
+
 MdxViewer::~MdxViewer() { Release(); }
 
 sg_shader MdxViewer::sharedShader_ = {0};
@@ -178,6 +206,28 @@ sg_pipeline MdxViewer::sharedOverlaySkinnedBlendPipeline_ = {0};
 sg_sampler MdxViewer::sharedSampler_ = {0};
 sg_image MdxViewer::sharedWhiteTexture_ = {0};
 sg_view MdxViewer::sharedWhiteTextureView_ = {0};
+
+void MdxViewer::DebugLogState(const char* tag) const {
+    std::fprintf(stderr,
+        "MdxViewer::State tag=%s this=%p name=%s batches=%zu ownsModel=%d ownsGpu=%d modelSource=%p sharedSource=%p hasAnim=%d hasAnimMats=%d initAnim=%d particles=%d boneView=0x%08x boneTexId=%u geoStates=%zu layerStates=%zu\n",
+        tag ? tag : "",
+        this,
+        name_.c_str(),
+        batches_.size(),
+        ownsModelData_ ? 1 : 0,
+        ownsBatchGpuResources_ ? 1 : 0,
+        modelSource_,
+        sharedSource_,
+        hasAnimations_ ? 1 : 0,
+        hasAnimatedMaterials_ ? 1 : 0,
+        initializedAnimator_ ? 1 : 0,
+        hasParticles_ ? 1 : 0,
+        cachedBoneView_.id,
+        cachedBoneTexId_,
+        animatedGeosetStates_.size(),
+        animatedLayerAlphas_.size());
+    std::fflush(stderr);
+}
 
 void MdxViewer::InitSharedShader() {
     if (sharedShader_.id) return;
@@ -509,6 +559,30 @@ void MdxViewer::ReleaseSharedShader() {
 }
 
 void MdxViewer::Release() {
+    std::fprintf(stderr, "MdxViewer::Release begin name=%s batches=%zu ownsGpu=%d rendererActive=%d\n",
+        name_.c_str(), batches_.size(), ownsBatchGpuResources_ ? 1 : 0, Renderer::IsActive() ? 1 : 0);
+    std::fflush(stderr);
+    const bool emptyViewerState = name_.empty()
+        && batches_.empty()
+        && !ownsModelData_
+        && !hasParticles_;
+    if (emptyViewerState) {
+        cachedBoneView_ = {0};
+        cachedBoneTexId_ = 0;
+        shader_ = {0};
+        modelSource_ = nullptr;
+        sharedSource_ = nullptr;
+        hasAnimations_ = false;
+        hasAnimatedMaterials_ = false;
+        initializedAnimator_ = false;
+        animatedGeosetStates_.clear();
+        animatedLayerAlphas_.clear();
+        ownsBatchGpuResources_ = true;
+        pendingStandSequenceAfterCurrent_ = false;
+        std::fprintf(stderr, "MdxViewer::Release end empty\n");
+        std::fflush(stderr);
+        return;
+    }
     if (!Renderer::IsActive()) {
         batches_.clear();
         shader_ = {0};
@@ -522,6 +596,8 @@ void MdxViewer::Release() {
         initializedAnimator_ = false;
         animatedGeosetStates_.clear();
         animatedLayerAlphas_.clear();
+        std::fprintf(stderr, "MdxViewer::Release end inactive name=%s\n", name_.c_str());
+        std::fflush(stderr);
         return;
     }
     for (auto& b : batches_) {
@@ -535,11 +611,23 @@ void MdxViewer::Release() {
         if (b.playerTexHandle.id) sg_destroy_image(b.playerTexHandle);
         SafeDestroyViewHandle(b.playerTexView, "batch.playerTexView");
     }
+    std::fprintf(stderr, "MdxViewer::Release before bone-view id=0x%08x texId=%u\n",
+        cachedBoneView_.id, cachedBoneTexId_);
+    std::fflush(stderr);
     SafeDestroyViewHandle(cachedBoneView_, "cachedBoneView");
+    std::fprintf(stderr, "MdxViewer::Release after bone-view\n");
+    std::fflush(stderr);
     cachedBoneTexId_ = 0;
     batches_.clear();
     shader_ = {0};
-    if (hasParticles_) { particles_.Destroy(); hasParticles_ = false; }
+    if (hasParticles_) {
+        std::fprintf(stderr, "MdxViewer::Release destroy particles begin\n");
+        std::fflush(stderr);
+        particles_.Destroy();
+        hasParticles_ = false;
+        std::fprintf(stderr, "MdxViewer::Release destroy particles end\n");
+        std::fflush(stderr);
+    }
     modelData_ = MdxModel{};
     ownsModelData_ = false;
     ownsBatchGpuResources_ = true;
@@ -551,6 +639,8 @@ void MdxViewer::Release() {
     animatedGeosetStates_.clear();
     animatedLayerAlphas_.clear();
     pendingStandSequenceAfterCurrent_ = false;
+    std::fprintf(stderr, "MdxViewer::Release end active name=%s\n", name_.c_str());
+    std::fflush(stderr);
 }
 
 bool MdxViewer::ShareModelResourcesFrom(const MdxViewer& other) {
@@ -635,7 +725,12 @@ static sg_image LoadTextureFromMpq(MpqManager* mpq, const std::string& path) {
 }
 
 bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
+    DebugLogState("load-pre-release");
+    std::fprintf(stderr, "MdxViewer::Load pre-release incoming=%s\n", model.name.c_str());
+    std::fflush(stderr);
     Release();
+    std::fprintf(stderr, "MdxViewer::Load post-release incoming=%s\n", model.name.c_str());
+    std::fflush(stderr);
     modelData_ = model;
     ownsModelData_ = true;
     ownsBatchGpuResources_ = true;
@@ -645,6 +740,14 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
 
     name_ = sourceModel.name;
     const bool logModelDebug = ShouldLogModelDebug(name_);
+    const bool traceLoad = g_mdxLoadTraceCount < 4;
+    if (traceLoad) {
+        ++g_mdxLoadTraceCount;
+        std::fprintf(stderr,
+            "MdxViewer::Load begin name=%s geosets=%zu bones=%zu helpers=%zu textures=%zu\n",
+            name_.c_str(), sourceModel.geosets.size(), sourceModel.bones.size(),
+            sourceModel.helpers.size(), sourceModel.textures.size());
+    }
 
     InitSharedShader();
     if (!sharedShader_.id || !sharedPipeline_.id) return false;
@@ -663,11 +766,35 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
     smp.wrap_v = SG_WRAP_REPEAT;
 
     if (hasAnimations_ || hasAnimatedMaterials_) {
+        if (traceLoad) {
+            std::fprintf(stderr, "MdxViewer::Load animator init name=%s\n", name_.c_str());
+            std::fflush(stderr);
+        }
         animator_.Init(*modelSource_);
+        if (traceLoad) {
+            std::fprintf(stderr, "MdxViewer::Load animator init returned name=%s\n", name_.c_str());
+            std::fflush(stderr);
+        }
         initializedAnimator_ = true;
+        if (traceLoad) {
+            std::fprintf(stderr, "MdxViewer::Load play stand name=%s\n", name_.c_str());
+            std::fflush(stderr);
+        }
         PlayStandSequence();
+        if (traceLoad) {
+            std::fprintf(stderr, "MdxViewer::Load init animated states name=%s\n", name_.c_str());
+            std::fflush(stderr);
+        }
         InitializeAnimatedStates();
+        if (traceLoad) {
+            std::fprintf(stderr, "MdxViewer::Load update animated states name=%s\n", name_.c_str());
+            std::fflush(stderr);
+        }
         UpdateAnimatedStates();
+        if (traceLoad) {
+            std::fprintf(stderr, "MdxViewer::Load animator ready name=%s\n", name_.c_str());
+            std::fflush(stderr);
+        }
     }
     std::unordered_map<int, const MdxNode*> debugNodesByObjectId;
     if (logModelDebug) {
@@ -756,6 +883,10 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
         std::string replaceablePath;
     };
     std::vector<TexResolve> texCache(sourceModel.textures.size());
+    if (traceLoad) {
+        std::fprintf(stderr, "MdxViewer::Load resolving textures name=%s count=%zu\n",
+            name_.c_str(), sourceModel.textures.size());
+    }
     for (size_t ti = 0; ti < sourceModel.textures.size(); ti++) {
         auto& texRef = sourceModel.textures[ti];
         auto& cache = texCache[ti];
@@ -779,8 +910,15 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
             }
         }
     }
+    if (traceLoad) {
+        std::fprintf(stderr, "MdxViewer::Load textures ready name=%s\n", name_.c_str());
+    }
 
     // Create batches for each geoset
+    if (traceLoad) {
+        std::fprintf(stderr, "MdxViewer::Load geosets begin name=%s count=%zu\n",
+            name_.c_str(), sourceModel.geosets.size());
+    }
     for (int gi = 0; gi < (int)sourceModel.geosets.size(); gi++) {
         if (portraitOnlyGeosets.find(gi) != portraitOnlyGeosets.end()) continue;
         const auto& geo = sourceModel.geosets[gi];
@@ -967,6 +1105,10 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
             }
         }
     }
+    if (traceLoad) {
+        std::fprintf(stderr, "MdxViewer::Load geosets ready name=%s batches=%zu\n",
+            name_.c_str(), batches_.size());
+    }
 
     mpq_ = mpq;
     center_ = {
@@ -981,6 +1123,10 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
 
     std::cout << "MdxViewer: " << name_ << " loaded (batches=" << batches_.size()
               << ", animated=" << hasAnimations_ << ", particles=" << hasParticles_ << ")" << std::endl;
+    if (traceLoad) {
+        std::fprintf(stderr, "MdxViewer::Load end name=%s\n", name_.c_str());
+        std::fflush(stderr);
+    }
     return !batches_.empty();
 }
 
@@ -1062,9 +1208,6 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
                 if (weight <= 0.0f) continue;
 
                 int boneIndex = animator_.GetBoneIndexForObjectId(objectId);
-                if (boneIndex < 0) {
-                    boneIndex = objectId;
-                }
                 if (boneIndex < 0 || boneIndex >= 256) continue;
 
                 verts[i].boneIndices[influenceCount] = (uint8_t)boneIndex;
@@ -1091,9 +1234,6 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
                     if (mi < (int)geo.matrixIndices.size()) {
                         int objectId = (int)geo.matrixIndices[mi];
                         int boneIndex = animator_.GetBoneIndexForObjectId(objectId);
-                        if (boneIndex < 0) {
-                            boneIndex = objectId;
-                        }
                         if (boneIndex >= 0 && boneIndex < 256) {
                             verts[i].boneIndices[influenceCount] = (uint8_t)boneIndex;
                             ++influenceCount;

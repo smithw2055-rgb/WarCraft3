@@ -3,7 +3,6 @@
 #include "model/mdx.h"
 #include "math.h"
 #include <string>
-#include <unordered_map>
 #include <vector>
 #include <algorithm>
 
@@ -73,7 +72,7 @@ private:
     std::vector<MdxAnimNode> nodes_;
     std::vector<int> nodeOrder_; // parent-first traversal order
     std::vector<Mat4> boneMatrices_;
-    std::unordered_map<int, int> objectIdToBoneIndex_;
+    std::vector<std::pair<int, int>> objectIdToBoneIndex_;
     int boneCount_ = 0;
 
     // Model data references

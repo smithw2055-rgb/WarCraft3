@@ -3,7 +3,7 @@
 #include <iostream>
 #include <cmath>
 #include <cstring>
-#include <map>
+#include <unordered_set>
 
 #define MAKE_TAG(A,B,C,D) ((A<<24)|(B<<16)|(C<<8)|D)
 static const uint32_t TAG_KGTR = MAKE_TAG('K','G','T','R');
@@ -55,8 +55,12 @@ static const MdxTimeline* findTimeline(const std::vector<MdxTimeline>& timelines
 MdxAnimator::MdxAnimator() = default;
 
 int MdxAnimator::GetBoneIndexForObjectId(int objectId) const {
-    auto it = objectIdToBoneIndex_.find(objectId);
-    return it != objectIdToBoneIndex_.end() ? it->second : -1;
+    for (const auto& entry : objectIdToBoneIndex_) {
+        if (entry.first == objectId) {
+            return entry.second;
+        }
+    }
+    return -1;
 }
 
 MdxAnimator::~MdxAnimator() {
@@ -85,21 +89,30 @@ void MdxAnimator::Init(const MdxModel& model) {
     sequences_ = &model.sequences;
     pivotPoints_ = &model.pivotPoints;
     BuildSkeleton(model);
+    std::fprintf(stderr, "MdxAnimator::Init skeleton nodes=%zu boneCount=%d\n", nodes_.size(), boneCount_);
     if (!nodes_.empty()) {
+        std::fprintf(stderr, "MdxAnimator::Init sample frame 0\n");
         SampleAnimations(0);
+        std::fprintf(stderr, "MdxAnimator::Init update skeleton\n");
         UpdateSkeleton();
-        needsBoneUpload_ = true;
-        UploadBoneTexture();
     }
+    std::fprintf(stderr, "MdxAnimator::Init end\n");
+    std::fflush(stderr);
 }
 
 void MdxAnimator::BuildSkeleton(const MdxModel& model) {
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton begin bones=%zu helpers=%zu attachments=%zu lights=%zu emit1=%zu emit2=%zu ribbons=%zu events=%zu\n",
+        model.bones.size(), model.helpers.size(), model.attachments.size(), model.lights.size(),
+        model.particleEmitters1.size(), model.particleEmitters2.size(),
+        model.ribbonEmitters.size(), model.eventObjects.size());
     nodes_.clear();
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after nodes clear\n");
     nodeOrder_.clear();
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after order clear\n");
     objectIdToBoneIndex_.clear();
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after bone map clear\n");
     boneCount_ = 0;
-    int maxObjectId = -1;
-
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after bone count reset\n");
     struct Entry {
         int objectId;
         int parentId;
@@ -107,33 +120,49 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         uint32_t flags;
         const std::vector<MdxTimeline>* timelines;
     };
-    std::map<int, Entry> entries;
+    std::vector<Entry> entries;
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after entries ctor\n");
+    entries.reserve(model.bones.size() + model.helpers.size() + model.attachments.size()
+        + model.lights.size() + model.particleEmitters1.size() + model.particleEmitters2.size()
+        + model.ribbonEmitters.size() + model.eventObjects.size());
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after entries reserve\n");
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after entry map ctor\n");
+    auto hasEntryObjectId = [&](int objectId) -> bool {
+        for (const auto& entry : entries) {
+            if (entry.objectId == objectId) {
+                return true;
+            }
+        }
+        return false;
+    };
     auto addEntry = [&](int objectId, int parentId, uint32_t flags,
                         const std::vector<MdxTimeline>* timelines) {
         if (objectId < 0 || timelines == nullptr) {
             return;
         }
-        if (entries.find(objectId) != entries.end()) {
+        if (hasEntryObjectId(objectId)) {
             return;
+        }
+        if (parentId == objectId) {
+            parentId = -1;
         }
         int pivotIndex = -1;
         if (objectId < (int)model.pivotPoints.size()) {
             pivotIndex = objectId;
         }
-        entries[objectId] = {objectId, parentId, pivotIndex, flags, timelines};
-        maxObjectId = std::max(maxObjectId, objectId);
+        entries.push_back({objectId, parentId, pivotIndex, flags, timelines});
     };
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton before add loops\n");
 
-    // Bones
     for (const auto& b : model.bones) {
+        std::fprintf(stderr, "MdxAnimator::BuildSkeleton bone objectId=%d parentId=%d name=%s\n",
+            b.objectId, b.parentId, b.name.c_str());
         addEntry(b.objectId, b.parentId, b.flags, &b.timelines);
     }
-    // Helpers
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after bones\n");
     for (const auto& h : model.helpers) {
         addEntry(h.objectId, h.parentId, h.flags, &h.timelines);
     }
-    // Other transform-bearing nodes can still drive skinned geosets even when
-    // they are not declared as bones/helpers in the MDX.
     for (const auto& attachment : model.attachments) {
         addEntry(attachment.objectId, attachment.parentId, attachment.flags, &attachment.timelines);
     }
@@ -152,77 +181,95 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
     for (const auto& eventObject : model.eventObjects) {
         addEntry(eventObject.objectId, eventObject.parentId, eventObject.flags, &eventObject.timelines);
     }
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton entries=%zu\n", entries.size());
 
     if (entries.empty()) return;
 
-    // Topological sort: parents before children
-    std::map<int,int> objIdToNodeIdx;
-    std::vector<int> sorted;
-
-    // Roots first
-    for (const auto& [oid,e] : entries) {
-        if (e.parentId < 0) {
-            objIdToNodeIdx[oid] = (int)nodes_.size();
-            sorted.push_back((int)nodes_.size());
-            nodes_.resize(nodes_.size() + 1);
+    std::vector<size_t> sortedEntries;
+    sortedEntries.reserve(entries.size());
+    std::vector<uint8_t> visitState(entries.size(), 0);
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton sort setup ready\n");
+    auto appendSubtree = [&](auto&& self, size_t entryIndex) -> void {
+        if (visitState[entryIndex] == 2) {
+            return;
         }
-    }
-    if (sorted.empty()) {
-        int oid = entries.begin()->first;
-        objIdToNodeIdx[oid] = 0;
-        sorted.push_back(0);
-        nodes_.resize(1);
-    }
-
-    // BFS children
-    size_t processed = 0;
-    while (processed < sorted.size()) {
-        int curIdx = sorted[processed];
-        int curOid = -1;
-        for (const auto& [oid,idx] : objIdToNodeIdx)
-            if (idx == curIdx) { curOid = oid; break; }
-
-        if (curOid >= 0) {
-            for (const auto& [oid,e] : entries) {
-                if (e.parentId == curOid && objIdToNodeIdx.find(oid) == objIdToNodeIdx.end()) {
-                    objIdToNodeIdx[oid] = (int)nodes_.size();
-                    sorted.push_back((int)nodes_.size());
-                    nodes_.resize(nodes_.size() + 1);
-                }
+        if (visitState[entryIndex] == 1) {
+            entries[entryIndex].parentId = -1;
+            return;
+        }
+        visitState[entryIndex] = 1;
+        sortedEntries.push_back(entryIndex);
+        const int objectId = entries[entryIndex].objectId;
+        for (size_t childIndex = 0; childIndex < entries.size(); ++childIndex) {
+            if (entries[childIndex].parentId == objectId) {
+                self(self, childIndex);
             }
         }
-        processed++;
-    }
+        visitState[entryIndex] = 2;
+    };
 
-    // Remaining unconnected
-    for (const auto& [oid,e] : entries) {
-        if (objIdToNodeIdx.find(oid) == objIdToNodeIdx.end()) {
-            objIdToNodeIdx[oid] = (int)nodes_.size();
-            sorted.push_back((int)nodes_.size());
-            nodes_.resize(nodes_.size() + 1);
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const int parentId = entries[i].parentId;
+        bool hasParent = false;
+        if (parentId >= 0) {
+            hasParent = hasEntryObjectId(parentId);
+        }
+        if (!hasParent) {
+            appendSubtree(appendSubtree, i);
         }
     }
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton root walk complete sorted=%zu\n", sortedEntries.size());
+    for (size_t i = 0; i < entries.size(); ++i) {
+        appendSubtree(appendSubtree, i);
+    }
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton full walk complete sorted=%zu\n", sortedEntries.size());
 
-    // Initialize nodes
-    for (const auto& [oid,e] : entries) {
-        int idx = objIdToNodeIdx[oid];
-        auto& n = nodes_[idx];
+    std::vector<MdxAnimNode> builtNodes(sortedEntries.size());
+    std::vector<int> builtNodeOrder(sortedEntries.size(), 0);
+    std::vector<std::pair<int, int>> builtObjectIdToBoneIndex;
+    builtObjectIdToBoneIndex.reserve(sortedEntries.size());
+    std::vector<std::pair<int, int>> objectIdToNodeIndex;
+    objectIdToNodeIndex.reserve(sortedEntries.size());
+    for (size_t i = 0; i < sortedEntries.size(); ++i) {
+        const Entry& e = entries[sortedEntries[i]];
+        auto& n = builtNodes[i];
         n.objectId = e.objectId;
-        n.parentIndex = (e.parentId >= 0 && objIdToNodeIdx.count(e.parentId))
-            ? objIdToNodeIdx[e.parentId] : -1;
         n.pivotIndex = e.pivotIndex;
         n.flags = e.flags;
         n.timelines = e.timelines;
-        n.boneIndex = n.objectId;
-        objectIdToBoneIndex_[n.objectId] = n.boneIndex;
-
+        objectIdToNodeIndex.push_back({e.objectId, (int)i});
+        builtNodeOrder[i] = (int)i;
     }
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton node table ready count=%zu\n", builtNodes.size());
+    for (size_t i = 0; i < sortedEntries.size(); ++i) {
+        const Entry& e = entries[sortedEntries[i]];
+        auto& n = builtNodes[i];
+        n.parentIndex = -1;
+        for (const auto& parentEntry : objectIdToNodeIndex) {
+            if (parentEntry.first == e.parentId) {
+                n.parentIndex = parentEntry.second;
+                break;
+            }
+        }
+    }
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton parent links ready\n");
 
-    nodeOrder_ = sorted;
-    boneCount_ = maxObjectId + 1;
-    boneMatrices_.resize(boneCount_, Mat4::Identity());
-
-    std::cout << "MdxAnimator: " << nodes_.size() << " nodes, " << boneCount_ << " bones" << std::endl;
+    int denseBoneIndex = 0;
+    for (int idx : builtNodeOrder) {
+        auto& n = builtNodes[idx];
+        n.boneIndex = denseBoneIndex++;
+        builtObjectIdToBoneIndex.push_back({n.objectId, n.boneIndex});
+    }
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton bone indices ready count=%d\n", denseBoneIndex);
+    nodes_.swap(builtNodes);
+    nodeOrder_.swap(builtNodeOrder);
+    objectIdToBoneIndex_.swap(builtObjectIdToBoneIndex);
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton member swaps complete\n");
+    boneCount_ = denseBoneIndex;
+    std::vector<Mat4> builtBoneMatrices(boneCount_, Mat4::Identity());
+    boneMatrices_.swap(builtBoneMatrices);
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton bone matrices ready count=%zu\n", boneMatrices_.size());
+    std::fprintf(stderr, "MdxAnimator::BuildSkeleton end nodes=%zu boneCount=%d\n", nodes_.size(), boneCount_);
 }
 
 bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
@@ -316,6 +363,8 @@ void MdxAnimator::SampleAnimations(uint32_t frame) {
 }
 
 void MdxAnimator::UpdateSkeleton() {
+    std::fprintf(stderr, "MdxAnimator::UpdateSkeleton begin nodes=%zu order=%zu boneMatrices=%zu\n",
+        nodes_.size(), nodeOrder_.size(), boneMatrices_.size());
     for (int idx : nodeOrder_) {
         auto& node = nodes_[idx];
         const MdxAnimNode* parent = (node.parentIndex >= 0) ? &nodes_[node.parentIndex] : nullptr;
@@ -402,7 +451,10 @@ void MdxAnimator::UpdateSkeleton() {
             boneMatrices_[node.boneIndex] = yup;
         }
     }
+    std::fprintf(stderr, "MdxAnimator::UpdateSkeleton matrices ready\n");
     UploadBoneTexture();
+    std::fprintf(stderr, "MdxAnimator::UpdateSkeleton end\n");
+    std::fflush(stderr);
 }
 
 void MdxAnimator::UploadBoneTexture() {

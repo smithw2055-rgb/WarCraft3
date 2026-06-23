@@ -1,4 +1,5 @@
 #include "scene.h"
+// Temporary rebuild anchor for MdxViewer layout debugging.
 #include "resource/slk.h"
 #include <iostream>
 #include <algorithm>
@@ -197,6 +198,7 @@ MdxViewer* SceneManager::GetOrLoadModel(const std::string& path) {
     }
 
     entry.sharedViewer = std::make_unique<MdxViewer>();
+    entry.sharedViewer->DebugLogState("scene-shared-after-ctor");
     std::cout << "SceneModelLoad: viewer loading " << path << std::endl;
     if (!entry.sharedViewer->Load(entry.model, mpq_)) {
         std::cout << "SceneModelLoad: viewer load failed for " << path << std::endl;

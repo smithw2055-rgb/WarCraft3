@@ -32,6 +32,7 @@
 #include "map/unitsdoo.h"
 #include "model/mdx.h"
 #include "render/mdx_viewer.h"
+// Temporary rebuild anchor for MdxViewer layout debugging.
 #include "render/scene.h"
 #include "render/shadow_manager.h"
 #include "render/fog_of_war.h"

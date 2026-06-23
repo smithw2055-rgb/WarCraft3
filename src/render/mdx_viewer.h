@@ -10,24 +10,7 @@
 
 class MdxViewer {
 public:
-    MdxViewer() {
-        shader_ = {0};
-        pipeline_ = {0};
-        mpq_ = nullptr;
-        center_ = {0, 0, 0};
-        radius_ = 0.0f;
-        ownsModelData_ = false;
-        ownsBatchGpuResources_ = true;
-        modelSource_ = nullptr;
-        hasAnimations_ = false;
-        hasAnimatedMaterials_ = false;
-        initializedAnimator_ = false;
-        cachedBoneView_ = {0};
-        cachedBoneTexId_ = 0;
-        hasParticles_ = false;
-        pendingStandSequenceAfterCurrent_ = false;
-        sharedSource_ = nullptr;
-    }
+    MdxViewer();
     ~MdxViewer();
 
     bool Load(const MdxModel& model, MpqManager* mpq, bool cliffMode = false);
@@ -50,6 +33,7 @@ public:
     float GetBoundsRadius() const { return radius_; }
     bool PlayStandSequence();
     bool PlayBirthThenStandSequence();
+    void DebugLogState(const char* tag) const;
 
     // Animation control
     MdxAnimator* GetAnimator() { return hasAnimations_ ? &animator_ : nullptr; }
