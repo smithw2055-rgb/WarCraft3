@@ -108,24 +108,49 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         const std::vector<MdxTimeline>* timelines;
     };
     std::map<int, Entry> entries;
+    auto addEntry = [&](int objectId, int parentId, uint32_t flags,
+                        const std::vector<MdxTimeline>* timelines) {
+        if (objectId < 0 || timelines == nullptr) {
+            return;
+        }
+        if (entries.find(objectId) != entries.end()) {
+            return;
+        }
+        int pivotIndex = -1;
+        if (objectId < (int)model.pivotPoints.size()) {
+            pivotIndex = objectId;
+        }
+        entries[objectId] = {objectId, parentId, pivotIndex, flags, timelines};
+        maxObjectId = std::max(maxObjectId, objectId);
+    };
 
     // Bones
     for (const auto& b : model.bones) {
-        int pi = -1;
-        if (b.objectId >= 0 && b.objectId < (int)model.pivotPoints.size())
-            pi = b.objectId;
-        entries[b.objectId] = {b.objectId, b.parentId, pi, b.flags, &b.timelines};
-        maxObjectId = std::max(maxObjectId, b.objectId);
+        addEntry(b.objectId, b.parentId, b.flags, &b.timelines);
     }
-    // Helpers (no duplicates)
+    // Helpers
     for (const auto& h : model.helpers) {
-        if (entries.find(h.objectId) == entries.end()) {
-            int pi = -1;
-            if (h.objectId >= 0 && h.objectId < (int)model.pivotPoints.size())
-                pi = h.objectId;
-            entries[h.objectId] = {h.objectId, h.parentId, pi, h.flags, &h.timelines};
-            maxObjectId = std::max(maxObjectId, h.objectId);
-        }
+        addEntry(h.objectId, h.parentId, h.flags, &h.timelines);
+    }
+    // Other transform-bearing nodes can still drive skinned geosets even when
+    // they are not declared as bones/helpers in the MDX.
+    for (const auto& attachment : model.attachments) {
+        addEntry(attachment.objectId, attachment.parentId, attachment.flags, &attachment.timelines);
+    }
+    for (const auto& light : model.lights) {
+        addEntry(light.objectId, light.parentId, light.flags, &light.timelines);
+    }
+    for (const auto& emitter : model.particleEmitters1) {
+        addEntry(emitter.objectId, emitter.parentId, emitter.flags, &emitter.timelines);
+    }
+    for (const auto& emitter : model.particleEmitters2) {
+        addEntry(emitter.objectId, emitter.parentId, (uint32_t)emitter.flags, &emitter.timelines);
+    }
+    for (const auto& ribbon : model.ribbonEmitters) {
+        addEntry(ribbon.objectId, ribbon.parentId, ribbon.flags, &ribbon.timelines);
+    }
+    for (const auto& eventObject : model.eventObjects) {
+        addEntry(eventObject.objectId, eventObject.parentId, eventObject.flags, &eventObject.timelines);
     }
 
     if (entries.empty()) return;
@@ -235,7 +260,6 @@ float MdxAnimator::GetSequenceProgress() const {
 }
 
 void MdxAnimator::Update(float dt) {
-    if (nodes_.empty()) return;
     if (sequenceState_.sequenceIndex < 0) {
         return;
     }
@@ -263,9 +287,11 @@ void MdxAnimator::Update(float dt) {
         }
     }
 
-    SampleAnimations(sequenceState_.currentFrame);
-    UpdateSkeleton();
-    needsBoneUpload_ = true;
+    if (!nodes_.empty()) {
+        SampleAnimations(sequenceState_.currentFrame);
+        UpdateSkeleton();
+        needsBoneUpload_ = true;
+    }
 }
 
 void MdxAnimator::SampleAnimations(uint32_t frame) {

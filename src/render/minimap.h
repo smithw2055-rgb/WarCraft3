@@ -1,6 +1,7 @@
 #pragma once
 #include "third_party/sokol/sokol_gfx.h"
 #include "math.h"
+#include <cstdint>
 #include <vector>
 
 class TexturedTerrain;
@@ -19,6 +20,8 @@ public:
     void SetScreenRect(float x, float y, float w, float h);
     void Render(int winW, int winH, float camX, float camZ,
                 float camYaw, float camPitch, float camDist, float fov, float aspect);
+    void ClearMarkers();
+    void AddMarker(float wx, float wy, uint32_t rgba, float sizePixels = 8.0f);
 
     bool HitTest(float mouseX, float mouseY, int winW, int winH) const;
     void ScreenToWorld(float mx, float my, int winW, int winH, float* wx, float* wy) const;
@@ -27,6 +30,13 @@ public:
     bool IsValid() const { return texture_.id != 0; }
 
 private:
+    struct Marker {
+        float worldX = 0.0f;
+        float worldY = 0.0f;
+        uint32_t rgba = 0xFFFFFFFFu;
+        float sizePixels = 8.0f;
+    };
+
     void InitShader();
 
     sg_image texture_ = {0};
@@ -47,4 +57,5 @@ private:
     float worldMaxX_ = 0, worldMaxY_ = 0;
 
     float texW_ = 0, texH_ = 0;
+    std::vector<Marker> markers_;
 };

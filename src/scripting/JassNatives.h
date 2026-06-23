@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <array>
 
 // Forward declaration (avoid circular include)
 class CSimulation;
@@ -118,6 +119,17 @@ struct JassHandleInfo {
     int id;
 };
 
+struct JassStartLocationConfig {
+    float x = 0.0f;
+    float y = 0.0f;
+    bool defined = false;
+};
+
+struct JassPlayerMapConfig {
+    int startLocationIndex = -1;
+    bool slotActive = false;
+};
+
 class JassNativesData {
 public:
     int AllocHandle(JassHandleInfo::Type type, int id);
@@ -162,6 +174,10 @@ public:
 
     std::unordered_map<int, std::shared_ptr<JassTimer>> timerCallbacks;
     int nextTimerCallbackId = 0x0C000000;
+
+    int configuredPlayerCount = 0;
+    std::array<JassStartLocationConfig, 24> startLocations;
+    std::array<JassPlayerMapConfig, 24> playerMapConfig;
 
     int filterUnitHandle = -1;
     int enumUnitHandle = -1;
@@ -226,7 +242,7 @@ public:
     void FireDamageEvent(int unitSimHandle, int sourceSimHandle, float damage, int eventType);
     void FireOrderEvent(int unitSimHandle, int orderId, int targetSimHandle, float x, float y);
 
-    void UpdateTimers(float dt);
+    int UpdateTimers(float dt);
 
     std::shared_ptr<JassNativesData> GetData() const { return data_; }
 

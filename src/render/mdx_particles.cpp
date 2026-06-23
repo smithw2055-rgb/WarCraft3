@@ -317,6 +317,10 @@ void MdxParticleSystem::Render(const Mat4& view, const Mat4& proj) {
         bind.index_buffer = sharedIndexBuffer_;
         bind.views[0] = state.textureView;
         bind.samplers[0] = state.sampler;
+        if (bind.views[0].id && ((bind.views[0].id & 0xFFFFu) >= 4096u)) {
+            std::fprintf(stderr, "MdxParticleSystem suspicious view: 0x%08x\n", bind.views[0].id);
+            continue;
+        }
         sg_apply_bindings(&bind);
 
         sg_draw(0, 6, (int)state.particles.size());

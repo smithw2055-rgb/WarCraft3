@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
+#include <unordered_set>
 
 #include "third_party/sokol/sokol_app.h"
 #include "third_party/sokol/sokol_gfx.h"
@@ -80,7 +82,7 @@ static struct {
     bool showMinimap = true;
     bool showPathing = false;
     bool showRegions = false;
-    bool wireframe = true;
+    bool wireframe = false;
 
     std::string screenshotPath;
     int screenshotFrame = -1;
@@ -104,14 +106,37 @@ static struct {
     std::unique_ptr<JassNatives> jassNatives;
 
     // ECS / Game Logic
+    struct UnitVisualSeed {
+        float scale[3] = {1.0f, 1.0f, 1.0f};
+        uint32_t skinId = 0;
+        int hitpoints = 0;
+        int flags = 0;
+    };
+
+    struct PendingUnitAnimation {
+        std::string sequenceName;
+        int sequenceIndex = -1;
+        bool useSequenceIndex = false;
+    };
+
     CSimulation simulation;
     CUnitData unitData;
     WpmData wpm;
     bool simulationInitialized = false;
+    std::unordered_map<int, UnitVisualSeed> simUnitVisualSeeds;
+    std::unordered_map<int, PendingUnitAnimation> simUnitPendingAnimations;
     std::unordered_map<int, int> simUnitToVisualIdx; // handleId → visual instance index
-    // Selected unit
+    std::unordered_set<int> simUnitVisualRegistrationFailed;
+    std::vector<int> selectedUnitHandles;
+    std::unordered_set<int> selectedUnitHandleSet;
     int selectedUnitHandle = -1;
     War3ID selectedUnitTypeId;
+    bool selectionPressActive = false;
+    bool selectionDragVisible = false;
+    float selectionStartX = 0.0f;
+    float selectionStartY = 0.0f;
+    float selectionCurrentX = 0.0f;
+    float selectionCurrentY = 0.0f;
 } g;
 
 // Project a 3D world position to 2D screen coordinates (sokol top-left origin)
@@ -141,6 +166,774 @@ static Vec3 ScreenToWorld(float screenX, float screenY, const Mat4& view, const 
     if (fabsf(dy) < 0.0001f) return Vec3(nearP.X, 0, nearP.Z);
     float t = -nearP.Y / dy;
     return Vec3(nearP.X + t * dx, 0, nearP.Z + t * dz);
+}
+
+struct PickRay {
+    Vec3 origin;
+    Vec3 direction;
+};
+
+static PickRay BuildScreenPickRay(float screenX, float screenY, const Mat4& view, const Mat4& proj,
+                                  int screenW, int screenH) {
+    float ndcX = 2.0f * screenX / screenW - 1.0f;
+    float ndcY = 1.0f - 2.0f * screenY / screenH;
+    HMM_Mat4 vp = HMM_MulM4((HMM_Mat4)proj, (HMM_Mat4)view);
+    HMM_Mat4 invVP = HMM_InvGeneralM4(vp);
+    HMM_Vec4 nearP = HMM_MulM4V4(invVP, HMM_V4(ndcX, ndcY, -1.0f, 1.0f));
+    HMM_Vec4 farP = HMM_MulM4V4(invVP, HMM_V4(ndcX, ndcY, 1.0f, 1.0f));
+    if (nearP.W != 0) { nearP.X /= nearP.W; nearP.Y /= nearP.W; nearP.Z /= nearP.W; }
+    if (farP.W != 0) { farP.X /= farP.W; farP.Y /= farP.W; farP.Z /= farP.W; }
+
+    PickRay ray;
+    ray.origin = Vec3(nearP.X, nearP.Y, nearP.Z);
+    ray.direction = Normalize(Vec3(farP.X - nearP.X, farP.Y - nearP.Y, farP.Z - nearP.Z));
+    return ray;
+}
+
+static float GetTerrainHeightAt(float worldX, float worldY) {
+    return g.texturedTerrain.IsValid() ? g.texturedTerrain.GetGroundHeight(worldX, worldY) : 0.0f;
+}
+
+static float ComputeUnitVisualHeight(const CUnit& unit) {
+    float height = GetTerrainHeightAt(unit.GetX(), unit.GetY());
+    switch (unit.GetMovementType()) {
+        case PathingGridMovementType::FLY:
+        case PathingGridMovementType::HOVER:
+        case PathingGridMovementType::FLOAT:
+            height += unit.GetFlyHeight();
+            break;
+        default:
+            break;
+    }
+    return height;
+}
+
+static float DistanceToSegmentSquared(float px, float py, float ax, float ay, float bx, float by) {
+    const float abx = bx - ax;
+    const float aby = by - ay;
+    const float apx = px - ax;
+    const float apy = py - ay;
+    const float abLenSq = abx * abx + aby * aby;
+    if (abLenSq <= 0.0001f) {
+        const float dx = px - ax;
+        const float dy = py - ay;
+        return dx * dx + dy * dy;
+    }
+    const float t = std::clamp((apx * abx + apy * aby) / abLenSq, 0.0f, 1.0f);
+    const float cx = ax + abx * t;
+    const float cy = ay + aby * t;
+    const float dx = px - cx;
+    const float dy = py - cy;
+    return dx * dx + dy * dy;
+}
+
+static float ComputeUnitSelectionWorldRadius(const CUnit& unit) {
+    float radius = unit.GetCollisionSize();
+    if (radius <= 1.0f) {
+        radius = unit.IsBuilding() ? 96.0f : 32.0f;
+    }
+    if (unit.IsBuilding()) {
+        radius = std::max(radius, 72.0f);
+    }
+    else {
+        radius = std::max(radius, 24.0f);
+    }
+    return radius;
+}
+
+static float ComputeUnitSelectionVisualHeight(const CUnit& unit) {
+    const CUnitType* unitType = unit.GetUnitType();
+    float height = unitType ? unitType->GetImpactZ() : 0.0f;
+    const float radius = ComputeUnitSelectionWorldRadius(unit);
+    if (unit.IsBuilding()) {
+        height = std::max(height, radius * 2.6f);
+        height = std::max(height, 170.0f);
+    }
+    else {
+        height = std::max(height, radius * 2.0f);
+        height = std::max(height, 95.0f);
+    }
+    return height;
+}
+
+static bool IntersectSphere(const PickRay& ray, const Vec3& center, float radius, float& outT) {
+    const Vec3 oc = ray.origin - center;
+    const float a = Dot(ray.direction, ray.direction);
+    const float b = 2.0f * Dot(oc, ray.direction);
+    const float c = Dot(oc, oc) - radius * radius;
+    const float discriminant = b * b - 4.0f * a * c;
+    if (discriminant < 0.0f) {
+        return false;
+    }
+
+    const float sqrtDisc = std::sqrt(discriminant);
+    const float inv2A = 0.5f / a;
+    const float t0 = (-b - sqrtDisc) * inv2A;
+    const float t1 = (-b + sqrtDisc) * inv2A;
+    if (t0 >= 0.0f) {
+        outT = t0;
+        return true;
+    }
+    if (t1 >= 0.0f) {
+        outT = t1;
+        return true;
+    }
+    return false;
+}
+
+static bool ComputeUnitSelectionScreenShape(const CUnit& unit,
+                                            const Mat4& view,
+                                            const Mat4& proj,
+                                            int screenW,
+                                            int screenH,
+                                            float& outFootX,
+                                            float& outFootY,
+                                            float& outHeadX,
+                                            float& outHeadY,
+                                            float& outRadiusPixels) {
+    const float baseHeight = ComputeUnitVisualHeight(unit);
+    const float worldRadius = ComputeUnitSelectionWorldRadius(unit);
+    const float visualHeight = ComputeUnitSelectionVisualHeight(unit);
+
+    const Vec3 footPos(unit.GetX(), baseHeight + 8.0f, unit.GetY());
+    const Vec3 headPos(unit.GetX(), baseHeight + visualHeight, unit.GetY());
+    if (!WorldToScreen(footPos, view, proj, screenW, screenH, outFootX, outFootY)) {
+        return false;
+    }
+    if (!WorldToScreen(headPos, view, proj, screenW, screenH, outHeadX, outHeadY)) {
+        return false;
+    }
+
+    const float midHeight = baseHeight + visualHeight * 0.5f;
+    const Vec3 centerPos(unit.GetX(), midHeight, unit.GetY());
+    float centerX = 0.0f;
+    float centerY = 0.0f;
+    if (!WorldToScreen(centerPos, view, proj, screenW, screenH, centerX, centerY)) {
+        centerX = (outFootX + outHeadX) * 0.5f;
+        centerY = (outFootY + outHeadY) * 0.5f;
+    }
+
+    float radiusPixels = 0.0f;
+    auto updateRadiusFromPoint = [&](const Vec3& point) {
+        float sx = 0.0f;
+        float sy = 0.0f;
+        if (!WorldToScreen(point, view, proj, screenW, screenH, sx, sy)) {
+            return;
+        }
+        const float dx = sx - centerX;
+        const float dy = sy - centerY;
+        radiusPixels = std::max(radiusPixels, std::sqrt(dx * dx + dy * dy));
+    };
+    updateRadiusFromPoint(Vec3(unit.GetX() + worldRadius, midHeight, unit.GetY()));
+    updateRadiusFromPoint(Vec3(unit.GetX(), midHeight, unit.GetY() + worldRadius));
+
+    outRadiusPixels = std::max(radiusPixels, unit.IsBuilding() ? 28.0f : 14.0f);
+    return true;
+}
+
+static CUnit* PickSimulationUnitAtScreenPoint(float screenX,
+                                              float screenY,
+                                              const Mat4& view,
+                                              const Mat4& proj,
+                                              int screenW,
+                                              int screenH,
+                                              int ignoreHandle = -1) {
+    const PickRay ray = BuildScreenPickRay(screenX, screenY, view, proj, screenW, screenH);
+    CUnit* bestRayUnit = nullptr;
+    CUnit* bestFallbackUnit = nullptr;
+    float bestRayT = std::numeric_limits<float>::infinity();
+    float bestFallbackScore = std::numeric_limits<float>::infinity();
+    float bestFallbackDistSq = std::numeric_limits<float>::infinity();
+
+    for (auto* unit : g.simulation.GetUnits()) {
+        if (!unit || unit->IsDead()) continue;
+        if (ignoreHandle >= 0 && unit->GetHandleId() == ignoreHandle) continue;
+
+        float sphereRadius = ComputeUnitSelectionWorldRadius(*unit);
+        Vec3 sphereCenter(unit->GetX(),
+                          ComputeUnitVisualHeight(*unit) + ComputeUnitSelectionVisualHeight(*unit) * 0.5f,
+                          unit->GetY());
+
+        auto visualIt = g.simUnitToVisualIdx.find(unit->GetHandleId());
+        if (visualIt != g.simUnitToVisualIdx.end()) {
+            if (MdxViewer* viewer = g.scene.GetViewer(visualIt->second)) {
+                const Vec3 viewerCenter = viewer->GetBoundsCenter();
+                sphereCenter = Vec3(unit->GetX() + viewerCenter.x,
+                                    ComputeUnitVisualHeight(*unit) + viewerCenter.y,
+                                    unit->GetY() + viewerCenter.z);
+                const float viewerRadius = viewer->GetBoundsRadius();
+                if (viewerRadius > 1.0f) {
+                    sphereRadius = std::max(sphereRadius, viewerRadius);
+                }
+            }
+        }
+        sphereRadius = std::max(sphereRadius, unit->IsBuilding() ? 72.0f : 28.0f);
+
+        float hitT = 0.0f;
+        if (IntersectSphere(ray, sphereCenter, sphereRadius, hitT)) {
+            if (hitT < bestRayT) {
+                bestRayT = hitT;
+                bestRayUnit = unit;
+            }
+            continue;
+        }
+
+        float footX = 0.0f;
+        float footY = 0.0f;
+        float headX = 0.0f;
+        float headY = 0.0f;
+        float radiusPixels = 0.0f;
+        if (!ComputeUnitSelectionScreenShape(*unit, view, proj, screenW, screenH,
+                                             footX, footY, headX, headY, radiusPixels)) {
+            continue;
+        }
+
+        const float distSq = DistanceToSegmentSquared(screenX, screenY, footX, footY, headX, headY);
+        if (distSq > radiusPixels * radiusPixels) {
+            continue;
+        }
+
+        const float score = distSq / std::max(1.0f, radiusPixels * radiusPixels);
+        if ((score < bestFallbackScore) || ((score == bestFallbackScore) && (distSq < bestFallbackDistSq))) {
+            bestFallbackScore = score;
+            bestFallbackDistSq = distSq;
+            bestFallbackUnit = unit;
+        }
+    }
+
+    return bestRayUnit ? bestRayUnit : bestFallbackUnit;
+}
+
+static std::string DescribeUnitType(War3ID typeId) {
+    auto* unitType = g.unitData.GetUnitType(typeId);
+    if (!unitType) {
+        return typeId.ToString();
+    }
+    return unitType->GetName() + " [" + typeId.ToString() + "]";
+}
+
+static void ApplyPendingUnitAnimation(int handleId, MdxViewer* viewer) {
+    if (!viewer || !viewer->GetAnimator()) return;
+
+    const auto pendingIt = g.simUnitPendingAnimations.find(handleId);
+    if (pendingIt == g.simUnitPendingAnimations.end()) return;
+
+    if (pendingIt->second.useSequenceIndex) {
+        viewer->GetAnimator()->SetSequence(pendingIt->second.sequenceIndex);
+    } else if (!pendingIt->second.sequenceName.empty()) {
+        viewer->GetAnimator()->PlaySequence(pendingIt->second.sequenceName);
+    }
+
+    g.simUnitPendingAnimations.erase(pendingIt);
+}
+
+static bool EnsureSimulationUnitVisual(CUnit* unit) {
+    if (!unit) return false;
+
+    const int handleId = unit->GetHandleId();
+    if (g.simUnitToVisualIdx.find(handleId) != g.simUnitToVisualIdx.end()) return true;
+    if (g.simUnitVisualRegistrationFailed.find(handleId) != g.simUnitVisualRegistrationFailed.end()) return false;
+
+    static const float defaultScale[3] = {1.0f, 1.0f, 1.0f};
+    const auto seedIt = g.simUnitVisualSeeds.find(handleId);
+    const float* scale = (seedIt != g.simUnitVisualSeeds.end()) ? seedIt->second.scale : defaultScale;
+    const uint32_t skinId = (seedIt != g.simUnitVisualSeeds.end()) ? seedIt->second.skinId : 0u;
+    const int hitpoints = (seedIt != g.simUnitVisualSeeds.end())
+        ? seedIt->second.hitpoints
+        : (int)std::lround(unit->GetLife());
+    const int flags = (seedIt != g.simUnitVisualSeeds.end()) ? seedIt->second.flags : 0;
+    float pos[3] = {unit->GetX(), unit->GetY(), ComputeUnitVisualHeight(*unit)};
+    int visIdx = g.scene.InstanceCount();
+    bool visualAdded = g.scene.AddUnit(unit->GetTypeId().value,
+                                       pos,
+                                       unit->GetFacing(),
+                                       scale,
+                                       unit->GetPlayerIndex(),
+                                       hitpoints,
+                                       flags,
+                                       skinId,
+                                       false);
+    if (!visualAdded) {
+        g.simUnitVisualRegistrationFailed.insert(handleId);
+        std::cout << "SceneUnitSync: visual registration failed for sim unit "
+                  << DescribeUnitType(unit->GetTypeId())
+                  << " handle=" << handleId << std::endl;
+        return false;
+    }
+
+    g.simUnitToVisualIdx[handleId] = visIdx;
+    ApplyPendingUnitAnimation(handleId, g.scene.GetViewer(visIdx));
+    std::cout << "SceneUnitSync: registered on-demand visual for sim unit "
+              << DescribeUnitType(unit->GetTypeId())
+              << " handle=" << handleId << std::endl;
+    return true;
+}
+
+static void SyncSimulationUnitVisual(CUnit* unit) {
+    if (!EnsureSimulationUnitVisual(unit)) return;
+
+    auto it = g.simUnitToVisualIdx.find(unit->GetHandleId());
+    if (it == g.simUnitToVisualIdx.end()) return;
+
+    float pos[3] = {
+        unit->GetX(),
+        unit->GetY(),
+        ComputeUnitVisualHeight(*unit)
+    };
+    g.scene.UpdateInstancePosition(it->second, pos, unit->GetFacing());
+}
+
+static void SyncAllSimulationUnitVisuals() {
+    for (auto* unit : g.simulation.GetUnits()) {
+        SyncSimulationUnitVisual(unit);
+    }
+}
+
+static void FlushStartupSimulationState() {
+    if (!g.simulationInitialized) return;
+
+    // Make editor and JASS-created units visible before the first render frame.
+    SyncAllSimulationUnitVisuals();
+
+    if (!g.jassNatives) return;
+
+    constexpr int maxStartupWarmupTicks = 4;
+    for (int i = 0; i < maxStartupWarmupTicks; ++i) {
+        const size_t unitCountBefore = g.simulation.GetUnits().size();
+        const int firedTimers = g.jassNatives->UpdateTimers(CSimulation::SIM_STEP_TIME);
+        g.simulation.Update();
+        SyncAllSimulationUnitVisuals();
+        if (firedTimers == 0 && g.simulation.GetUnits().size() == unitCountBefore) {
+            break;
+        }
+    }
+}
+
+static bool IsUnitSelected(int handleId) {
+    return g.selectedUnitHandleSet.find(handleId) != g.selectedUnitHandleSet.end();
+}
+
+static bool IsShiftSelectionModifierDown() {
+    return Platform::IsKeyDown(SAPP_KEYCODE_LEFT_SHIFT) || Platform::IsKeyDown(SAPP_KEYCODE_RIGHT_SHIFT);
+}
+
+static ScreenRect MakeNormalizedScreenRect(float x0, float y0, float x1, float y1) {
+    ScreenRect rect;
+    rect.x = std::min(x0, x1);
+    rect.y = std::min(y0, y1);
+    rect.w = std::fabs(x1 - x0);
+    rect.h = std::fabs(y1 - y0);
+    return rect;
+}
+
+static bool RectanglesOverlap(const ScreenRect& a, const ScreenRect& b) {
+    if (!a.IsValid() || !b.IsValid()) return false;
+    return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
+}
+
+static bool ComputeUnitSelectionScreenBounds(const CUnit& unit,
+                                             const Mat4& view,
+                                             const Mat4& proj,
+                                             int screenW,
+                                             int screenH,
+                                             ScreenRect& outRect) {
+    float footX = 0.0f;
+    float footY = 0.0f;
+    float headX = 0.0f;
+    float headY = 0.0f;
+    float radiusPixels = 0.0f;
+    if (!ComputeUnitSelectionScreenShape(unit, view, proj, screenW, screenH,
+                                         footX, footY, headX, headY, radiusPixels)) {
+        return false;
+    }
+
+    const float minX = std::min(footX, headX) - radiusPixels;
+    const float maxX = std::max(footX, headX) + radiusPixels;
+    const float minY = std::min(footY, headY) - radiusPixels;
+    const float maxY = std::max(footY, headY) + radiusPixels;
+    outRect.x = minX;
+    outRect.y = minY;
+    outRect.w = maxX - minX;
+    outRect.h = maxY - minY;
+    return outRect.IsValid();
+}
+
+static std::vector<CUnit*> CollectUnitsInScreenRect(const ScreenRect& rect,
+                                                    const Mat4& view,
+                                                    const Mat4& proj,
+                                                    int screenW,
+                                                    int screenH) {
+    std::vector<CUnit*> result;
+    if (!rect.IsValid()) return result;
+
+    for (auto* unit : g.simulation.GetUnits()) {
+        if (!unit || unit->IsDead()) continue;
+
+        ScreenRect unitRect;
+        if (!ComputeUnitSelectionScreenBounds(*unit, view, proj, screenW, screenH, unitRect)) {
+            continue;
+        }
+        if (RectanglesOverlap(rect, unitRect)) {
+            result.push_back(unit);
+        }
+    }
+    return result;
+}
+
+static std::vector<CUnit*> GetSelectedSimulationUnits() {
+    std::vector<CUnit*> units;
+    units.reserve(g.selectedUnitHandles.size());
+    for (int handleId : g.selectedUnitHandles) {
+        CUnit* unit = g.simulation.GetUnit(handleId);
+        if (!unit || unit->IsDead()) continue;
+        units.push_back(unit);
+    }
+    return units;
+}
+
+static std::vector<MultiSelectUnitInfo> BuildMultiSelectionInfo(const std::vector<CUnit*>& units) {
+    static const uint32_t kPlayerColors[12] = {
+        0xFFFF0000, 0xFF0042FF, 0xFF1CE6B6, 0xFF540081,
+        0xFFFFFC00, 0xFFFE8A0E, 0xFF20C000, 0xFFE55BB0,
+        0xFF959697, 0xFF7EBFF1, 0xFF106246, 0xFF4F2B05
+    };
+
+    std::vector<MultiSelectUnitInfo> info;
+    info.reserve(units.size());
+    for (auto* unit : units) {
+        if (!unit) continue;
+        MultiSelectUnitInfo item;
+        item.handleId = unit->GetHandleId();
+        if (auto* unitType = unit->GetUnitType()) {
+            item.name = unitType->GetName();
+            item.level = unitType->GetLevel();
+            item.isHero = unitType->IsHero();
+        }
+        item.hpRatio = unit->GetMaxLife() > 0.0f ? unit->GetLife() / unit->GetMaxLife() : 1.0f;
+        item.mpRatio = unit->GetMaxMana() > 0 ? unit->GetMana() / (float)unit->GetMaxMana() : 0.0f;
+        const int playerIndex = unit->GetPlayerIndex();
+        if (playerIndex >= 0 && playerIndex < 12) {
+            item.playerColor = kPlayerColors[playerIndex];
+        }
+        info.push_back(std::move(item));
+    }
+    return info;
+}
+
+static void RefreshSelectionUi(bool rebuildCommandCard) {
+    const int previousPrimaryHandle = g.selectedUnitHandle;
+    const uint32_t previousPrimaryTypeValue = g.selectedUnitTypeId.value;
+    std::vector<CUnit*> selectedUnits = GetSelectedSimulationUnits();
+    g.selectedUnitHandles.clear();
+    g.selectedUnitHandleSet.clear();
+    for (auto* unit : selectedUnits) {
+        g.selectedUnitHandles.push_back(unit->GetHandleId());
+        g.selectedUnitHandleSet.insert(unit->GetHandleId());
+    }
+
+    if (selectedUnits.empty()) {
+        g.selectedUnitHandle = -1;
+        g.selectedUnitTypeId = War3ID();
+        g.ui.SetSelectedUnit(-1);
+        g.ui.SetMultiSelection({});
+        g.ui.ClearInfoPanel();
+        g.ui.HideHeroPanel();
+        g.ui.ClearPendingCommand();
+        return;
+    }
+
+    CUnit* primaryUnit = nullptr;
+    for (auto* unit : selectedUnits) {
+        if (unit->GetHandleId() == g.selectedUnitHandle) {
+            primaryUnit = unit;
+            break;
+        }
+    }
+    if (!primaryUnit) {
+        primaryUnit = selectedUnits.front();
+    }
+
+    g.selectedUnitHandle = primaryUnit->GetHandleId();
+    g.selectedUnitTypeId = primaryUnit->GetTypeId();
+    g.ui.SetSelectedUnit(g.selectedUnitHandle);
+
+    if (!rebuildCommandCard) {
+        rebuildCommandCard = (g.selectedUnitHandle != previousPrimaryHandle)
+            || (g.selectedUnitTypeId.value != previousPrimaryTypeValue);
+    }
+
+    if (rebuildCommandCard) {
+        g.ui.SetUnitData(&g.unitData);
+        g.ui.PopulateCommandCardForUnitType(g.selectedUnitTypeId);
+    }
+
+    if (selectedUnits.size() > 1) {
+        g.ui.SetMultiSelection(BuildMultiSelectionInfo(selectedUnits));
+    } else {
+        g.ui.SetMultiSelection({});
+    }
+
+    auto* unitType = primaryUnit->GetUnitType();
+    std::string unitName = unitType ? unitType->GetName() : "Unknown";
+    int unitLevel = unitType ? unitType->GetLevel() : 1;
+    bool isHero = unitType ? unitType->IsHero() : false;
+    float hp = primaryUnit->GetLife();
+    float maxHp = primaryUnit->GetMaxLife();
+    float mp = primaryUnit->GetMana();
+    float maxMp = (float)primaryUnit->GetMaxMana();
+    if (isHero) {
+        int strBase = unitType->GetStartingStrength();
+        int agiBase = unitType->GetStartingAgility();
+        int intBase = unitType->GetStartingIntelligence();
+        int heroLvl = unitLevel < 1 ? 1 : unitLevel;
+        g.ui.ShowHeroPanel(unitName, heroLvl, 0, 100,
+                           strBase, 0, agiBase, 0, intBase, 0);
+    } else {
+        g.ui.HideHeroPanel();
+        g.ui.UpdateInfoPanel(g.selectedUnitTypeId, unitName, unitLevel, hp, maxHp, mp, maxMp);
+    }
+}
+
+static void SetSelectedUnits(const std::vector<CUnit*>& units, int primaryHandle = -1, bool rebuildCommandCard = true) {
+    g.selectedUnitHandles.clear();
+    g.selectedUnitHandleSet.clear();
+
+    for (auto* unit : units) {
+        if (!unit || unit->IsDead()) continue;
+        const int handleId = unit->GetHandleId();
+        if (g.selectedUnitHandleSet.insert(handleId).second) {
+            g.selectedUnitHandles.push_back(handleId);
+        }
+    }
+
+    if (g.selectedUnitHandles.empty()) {
+        g.selectedUnitHandle = -1;
+    } else if (primaryHandle >= 0 && g.selectedUnitHandleSet.find(primaryHandle) != g.selectedUnitHandleSet.end()) {
+        g.selectedUnitHandle = primaryHandle;
+    } else {
+        g.selectedUnitHandle = g.selectedUnitHandles.front();
+    }
+
+    RefreshSelectionUi(rebuildCommandCard);
+}
+
+static void SelectSingleUnit(CUnit* unit, bool additive) {
+    if (!unit || unit->IsDead()) {
+        if (!additive) {
+            SetSelectedUnits({}, -1);
+        }
+        return;
+    }
+
+    if (!additive) {
+        SetSelectedUnits({unit}, unit->GetHandleId());
+        return;
+    }
+
+    std::vector<CUnit*> units = GetSelectedSimulationUnits();
+    bool alreadySelected = false;
+    for (auto* selected : units) {
+        if (selected && selected->GetHandleId() == unit->GetHandleId()) {
+            alreadySelected = true;
+            break;
+        }
+    }
+    if (!alreadySelected) {
+        units.push_back(unit);
+    }
+    SetSelectedUnits(units, unit->GetHandleId());
+}
+
+static void SelectUnitsInRect(const ScreenRect& rect, bool additive) {
+    int winW = sapp_width();
+    int winH = sapp_height();
+    float aspect = (winH > 0) ? (float)winW / winH : 1.0f;
+    Mat4 view = g.camera.GetViewMatrix();
+    Mat4 proj = g.camera.GetProjectionMatrix(aspect);
+
+    std::vector<CUnit*> units = CollectUnitsInScreenRect(rect, view, proj, winW, winH);
+    if (additive) {
+        std::vector<CUnit*> existing = GetSelectedSimulationUnits();
+        existing.insert(existing.end(), units.begin(), units.end());
+        SetSelectedUnits(existing);
+    } else {
+        SetSelectedUnits(units);
+    }
+}
+
+static bool IsHumanTownHallType(War3ID typeId) {
+    return typeId == War3ID("htow") || typeId == War3ID("hkee") || typeId == War3ID("hcas");
+}
+
+static int CountPlayerUnitsOfType(int playerIndex, War3ID typeId) {
+    int count = 0;
+    for (auto* unit : g.simulation.GetUnits()) {
+        if (unit && unit->GetPlayerIndex() == playerIndex && unit->GetTypeId() == typeId) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+static int CountPlayerTownHalls(int playerIndex) {
+    int count = 0;
+    for (auto* unit : g.simulation.GetUnits()) {
+        if (unit && unit->GetPlayerIndex() == playerIndex && IsHumanTownHallType(unit->GetTypeId())) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+static bool FindPlayerTownHallPosition(int playerIndex, float& outX, float& outY) {
+    for (auto* unit : g.simulation.GetUnits()) {
+        if (unit && unit->GetPlayerIndex() == playerIndex && IsHumanTownHallType(unit->GetTypeId())) {
+            outX = unit->GetX();
+            outY = unit->GetY();
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool FindPlayerStartLocationPosition(int playerIndex, float& outX, float& outY) {
+    if (!g.jassNatives) return false;
+    auto data = g.jassNatives->GetData();
+    if (!data) return false;
+    if (playerIndex < 0 || playerIndex >= (int)data->playerMapConfig.size()) return false;
+
+    const auto& playerConfig = data->playerMapConfig[playerIndex];
+    const int startIndex = playerConfig.startLocationIndex;
+    if (startIndex < 0 || startIndex >= (int)data->startLocations.size()) return false;
+
+    const auto& start = data->startLocations[startIndex];
+    if (!start.defined) return false;
+
+    outX = start.x;
+    outY = start.y;
+    return true;
+}
+
+static bool FindInitialSpawnFocusPosition(float& outX, float& outY) {
+    if (FindPlayerTownHallPosition(0, outX, outY)) {
+        return true;
+    }
+    if (FindPlayerStartLocationPosition(0, outX, outY)) {
+        return true;
+    }
+
+    if (!g.jassNatives) return false;
+    auto data = g.jassNatives->GetData();
+    if (!data) return false;
+
+    int playerLimit = data->configuredPlayerCount > 0
+        ? std::min(data->configuredPlayerCount, (int)data->playerMapConfig.size())
+        : (int)data->playerMapConfig.size();
+    for (int playerIndex = 0; playerIndex < playerLimit; ++playerIndex) {
+        if (FindPlayerTownHallPosition(playerIndex, outX, outY)) {
+            return true;
+        }
+        if (FindPlayerStartLocationPosition(playerIndex, outX, outY)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void FocusCameraAndMinimapOnInitialSpawn() {
+    float focusX = 0.0f;
+    float focusY = 0.0f;
+    if (!FindInitialSpawnFocusPosition(focusX, focusY)) {
+        return;
+    }
+
+    const float groundHeight = GetTerrainHeightAt(focusX, focusY);
+    g.camera.SetTarget(focusX, groundHeight + 100.0f, focusY);
+    g.camera.SetDistance(2200.0f);
+    g.camera.SetMaxDistance(5000.0f);
+    g.camera.SaveHomeState();
+
+    g.minimap.ClearMarkers();
+    g.minimap.AddMarker(focusX, focusY, 0xFFD54AFFu, 10.0f);
+
+    std::cout << "InitialFocus: spawn at (" << focusX << ", " << focusY << ")" << std::endl;
+}
+
+static void EnsureHumanMeleeStartForPlayer(int playerIndex, float startX, float startY) {
+    if (!g.unitData.HasUnitType(War3ID("htow")) || !g.unitData.HasUnitType(War3ID("hpea"))) {
+        return;
+    }
+
+    constexpr float townHallFacing = 270.0f;
+    constexpr float peasantFacing = 90.0f;
+    static const float peasantOffsets[][2] = {
+        {-220.0f,  120.0f},
+        {-220.0f,  -20.0f},
+        {-220.0f, -160.0f},
+        {-80.0f,   180.0f},
+        {-80.0f,  -220.0f},
+    };
+
+    if (CountPlayerTownHalls(playerIndex) == 0) {
+        g.simulation.CreateUnit(War3ID("htow"), playerIndex, startX, startY, townHallFacing);
+        std::cout << "MeleeFallback: created Town Hall for player " << playerIndex
+                  << " at (" << startX << ", " << startY << ")" << std::endl;
+    }
+
+    float townHallX = startX;
+    float townHallY = startY;
+    FindPlayerTownHallPosition(playerIndex, townHallX, townHallY);
+
+    int existingPeasants = CountPlayerUnitsOfType(playerIndex, War3ID("hpea"));
+    for (int i = existingPeasants; i < 5; ++i) {
+        const float px = townHallX + peasantOffsets[i][0];
+        const float py = townHallY + peasantOffsets[i][1];
+        g.simulation.CreateUnit(War3ID("hpea"), playerIndex, px, py, peasantFacing);
+    }
+    if (existingPeasants < 5) {
+        std::cout << "MeleeFallback: created " << (5 - existingPeasants)
+                  << " Peasants for player " << playerIndex << std::endl;
+    }
+}
+
+static void EnsureHumanMeleeStartsFromMapConfig() {
+    if (!g.jassNatives || !g.simulationInitialized) return;
+
+    auto data = g.jassNatives->GetData();
+    if (!data) return;
+
+    bool createdAny = false;
+    int playerLimit = data->configuredPlayerCount > 0
+        ? std::min(data->configuredPlayerCount, (int)data->playerMapConfig.size())
+        : (int)data->playerMapConfig.size();
+
+    for (int playerIndex = 0; playerIndex < playerLimit; ++playerIndex) {
+        const auto& playerConfig = data->playerMapConfig[playerIndex];
+        if (playerConfig.startLocationIndex < 0) continue;
+        if (!playerConfig.slotActive && CountPlayerTownHalls(playerIndex) > 0) continue;
+
+        const int startIndex = playerConfig.startLocationIndex;
+        if (startIndex < 0 || startIndex >= (int)data->startLocations.size()) continue;
+
+        const auto& start = data->startLocations[startIndex];
+        if (!start.defined) continue;
+
+        if (auto* player = g.simulation.GetPlayer(playerIndex)) {
+            player->SetStartLocation(start.x, start.y);
+        }
+
+        const int beforeTownHalls = CountPlayerTownHalls(playerIndex);
+        const int beforePeasants = CountPlayerUnitsOfType(playerIndex, War3ID("hpea"));
+        EnsureHumanMeleeStartForPlayer(playerIndex, start.x, start.y);
+        if (CountPlayerTownHalls(playerIndex) > beforeTownHalls ||
+            CountPlayerUnitsOfType(playerIndex, War3ID("hpea")) > beforePeasants) {
+            createdAny = true;
+        }
+    }
+
+    if (createdAny) {
+        g.simulation.Update();
+    }
 }
 
 static W3EMap GenerateTestTerrain() {
@@ -204,6 +997,13 @@ static void event_cb(const sapp_event* ev) {
 
         if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
             g.mouseDown[0] = true;
+            g.selectionPressActive = false;
+            g.selectionDragVisible = false;
+            g.selectionStartX = ev->mouse_x;
+            g.selectionStartY = ev->mouse_y;
+            g.selectionCurrentX = ev->mouse_x;
+            g.selectionCurrentY = ev->mouse_y;
+            g.ui.ClearSelectionBox();
             // Check if click is on minimap
             if (g.minimap.IsValid() && g.minimap.HitTest(ev->mouse_x, ev->mouse_y, sapp_width(), sapp_height())) {
                 float wx, wy;
@@ -211,119 +1011,47 @@ static void event_cb(const sapp_event* ev) {
                 float gh = g.texturedTerrain.GetGroundHeight(wx, wy);
                 g.camera.SetTarget(wx, gh + 100.0f, wy);
             } else if (g.simulationInitialized && !g.simulation.GetUnits().empty()) {
-                // Unit selection: project all units to screen, find closest to click
-                int winW = sapp_width(), winH = sapp_height();
-                float aspect = (winH > 0) ? (float)winW / winH : 1.0f;
-                Mat4 view = g.camera.GetViewMatrix();
-                Mat4 proj = g.camera.GetProjectionMatrix(aspect);
-                // Ground height to Z-map: use terrain height at unit position
-                float bestDist = 20.0f; // max pixel distance for selection
-                int bestHandle = -1;
-                War3ID bestTypeId;
-                for (auto* unit : g.simulation.GetUnits()) {
-                    float gndH = 0;
-                    if (g.texturedTerrain.IsValid())
-                        gndH = g.texturedTerrain.GetGroundHeight(unit->GetX(), unit->GetY());
-                    Vec3 wPos(unit->GetX(), gndH, unit->GetY());
-                    float sx, sy;
-                    if (!WorldToScreen(wPos, view, proj, winW, winH, sx, sy)) continue;
-                    float dx = sx - ev->mouse_x, dy = sy - ev->mouse_y;
-                    float dist = std::sqrt(dx * dx + dy * dy);
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        bestHandle = unit->GetHandleId();
-                        bestTypeId = unit->GetTypeId();
-                    }
-                }
-                if (bestHandle >= 0) {
-                    // Play unit selection sound
-                    if (g.audio.IsValid() && g.frameCount > 10) {
-                        g.audio.Play2D("ui_click", 0.5f);
-                    }
-                    g.selectedUnitHandle = bestHandle;
-                    g.selectedUnitTypeId = bestTypeId;
-                    g.ui.SetSelectedUnit(g.selectedUnitHandle);
-                    // Update command card for selected unit type
-                    g.ui.SetUnitData(&g.unitData);
-                    g.ui.PopulateCommandCardForUnitType(bestTypeId);
-                    // Update info panel
-                    auto* unitType = g.unitData.GetUnitType(bestTypeId);
-                    std::string unitName = unitType ? unitType->GetName() : "Unknown";
-                    int unitLevel = unitType ? unitType->GetLevel() : 1;
-                    bool isHero = unitType ? unitType->IsHero() : false;
-                    // Find the actual unit for HP/MP
-                    for (auto* u : g.simulation.GetUnits()) {
-                        if (u->GetHandleId() == bestHandle) {
-                            float hp = u->GetLife();
-                            float maxHp = u->GetMaxLife();
-                            float mp = u->GetMana();
-                            float maxMp = (float)u->GetMaxMana();
-                            if (isHero) {
-                                int strBase = unitType->GetStartingStrength();
-                                int agiBase = unitType->GetStartingAgility();
-                                int intBase = unitType->GetStartingIntelligence();
-                                int heroLvl = unitLevel < 1 ? 1 : unitLevel;
-                                g.ui.ShowHeroPanel(unitName, heroLvl, 0, 100,
-                                                    strBase, 0, agiBase, 0, intBase, 0);
-                            } else {
-                                g.ui.HideHeroPanel();
-                                g.ui.UpdateInfoPanel(bestTypeId, unitName, unitLevel, hp, maxHp, mp, maxMp);
-                            }
-                            break;
-                        }
-                    }
-                } else {
-                    g.selectedUnitHandle = -1;
-                    g.ui.SetSelectedUnit(-1);
-                    g.ui.ClearInfoPanel();
-                    g.ui.HideHeroPanel();
-                    g.ui.ClearPendingCommand();
-                }
+                g.selectionPressActive = true;
             }
         }
         else if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
             bool issuedOrder = false;
-            if (g.simulationInitialized && g.selectedUnitHandle >= 0) {
-                CUnit* selectedUnit = g.simulation.GetUnit(g.selectedUnitHandle);
-                if (selectedUnit) {
+            if (g.simulationInitialized && !g.selectedUnitHandles.empty()) {
+                std::vector<CUnit*> selectedUnits = GetSelectedSimulationUnits();
+                if (!selectedUnits.empty()) {
                     int winW = sapp_width(), winH = sapp_height();
                     float aspect = (winH > 0) ? (float)winW / winH : 1.0f;
                     Mat4 view = g.camera.GetViewMatrix();
                     Mat4 proj = g.camera.GetProjectionMatrix(aspect);
-
-                    // Check if right-click hits a unit (for attack)
-                    float bestDist = 20.0f;
-                    CUnit* targetUnit = nullptr;
-                    for (auto* u : g.simulation.GetUnits()) {
-                        if (u->IsDead() || u->GetHandleId() == g.selectedUnitHandle) continue;
-                        float gndH = g.texturedTerrain.IsValid() ? g.texturedTerrain.GetGroundHeight(u->GetX(), u->GetY()) : 0;
-                        Vec3 wPos(u->GetX(), gndH, u->GetY());
-                        float sx, sy;
-                        if (!WorldToScreen(wPos, view, proj, winW, winH, sx, sy)) continue;
-                        float dx = sx - ev->mouse_x, dy = sy - ev->mouse_y;
-                        float dist = std::sqrt(dx * dx + dy * dy);
-                        if (dist < bestDist) {
-                            bestDist = dist;
-                            targetUnit = u;
-                        }
-                    }
+                    CUnit* targetUnit = PickSimulationUnitAtScreenPoint(ev->mouse_x, ev->mouse_y,
+                                                                        view, proj, winW, winH,
+                                                                        g.selectedUnitHandle);
 
                     int pendingCmd = g.ui.GetPendingCommand();
                     if (pendingCmd >= 0) {
                         g.ui.ClearPendingCommand();
-                        if (targetUnit) {
-                            selectedUnit->IssueOrder(std::make_unique<COrderTargetWidget>(pendingCmd, targetUnit));
-                        } else {
-                            Vec3 wPos = ScreenToWorld(ev->mouse_x, ev->mouse_y, view, proj, winW, winH);
-                            selectedUnit->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
+                        Vec3 wPos = ScreenToWorld(ev->mouse_x, ev->mouse_y, view, proj, winW, winH);
+                        for (auto* selectedUnit : selectedUnits) {
+                            if (!selectedUnit) continue;
+                            if (targetUnit) {
+                                selectedUnit->IssueOrder(std::make_unique<COrderTargetWidget>(pendingCmd, targetUnit));
+                            } else {
+                                selectedUnit->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
+                            }
                         }
                         issuedOrder = true;
                     } else if (targetUnit) {
-                        selectedUnit->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::ATTACK, targetUnit));
+                        for (auto* selectedUnit : selectedUnits) {
+                            if (!selectedUnit) continue;
+                            selectedUnit->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::ATTACK, targetUnit));
+                        }
                         issuedOrder = true;
                     } else {
                         Vec3 wPos = ScreenToWorld(ev->mouse_x, ev->mouse_y, view, proj, winW, winH);
-                        selectedUnit->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::MOVE, wPos.x, wPos.z));
+                        for (auto* selectedUnit : selectedUnits) {
+                            if (!selectedUnit) continue;
+                            selectedUnit->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::MOVE, wPos.x, wPos.z));
+                        }
                         issuedOrder = true;
                     }
                 }
@@ -338,15 +1066,48 @@ static void event_cb(const sapp_event* ev) {
         break;
     }
     case SAPP_EVENTTYPE_MOUSE_UP: {
-        if (g.ui.HandleEvent(ev))
+        if (!g.selectionPressActive && g.ui.HandleEvent(ev))
             break;
 
         int btn = (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) ? 0 :
                   (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) ? 1 : 2;
-        if (g.ui.OnMouseUp(ev->mouse_x, ev->mouse_y, btn))
+        if (!g.selectionPressActive && g.ui.OnMouseUp(ev->mouse_x, ev->mouse_y, btn))
             break;
 
-        if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) g.mouseDown[0] = false;
+        if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
+            g.mouseDown[0] = false;
+            if (g.selectionPressActive) {
+                const bool additive = IsShiftSelectionModifierDown();
+                const ScreenRect rect = MakeNormalizedScreenRect(g.selectionStartX, g.selectionStartY,
+                                                                 g.selectionCurrentX, g.selectionCurrentY);
+                if (g.selectionDragVisible && rect.w >= 4.0f && rect.h >= 4.0f) {
+                    SelectUnitsInRect(rect, additive);
+                } else if (g.simulationInitialized && !g.simulation.GetUnits().empty()) {
+                    int winW = sapp_width(), winH = sapp_height();
+                    float aspect = (winH > 0) ? (float)winW / winH : 1.0f;
+                    Mat4 view = g.camera.GetViewMatrix();
+                    Mat4 proj = g.camera.GetProjectionMatrix(aspect);
+                    CUnit* bestUnit = PickSimulationUnitAtScreenPoint(ev->mouse_x, ev->mouse_y,
+                                                                      view, proj, winW, winH);
+                    if (bestUnit) {
+                        if (g.audio.IsValid() && g.frameCount > 10) {
+                            g.audio.Play2D("ui_click", 0.5f);
+                        }
+                        SelectSingleUnit(bestUnit, additive);
+                        std::cout << "SelectedUnit: "
+                                  << DescribeUnitType(bestUnit->GetTypeId())
+                                  << " handle=" << bestUnit->GetHandleId()
+                                  << " count=" << g.selectedUnitHandles.size()
+                                  << std::endl;
+                    } else if (!additive) {
+                        SetSelectedUnits({}, -1);
+                    }
+                }
+            }
+            g.selectionPressActive = false;
+            g.selectionDragVisible = false;
+            g.ui.ClearSelectionBox();
+        }
         else if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) g.mouseDown[2] = false;
         sapp_lock_mouse(false);
         break;
@@ -354,6 +1115,16 @@ static void event_cb(const sapp_event* ev) {
     case SAPP_EVENTTYPE_MOUSE_MOVE:
         if (!sapp_mouse_locked() && g.ui.HandleEvent(ev))
             break;
+        if (g.mouseDown[0] && g.selectionPressActive && !sapp_mouse_locked()) {
+            g.selectionCurrentX = ev->mouse_x;
+            g.selectionCurrentY = ev->mouse_y;
+            const ScreenRect rect = MakeNormalizedScreenRect(g.selectionStartX, g.selectionStartY,
+                                                             g.selectionCurrentX, g.selectionCurrentY);
+            if (rect.w >= 4.0f || rect.h >= 4.0f) {
+                g.selectionDragVisible = true;
+                g.ui.SetSelectionBox(rect);
+            }
+        }
         if (sapp_mouse_locked()) {
             g.mouseDX += ev->mouse_dx;
             g.mouseDY += ev->mouse_dy;
@@ -500,21 +1271,16 @@ static void frame_cb() {
 
     // Run simulation step
     if (g.simulationInitialized) {
-        g.simulation.Update();
-
-        // Tick JASS timers (one step per simulation tick)
         if (g.jassNatives) {
             g.jassNatives->UpdateTimers(CSimulation::SIM_STEP_TIME);
         }
 
-        // Sync simulation positions to visual models
-        for (auto* unit : g.simulation.GetUnits()) {
-            auto it = g.simUnitToVisualIdx.find(unit->GetHandleId());
-            if (it != g.simUnitToVisualIdx.end()) {
-                float pos[3] = { unit->GetX(), unit->GetY(), 0 };
-                g.scene.UpdateInstancePosition(it->second, pos, unit->GetFacing());
-            }
-        }
+        g.simulation.Update();
+
+        // Sync simulation positions to visual models after timer-driven spawns and orders.
+        SyncAllSimulationUnitVisuals();
+
+        RefreshSelectionUi(false);
     }
 
     int winW = sapp_width(), winH = sapp_height();
@@ -560,7 +1326,7 @@ static void frame_cb() {
 
             UnitOverlayInfo info;
             info.handleId = unit->GetHandleId();
-            info.isSelected = (unit->GetHandleId() == g.selectedUnitHandle);
+            info.isSelected = IsUnitSelected(unit->GetHandleId());
             info.isAlive = !unit->IsDead();
             info.hpRatio = unit->GetMaxLife() > 0 ? unit->GetLife() / unit->GetMaxLife() : 1.0f;
             info.mpRatio = unit->GetMaxMana() > 0 ? unit->GetMana() / (float)unit->GetMaxMana() : 0.0f;
@@ -704,7 +1470,9 @@ static void init_cb() {
                     g.simulation.AddPlayer(std::move(player));
                 }
 
-                // Create simulation units + visual models in sync
+                // Create simulation units from units.doo and let the simulation own
+                // their visuals so animation/state starts from runtime data instead of
+                // a separate editor-scene copy.
                 int simUnitCreated = 0;
                 int visualUnitCreated = 0;
                 int visualMissForSimUnits = 0;
@@ -716,26 +1484,35 @@ static void init_cb() {
                             id, u.player, u.pos[0], u.pos[1], u.angle);
                         if (simUnit) {
                             simUnitCreated++;
+                            g.simUnitVisualSeeds[simUnit->GetHandleId()] = {
+                                {u.scale[0], u.scale[1], u.scale[2]},
+                                u.skinId,
+                                u.hitpoints,
+                                u.flags
+                            };
                             if (u.hitpoints > 0) simUnit->SetLife(g.simulation, (float)u.hitpoints);
                             if (u.mana > 0) simUnit->SetMana((float)u.mana);
                         }
                     }
-                    // Create visual model for every unit (even if unknown to sim)
-                    int visIdx = g.scene.InstanceCount();
-                    bool visualAdded = g.scene.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId);
-                    if (visualAdded) {
-                        visualUnitCreated++;
-                        if (simUnit) {
-                            g.simUnitToVisualIdx[simUnit->GetHandleId()] = visIdx;
+                    // Keep direct scene visuals only for units we couldn't instantiate
+                    // in the simulation.
+                    if (!simUnit) {
+                        if (g.scene.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId)) {
+                            visualUnitCreated++;
                         }
-                    } else if (simUnit) {
-                        visualMissForSimUnits++;
                     }
                 }
                 // Force process new units
                 g.simulation.Update();
                 g.simulationInitialized = true;
                 g.ui.SetSimulation(&g.simulation);
+                for (auto* unit : g.simulation.GetUnits()) {
+                    if (EnsureSimulationUnitVisual(unit)) {
+                        visualUnitCreated++;
+                    } else {
+                        visualMissForSimUnits++;
+                    }
+                }
                 std::cout << "Simulation: " << g.unitData.GetAllTypes().size()
                           << " types, " << g.simulation.GetUnits().size() << " units" << std::endl;
                 std::cout << "SceneUnitSync: simCreated=" << simUnitCreated
@@ -886,8 +1663,11 @@ static void init_cb() {
                         auto* viewer = g.scene.GetViewer(it->second);
                         if (viewer && viewer->GetAnimator()) {
                             viewer->GetAnimator()->PlaySequence(animName);
+                            g.simUnitPendingAnimations.erase(simHandle);
+                            return;
                         }
                     }
+                    g.simUnitPendingAnimations[simHandle] = {animName, -1, false};
                 };
                 jassData->unitSetAnimationByIndex = [](int simHandle, int index) {
                     auto it = g.simUnitToVisualIdx.find(simHandle);
@@ -895,8 +1675,11 @@ static void init_cb() {
                         auto* viewer = g.scene.GetViewer(it->second);
                         if (viewer && viewer->GetAnimator()) {
                             viewer->GetAnimator()->SetSequence(index);
+                            g.simUnitPendingAnimations.erase(simHandle);
+                            return;
                         }
                     }
+                    g.simUnitPendingAnimations[simHandle] = {"", index, true};
                 };
 
                 // Wire unit death events to trigger system
@@ -920,9 +1703,14 @@ static void init_cb() {
                             g.jassNatives->FireOrderEvent(unitHandle, orderId, targetHandle, x, y);
                     }
                 );
-                // Try to execute main/config functions
+                // Warcraft III maps expect config() before main().
                 if (g.jass.IsValid()) {
+                    g.jass.Execute("config");
                     g.jass.Execute("main");
+                    // Flush any CreateUnit() calls issued by JASS before we inspect the map state.
+                    g.simulation.Update();
+                    EnsureHumanMeleeStartsFromMapConfig();
+                    FlushStartupSimulationState();
                 }
             } else {
                 for (auto& e : g.jass.GetErrors())
@@ -978,11 +1766,13 @@ static void init_cb() {
                   << " playable: " << playable << std::endl;
     }
 
-    // Camera at terrain center
+    // Default camera fallback at terrain center. We may overwrite this below
+    // with the initial spawn focus once map/JASS state is ready.
     g.camera.SetTarget(center.x, center.y, center.z);
     g.camera.SetDistance(2500.0f);
     g.camera.SetMaxDistance(5000.0f);
     g.camera.SaveHomeState();
+    FocusCameraAndMinimapOnInitialSpawn();
 
     g.initialized = true;
     std::cout << "Initialization complete. Starting render loop..." << std::endl;

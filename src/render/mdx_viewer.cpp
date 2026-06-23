@@ -5,9 +5,161 @@
 #include "asset/BLP.h"
 #include "asset/DDS.h"
 #include "asset/stb_image.h"
+#include <algorithm>
 #include <iostream>
 #include <cstring>
 #include <cmath>
+#include <unordered_map>
+#include <unordered_set>
+
+static bool IsPortraitOnlyNodeName(const std::string& name) {
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    return lower.find("portraitbackground") != std::string::npos;
+}
+
+static bool ShouldLogModelDebug(const std::string& name) {
+    return false;
+}
+
+namespace {
+static bool IsSuspiciousViewHandle(sg_view view) {
+    if (!view.id) {
+        return false;
+    }
+    const uint32_t slot = view.id & 0xFFFFu;
+    return (slot == 0u) || (slot > 2048u);
+}
+
+static void SafeDestroyViewHandle(sg_view& view, const char* owner) {
+    if (!view.id) {
+        return;
+    }
+    if (IsSuspiciousViewHandle(view)) {
+        std::fprintf(stderr, "MdxViewer: skipped suspicious view destroy owner=%s id=0x%08x\n",
+            owner, view.id);
+        view = {0};
+        return;
+    }
+    if (sg_query_view_state(view) == SG_RESOURCESTATE_VALID) {
+        sg_destroy_view(view);
+    }
+    view = {0};
+}
+}
+
+static constexpr uint32_t MakeTag(char a, char b, char c, char d) {
+    return (uint32_t(uint8_t(a)) << 24) | (uint32_t(uint8_t(b)) << 16)
+         | (uint32_t(uint8_t(c)) << 8) | uint32_t(uint8_t(d));
+}
+
+static const uint32_t TAG_KGAO = MakeTag('K','G','A','O');
+static const uint32_t TAG_KGAC = MakeTag('K','G','A','C');
+static const uint32_t TAG_KMTA = MakeTag('K','M','T','A');
+
+static bool ModelHasAnimatedMaterials(const MdxModel& model) {
+    if (!model.geosetAnims.empty()) {
+        return true;
+    }
+    for (const auto& material : model.materials) {
+        for (const auto& layer : material.layers) {
+            if (!layer.timelines.empty()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static std::string ToLowerCopy(const std::string& value) {
+    std::string lower = value;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    return lower;
+}
+
+static int FindBestDefaultStandSequenceIndex(const MdxModel& model) {
+    int exactStandReady = -1;
+    int fallbackStandReady = -1;
+    int fallbackStand = -1;
+    int exactStand = -1;
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        const std::string lowerName = ToLowerCopy(model.sequences[i].name);
+        if (lowerName == "stand ready") {
+            exactStandReady = i;
+            continue;
+        }
+        if (lowerName == "stand") {
+            exactStand = i;
+            continue;
+        }
+        if (lowerName.rfind("stand", 0) != 0) {
+            continue;
+        }
+        const bool hasReadyTag = lowerName.find("ready") != std::string::npos;
+        const bool hasDisallowedTag = lowerName.find("alternate") != std::string::npos
+            || lowerName.find("work") != std::string::npos
+            || lowerName.find("swim") != std::string::npos
+            || lowerName.find("gold") != std::string::npos
+            || lowerName.find("lumber") != std::string::npos
+            || lowerName.find("talk") != std::string::npos
+            || lowerName.find("channel") != std::string::npos
+            || lowerName.find("spell") != std::string::npos
+            || lowerName.find("defend") != std::string::npos
+            || lowerName.find("victory") != std::string::npos
+            || lowerName.find("hit") != std::string::npos
+            || lowerName.find("flesh") != std::string::npos
+            || lowerName.find("bone") != std::string::npos;
+        if (hasReadyTag && !hasDisallowedTag && fallbackStandReady < 0) {
+            fallbackStandReady = i;
+        }
+        if (!hasReadyTag && !hasDisallowedTag && fallbackStand < 0) {
+            fallbackStand = i;
+        }
+    }
+    if (exactStandReady >= 0) return exactStandReady;
+    if (fallbackStandReady >= 0) return fallbackStandReady;
+    if (exactStand >= 0) return exactStand;
+    if (fallbackStand >= 0) return fallbackStand;
+    return model.sequences.empty() ? -1 : 0;
+}
+
+static int FindBestBirthSequenceIndex(const MdxModel& model) {
+    int fallbackBirth = -1;
+    int exactBirth = -1;
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        const std::string lowerName = ToLowerCopy(model.sequences[i].name);
+        if (lowerName == "birth") {
+            exactBirth = i;
+            break;
+        }
+        if (lowerName.rfind("birth", 0) != 0) {
+            continue;
+        }
+        const bool hasDisallowedTag = lowerName.find("alternate") != std::string::npos
+            || lowerName.find("work") != std::string::npos
+            || lowerName.find("swim") != std::string::npos
+            || lowerName.find("ready") != std::string::npos
+            || lowerName.find("gold") != std::string::npos
+            || lowerName.find("lumber") != std::string::npos
+            || lowerName.find("talk") != std::string::npos
+            || lowerName.find("channel") != std::string::npos
+            || lowerName.find("spell") != std::string::npos
+            || lowerName.find("defend") != std::string::npos
+            || lowerName.find("victory") != std::string::npos
+            || lowerName.find("hit") != std::string::npos
+            || lowerName.find("flesh") != std::string::npos
+            || lowerName.find("bone") != std::string::npos;
+        if (!hasDisallowedTag && fallbackBirth < 0) {
+            fallbackBirth = i;
+        }
+    }
+    if (exactBirth >= 0) return exactBirth;
+    return fallbackBirth;
+}
 
 MdxViewer::~MdxViewer() { Release(); }
 
@@ -24,6 +176,8 @@ sg_pipeline MdxViewer::sharedSkinnedBlendPipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlaySkinnedPipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlaySkinnedBlendPipeline_ = {0};
 sg_sampler MdxViewer::sharedSampler_ = {0};
+sg_image MdxViewer::sharedWhiteTexture_ = {0};
+sg_view MdxViewer::sharedWhiteTextureView_ = {0};
 
 void MdxViewer::InitSharedShader() {
     if (sharedShader_.id) return;
@@ -36,6 +190,23 @@ void MdxViewer::InitSharedShader() {
     smpDesc.wrap_u = SG_WRAP_REPEAT;
     smpDesc.wrap_v = SG_WRAP_REPEAT;
     sharedSampler_ = sg_make_sampler(&smpDesc);
+
+    const uint32_t whitePixel = 0xFFFFFFFFu;
+    sg_image_desc whiteDesc = {};
+    whiteDesc.type = SG_IMAGETYPE_2D;
+    whiteDesc.width = 1;
+    whiteDesc.height = 1;
+    whiteDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    whiteDesc.data.mip_levels[0].ptr = &whitePixel;
+    whiteDesc.data.mip_levels[0].size = sizeof(whitePixel);
+    sharedWhiteTexture_ = sg_make_image(&whiteDesc);
+    if (sg_query_image_state(sharedWhiteTexture_) == SG_RESOURCESTATE_VALID) {
+        sg_view_desc whiteViewDesc = {};
+        whiteViewDesc.texture.image = sharedWhiteTexture_;
+        sharedWhiteTextureView_ = sg_make_view(&whiteViewDesc);
+    } else {
+        sharedWhiteTexture_ = {0};
+    }
 
     // ---- Static (non-skinned) shader ----
     {
@@ -325,28 +496,99 @@ void MdxViewer::ReleaseSharedShader() {
     if (sharedShader_.id) sg_destroy_shader(sharedShader_);
     if (sharedSkinnedPipeline_.id) sg_destroy_pipeline(sharedSkinnedPipeline_);
     if (sharedSkinnedShader_.id) sg_destroy_shader(sharedSkinnedShader_);
+    if (sharedWhiteTextureView_.id) sg_destroy_view(sharedWhiteTextureView_);
+    if (sharedWhiteTexture_.id) sg_destroy_image(sharedWhiteTexture_);
+    if (sharedSampler_.id) sg_destroy_sampler(sharedSampler_);
     sharedShader_ = {0}; sharedPipeline_ = {0}; sharedNoDepthWritePipeline_ = {0}; sharedBlendPipeline_ = {0};
     sharedOverlayPipeline_ = {0}; sharedOverlayBlendPipeline_ = {0};
     sharedSkinnedShader_ = {0}; sharedSkinnedPipeline_ = {0}; sharedSkinnedNoDepthWritePipeline_ = {0}; sharedSkinnedBlendPipeline_ = {0};
     sharedOverlaySkinnedPipeline_ = {0}; sharedOverlaySkinnedBlendPipeline_ = {0};
+    sharedSampler_ = {0};
+    sharedWhiteTexture_ = {0};
+    sharedWhiteTextureView_ = {0};
 }
 
 void MdxViewer::Release() {
-    if (!Renderer::IsActive()) { batches_.clear(); shader_ = {0}; return; }
-    for (auto& b : batches_) {
-        if (b.vbo.id) sg_destroy_buffer(b.vbo);
-        if (b.ebo.id) sg_destroy_buffer(b.ebo);
-        if (b.textureHandle.id) sg_destroy_image(b.textureHandle);
-        if (b.textureView.id) sg_destroy_view(b.textureView);
-        if (b.playerTexHandle.id) sg_destroy_image(b.playerTexHandle);
-        if (b.playerTexView.id) sg_destroy_view(b.playerTexView);
-        if (b.sampler.id) sg_destroy_sampler(b.sampler);
+    if (!Renderer::IsActive()) {
+        batches_.clear();
+        shader_ = {0};
+        modelData_ = MdxModel{};
+        ownsModelData_ = false;
+        ownsBatchGpuResources_ = true;
+        modelSource_ = nullptr;
+        sharedSource_ = nullptr;
+        hasAnimations_ = false;
+        hasAnimatedMaterials_ = false;
+        initializedAnimator_ = false;
+        animatedGeosetStates_.clear();
+        animatedLayerAlphas_.clear();
+        return;
     }
-    if (cachedBoneView_.id) { sg_destroy_view(cachedBoneView_); cachedBoneView_ = {0}; }
+    for (auto& b : batches_) {
+        if (ownsBatchGpuResources_) {
+            if (b.vbo.id) sg_destroy_buffer(b.vbo);
+            if (b.ebo.id) sg_destroy_buffer(b.ebo);
+            if (b.textureHandle.id) sg_destroy_image(b.textureHandle);
+            SafeDestroyViewHandle(b.textureView, "batch.textureView");
+            if (b.sampler.id) sg_destroy_sampler(b.sampler);
+        }
+        if (b.playerTexHandle.id) sg_destroy_image(b.playerTexHandle);
+        SafeDestroyViewHandle(b.playerTexView, "batch.playerTexView");
+    }
+    SafeDestroyViewHandle(cachedBoneView_, "cachedBoneView");
     cachedBoneTexId_ = 0;
     batches_.clear();
     shader_ = {0};
     if (hasParticles_) { particles_.Destroy(); hasParticles_ = false; }
+    modelData_ = MdxModel{};
+    ownsModelData_ = false;
+    ownsBatchGpuResources_ = true;
+    modelSource_ = nullptr;
+    sharedSource_ = nullptr;
+    hasAnimations_ = false;
+    hasAnimatedMaterials_ = false;
+    initializedAnimator_ = false;
+    animatedGeosetStates_.clear();
+    animatedLayerAlphas_.clear();
+    pendingStandSequenceAfterCurrent_ = false;
+}
+
+bool MdxViewer::ShareModelResourcesFrom(const MdxViewer& other) {
+    Release();
+    if (!other.IsValid()) {
+        return false;
+    }
+
+    batches_ = other.batches_;
+    for (auto& batch : batches_) {
+        batch.playerTexHandle = {0};
+        batch.playerTexView = {0};
+        batch.cachedPlayer = -1;
+    }
+    ownsBatchGpuResources_ = false;
+    sharedSource_ = nullptr;
+    mpq_ = other.mpq_;
+    name_ = other.name_;
+    center_ = other.center_;
+    radius_ = other.radius_;
+    hasAnimations_ = other.hasAnimations_;
+    hasAnimatedMaterials_ = other.hasAnimatedMaterials_;
+    modelSource_ = other.modelSource_ ? other.modelSource_ : &other.modelData_;
+    if (!modelSource_) {
+        return false;
+    }
+
+    if (hasAnimations_ || hasAnimatedMaterials_) {
+        animator_.Init(*modelSource_);
+        initializedAnimator_ = true;
+        PlayStandSequence();
+        InitializeAnimatedStates();
+        UpdateAnimatedStates();
+    }
+
+    // Particle systems stay disabled for now; each runtime instance owns only animation state.
+    hasParticles_ = false;
+    return true;
 }
 
 static sg_image CreateSGImage(int w, int h, const uint8_t* pixels) {
@@ -394,7 +636,15 @@ static sg_image LoadTextureFromMpq(MpqManager* mpq, const std::string& path) {
 
 bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
     Release();
-    name_ = model.name;
+    modelData_ = model;
+    ownsModelData_ = true;
+    ownsBatchGpuResources_ = true;
+    modelSource_ = &modelData_;
+    sharedSource_ = nullptr;
+    const MdxModel& sourceModel = *modelSource_;
+
+    name_ = sourceModel.name;
+    const bool logModelDebug = ShouldLogModelDebug(name_);
 
     InitSharedShader();
     if (!sharedShader_.id || !sharedPipeline_.id) return false;
@@ -402,7 +652,8 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
     // Many Warcraft III models rely on bones/helpers even without animation sequences.
     // Treat any skeletal hierarchy as needing the animator path so bind-pose transforms
     // are still applied.
-    hasAnimations_ = !model.bones.empty() || !model.helpers.empty();
+    hasAnimations_ = !sourceModel.bones.empty() || !sourceModel.helpers.empty();
+    hasAnimatedMaterials_ = ModelHasAnimatedMaterials(sourceModel);
 
     sg_sampler_desc smp = {};
     smp.min_filter = SG_FILTER_LINEAR;
@@ -411,13 +662,90 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
     smp.wrap_u = SG_WRAP_REPEAT;
     smp.wrap_v = SG_WRAP_REPEAT;
 
-    if (hasAnimations_) {
-        modelData_ = model;
-        ownsModelData_ = true;
-        animator_.Init(modelData_);
+    if (hasAnimations_ || hasAnimatedMaterials_) {
+        animator_.Init(*modelSource_);
         initializedAnimator_ = true;
-        if (animator_.GetSequenceCount() > 0) {
-            animator_.SetSequence(0, true, 1.0f);
+        PlayStandSequence();
+        InitializeAnimatedStates();
+        UpdateAnimatedStates();
+    }
+    std::unordered_map<int, const MdxNode*> debugNodesByObjectId;
+    if (logModelDebug) {
+        std::cout << "ModelDebug[" << name_ << "]: bones=" << sourceModel.bones.size()
+                  << " helpers=" << sourceModel.helpers.size() << std::endl;
+        for (const auto& bone : sourceModel.bones) {
+            debugNodesByObjectId[bone.objectId] = &bone;
+            std::cout << "ModelDebug[" << name_ << "]: bone objectId=" << bone.objectId
+                      << " parentId=" << bone.parentId
+                      << " flags=0x" << std::hex << bone.flags << std::dec
+                      << " geosetId=" << bone.geosetId
+                      << " geosetAnimId=" << bone.geosetAnimationId
+                      << " name=" << bone.name << std::endl;
+        }
+        for (const auto& helper : sourceModel.helpers) {
+            debugNodesByObjectId[helper.objectId] = &helper;
+            std::cout << "ModelDebug[" << name_ << "]: helper objectId=" << helper.objectId
+                      << " parentId=" << helper.parentId
+                      << " flags=0x" << std::hex << helper.flags << std::dec
+                      << " name=" << helper.name << std::endl;
+        }
+        for (const auto& attachment : sourceModel.attachments) {
+            std::cout << "ModelDebug[" << name_ << "]: attachment objectId=" << attachment.objectId
+                      << " parentId=" << attachment.parentId
+                      << " flags=0x" << std::hex << attachment.flags << std::dec
+                      << " attachmentId=" << attachment.attachmentId
+                      << " path=" << attachment.path
+                      << " name=" << attachment.name << std::endl;
+        }
+        for (const auto& light : sourceModel.lights) {
+            std::cout << "ModelDebug[" << name_ << "]: light objectId=" << light.objectId
+                      << " parentId=" << light.parentId
+                      << " flags=0x" << std::hex << light.flags << std::dec
+                      << " textureId=" << light.textureId
+                      << " name=" << light.name << std::endl;
+        }
+        for (const auto& emitter : sourceModel.particleEmitters1) {
+            std::cout << "ModelDebug[" << name_ << "]: emitter1 objectId=" << emitter.objectId
+                      << " parentId=" << emitter.parentId
+                      << " flags=0x" << std::hex << emitter.flags << std::dec
+                      << " textureId=" << emitter.textureId
+                      << " replaceableId=" << emitter.replaceableId
+                      << " name=" << emitter.name << std::endl;
+        }
+        for (const auto& emitter : sourceModel.particleEmitters2) {
+            std::cout << "ModelDebug[" << name_ << "]: emitter2 objectId=" << emitter.objectId
+                      << " parentId=" << emitter.parentId
+                      << " flags=0x" << std::hex << emitter.flags << std::dec
+                      << " textureId=" << emitter.textureId
+                      << " replaceableId=" << emitter.replaceableId
+                      << " name=" << emitter.name << std::endl;
+        }
+        for (const auto& ribbon : sourceModel.ribbonEmitters) {
+            std::cout << "ModelDebug[" << name_ << "]: ribbon objectId=" << ribbon.objectId
+                      << " parentId=" << ribbon.parentId
+                      << " flags=0x" << std::hex << ribbon.flags << std::dec
+                      << " replaceableId=" << ribbon.replaceableId
+                      << " name=" << ribbon.name << std::endl;
+        }
+        for (const auto& eventObject : sourceModel.eventObjects) {
+            std::cout << "ModelDebug[" << name_ << "]: event objectId=" << eventObject.objectId
+                      << " parentId=" << eventObject.parentId
+                      << " flags=0x" << std::hex << eventObject.flags << std::dec
+                      << " type=" << eventObject.type
+                      << " id=" << eventObject.id
+                      << " name=" << eventObject.name << std::endl;
+        }
+    }
+
+    std::unordered_set<int> portraitOnlyGeosets;
+    for (const auto& bone : sourceModel.bones) {
+        if (bone.geosetId >= 0 && IsPortraitOnlyNodeName(bone.name)) {
+            portraitOnlyGeosets.insert(bone.geosetId);
+        }
+    }
+    for (const auto& helper : sourceModel.helpers) {
+        if (helper.geosetId >= 0 && IsPortraitOnlyNodeName(helper.name)) {
+            portraitOnlyGeosets.insert(helper.geosetId);
         }
     }
 
@@ -427,9 +755,9 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
         int replaceableId = 0;
         std::string replaceablePath;
     };
-    std::vector<TexResolve> texCache(model.textures.size());
-    for (size_t ti = 0; ti < model.textures.size(); ti++) {
-        auto& texRef = model.textures[ti];
+    std::vector<TexResolve> texCache(sourceModel.textures.size());
+    for (size_t ti = 0; ti < sourceModel.textures.size(); ti++) {
+        auto& texRef = sourceModel.textures[ti];
         auto& cache = texCache[ti];
         if (!texRef.path.empty()) {
             std::string path = texRef.path;
@@ -453,11 +781,61 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
     }
 
     // Create batches for each geoset
-    for (int gi = 0; gi < (int)model.geosets.size(); gi++) {
-        const auto& geo = model.geosets[gi];
+    for (int gi = 0; gi < (int)sourceModel.geosets.size(); gi++) {
+        if (portraitOnlyGeosets.find(gi) != portraitOnlyGeosets.end()) continue;
+        const auto& geo = sourceModel.geosets[gi];
         if (geo.vertices.empty() || geo.indices.empty()) continue;
+        if (logModelDebug) {
+            std::cout << "ModelDebug[" << name_ << "]: geoset=" << gi
+                      << " vertices=" << (geo.vertices.size() / 3)
+                      << " indices=" << geo.indices.size()
+                      << " materialId=" << geo.materialId
+                      << " vertexGroups=" << geo.vertexGroups.size()
+                      << " matrixGroups=" << geo.matrixGroups.size()
+                      << " matrixIndices=" << geo.matrixIndices.size()
+                      << std::endl;
+            if (!geo.matrixIndices.empty()) {
+                std::cout << "ModelDebug[" << name_ << "]: geoset=" << gi
+                          << " matrixIndexValues=";
+                for (size_t mi = 0; mi < geo.matrixIndices.size(); ++mi) {
+                    if (mi > 0) {
+                        std::cout << ",";
+                    }
+                    const int objectId = (int)geo.matrixIndices[mi];
+                    std::cout << objectId;
+                    auto nodeIt = debugNodesByObjectId.find(objectId);
+                    if (nodeIt != debugNodesByObjectId.end() && nodeIt->second) {
+                        std::cout << "(" << nodeIt->second->name
+                                  << ",flags=0x" << std::hex << nodeIt->second->flags << std::dec
+                                  << ")";
+                    }
+                }
+                std::cout << std::endl;
+            }
+            if (geo.materialId >= 0 && geo.materialId < (int)sourceModel.materials.size()) {
+                const auto& dbgMaterial = sourceModel.materials[geo.materialId];
+                std::cout << "ModelDebug[" << name_ << "]: material=" << geo.materialId
+                          << " layers=" << dbgMaterial.layers.size()
+                          << " flags=" << dbgMaterial.flags << std::endl;
+                for (size_t li = 0; li < dbgMaterial.layers.size(); ++li) {
+                    const auto& dbgLayer = dbgMaterial.layers[li];
+                    std::cout << "ModelDebug[" << name_ << "]: layer=" << li
+                              << " textureId=" << dbgLayer.textureId
+                              << " filterMode=" << dbgLayer.filterMode
+                              << " flags=" << dbgLayer.flags
+                              << " coordId=" << dbgLayer.coordId
+                              << " alpha=" << dbgLayer.alpha;
+                    if (dbgLayer.textureId >= 0 && dbgLayer.textureId < (int)sourceModel.textures.size()) {
+                        const auto& dbgTex = sourceModel.textures[dbgLayer.textureId];
+                        std::cout << " texPath=" << dbgTex.path
+                                  << " replaceableId=" << dbgTex.replaceableId;
+                    }
+                    std::cout << std::endl;
+                }
+            }
+        }
         const MdxGeosetAnim* geosetAnim = nullptr;
-        for (const auto& ga : model.geosetAnims) {
+        for (const auto& ga : sourceModel.geosetAnims) {
             if (ga.geosetId == gi) {
                 geosetAnim = &ga;
                 break;
@@ -468,8 +846,8 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
         bool isSkinned = !geo.vertexGroups.empty() && !geo.matrixGroups.empty();
 
         const MdxMaterial* material = nullptr;
-        if (geo.materialId >= 0 && geo.materialId < (int)model.materials.size()) {
-            material = &model.materials[geo.materialId];
+        if (geo.materialId >= 0 && geo.materialId < (int)sourceModel.materials.size()) {
+            material = &sourceModel.materials[geo.materialId];
         }
         int passCount = (material && !material->layers.empty()) ? (int)material->layers.size() : 1;
 
@@ -494,7 +872,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
             }
 
             if (isSkinned && hasAnimations_) {
-                BuildSkinnedBatch(geo, gi, uvSource, model, mpq);
+                BuildSkinnedBatch(geo, gi, uvSource, sourceModel, mpq);
                 if (!batches_.empty()) {
                     auto& batch = batches_.back();
                     batch.textureHandle = texHandle;
@@ -508,6 +886,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
                     batch.sampler = sg_make_sampler(&smp);
                     batch.materialId = geo.materialId;
                     batch.geosetIndex = gi;
+                    batch.materialLayerIndex = pass;
                     if (layer) {
                         batch.filterMode = layer->filterMode;
                         batch.layerFlags = layer->flags;
@@ -561,6 +940,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
                 batch.skinned = false;
                 batch.materialId = geo.materialId;
                 batch.geosetIndex = gi;
+                batch.materialLayerIndex = pass;
                 if (layer) {
                     batch.filterMode = layer->filterMode;
                     batch.layerFlags = layer->flags;
@@ -590,11 +970,11 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
 
     mpq_ = mpq;
     center_ = {
-        (model.boundsMin[0] + model.boundsMax[0]) * 0.5f,
-        (model.boundsMin[2] + model.boundsMax[2]) * 0.5f,
-        -(model.boundsMin[1] + model.boundsMax[1]) * 0.5f
+        (sourceModel.boundsMin[0] + sourceModel.boundsMax[0]) * 0.5f,
+        (sourceModel.boundsMin[2] + sourceModel.boundsMax[2]) * 0.5f,
+        -(sourceModel.boundsMin[1] + sourceModel.boundsMax[1]) * 0.5f
     };
-    radius_ = model.boundsRadius > 0 ? model.boundsRadius : 100.0f;
+    radius_ = sourceModel.boundsRadius > 0 ? sourceModel.boundsRadius : 100.0f;
 
     // Particle systems are temporarily disabled while stabilizing scene rendering.
     hasParticles_ = false;
@@ -604,18 +984,46 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
     return !batches_.empty();
 }
 
+bool MdxViewer::PlayStandSequence() {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int defaultSequenceIndex = FindBestDefaultStandSequenceIndex(*modelSource_);
+    if (defaultSequenceIndex < 0) {
+        return false;
+    }
+    return animator_.SetSequence(defaultSequenceIndex, true, 1.0f);
+}
+
+bool MdxViewer::PlayBirthThenStandSequence() {
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int birthSequenceIndex = FindBestBirthSequenceIndex(*modelSource_);
+    if (birthSequenceIndex < 0) {
+        return PlayStandSequence();
+    }
+    pendingStandSequenceAfterCurrent_ = animator_.SetSequence(birthSequenceIndex, false, 1.0f);
+    return pendingStandSequenceAfterCurrent_;
+}
+
 void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
                                    const std::vector<float>* uvSource,
                                    const MdxModel& model, MpqManager* mpq) {
     (void)model; (void)mpq;
+    (void)geosetIdx;
 
     int vc = (int)geo.vertices.size() / 3;
     if (vc == 0) return;
+    const bool hasCompactSkin = geo.skin.size() >= size_t(vc * 4);
 
     // Build per-vertex bone data
     std::vector<VertexSkinned> verts(vc);
 
-    // For each vertex, look up its vertexGroup -> matrixGroup -> matrix indices
+    // Reforged SKIN data carries explicit per-vertex weights. Classic MDX stores
+    // a matrix group per vertex group instead; Warsmash averages across the
+    // referenced matrices, so we mirror that behavior here.
     for (int i = 0; i < vc; i++) {
         float mx = geo.vertices[i*3];
         float my = geo.vertices[i*3+1];
@@ -644,17 +1052,41 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
         verts[i].boneWeights[3] = 0;
         verts[i].boneCount = 1;
 
-        if (i < (int)geo.vertexGroups.size()) {
+        if (hasCompactSkin) {
+            float totalWeight = 0.0f;
+            int influenceCount = 0;
+            for (int b = 0; b < 4; ++b) {
+                const uint16_t skinEntry = geo.skin[i * 4 + b];
+                const int objectId = (int)(skinEntry >> 8);
+                const float weight = float(skinEntry & 0xFF) / 255.0f;
+                if (weight <= 0.0f) continue;
+
+                int boneIndex = animator_.GetBoneIndexForObjectId(objectId);
+                if (boneIndex < 0) {
+                    boneIndex = objectId;
+                }
+                if (boneIndex < 0 || boneIndex >= 256) continue;
+
+                verts[i].boneIndices[influenceCount] = (uint8_t)boneIndex;
+                verts[i].boneWeights[influenceCount] = weight;
+                totalWeight += weight;
+                ++influenceCount;
+            }
+            if (influenceCount > 0 && totalWeight > 0.0f) {
+                for (int b = 0; b < influenceCount; ++b) {
+                    verts[i].boneWeights[b] /= totalWeight;
+                }
+                verts[i].boneCount = (float)influenceCount;
+            }
+        } else if (i < (int)geo.vertexGroups.size()) {
             int groupIdx = geo.vertexGroups[i];
             if (groupIdx >= 0 && groupIdx < (int)geo.matrixGroups.size()) {
                 int groupStart = 0;
                 for (int mg = 0; mg < groupIdx; mg++)
                     groupStart += (int)geo.matrixGroups[mg];
-                int boneCount = (int)geo.matrixGroups[groupIdx];
-                boneCount = std::min(boneCount, 4);
-                verts[i].boneCount = boneCount;
-                float totalWeight = 0;
-                for (int b = 0; b < boneCount; b++) {
+                int groupBoneCount = (int)geo.matrixGroups[groupIdx];
+                int influenceCount = 0;
+                for (int b = 0; b < groupBoneCount && influenceCount < 4; ++b) {
                     int mi = groupStart + b;
                     if (mi < (int)geo.matrixIndices.size()) {
                         int objectId = (int)geo.matrixIndices[mi];
@@ -663,16 +1095,17 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
                             boneIndex = objectId;
                         }
                         if (boneIndex >= 0 && boneIndex < 256) {
-                            verts[i].boneIndices[b] = (uint8_t)boneIndex;
-                            verts[i].boneWeights[b] = 1.0f / (float)boneCount;
-                            totalWeight += verts[i].boneWeights[b];
+                            verts[i].boneIndices[influenceCount] = (uint8_t)boneIndex;
+                            ++influenceCount;
                         }
                     }
                 }
-                // Normalize
-                if (totalWeight > 0) {
-                    for (int b = 0; b < boneCount; b++)
-                        verts[i].boneWeights[b] /= totalWeight;
+                if (influenceCount > 0) {
+                    const float weight = 1.0f / (float)influenceCount;
+                    for (int b = 0; b < influenceCount; ++b) {
+                        verts[i].boneWeights[b] = weight;
+                    }
+                    verts[i].boneCount = (float)influenceCount;
                 }
             }
         }
@@ -697,8 +1130,15 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
 }
 
 void MdxViewer::Update(float dt) {
-    if (hasAnimations_)
+    if (initializedAnimator_) {
         animator_.Update(dt);
+        if (pendingStandSequenceAfterCurrent_ && animator_.IsSequenceFinished()) {
+            PlayStandSequence();
+        }
+    }
+    if (hasAnimatedMaterials_) {
+        UpdateAnimatedStates();
+    }
     if (hasParticles_)
         particles_.Update(dt, particles_.GetWorldOffset());
 }
@@ -708,10 +1148,112 @@ void MdxViewer::Update(float dt, const Mat4& view) {
         Vec3 cameraForward = {-view.m[2], -view.m[6], -view.m[10]};
         animator_.SetCameraForward(cameraForward);
     }
-    if (hasAnimations_)
+    if (initializedAnimator_) {
         animator_.Update(dt);
+        if (pendingStandSequenceAfterCurrent_ && animator_.IsSequenceFinished()) {
+            PlayStandSequence();
+        }
+    }
+    if (hasAnimatedMaterials_) {
+        UpdateAnimatedStates();
+    }
     if (hasParticles_)
         particles_.Update(dt, particles_.GetWorldOffset());
+}
+
+void MdxViewer::InitializeAnimatedStates() {
+    if (!modelSource_) {
+        animatedGeosetStates_.clear();
+        animatedLayerAlphas_.clear();
+        return;
+    }
+
+    animatedGeosetStates_.assign(modelSource_->geosets.size(), AnimatedGeosetState{});
+    for (size_t gi = 0; gi < modelSource_->geosets.size(); ++gi) {
+        auto& state = animatedGeosetStates_[gi];
+        for (const auto& geosetAnim : modelSource_->geosetAnims) {
+            if (geosetAnim.geosetId == (int)gi) {
+                state.alpha = geosetAnim.alpha;
+                state.color[0] = geosetAnim.color[0];
+                state.color[1] = geosetAnim.color[1];
+                state.color[2] = geosetAnim.color[2];
+                break;
+            }
+        }
+    }
+
+    animatedLayerAlphas_.clear();
+    animatedLayerAlphas_.reserve(modelSource_->materials.size());
+    for (const auto& material : modelSource_->materials) {
+        std::vector<float> materialLayers(material.layers.size(), 1.0f);
+        for (size_t li = 0; li < material.layers.size(); ++li) {
+            materialLayers[li] = material.layers[li].alpha;
+        }
+        animatedLayerAlphas_.push_back(std::move(materialLayers));
+    }
+}
+
+void MdxViewer::UpdateAnimatedStates() {
+    if (!modelSource_ || modelSource_->sequences.empty()) {
+        return;
+    }
+
+    if (animatedGeosetStates_.size() != modelSource_->geosets.size()
+        || animatedLayerAlphas_.size() != modelSource_->materials.size()) {
+        InitializeAnimatedStates();
+    }
+
+    const uint32_t frame = animator_.GetCurrentFrame();
+
+    for (size_t gi = 0; gi < modelSource_->geosets.size(); ++gi) {
+        auto& state = animatedGeosetStates_[gi];
+        state.alpha = 1.0f;
+        state.color[0] = 1.0f;
+        state.color[1] = 1.0f;
+        state.color[2] = 1.0f;
+
+        for (const auto& geosetAnim : modelSource_->geosetAnims) {
+            if (geosetAnim.geosetId != (int)gi) {
+                continue;
+            }
+            state.alpha = geosetAnim.alpha;
+            state.color[0] = geosetAnim.color[0];
+            state.color[1] = geosetAnim.color[1];
+            state.color[2] = geosetAnim.color[2];
+
+            float sampled[4] = {};
+            for (const auto& timeline : geosetAnim.timelines) {
+                if (timeline.tag == TAG_KGAO && MdxSampleTimeline(timeline, frame, sampled, 1, geosetAnim.alpha)) {
+                    state.alpha = sampled[0];
+                }
+                else if (timeline.tag == TAG_KGAC && MdxSampleTimeline(timeline, frame, sampled, 3, 1.0f)) {
+                    state.color[0] = sampled[0];
+                    state.color[1] = sampled[1];
+                    state.color[2] = sampled[2];
+                }
+            }
+            break;
+        }
+    }
+
+    for (size_t mi = 0; mi < modelSource_->materials.size(); ++mi) {
+        const auto& material = modelSource_->materials[mi];
+        auto& materialLayers = animatedLayerAlphas_[mi];
+        if (materialLayers.size() != material.layers.size()) {
+            materialLayers.assign(material.layers.size(), 1.0f);
+        }
+        for (size_t li = 0; li < material.layers.size(); ++li) {
+            const auto& layer = material.layers[li];
+            materialLayers[li] = layer.alpha;
+            float sampled = layer.alpha;
+            for (const auto& timeline : layer.timelines) {
+                if (timeline.tag == TAG_KMTA && MdxSampleTimeline(timeline, frame, &sampled, 1, layer.alpha)) {
+                    materialLayers[li] = sampled;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 void MdxViewer::Render(const Mat4& view, const Mat4& proj) {
@@ -753,6 +1295,22 @@ sg_image MdxViewer::GetPlayerTexture(Batch& batch, int player) {
 void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, float scale,
                          int player, float yawRadians, float alpha, bool depthTest) {
     if (batches_.empty() || (!sharedShader_.id && !sharedSkinnedShader_.id)) return;
+    auto isValidBuffer = [](sg_buffer buffer) {
+        return buffer.id && sg_query_buffer_state(buffer) == SG_RESOURCESTATE_VALID;
+    };
+    auto isValidImage = [](sg_image image) {
+        return image.id && sg_query_image_state(image) == SG_RESOURCESTATE_VALID;
+    };
+    auto isValidView = [](sg_view viewHandle) {
+        if (viewHandle.id && ((viewHandle.id & 0xFFFFu) >= 4096u)) {
+            std::fprintf(stderr, "MdxViewer suspicious view handle: 0x%08x\n", viewHandle.id);
+            return false;
+        }
+        return viewHandle.id && sg_query_view_state(viewHandle) == SG_RESOURCESTATE_VALID;
+    };
+    auto isValidSampler = [](sg_sampler samplerHandle) {
+        return samplerHandle.id && sg_query_sampler_state(samplerHandle) == SG_RESOURCESTATE_VALID;
+    };
     static bool s_loggedFirstOverlayRender = false;
     if (!s_loggedFirstOverlayRender && !depthTest) {
         int skinnedBatches = 0;
@@ -790,31 +1348,66 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
     sg_sampler_desc smpDesc = {};
     smpDesc.min_filter = SG_FILTER_LINEAR;
     smpDesc.mag_filter = SG_FILTER_LINEAR;
+    const sg_view fallbackTexView = isValidView(sharedWhiteTextureView_) ? sharedWhiteTextureView_ : sg_view{0};
+    const sg_sampler fallbackSampler = isValidSampler(sharedSampler_) ? sharedSampler_ : sg_sampler{0};
 
     for (auto& batch : batches_) {
+        if (!isValidBuffer(batch.vbo) || !isValidBuffer(batch.ebo)) {
+            continue;
+        }
         sg_image tex = batch.textureHandle;
         sg_view texView = batch.textureView;
+        bool hasBoundTexture = isValidImage(tex) && isValidView(texView);
         if (batch.replaceableId == 1 || batch.replaceableId == 2) {
             sg_image pt = GetPlayerTexture(batch, player);
-            if (pt.id) {
+            if (isValidImage(pt)) {
                 tex = pt;
-                if (batch.playerTexView.id) texView = batch.playerTexView;
+                if (isValidView(batch.playerTexView)) {
+                    texView = batch.playerTexView;
+                    hasBoundTexture = true;
+                }
             }
         }
 
-        fsU.hasTex = tex.id ? 1.0f : 0.0f;
+        if (!isValidImage(tex)) {
+            tex = sharedWhiteTexture_;
+        }
+        if (!isValidView(texView)) {
+            texView = fallbackTexView;
+        }
+        sg_sampler diffuseSampler = isValidSampler(batch.sampler) ? batch.sampler : fallbackSampler;
+
+        fsU.hasTex = hasBoundTexture ? 1.0f : 0.0f;
         fsU.filterMode = (float)batch.filterMode;
-        fsU.color[0] = batch.geosetColor[0];
-        fsU.color[1] = batch.geosetColor[1];
-        fsU.color[2] = batch.geosetColor[2];
-        fsU.color[3] = alpha * batch.layerAlpha * batch.geosetAlpha;
+        float geosetColorR = batch.geosetColor[0];
+        float geosetColorG = batch.geosetColor[1];
+        float geosetColorB = batch.geosetColor[2];
+        float geosetAlpha = batch.geosetAlpha;
+        if (batch.geosetIndex >= 0 && batch.geosetIndex < (int)animatedGeosetStates_.size()) {
+            const auto& state = animatedGeosetStates_[batch.geosetIndex];
+            geosetColorR = state.color[0];
+            geosetColorG = state.color[1];
+            geosetColorB = state.color[2];
+            geosetAlpha = state.alpha;
+        }
+        float layerAlpha = batch.layerAlpha;
+        if (batch.materialId >= 0 && batch.materialId < (int)animatedLayerAlphas_.size()) {
+            const auto& materialLayers = animatedLayerAlphas_[batch.materialId];
+            if (batch.materialLayerIndex >= 0 && batch.materialLayerIndex < (int)materialLayers.size()) {
+                layerAlpha = materialLayers[batch.materialLayerIndex];
+            }
+        }
+        fsU.color[0] = geosetColorR;
+        fsU.color[1] = geosetColorG;
+        fsU.color[2] = geosetColorB;
+        fsU.color[3] = alpha * layerAlpha * geosetAlpha;
         const bool blended = batch.filterMode >= 2;
         const bool depthEnabled = depthTest && ((batch.layerFlags & 0x40) == 0);
         const bool noDepthWrite = (batch.layerFlags & 0x80) != 0;
 
         if (batch.skinned && sharedSkinnedShader_.id && sharedSkinnedPipeline_.id) {
             sg_image boneTex = animator_.GetBoneTexture();
-            if (!boneTex.id) continue;
+            if (!isValidImage(boneTex)) continue;
 
             sg_apply_pipeline(depthEnabled
                 ? (blended ? sharedSkinnedBlendPipeline_ : (noDepthWrite ? sharedSkinnedNoDepthWritePipeline_ : sharedSkinnedPipeline_))
@@ -833,14 +1426,14 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
                 cachedBoneView_ = sg_make_view(&vd);
                 cachedBoneTexId_ = boneTex.id;
             }
+            if (!isValidView(cachedBoneView_) || !isValidSampler(linearSmp)) {
+                continue;
+            }
             bind.views[0] = cachedBoneView_;
             bind.samplers[0] = linearSmp;
             // Diffuse texture (FS slot 1)
-            if (tex.id && texView.id) {
-                bind.views[1] = texView;
-                if (!linearSmp.id) linearSmp = sg_make_sampler(&smpDesc);
-                bind.samplers[1] = linearSmp;
-            }
+            bind.views[1] = texView;
+            bind.samplers[1] = diffuseSampler.id ? diffuseSampler : linearSmp;
             sg_apply_bindings(&bind);
             sg_draw(0, batch.indexCount, 1);
         } else if (sharedShader_.id && sharedPipeline_.id) {
@@ -854,7 +1447,10 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
             bind.vertex_buffers[0] = batch.vbo;
             bind.index_buffer = batch.ebo;
             bind.views[0] = texView;
-            bind.samplers[0] = batch.sampler;
+            bind.samplers[0] = diffuseSampler;
+            if (!isValidView(bind.views[0]) || !isValidSampler(bind.samplers[0])) {
+                continue;
+            }
             sg_apply_bindings(&bind);
             sg_draw(0, batch.indexCount, 1);
         }

@@ -37,9 +37,16 @@ static sg_image make_white_tex() {
 }
 
 sg_view UiRenderer::GetOrCreateView(sg_image img) {
+    if (!img.id) {
+        return whiteView_;
+    }
     if (img.id == whiteTex_.id) return whiteView_;
     for (auto& e : viewCache_) {
         if (e.img.id == img.id) return e.view;
+    }
+    if (sg_query_image_state(img) != SG_RESOURCESTATE_VALID) {
+        std::fprintf(stderr, "UiRenderer: rejected invalid image handle 0x%08x for view creation\n", img.id);
+        return whiteView_;
     }
     sg_view_desc vd = {};
     vd.texture.image = img;
@@ -218,6 +225,14 @@ void UiRenderer::Flush() {
     bind.index_buffer = ibo_;
     bind.views[0] = GetOrCreateView(currentTex_);
     bind.samplers[0] = sampler_;
+
+    if (bind.views[0].id && ((bind.views[0].id & 0xFFFFu) >= 4096u)) {
+        std::fprintf(stderr, "UiRenderer suspicious bind view: 0x%08x tex=0x%08x\n",
+            bind.views[0].id, currentTex_.id);
+        quadCount_ = 0;
+        currentTex_ = whiteTex_;
+        return;
+    }
 
     sg_apply_pipeline(pipeline_);
     sg_apply_bindings(&bind);

@@ -6,6 +6,7 @@
 #include "ChatConsoleFrame.h"
 #include "TextRenderer.h"
 #include "UiRenderer.h"
+#include "MultiSelectionPanel.h"
 #include "../asset/Texture.h"
 #include "../resource/mpq_storm.h"
 #include "../data/abilitydata.h"
@@ -95,6 +96,9 @@ public:
 
     // In-world unit overlays (health bars, selection indicators, names)
     void SetOverlayData(const std::vector<UnitOverlayInfo>& data) { overlayData_ = &data; }
+    void SetMultiSelection(const std::vector<MultiSelectUnitInfo>& units);
+    void SetSelectionBox(const ScreenRect& rect);
+    void ClearSelectionBox();
     void RenderOverlays(UiRenderer& r);
 
     // Resource bar access for game state updates
@@ -148,6 +152,9 @@ private:
     std::vector<War3ID> GetUnitAbilities(War3ID unitTypeId);
 
     const std::vector<UnitOverlayInfo>* overlayData_ = nullptr;
+    MultiSelectionPanel multiSelectionPanel_;
+    bool selectionBoxVisible_ = false;
+    ScreenRect selectionBoxRect_;
 
     ChatConsoleFrame* chatConsole_ = nullptr;
 

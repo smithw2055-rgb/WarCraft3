@@ -4,7 +4,7 @@
 class TerrainShaders {
 public:
     static sg_shader CreateGroundShader(int textureCount);
-    static sg_shader CreateCliffShader(int cliffTextureCount);
+    static sg_shader CreateCliffShader(int cliffTextureCount, int groundTextureCount);
     static sg_shader CreateWaterShader(int waterTextureCount);
-    static sg_shader CreateUberSplatShader();
+    static sg_shader CreateUberSplatShader(int textureCount);
 };

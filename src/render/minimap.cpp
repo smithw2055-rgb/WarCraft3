@@ -115,8 +115,10 @@ void Minimap::InitShader() {
         in vec2 vUV;
         out vec4 FragColor;
         uniform sampler2D uTex;
+        uniform vec4 uColor;
+        uniform float uUseTexture;
         void main() {
-            FragColor = texture(uTex, vUV);
+            FragColor = (uUseTexture > 0.5) ? texture(uTex, vUV) * uColor : uColor;
         }
     )";
 
@@ -138,6 +140,15 @@ void Minimap::InitShader() {
     sd.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
     sd.views[0].texture.image_type = SG_IMAGETYPE_2D;
     sd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+    sd.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    sd.uniform_blocks[1].size = 20;
+    sd.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_NATIVE;
+    sd.uniform_blocks[1].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
+    sd.uniform_blocks[1].glsl_uniforms[0].array_count = 1;
+    sd.uniform_blocks[1].glsl_uniforms[0].glsl_name = "uColor";
+    sd.uniform_blocks[1].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT;
+    sd.uniform_blocks[1].glsl_uniforms[1].array_count = 1;
+    sd.uniform_blocks[1].glsl_uniforms[1].glsl_name = "uUseTexture";
     sd.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
     sd.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
     sd.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
@@ -335,6 +346,14 @@ void Minimap::SetScreenRect(float x, float y, float w, float h) {
     filledY_ = screenY_ + (screenH_ - filledH_) * 0.5f;
 }
 
+void Minimap::ClearMarkers() {
+    markers_.clear();
+}
+
+void Minimap::AddMarker(float wx, float wy, uint32_t rgba, float sizePixels) {
+    markers_.push_back({wx, wy, rgba, std::max(2.0f, sizePixels)});
+}
+
 void Minimap::Render(int winW, int winH, float camX, float camZ,
                      float camYaw, float camPitch, float camDist, float fov, float aspect) {
     if (!texture_.id || !textureView_.id) return;
@@ -344,10 +363,29 @@ void Minimap::Render(int winW, int winH, float camX, float camZ,
     if (!pipeline_.id || !shader_.id || !vbo_.id || !ibo_.id || !sampler_.id) return;
     if (screenW_ <= 0.0f || screenH_ <= 0.0f) return;
 
-    float uniforms[6];
-    uniforms[0] = (float)winW; uniforms[1] = (float)winH; // uScreenSize
-    uniforms[2] = screenX_;    uniforms[3] = screenY_;     // uOffset
-    uniforms[4] = screenW_;    uniforms[5] = screenH_;     // uScale
+    (void)camYaw;
+    (void)camPitch;
+    (void)camDist;
+    (void)fov;
+    (void)aspect;
+
+    struct VSUniforms {
+        float screenSize[2];
+        float offset[2];
+        float scale[2];
+    };
+    VSUniforms vsUniforms = {};
+    vsUniforms.screenSize[0] = (float)winW;
+    vsUniforms.screenSize[1] = (float)winH;
+    vsUniforms.offset[0] = screenX_;
+    vsUniforms.offset[1] = screenY_;
+    vsUniforms.scale[0] = screenW_;
+    vsUniforms.scale[1] = screenH_;
+
+    float fsUniforms[5] = {
+        1.0f, 1.0f, 1.0f, 1.0f,
+        1.0f
+    };
 
     sg_apply_pipeline(pipeline_);
     sg_bindings bind = {};
@@ -355,13 +393,46 @@ void Minimap::Render(int winW, int winH, float camX, float camZ,
     bind.index_buffer = ibo_;
     bind.views[0] = textureView_;
     bind.samplers[0] = sampler_;
+    if (bind.views[0].id && ((bind.views[0].id & 0xFFFFu) >= 4096u)) {
+        std::fprintf(stderr, "Minimap suspicious view: 0x%08x\n", bind.views[0].id);
+        return;
+    }
     sg_apply_bindings(&bind);
-    sg_apply_uniforms(0, SG_RANGE(uniforms));
+    sg_apply_uniforms(0, SG_RANGE(vsUniforms));
+    sg_apply_uniforms(1, SG_RANGE(fsUniforms));
     sg_draw(0, 6, 1);
 
-    // Draw camera frustum indicator as a simple dot
-    // Convert camera world position to minimap screen coords
-    // Note: we approximate the camera footprint for now
+    auto drawMarker = [&](float screenX, float screenY, float sizePixels, uint32_t rgba) {
+        VSUniforms markerVs = vsUniforms;
+        markerVs.offset[0] = screenX - sizePixels * 0.5f;
+        markerVs.offset[1] = screenY - sizePixels * 0.5f;
+        markerVs.scale[0] = sizePixels;
+        markerVs.scale[1] = sizePixels;
+
+        float markerFs[5] = {
+            float((rgba >> 24) & 0xFF) / 255.0f,
+            float((rgba >> 16) & 0xFF) / 255.0f,
+            float((rgba >> 8) & 0xFF) / 255.0f,
+            float(rgba & 0xFF) / 255.0f,
+            0.0f
+        };
+
+        sg_apply_uniforms(0, SG_RANGE(markerVs));
+        sg_apply_uniforms(1, SG_RANGE(markerFs));
+        sg_draw(0, 6, 1);
+    };
+
+    float camSX = 0.0f;
+    float camSY = 0.0f;
+    WorldToScreen(camX, camZ, winW, winH, &camSX, &camSY);
+    drawMarker(camSX, camSY, 6.0f, 0xFFFFFFFFu);
+
+    for (const auto& marker : markers_) {
+        float sx = 0.0f;
+        float sy = 0.0f;
+        WorldToScreen(marker.worldX, marker.worldY, winW, winH, &sx, &sy);
+        drawMarker(sx, sy, marker.sizePixels, marker.rgba);
+    }
 }
 
 bool Minimap::HitTest(float mouseX, float mouseY, int winW, int winH) const {

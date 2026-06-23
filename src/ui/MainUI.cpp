@@ -117,6 +117,7 @@ bool MainUI::Init(MpqManager* mpq, int screenW, int screenH) {
     chatMessages_.push_back("Warcraft III HUD online");
     chatHistoryIndex_ = 0;
     ClearCommandSlots();
+    multiSelectionPanel_.Init(screenW, screenH);
     return true;
 }
 
@@ -207,8 +208,23 @@ void MainUI::Render() {
     }
 
     gameUI_.renderer.BeginFrame(gameUI_.screenW, gameUI_.screenH);
+    multiSelectionPanel_.Render(gameUI_.renderer, gameUI_.screenW, gameUI_.screenH);
     RenderCommandIcons(gameUI_.renderer);
     gameUI_.renderer.EndFrame();
+}
+
+void MainUI::SetMultiSelection(const std::vector<MultiSelectUnitInfo>& units) {
+    multiSelectionPanel_.SetSelection(units);
+}
+
+void MainUI::SetSelectionBox(const ScreenRect& rect) {
+    selectionBoxRect_ = rect;
+    selectionBoxVisible_ = rect.IsValid();
+}
+
+void MainUI::ClearSelectionBox() {
+    selectionBoxVisible_ = false;
+    selectionBoxRect_ = {};
 }
 
 void MainUI::RenderCommandIcons(UiRenderer& r) {
@@ -423,30 +439,35 @@ void MainUI::UpdateHeroPanelFromUnit(War3ID unitTypeId, int handleId) {
 }
 
 void MainUI::RenderOverlays(UiRenderer& r) {
+    if (selectionBoxVisible_) {
+        const float x0 = selectionBoxRect_.x;
+        const float y0 = selectionBoxRect_.y;
+        const float x1 = selectionBoxRect_.x + selectionBoxRect_.w;
+        const float y1 = selectionBoxRect_.y + selectionBoxRect_.h;
+        r.DrawQuad(x0, y0, selectionBoxRect_.w, selectionBoxRect_.h, 0x2233FF66);
+        r.DrawQuad(x0, y0, selectionBoxRect_.w, 1.0f, 0xCC66FF99);
+        r.DrawQuad(x0, y1 - 1.0f, selectionBoxRect_.w, 1.0f, 0xCC66FF99);
+        r.DrawQuad(x0, y0, 1.0f, selectionBoxRect_.h, 0xCC66FF99);
+        r.DrawQuad(x1 - 1.0f, y0, 1.0f, selectionBoxRect_.h, 0xCC66FF99);
+    }
+
     if (!overlayData_) return;
 
     for (const auto& info : *overlayData_) {
-        if (!info.isAlive) continue;
+        if (!info.isAlive || !info.isSelected) continue;
 
         float sx = info.screenX;
         float sy = info.screenY;
 
-        if (info.isSelected) {
-            float ringSize = 8.0f;
-            uint32_t selColor = 0x44FFCC00;
-            float fx = info.footX, fy = info.footY;
-            r.DrawQuad(fx - ringSize, fy - 1, ringSize * 2, 2, selColor);
-            r.DrawQuad(fx - 1, fy - ringSize, 2, ringSize * 2, selColor);
-            uint32_t innerColor = 0x88FFDD00;
-            float innerSize = ringSize * 0.4f;
-            r.DrawQuad(fx - innerSize, fy - 1, innerSize * 2, 1, innerColor);
-            r.DrawQuad(fx - 1, fy - innerSize, 1, innerSize * 2, innerColor);
-
-            uint32_t glowColor = (info.playerColor & 0x00FFFFFF) | 0x44000000;
-            float glowSize = ringSize * 1.2f;
-            r.DrawQuad(fx - glowSize, fy - 1, glowSize * 2, 1, glowColor);
-            r.DrawQuad(fx - 1, fy - glowSize, 1, glowSize * 2, glowColor);
-        }
+        float ringSize = 8.0f;
+        uint32_t selColor = 0x6600FF66;
+        float fx = info.footX, fy = info.footY;
+        r.DrawQuad(fx - ringSize, fy - 1, ringSize * 2, 2, selColor);
+        r.DrawQuad(fx - 1, fy - ringSize, 2, ringSize * 2, selColor);
+        uint32_t innerColor = 0xCC33FF88;
+        float innerSize = ringSize * 0.4f;
+        r.DrawQuad(fx - innerSize, fy - 1, innerSize * 2, 1, innerColor);
+        r.DrawQuad(fx - 1, fy - innerSize, 1, innerSize * 2, innerColor);
 
         float barW = 48.0f;
         float barH = 6.0f;
@@ -457,8 +478,7 @@ void MainUI::RenderOverlays(UiRenderer& r) {
 
         float hpRatio = std::clamp(info.hpRatio, 0.0f, 1.0f);
         if (hpRatio > 0.01f) {
-            uint32_t hpColor = hpRatio > 0.6f ? 0xFF00CC00 :
-                               hpRatio > 0.3f ? 0xFFCCCC00 : 0xFFCC0000;
+            uint32_t hpColor = 0xFF1FD655;
             r.DrawQuad(barX + 1, barY + 1, (barW - 2) * hpRatio, barH - 2, hpColor);
         }
 

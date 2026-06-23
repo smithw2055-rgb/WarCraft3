@@ -182,25 +182,62 @@ void SceneManager::PrintLoadStats() const {
 
 MdxViewer* SceneManager::GetOrLoadModel(const std::string& path) {
     auto it = cache_.find(path);
-    if (it != cache_.end()) return &it->second.viewer;
+    if (it == cache_.end()) {
+        auto [insertIt, inserted] = cache_.try_emplace(path);
+        insertIt->second.path = path;
+        it = insertIt;
+    }
+
+    MdxEntry& entry = it->second;
+    if (!EnsureModelCached(path, entry)) {
+        return nullptr;
+    }
+    if (entry.sharedViewer) {
+        return entry.sharedViewer.get();
+    }
+
+    entry.sharedViewer = std::make_unique<MdxViewer>();
+    std::cout << "SceneModelLoad: viewer loading " << path << std::endl;
+    if (!entry.sharedViewer->Load(entry.model, mpq_)) {
+        std::cout << "SceneModelLoad: viewer load failed for " << path << std::endl;
+        entry.sharedViewer.reset();
+        return nullptr;
+    }
+
+    return entry.sharedViewer.get();
+}
+
+bool SceneManager::EnsureModelCached(const std::string& path, MdxEntry& entry) {
+    if (entry.modelLoaded) {
+        return true;
+    }
 
     std::vector<uint8_t> data;
     if (!mpq_ || !mpq_->ReadFile(path, data)) {
-        return nullptr;
+        return false;
     }
 
     MdxModel model;
-    if (!MdxLoad(data.data(), data.size(), model)) return nullptr;
-
-    auto [insertIt, inserted] = cache_.try_emplace(path);
-    MdxEntry& entry = insertIt->second;
+    if (!MdxLoad(data.data(), data.size(), model)) {
+        return false;
+    }
     entry.path = path;
-    if (!entry.viewer.Load(model, mpq_)) {
-        cache_.erase(insertIt);
+    entry.model = std::move(model);
+    entry.modelLoaded = true;
+    return true;
+}
+
+std::unique_ptr<MdxViewer> SceneManager::CreateUnitViewer(const std::string& path) {
+    MdxViewer* sharedViewer = GetOrLoadModel(path);
+    if (!sharedViewer) {
         return nullptr;
     }
 
-    return &entry.viewer;
+    auto viewer = std::make_unique<MdxViewer>();
+    if (!viewer->ShareModelResourcesFrom(*sharedViewer)) {
+        return nullptr;
+    }
+    return viewer;
 }
 
 MdxViewer* SceneManager::ResolveAndLoad(uint32_t war3ID, uint32_t skinId, int variation, bool doodad, const char** missReason) {
@@ -289,13 +326,41 @@ bool SceneManager::AddDoodad(uint32_t war3ID, const float pos[3], float angle,
 }
 
 bool SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
-                            const float scale[3], int player, int hitpoints, int flags, uint32_t skinId) {
+                            const float scale[3], int player, int hitpoints, int flags, uint32_t skinId,
+                            bool playBirthAnimation) {
     (void)hitpoints;
     (void)flags;
     loadStats_.unitAttempts++;
 
     const char* missReason = nullptr;
-    MdxViewer* viewer = ResolveAndLoad(war3ID, skinId, 0, false, &missReason);
+    std::unique_ptr<MdxViewer> uniqueViewer;
+    MdxViewer* viewer = nullptr;
+
+    // Units need per-instance animation/geoset state like warsmash_ref. We still
+    // share immutable GPU/model resources under the hood to avoid buffer-pool exhaustion.
+    std::vector<uint32_t> ids;
+    if (skinId != 0 && skinId != war3ID) ids.push_back(skinId);
+    ids.push_back(war3ID);
+
+    bool sawUnitPath = false;
+    for (uint32_t id : ids) {
+        auto unitIt = unitPaths_.find(id);
+        if (unitIt == unitPaths_.end()) continue;
+        sawUnitPath = true;
+        uniqueViewer = CreateUnitViewer(unitIt->second);
+        if (uniqueViewer) {
+            break;
+        }
+    }
+
+    viewer = uniqueViewer.get();
+    if (!viewer && !sawUnitPath) {
+        missReason = "unit-path-miss";
+    }
+
+    if (!viewer) {
+        viewer = ResolveAndLoad(war3ID, skinId, 0, false, &missReason);
+    }
     if (!viewer) {
         loadStats_.missReasons[missReason ? missReason : "unit-unknown-miss"]++;
         return false;
@@ -306,7 +371,11 @@ bool SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
     inst->angle = angle;
     inst->scale[0] = scale[0]; inst->scale[1] = scale[2]; inst->scale[2] = scale[1];
     inst->player = player;
+    inst->ownedViewer = std::move(uniqueViewer);
     inst->viewer = viewer;
+    if (playBirthAnimation) {
+        inst->viewer->PlayBirthThenStandSequence();
+    }
     instances_.push_back(inst);
     loadStats_.unitSuccess++;
     return true;

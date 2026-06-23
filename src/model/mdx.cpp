@@ -165,6 +165,18 @@ static void ReadTimelines(MdxReader& r, size_t entryEnd, std::vector<MdxTimeline
     r.off = entryEnd;
 }
 
+static void ReadSizedGenericObject(MdxReader& r, size_t entryEnd, MdxNode& node,
+                                   std::vector<MdxTimeline>& timelines) {
+    size_t genericStart = r.off;
+    uint32_t genericSize = r.u32();
+    size_t genericEnd = genericStart + genericSize;
+    if (genericSize < 96 || genericEnd > entryEnd) {
+        genericEnd = entryEnd;
+    }
+    ReadNodeGeneric(r, node);
+    ReadTimelines(r, genericEnd, timelines);
+}
+
 // ---- Read timelines for the old-style PRE2 entry (generic timelines come first) ----
 static void ReadTimelinesWithSize(MdxReader& r, size_t entryEnd, uint32_t genericSize,
                                     std::vector<MdxTimeline>& out) {
@@ -309,138 +321,141 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
 
         // ---- GEOS ----
         case T_GEOS: {
-            size_t geosetEnd = r.off + chunkSize;
-            MdxGeoset geo;
+            while (r.off + 4 <= chunkEnd) {
+                size_t geosetStart = r.off;
+                uint32_t geosetSize = r.u32();
+                if (geosetSize < 4 || geosetStart + geosetSize > chunkEnd) break;
+                size_t geosetEnd = geosetStart + geosetSize;
+                MdxGeoset geo;
 
-            r.u32(); // skip internal geoset size
-
-            // VRTX
-            if (r.peekTag() == T_VRTX) {
-                r.tag(); int vc = (int)r.u32();
-                geo.vertices.resize(vc * 3);
-                for (int i = 0; i < vc * 3; i++) geo.vertices[i] = r.f32();
-            }
-
-            // NRMS
-            if (r.off + 4 <= geosetEnd && r.peekTag() == T_NRMS) {
-                r.tag(); // consume NRMS
-                int nc = (int)r.u32();
-                geo.normals.resize(nc * 3);
-                for (int i = 0; i < nc * 3; i++) geo.normals[i] = r.f32();
-            }
-
-            // PTYP
-            std::vector<uint32_t> faceTypes;
-            if (r.off + 4 <= geosetEnd && r.peekTag() == T_PTYP) {
-                r.tag(); int fc = (int)r.u32();
-                faceTypes.resize(fc);
-                for (int i = 0; i < fc; i++) faceTypes[i] = r.u32();
-            }
-
-            // PCNT
-            std::vector<uint32_t> faceCounts;
-            if (r.off + 4 <= geosetEnd && r.peekTag() == T_PCNT) {
-                r.tag(); int fc = (int)r.u32();
-                faceCounts.resize(fc);
-                for (int i = 0; i < fc; i++) faceCounts[i] = r.u32();
-            }
-
-            // PVTX
-            std::vector<uint16_t> rawFaces;
-            if (r.off + 4 <= geosetEnd && r.peekTag() == T_PVTX) {
-                r.tag(); int fcnt = (int)r.u32();
-                rawFaces.resize(fcnt);
-                for (int i = 0; i < fcnt; i++) rawFaces[i] = r.u16();
-            }
-
-            // Warcraft III geosets are consumed by the reference implementation as a
-            // flat face index buffer. Rebuilding triangles here was dropping or
-            // rearranging parts of some models (trees/units appearing like only half
-            // the shell existed). Keep the raw face order.
-            geo.indices.reserve(rawFaces.size());
-            for (uint16_t face : rawFaces) {
-                geo.indices.push_back(face);
-            }
-
-            // GNDX
-            if (r.off + 4 <= geosetEnd && r.peekTag() == T_GNDX) {
-                r.tag(); int gcount = (int)r.u32();
-                geo.vertexGroups.resize(gcount);
-                for (int i = 0; i < gcount; i++) geo.vertexGroups[i] = r.u8();
-            }
-
-            // MTGC
-            if (r.off + 4 <= geosetEnd && r.peekTag() == T_MTGC) {
-                r.tag(); int mcount = (int)r.u32();
-                geo.matrixGroups.resize(mcount);
-                for (int i = 0; i < mcount; i++) geo.matrixGroups[i] = r.u32();
-            }
-
-            // MATS - store matrix indices for skinning
-            if (r.off + 4 <= geosetEnd && r.peekTag() == T_MATS) {
-                r.tag(); int mic = (int)r.u32();
-                geo.matrixIndices.resize(mic);
-                for (int i = 0; i < mic; i++) geo.matrixIndices[i] = r.u32();
-            }
-
-            geo.materialId = (int)r.u32();
-            r.skip(8); // selection group, selection flags
-
-            if (out.version > 800) {
-                r.skip(84); // lod + lodName
-            }
-
-            // Extent
-            r.skip(12); // min
-            r.skip(12); // max
-            r.skip(4);  // boundsRadius
-
-            int numSeqExt = (int)r.u32();
-            r.skip(numSeqExt * 28);
-
-            // Version > 800 may have TANG/SKIN/UVAS
-            if (r.off + 4 <= geosetEnd) {
-                uint32_t nextTag = r.tag();
-                if (nextTag == T_TANG) {
-                    int tc = (int)r.u32();
-                    r.skip(tc * 16);
-                    if (r.off + 4 <= geosetEnd) nextTag = r.tag();
+                // VRTX
+                if (r.peekTag() == T_VRTX) {
+                    r.tag(); int vc = (int)r.u32();
+                    geo.vertices.resize(vc * 3);
+                    for (int i = 0; i < vc * 3; i++) geo.vertices[i] = r.f32();
                 }
-                if (nextTag == T_SKIN) {
-                    int sc = (int)r.u32();
-                    // Skin data: uint16 per vertex (boneIndex<<8 | weight)
-                    int skinCount = sc / 2;
-                    if (sc > 0 && skinCount <= (int)geo.vertices.size() / 3 * 4) {
-                        geo.skin.resize(skinCount);
-                        for (int si = 0; si < skinCount; si++)
-                            geo.skin[si] = r.u16();
-                    } else {
-                        r.skip(sc);
+
+                // NRMS
+                if (r.off + 4 <= geosetEnd && r.peekTag() == T_NRMS) {
+                    r.tag(); // consume NRMS
+                    int nc = (int)r.u32();
+                    geo.normals.resize(nc * 3);
+                    for (int i = 0; i < nc * 3; i++) geo.normals[i] = r.f32();
+                }
+
+                // PTYP
+                std::vector<uint32_t> faceTypes;
+                if (r.off + 4 <= geosetEnd && r.peekTag() == T_PTYP) {
+                    r.tag(); int fc = (int)r.u32();
+                    faceTypes.resize(fc);
+                    for (int i = 0; i < fc; i++) faceTypes[i] = r.u32();
+                }
+
+                // PCNT
+                std::vector<uint32_t> faceCounts;
+                if (r.off + 4 <= geosetEnd && r.peekTag() == T_PCNT) {
+                    r.tag(); int fc = (int)r.u32();
+                    faceCounts.resize(fc);
+                    for (int i = 0; i < fc; i++) faceCounts[i] = r.u32();
+                }
+
+                // PVTX
+                std::vector<uint16_t> rawFaces;
+                if (r.off + 4 <= geosetEnd && r.peekTag() == T_PVTX) {
+                    r.tag(); int fcnt = (int)r.u32();
+                    rawFaces.resize(fcnt);
+                    for (int i = 0; i < fcnt; i++) rawFaces[i] = r.u16();
+                }
+
+                // Warcraft III geosets are consumed by the reference implementation as a
+                // flat face index buffer. Rebuilding triangles here was dropping or
+                // rearranging parts of some models (trees/units appearing like only half
+                // the shell existed). Keep the raw face order.
+                geo.indices.reserve(rawFaces.size());
+                for (uint16_t face : rawFaces) {
+                    geo.indices.push_back(face);
+                }
+
+                // GNDX
+                if (r.off + 4 <= geosetEnd && r.peekTag() == T_GNDX) {
+                    r.tag(); int gcount = (int)r.u32();
+                    geo.vertexGroups.resize(gcount);
+                    for (int i = 0; i < gcount; i++) geo.vertexGroups[i] = r.u8();
+                }
+
+                // MTGC
+                if (r.off + 4 <= geosetEnd && r.peekTag() == T_MTGC) {
+                    r.tag(); int mcount = (int)r.u32();
+                    geo.matrixGroups.resize(mcount);
+                    for (int i = 0; i < mcount; i++) geo.matrixGroups[i] = r.u32();
+                }
+
+                // MATS - store matrix indices for skinning
+                if (r.off + 4 <= geosetEnd && r.peekTag() == T_MATS) {
+                    r.tag(); int mic = (int)r.u32();
+                    geo.matrixIndices.resize(mic);
+                    for (int i = 0; i < mic; i++) geo.matrixIndices[i] = r.u32();
+                }
+
+                geo.materialId = (int)r.u32();
+                r.skip(8); // selection group, selection flags
+
+                if (out.version > 800) {
+                    r.skip(84); // lod + lodName
+                }
+
+                // Extent
+                r.skip(12); // min
+                r.skip(12); // max
+                r.skip(4);  // boundsRadius
+
+                int numSeqExt = (int)r.u32();
+                r.skip(numSeqExt * 28);
+
+                // Version > 800 may have TANG/SKIN/UVAS
+                if (r.off + 4 <= geosetEnd) {
+                    uint32_t nextTag = r.tag();
+                    if (nextTag == T_TANG) {
+                        int tc = (int)r.u32();
+                        r.skip(tc * 16);
+                        if (r.off + 4 <= geosetEnd) nextTag = r.tag();
                     }
-                    if (r.off + 4 <= geosetEnd) nextTag = r.tag();
-                }
-                if (nextTag == T_UVAS) {
-                    int numUV = (int)r.u32();
-                    geo.uvSets.clear();
-                    geo.uvSets.resize(numUV);
-                    for (int uvi = 0; uvi < numUV; uvi++) {
-                        if (r.off + 4 <= geosetEnd && r.tag() == T_UVBS) {
-                            int uvcount = (int)r.u32();
-                            auto& uvSet = geo.uvSets[uvi];
-                            uvSet.resize(uvcount * 2);
-                            for (int k = 0; k < uvcount * 2; k++) uvSet[k] = r.f32();
+                    if (nextTag == T_SKIN) {
+                        int sc = (int)r.u32();
+                        // Skin data: uint16 per vertex (boneIndex<<8 | weight)
+                        int skinCount = sc / 2;
+                        if (sc > 0 && skinCount <= (int)geo.vertices.size() / 3 * 4) {
+                            geo.skin.resize(skinCount);
+                            for (int si = 0; si < skinCount; si++)
+                                geo.skin[si] = r.u16();
+                        } else {
+                            r.skip(sc);
+                        }
+                        if (r.off + 4 <= geosetEnd) nextTag = r.tag();
+                    }
+                    if (nextTag == T_UVAS) {
+                        int numUV = (int)r.u32();
+                        geo.uvSets.clear();
+                        geo.uvSets.resize(numUV);
+                        for (int uvi = 0; uvi < numUV; uvi++) {
+                            if (r.off + 4 <= geosetEnd && r.tag() == T_UVBS) {
+                                int uvcount = (int)r.u32();
+                                auto& uvSet = geo.uvSets[uvi];
+                                uvSet.resize(uvcount * 2);
+                                for (int k = 0; k < uvcount * 2; k++) uvSet[k] = r.f32();
+                            }
+                        }
+                        if (!geo.uvSets.empty()) {
+                            geo.uvs = geo.uvSets[0];
                         }
                     }
-                    if (!geo.uvSets.empty()) {
-                        geo.uvs = geo.uvSets[0];
-                    }
                 }
+
+                if (!geo.vertices.empty() && !geo.indices.empty())
+                    out.geosets.push_back(geo);
+
+                r.off = geosetEnd;
             }
-
-            if (!geo.vertices.empty() && !geo.indices.empty())
-                out.geosets.push_back(geo);
-
-            r.off = geosetEnd;
             break;
         }
 
@@ -489,26 +504,40 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
             break;
         }
 
-        // ---- Generic node reader for BONE/HELP ----
-        case T_BONE:
-        case T_HELP: {
-            bool isBone = (tag == T_BONE);
+        // ---- BONE ----
+        case T_BONE: {
             while (r.off + 4 <= chunkEnd) {
                 size_t entryStart = r.off;
-                uint32_t entrySize = r.u32();
-                if (entrySize < 4 || entryStart + entrySize > chunkEnd) break;
-                size_t entryEndLocal = entryStart + entrySize;
-
+                uint32_t genericSize = r.u32();
+                if (genericSize < 96) break;
+                size_t genericEnd = entryStart + genericSize;
+                size_t objectEnd = genericEnd + 8;
+                if (objectEnd > chunkEnd) break;
+                r.off = entryStart;
                 MdxNode node;
-                ReadNodeGeneric(r, node);
+                ReadSizedGenericObject(r, genericEnd, node, node.timelines);
                 node.geosetId = r.s32();
                 node.geosetAnimationId = r.s32();
-                ReadTimelines(r, entryEndLocal, node.timelines);
+                out.bones.push_back(std::move(node));
+                r.off = objectEnd;
+            }
+            r.off = chunkEnd;
+            break;
+        }
 
-                if (isBone)
-                    out.bones.push_back(std::move(node));
-                else
-                    out.helpers.push_back(std::move(node));
+        // ---- HELP ----
+        case T_HELP: {
+            while (r.off + 4 <= chunkEnd) {
+                size_t entryStart = r.off;
+                uint32_t genericSize = r.u32();
+                if (genericSize < 96) break;
+                size_t genericEnd = entryStart + genericSize;
+                if (genericEnd > chunkEnd) break;
+                r.off = entryStart;
+                MdxNode node;
+                ReadSizedGenericObject(r, genericEnd, node, node.timelines);
+                out.helpers.push_back(std::move(node));
+                r.off = genericEnd;
             }
             r.off = chunkEnd;
             break;
@@ -524,7 +553,7 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
 
                 MdxAttachment att;
                 MdxNode genericNode;
-                ReadNodeGeneric(r, genericNode);
+                ReadSizedGenericObject(r, entryEndLocal, genericNode, att.timelines);
                 att.name = genericNode.name;
                 att.objectId = genericNode.objectId;
                 att.parentId = genericNode.parentId;
@@ -548,7 +577,7 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
 
                 MdxLight lt;
                 MdxNode genericNode;
-                ReadNodeGeneric(r, genericNode);
+                ReadSizedGenericObject(r, entryEndLocal, genericNode, lt.timelines);
                 lt.name = genericNode.name;
                 lt.objectId = genericNode.objectId;
                 lt.parentId = genericNode.parentId;
@@ -556,10 +585,10 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 lt.textureId = r.s32();
                 lt.attenuationStart = r.f32();
                 lt.attenuationEnd = r.f32();
-                lt.intensity = r.f32();
                 r.readFloatArray(lt.color, 3);
-                lt.ambientIntensity = r.f32();
+                lt.intensity = r.f32();
                 r.readFloatArray(lt.ambientColor, 3);
+                lt.ambientIntensity = r.f32();
                 ReadTimelines(r, entryEndLocal, lt.timelines);
                 out.lights.push_back(std::move(lt));
             }
@@ -601,7 +630,7 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
 
                 MdxParticleEmitter1 em;
                 MdxNode genericNode;
-                ReadNodeGeneric(r, genericNode);
+                ReadSizedGenericObject(r, entryEndLocal, genericNode, em.timelines);
                 em.name = genericNode.name;
                 em.objectId = genericNode.objectId;
                 em.parentId = genericNode.parentId;
@@ -610,15 +639,11 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 em.gravity = r.f32();
                 em.longitude = r.f32();
                 em.latitude = r.f32();
+                em.internalModelPath = r.readStr(260);
                 em.lifeSpan = r.f32();
                 em.speed = r.f32();
-                em.variation = r.f32();
-                em.textureId = r.s32();
-                em.filterMode = r.s32();
-                em.priorityPlane = r.s32();
-                em.replaceableId = r.u32();
-                em.internalModelPath = r.readStr(260);
                 ReadTimelines(r, entryEndLocal, em.timelines);
+                r.off = entryEndLocal;
                 out.particleEmitters1.push_back(std::move(em));
             }
             r.off = chunkEnd;
@@ -634,18 +659,12 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 size_t entryEndLocal = start + outerSize;
 
                 MdxParticleEmitter2 em;
-                uint32_t genericSize = r.u32();
-                em.name = r.readStr(80);
-                em.objectId = r.s32();
-                em.parentId = r.s32();
-                em.flags = (int)r.u32();
-
-                // Read generic timelines within the generic section
-                size_t genericEnd = start + 4 + genericSize;
-                if (genericEnd > entryEndLocal) genericEnd = entryEndLocal;
-                ReadTimelines(r, genericEnd, em.timelines);
-                // Skip generic timelines that were already consumed
-                // (ReadTimelines will advance to genericEnd)
+                MdxNode genericNode;
+                ReadSizedGenericObject(r, entryEndLocal, genericNode, em.timelines);
+                em.name = genericNode.name;
+                em.objectId = genericNode.objectId;
+                em.parentId = genericNode.parentId;
+                em.flags = (int)genericNode.flags;
 
                 em.speed = r.f32();
                 em.variation = r.f32();
@@ -653,8 +672,8 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 em.gravity = r.f32();
                 em.lifeSpan = r.f32();
                 em.emissionRate = r.f32();
-                em.width = r.f32();
                 em.length = r.f32();
+                em.width = r.f32();
                 em.filterMode = (int)r.s32();
                 em.rows = r.u32();
                 em.columns = r.u32();
@@ -690,12 +709,12 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
             while (r.off + 4 <= chunkEnd) {
                 size_t entryStart = r.off;
                 uint32_t entrySize = r.u32();
-                if (entrySize < 100 || entryStart + entrySize > chunkEnd) break;
+                if (entrySize < 64 || entryStart + entrySize > chunkEnd) break;
                 size_t entryEndLocal = entryStart + entrySize;
 
                 MdxRibbonEmitter rb;
                 MdxNode genericNode;
-                ReadNodeGeneric(r, genericNode);
+                ReadSizedGenericObject(r, entryEndLocal, genericNode, rb.timelines);
                 rb.name = genericNode.name;
                 rb.objectId = genericNode.objectId;
                 rb.parentId = genericNode.parentId;
@@ -705,14 +724,14 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 rb.alpha = r.f32();
                 r.readFloatArray(rb.color, 3);
                 rb.lifeSpan = r.f32();
-                rb.textureSlot = r.s32();
-                rb.emissionRate = r.f32();
-                rb.gravity = r.s32();
+                rb.textureSlot = (int)r.u32();
+                rb.emissionRate = (float)r.u32();
                 rb.rows = r.u32();
                 rb.columns = r.u32();
                 rb.priorityPlane = r.s32();
-                rb.replaceableId = r.u32();
+                rb.gravity = (int)r.f32();
                 ReadTimelines(r, entryEndLocal, rb.timelines);
+                r.off = entryEndLocal;
                 out.ribbonEmitters.push_back(std::move(rb));
             }
             r.off = chunkEnd;

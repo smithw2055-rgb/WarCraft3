@@ -30,16 +30,16 @@ public:
 private:
     void Flush();
 
-    struct ViewEntry { sg_image img; sg_view view; };
+    struct ViewEntry { sg_image img = {}; sg_view view = {}; };
     std::vector<ViewEntry> viewCache_;
 
-    sg_pipeline pipeline_;
-    sg_shader shader_;
-    sg_buffer vbo_;
-    sg_buffer ibo_;
-    sg_sampler sampler_;
-    sg_image whiteTex_;
-    sg_view whiteView_;
+    sg_pipeline pipeline_ = {};
+    sg_shader shader_ = {};
+    sg_buffer vbo_ = {};
+    sg_buffer ibo_ = {};
+    sg_sampler sampler_ = {};
+    sg_image whiteTex_ = {};
+    sg_view whiteView_ = {};
 
     static const int MAX_QUADS = 4096;
     static const int MAX_VERTS = MAX_QUADS * 4;

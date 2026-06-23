@@ -10,10 +10,28 @@
 
 class MdxViewer {
 public:
-    MdxViewer() = default;
+    MdxViewer() {
+        shader_ = {0};
+        pipeline_ = {0};
+        mpq_ = nullptr;
+        center_ = {0, 0, 0};
+        radius_ = 0.0f;
+        ownsModelData_ = false;
+        ownsBatchGpuResources_ = true;
+        modelSource_ = nullptr;
+        hasAnimations_ = false;
+        hasAnimatedMaterials_ = false;
+        initializedAnimator_ = false;
+        cachedBoneView_ = {0};
+        cachedBoneTexId_ = 0;
+        hasParticles_ = false;
+        pendingStandSequenceAfterCurrent_ = false;
+        sharedSource_ = nullptr;
+    }
     ~MdxViewer();
 
     bool Load(const MdxModel& model, MpqManager* mpq, bool cliffMode = false);
+    bool ShareModelResourcesFrom(const MdxViewer& other);
 
     // Per-frame update (animation, particles, etc.)
     void Update(float dt);
@@ -28,6 +46,10 @@ public:
 
     const std::string& GetName() const { return name_; }
     bool IsValid() const { return !batches_.empty(); }
+    const Vec3& GetBoundsCenter() const { return center_; }
+    float GetBoundsRadius() const { return radius_; }
+    bool PlayStandSequence();
+    bool PlayBirthThenStandSequence();
 
     // Animation control
     MdxAnimator* GetAnimator() { return hasAnimations_ ? &animator_ : nullptr; }
@@ -69,6 +91,7 @@ private:
         // For skinned batches: bone palette indices
         int materialId = -1;
         int geosetIndex = -1;
+        int materialLayerIndex = -1;
         int filterMode = 0;
         int layerFlags = 0;
         float layerAlpha = 1.0f;
@@ -76,8 +99,15 @@ private:
         float geosetColor[3] = {1.0f, 1.0f, 1.0f};
     };
 
+    struct AnimatedGeosetState {
+        float alpha = 1.0f;
+        float color[3] = {1.0f, 1.0f, 1.0f};
+    };
+
     sg_image GetPlayerTexture(Batch& batch, int player);
     void Release();
+    void InitializeAnimatedStates();
+    void UpdateAnimatedStates();
 
     // Build skinned vertex buffer from geoset data
     void BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
@@ -97,6 +127,8 @@ private:
     static sg_pipeline sharedOverlaySkinnedPipeline_;
     static sg_pipeline sharedOverlaySkinnedBlendPipeline_;
     static sg_sampler sharedSampler_;
+    static sg_image sharedWhiteTexture_;
+    static sg_view sharedWhiteTextureView_;
     sg_shader shader_ = {0};
     sg_pipeline pipeline_ = {0};
     std::vector<Batch> batches_;
@@ -108,11 +140,16 @@ private:
     // Stored model data for animation
     MdxModel modelData_;
     bool ownsModelData_ = false;
+    bool ownsBatchGpuResources_ = true;
+    const MdxModel* modelSource_ = nullptr;
 
     // Animation
     MdxAnimator animator_;
     bool hasAnimations_ = false;
+    bool hasAnimatedMaterials_ = false;
     bool initializedAnimator_ = false;
+    std::vector<AnimatedGeosetState> animatedGeosetStates_;
+    std::vector<std::vector<float>> animatedLayerAlphas_;
 
     // Cached bone texture view (recreated when bone texture changes)
     sg_view cachedBoneView_ = {0};
@@ -121,4 +158,6 @@ private:
     // Particle system
     MdxParticleSystem particles_;
     bool hasParticles_ = false;
+    bool pendingStandSequenceAfterCurrent_ = false;
+    MdxViewer* sharedSource_ = nullptr;
 };

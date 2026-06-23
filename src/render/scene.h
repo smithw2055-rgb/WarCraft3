@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <memory>
 #include "resource/mpq_storm.h"
 #include "model/mdx.h"
 #include "render/mdx_viewer.h"
@@ -12,6 +13,7 @@ struct PlacedModel {
     float scale[3] = {1,1,1};
     int player = 0;
     int variation = 0;
+    std::unique_ptr<MdxViewer> ownedViewer;
     MdxViewer* viewer = nullptr; // shared, not owned
 };
 
@@ -29,7 +31,8 @@ public:
     bool AddDoodad(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
                    int variation, int flags, int life, uint32_t skinId = 0);
     bool AddUnit(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
-                 int player, int hitpoints, int flags, uint32_t skinId = 0);
+                 int player, int hitpoints, int flags, uint32_t skinId = 0,
+                 bool playBirthAnimation = false);
 
     // Render all placed models
     void RenderAll(const Mat4& view, const Mat4& proj);
@@ -56,10 +59,14 @@ private:
 
     struct MdxEntry {
         std::string path;
-        MdxViewer viewer;
+        MdxModel model;
+        bool modelLoaded = false;
+        std::unique_ptr<MdxViewer> sharedViewer;
     };
 
+    bool EnsureModelCached(const std::string& path, MdxEntry& entry);
     MdxViewer* GetOrLoadModel(const std::string& path);
+    std::unique_ptr<MdxViewer> CreateUnitViewer(const std::string& path);
     MdxViewer* ResolveAndLoad(uint32_t war3ID, uint32_t skinId, int variation, bool doodad, const char** missReason = nullptr);
 
     std::unordered_map<std::string, MdxEntry> cache_;

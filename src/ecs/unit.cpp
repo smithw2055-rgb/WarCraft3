@@ -164,10 +164,9 @@ void CUnit::UpdateBuffs(CSimulation& game) {
 // ===== Behavior System =====
 
 void CUnit::SetCurrentBehavior(std::unique_ptr<CBehavior> behavior) {
-    if (currentBehavior_) {
-        currentBehavior_.reset();
-    }
-    currentBehavior_ = std::move(behavior);
+    currentBehavior_ = nullptr;
+    ownedCurrentBehavior_ = std::move(behavior);
+    currentBehavior_ = ownedCurrentBehavior_.get();
     if (currentBehavior_) {
         currentBehavior_->SetUnit(this);
     }
@@ -179,39 +178,46 @@ void CUnit::IssueOrder(std::unique_ptr<COrder> order) {
 
 void CUnit::ClearOrders() {
     while (!orderQueue_.empty()) orderQueue_.pop();
-    currentBehavior_.reset();
+    currentBehavior_ = nullptr;
+    ownedCurrentBehavior_.reset();
 }
 
 void CUnit::Stop(CSimulation& simulation) {
     ClearOrders();
     if (defaultBehavior_) {
-        auto behavior = std::make_unique<CBehaviorStop>();
-        behavior->SetUnit(this);
-        behavior->Begin(simulation);
-        currentBehavior_ = std::move(behavior);
+        defaultBehavior_->SetUnit(this);
+        defaultBehavior_->Begin(simulation);
+        currentBehavior_ = defaultBehavior_.get();
     }
 }
 
 // Behavior storage setters
 void CUnit::SetMoveBehavior(std::unique_ptr<CBehaviorMove> b) {
+    if (currentBehavior_ == moveBehavior_.get()) currentBehavior_ = nullptr;
     moveBehavior_ = std::move(b);
 }
 void CUnit::SetFollowBehavior(std::unique_ptr<CBehaviorFollow> b) {
+    if (currentBehavior_ == followBehavior_.get()) currentBehavior_ = nullptr;
     followBehavior_ = std::move(b);
 }
 void CUnit::SetPatrolBehavior(std::unique_ptr<CBehaviorPatrol> b) {
+    if (currentBehavior_ == patrolBehavior_.get()) currentBehavior_ = nullptr;
     patrolBehavior_ = std::move(b);
 }
 void CUnit::SetHoldPositionBehavior(std::unique_ptr<CBehaviorHoldPosition> b) {
+    if (currentBehavior_ == holdPositionBehavior_.get()) currentBehavior_ = nullptr;
     holdPositionBehavior_ = std::move(b);
 }
 void CUnit::SetAttackBehavior(std::unique_ptr<CBehaviorAttack> b) {
+    if (currentBehavior_ == attackBehavior_.get()) currentBehavior_ = nullptr;
     attackBehavior_ = std::move(b);
 }
 void CUnit::SetAttackMoveBehavior(std::unique_ptr<CBehaviorAttackMove> b) {
+    if (currentBehavior_ == attackMoveBehavior_.get()) currentBehavior_ = nullptr;
     attackMoveBehavior_ = std::move(b);
 }
 void CUnit::SetDefaultBehavior(std::unique_ptr<CBehavior> b) {
+    if (currentBehavior_ == defaultBehavior_.get()) currentBehavior_ = nullptr;
     defaultBehavior_ = std::move(b);
 }
 
@@ -222,7 +228,7 @@ CBehavior* CUnit::PollNextOrderBehavior(CSimulation& simulation) {
         if (order) {
             ConvertOrderToBehavior(simulation, std::move(order));
             if (currentBehavior_) {
-                return currentBehavior_.get();
+                return currentBehavior_;
             }
         }
     }
@@ -278,7 +284,10 @@ bool CUnit::Update(CSimulation& simulation) {
         bool done = currentBehavior_->Update(simulation);
         if (done) {
             currentBehavior_->End(simulation);
-            currentBehavior_.reset();
+            if (currentBehavior_ == ownedCurrentBehavior_.get()) {
+                ownedCurrentBehavior_.reset();
+            }
+            currentBehavior_ = nullptr;
             // Try to get next behavior from order queue
             PollNextOrderBehavior(simulation);
         }
@@ -304,17 +313,10 @@ bool CUnit::Update(CSimulation& simulation) {
 void CUnit::PerformDefaultBehavior(CSimulation& simulation) {
     // Use default behavior (usually stop/idle)
     if (defaultBehavior_) {
-        // Reset and start default behavior
-        currentBehavior_.reset();
-        auto* defBehavior = defaultBehavior_.get();
-        defBehavior->SetUnit(this);
-        defBehavior->Begin(simulation);
-        // We don't move ownership - default behavior is a template
-        // The actual behavior is a stop behavior
-        auto stopBehavior = std::make_unique<CBehaviorStop>();
-        stopBehavior->SetUnit(this);
-        stopBehavior->Begin(simulation);
-        currentBehavior_ = std::move(stopBehavior);
+        ownedCurrentBehavior_.reset();
+        currentBehavior_ = defaultBehavior_.get();
+        currentBehavior_->SetUnit(this);
+        currentBehavior_->Begin(simulation);
     }
 }
 
@@ -408,11 +410,14 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
             // End current behavior
             if (currentBehavior_) {
                 currentBehavior_->End(simulation);
-                currentBehavior_.reset();
+                if (currentBehavior_ == ownedCurrentBehavior_.get()) {
+                    ownedCurrentBehavior_.reset();
+                }
+                currentBehavior_ = nullptr;
             }
             newBehavior->SetUnit(this);
             newBehavior->Begin(simulation);
-            currentBehavior_.reset(newBehavior);
+            currentBehavior_ = newBehavior;
             return;
         }
     }
@@ -421,5 +426,6 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
     auto behavior = std::make_unique<CBehaviorStop>();
     behavior->SetUnit(this);
     behavior->Begin(simulation);
-    currentBehavior_ = std::move(behavior);
+    ownedCurrentBehavior_ = std::move(behavior);
+    currentBehavior_ = ownedCurrentBehavior_.get();
 }

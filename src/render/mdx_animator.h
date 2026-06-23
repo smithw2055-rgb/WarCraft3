@@ -50,8 +50,10 @@ public:
     int FindSequence(const std::string& name) const;
     bool PlaySequence(const std::string& name, bool loop = true, float speed = 1.0f);
     int GetCurrentSequence() const { return sequenceState_.sequenceIndex; }
+    uint32_t GetCurrentFrame() const { return sequenceState_.currentFrame; }
     int GetSequenceCount() const { return sequences_ ? (int)sequences_->size() : 0; }
     float GetSequenceProgress() const;
+    bool IsSequenceFinished() const { return sequenceState_.finished; }
     int GetBoneIndexForObjectId(int objectId) const;
 
     // Bone matrices for skinning

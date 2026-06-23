@@ -7,13 +7,13 @@
 #include "math.h"
 #include "wave_builder.h"
 #include "light_manager.h"
+#include "splat_model.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
 
 class TileSet;
 class MdxViewer;
-class SplatModel;
 
 struct CliffInstance {
     MdxViewer* viewer = nullptr;
@@ -25,6 +25,10 @@ struct CliffInstance {
     int gridX = 0;
     int gridY = 0;
     float layerBase = 0.0f;
+    int topCellX = 0;
+    int topCellY = 0;
+    int bottomCellX = 0;
+    int bottomCellY = 0;
     std::string meshPath;
 };
 
@@ -109,6 +113,7 @@ private:
     void RebuildCornerData(const W3EMap& map);
     MdxViewer* GetOrLoadCliffModel(const std::string& path);
     void BuildCliffsFromMdx(const W3EMap& map);
+    void BuildCliffEdgeSplats();
     void BuildPathingOverlay(const W3EMap& map);
     void BuildRegionOverlay(const W3EMap& map);
 
@@ -116,6 +121,18 @@ private:
     int GetVariation(int groundTexture, int variation);
     bool isCornerRampEntrance(const W3EMap& map, int x, int y) const;
     int RealTileTexture(const W3EMap& map, int x, int y) const;
+    void AddUberSplatRect(const std::string& path, float x0, float y0, float x1, float y1,
+                          float zOffset, bool highPriority,
+                          bool absoluteHeight = false, float absoluteHeightValue = 0.0f,
+                          bool clampHeightToRect = false,
+                          float clampMinTileX = 0.0f, float clampMinTileY = 0.0f,
+                          float clampMaxTileX = 0.0f, float clampMaxTileY = 0.0f,
+                          bool useCornerHeightOverride = false,
+                          float cornerHeightBL = 0.0f, float cornerHeightBR = 0.0f,
+                          float cornerHeightTL = 0.0f, float cornerHeightTR = 0.0f);
+    void AddUberSplatMesh(const std::string& path, const std::vector<SplatModel::MeshVertex>& vertices,
+                          const std::vector<uint32_t>& indices, bool highPriority);
+    SplatModel* GetOrCreateUberSplatModel(const std::string& path, bool highPriority, bool terrainColorMask);
     std::string ResolveUberSplatPath(const std::string& path);
 
     struct CornerExtra {
@@ -154,7 +171,7 @@ private:
     sg_view waterHeightView_ = {0};
     sg_view waterExistsView_ = {0};
     sg_view waterTexArrayView_ = {0};
-    sg_view tileTexViews_[17]; // cached views for texture arrays
+    sg_view tileTexViews_[17] = {}; // cached views for texture arrays
 
     float* groundHeights_ = nullptr;
     float* groundCornerHeights_ = nullptr;
@@ -178,11 +195,15 @@ private:
         sg_buffer vbo = {0}, ebo = {0};
         sg_view textureView = {0};
         int indexCount = 0;
-        int textureLayer = 0;
+        float minLocalZ = 0.0f;
+        float maxLocalZ = 0.0f;
     };
     struct CliffInstanceGPU {
         int gridX, gridY;
         float layerBase;
+        int textureLayer;
+        int topCellX, topCellY;
+        int bottomCellX, bottomCellY;
         int meshIndex;
     };
     std::vector<CliffMeshGPU> cliffMeshes_;
@@ -208,6 +229,7 @@ private:
     int columns_ = 0, rows_ = 0;
     int mapTileW_ = 0, mapTileH_ = 0;
     float mapOffsetX_ = 0, mapOffsetY_ = 0;
+    char tilesetChar_ = 0;
 
     bool fogEnabled_ = false;
     float fogColor_[3] = {0.7f, 0.7f, 0.7f};

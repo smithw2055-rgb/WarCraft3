@@ -378,6 +378,10 @@ void WaveBuilder::PrintCount() {
 }
 
 void WaveBuilder::Render(const Mat4& view, const Mat4& proj) {
+    // Temporarily disable shoreline particle rendering while scene init/state is stabilized.
+    (void)view;
+    (void)proj;
+    return;
     RenderParticles(view, proj);
 }
 

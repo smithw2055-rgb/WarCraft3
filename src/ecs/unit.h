@@ -78,7 +78,7 @@ public:
 
     // ===== Behavior System =====
     // Current behavior
-    CBehavior* GetCurrentBehavior() const { return currentBehavior_.get(); }
+    CBehavior* GetCurrentBehavior() const { return currentBehavior_; }
     void SetCurrentBehavior(std::unique_ptr<CBehavior> behavior);
     void IssueOrder(std::unique_ptr<COrder> order);
     void ClearOrders();
@@ -205,6 +205,7 @@ private:
     std::unique_ptr<CBehavior> defaultBehavior_;
 
     // Current behavior and order queue
-    std::unique_ptr<CBehavior> currentBehavior_;
+    std::unique_ptr<CBehavior> ownedCurrentBehavior_;
+    CBehavior* currentBehavior_ = nullptr;
     std::queue<std::unique_ptr<COrder>> orderQueue_;
 };

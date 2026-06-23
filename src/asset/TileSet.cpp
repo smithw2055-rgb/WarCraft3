@@ -462,16 +462,7 @@ bool TileSet::LoadCliffTextures(const MpqManager& mpq, const W3EMap& w3e) {
             }
         }
 
-        sg_image_desc desc = {};
-        desc.type = SG_IMAGETYPE_ARRAY;
-        desc.width = arraySize;
-        desc.height = arraySize;
-        desc.num_slices = maxPalette;
-        desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        desc.num_mipmaps = 1;
-        desc.data.mip_levels[0].ptr = arrayData.data();
-        desc.data.mip_levels[0].size = arrayData.size();
-        cliffTextureArray_ = sg_make_image(&desc);
+        cliffTextureArray_ = CreateTextureArray(arraySize, maxPalette, arrayData);
         if (sg_query_image_state(cliffTextureArray_) == SG_RESOURCESTATE_VALID) {
             sg_view_desc vd = {};
             vd.texture.image = cliffTextureArray_;
