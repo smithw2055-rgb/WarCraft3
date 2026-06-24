@@ -213,6 +213,9 @@ public:
     int eventManipulatedItemHandle = -1;
     int eventOrderedUnitHandle = -1;
     int eventIssuedOrderId = 0;
+    float eventOrderPointX = 0.0f;
+    float eventOrderPointY = 0.0f;
+    int eventOrderTargetHandle = -1;
     int eventKillingUnitHandle = -1;
     int eventDyingUnitHandle = -1;
     int eventRevivingUnitHandle = -1;
@@ -268,6 +271,9 @@ struct JassQueuedContext {
     int eventManipulatedItemHandle = -1;
     int eventOrderedUnitHandle = -1;
     int eventIssuedOrderId = 0;
+    float eventOrderPointX = 0.0f;
+    float eventOrderPointY = 0.0f;
+    int eventOrderTargetHandle = -1;
     int eventKillingUnitHandle = -1;
     int eventDyingUnitHandle = -1;
     int eventRevivingUnitHandle = -1;

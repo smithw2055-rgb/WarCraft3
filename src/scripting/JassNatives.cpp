@@ -191,6 +191,9 @@ JassQueuedContext JassNatives::CaptureContext() const {
     context.eventManipulatedItemHandle = data_->eventManipulatedItemHandle;
     context.eventOrderedUnitHandle = data_->eventOrderedUnitHandle;
     context.eventIssuedOrderId = data_->eventIssuedOrderId;
+    context.eventOrderPointX = data_->eventOrderPointX;
+    context.eventOrderPointY = data_->eventOrderPointY;
+    context.eventOrderTargetHandle = data_->eventOrderTargetHandle;
     context.eventKillingUnitHandle = data_->eventKillingUnitHandle;
     context.eventDyingUnitHandle = data_->eventDyingUnitHandle;
     context.eventRevivingUnitHandle = data_->eventRevivingUnitHandle;
@@ -225,6 +228,9 @@ void JassNatives::ApplyContext(const JassQueuedContext& context) {
     data_->eventManipulatedItemHandle = context.eventManipulatedItemHandle;
     data_->eventOrderedUnitHandle = context.eventOrderedUnitHandle;
     data_->eventIssuedOrderId = context.eventIssuedOrderId;
+    data_->eventOrderPointX = context.eventOrderPointX;
+    data_->eventOrderPointY = context.eventOrderPointY;
+    data_->eventOrderTargetHandle = context.eventOrderTargetHandle;
     data_->eventKillingUnitHandle = context.eventKillingUnitHandle;
     data_->eventDyingUnitHandle = context.eventDyingUnitHandle;
     data_->eventRevivingUnitHandle = context.eventRevivingUnitHandle;
@@ -365,6 +371,22 @@ void JassNatives::FireDeathEvent(int unitSimHandle, int killerSimHandle, int eve
 void JassNatives::FireOrderEvent(int unitSimHandle, int orderId, int targetSimHandle, float x, float y) {
     data_->eventOrderedUnitHandle = data_->AllocHandle(JassHandleInfo::UNIT, unitSimHandle);
     data_->eventIssuedOrderId = orderId;
+    data_->eventOrderPointX = x;
+    data_->eventOrderPointY = y;
+    data_->eventOrderTargetHandle = -1;
+    if (targetSimHandle >= 0 && sim_) {
+        if (CUnit* targetUnit = sim_->GetUnit(targetSimHandle)) {
+            data_->eventOrderTargetHandle =
+                data_->AllocHandle(JassHandleInfo::UNIT, targetUnit->GetHandleId());
+        } else if (CDestructable* targetDest = sim_->GetDestructable(targetSimHandle)) {
+            data_->eventOrderTargetHandle =
+                data_->AllocHandle(JassHandleInfo::DESTRUCTABLE, targetDest->GetHandleId());
+        } else if (CItem* targetItem = sim_->GetItem(targetSimHandle)) {
+            data_->items[targetItem->GetHandleId()] = targetItem;
+            data_->eventOrderTargetHandle =
+                data_->AllocHandle(JassHandleInfo::ITEM, targetItem->GetHandleId());
+        }
+    }
 
     // Determine which event type to fire based on whether there's a target or point
     int eventType = JASS_EVENT_UNIT_ISSUED_ORDER;
@@ -378,6 +400,9 @@ void JassNatives::FireOrderEvent(int unitSimHandle, int orderId, int targetSimHa
 
     data_->eventOrderedUnitHandle = -1;
     data_->eventIssuedOrderId = 0;
+    data_->eventOrderPointX = 0.0f;
+    data_->eventOrderPointY = 0.0f;
+    data_->eventOrderTargetHandle = -1;
 }
 
 void JassNatives::FireItemEvent(int unitSimHandle, int itemSimHandle, int eventType) {
@@ -2713,6 +2738,35 @@ void JassNatives::RegisterEventNatives() {
     });
     vm_.RegisterNative("GetIssuedOrderId", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return JassValue::Int(data->eventIssuedOrderId);
+    });
+    vm_.RegisterNative("GetOrderPointX", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Real(data->eventOrderPointX);
+    });
+    vm_.RegisterNative("GetOrderPointY", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Real(data->eventOrderPointY);
+    });
+    vm_.RegisterNative("GetOrderPointLoc", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        auto loc = std::make_shared<JassLocation>();
+        loc->x = data->eventOrderPointX;
+        loc->y = data->eventOrderPointY;
+        int id = data->nextLocId++;
+        data->locations[id] = loc;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::LOCATION, id));
+    });
+    vm_.RegisterNative("GetOrderTarget", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return data->eventOrderTargetHandle >= 0 ? JassValue::Int(data->eventOrderTargetHandle) : JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetOrderTargetUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        auto* info = data->GetHandleInfo(data->eventOrderTargetHandle);
+        return (info && info->type == JassHandleInfo::UNIT) ? JassValue::Int(data->eventOrderTargetHandle) : JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetOrderTargetDestructable", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        auto* info = data->GetHandleInfo(data->eventOrderTargetHandle);
+        return (info && info->type == JassHandleInfo::DESTRUCTABLE) ? JassValue::Int(data->eventOrderTargetHandle) : JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetOrderTargetItem", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        auto* info = data->GetHandleInfo(data->eventOrderTargetHandle);
+        return (info && info->type == JassHandleInfo::ITEM) ? JassValue::Int(data->eventOrderTargetHandle) : JassValue::Int(0);
     });
     vm_.RegisterNative("GetKillingUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->eventKillingUnitHandle >= 0 ? JassValue::Int(data->eventKillingUnitHandle) : JassValue::Int(0);
