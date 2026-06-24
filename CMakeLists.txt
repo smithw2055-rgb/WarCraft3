@@ -290,6 +290,7 @@ set(SOURCES
     src/ui/MultiSelectionPanel.cpp
     src/ui/BuffBar.cpp
     # ===== Core / State Machine =====
+    src/core/game_controller.cpp
     src/core/warsmash_config.cpp
     # ===== Map Loading =====
     src/map/map_loader.cpp

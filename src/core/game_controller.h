@@ -8,6 +8,8 @@
 #include "../render/minimap.h"
 #include "../render/mdx_viewer.h"
 #include "../render/daynight.h"
+#include "../render/splat_metadata.h"
+#include "../ecs/animation_utils.h"
 #include "../resource/mpq_storm.h"
 #include "../asset/TileSet.h"
 #include "../asset/Texture.h"
@@ -17,6 +19,7 @@
 #include "../ecs/csimulation.h"
 #include "../ecs/unit.h"
 #include "../ecs/player.h"
+#include "../ecs/abilities/ability_harvest.h"
 #include "../data/unitdata.h"
 #include "../data/destructabledata.h"
 #include "../data/gameplay_constants.h"
@@ -30,23 +33,31 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <functional>
+
+struct sapp_event; // fwd
 
 class GameController {
 public:
     GameController();
     ~GameController();
 
-    bool Initialize(int argc, char* argv[]);
-    void RunSyncInit();  // Run all init stages synchronously (for legacy frame_cb compat)
+    void ParseArgs(int argc, char* argv[]);  // call from sokol_main; safe before sokol init
+    bool Initialize();                       // call from init_cb (depends on sokol context)
+    void RunSyncInit();
     void Update(int screenW, int screenH, float dt);
     void Render(int screenW, int screenH);
+    void OnEvent(const sapp_event* ev);
     void Shutdown();
 
     GameState GetState() const { return state_; }
+    bool IsInitialized() const { return initialized_; }
+    bool IsRunning() const { return running_; }
+    int GetFrameCount() const { return frameCount_; }
 
-    // Accessors for subsystems (used by main.cpp callback wiring)
+    // Accessors
     SceneManager& GetScene() { return scene_; }
     CSimulation& GetSimulation() { return simulation_; }
     MainUI& GetUI() { return ui_; }
@@ -57,6 +68,7 @@ public:
     OrbitCamera& GetCamera() { return camera_; }
     MdxViewer& GetMdxViewer() { return mdxViewer_; }
     DayNightCycle& GetDayNight() { return dayNight_; }
+    SplatMetadataStore& GetSplatMeta() { return splatMeta_; }
     TileSet& GetTileset() { return tileset_; }
     MpqManager& GetMpq() { return mpq_; }
     CUnitData& GetUnitData() { return unitData_; }
@@ -70,50 +82,26 @@ public:
     WarsmashConfig& GetConfig() { return config_; }
     const std::string& GetMapPath() const { return mapPath_; }
 
-    bool IsInitialized() const { return initialized_; }
-    bool IsRunning() const { return running_; }
-    int GetFrameCount() const { return frameCount_; }
+    // Selection access (for JASS natives / splat refresh)
+    const std::unordered_set<int>& GetSelectedUnitHandles() const { return selectedUnitHandlesSet_; }
+    bool IsUnitSelected(int handleId) const;
+    std::vector<CUnit*> GetSelectedSimulationUnits() const;
 
-    // Unit visual state (moved from global 'g')
-    struct UnitVisualSeed {
-        float scale[3] = {1.0f, 1.0f, 1.0f};
-        uint32_t skinId = 0;
-        int hitpoints = 0;
-        int flags = 0;
-    };
+    // Visual seed (distinct from MapLoader::UnitVisualSeed — no handleId)
+    struct UnitVisualSeed { float scale[3]={1,1,1}; uint32_t skinId=0; int hitpoints=0; int flags=0; };
 
-    struct PendingUnitAnimation {
-        std::string sequenceName;
-        int sequenceIndex = -1;
-        bool useSequenceIndex = false;
-    };
-
-    enum class UnitVisualAnimationMode : uint8_t {
-        NONE, READY, READY_GOLD, READY_LUMBER,
-        WALK, WALK_GOLD, WALK_LUMBER, WALK_WORK,
-        WORK, SPELL, ATTACK, CONSTRUCT,
-        DEAD, CORPSE, BONE_CORPSE, DISSIPATE
-    };
-
-    struct ScriptedUnitAnimationState {
-        PendingUnitAnimation request;
-        bool loop = false;
-        bool queueStandAfterCurrent = false;
-    };
-
-    // Map for per-unit visual state
     std::unordered_map<int, UnitVisualSeed> simUnitVisualSeeds;
-    std::unordered_map<int, PendingUnitAnimation> simUnitPendingAnimations;
+    std::unordered_map<int, animation_utils::PendingUnitAnimation> simUnitPendingAnimations;
     std::unordered_map<int, int> simUnitToVisualIdx;
     std::unordered_map<int, std::pair<float, float>> simUnitVisualLastPositions;
     std::unordered_map<int, bool> simUnitVisualMovingStates;
-    std::unordered_map<int, UnitVisualAnimationMode> simUnitVisualAnimationModes;
+    std::unordered_map<int, animation_utils::UnitVisualAnimationMode> simUnitVisualAnimationModes;
     std::unordered_map<int, int> simUnitVisualLastAttackAnimationTicks;
-    std::unordered_map<int, int> simUnitVisualResourceTags; // CResourceType
+    std::unordered_map<int, CResourceType> simUnitVisualResourceTags;
     std::unordered_map<int, bool> simUnitVisualConstructionStates;
     std::unordered_map<int, std::vector<std::string>> simUnitVisualPropertyTags;
-    std::unordered_map<int, ScriptedUnitAnimationState> simUnitScriptedAnimations;
-    std::unordered_map<int, PendingUnitAnimation> simUnitQueuedAnimations;
+    std::unordered_map<int, animation_utils::ScriptedUnitAnimationState> simUnitScriptedAnimations;
+    std::unordered_map<int, animation_utils::PendingUnitAnimation> simUnitQueuedAnimations;
     std::unordered_map<int, std::vector<std::string>> simUnitAnimationPropertyTags;
     std::unordered_set<int> simUnitVisualRegistrationFailed;
 
@@ -133,32 +121,64 @@ public:
     bool wireframe = false;
 
 private:
+    // --- State machine ---
     void TransitionTo(GameState newState);
     void OnEnterState(GameState state);
     void OnLeaveState(GameState state);
 
+    // --- Init phases ---
     void InitBootstrap();
-    void InitMenu();
     void InitMapConfig();
     void InitLoading();
     void InitInGame();
 
-    void UpdateBootstrap();
-    void UpdateMenu();
+    // --- Update phases ---
     void UpdateLoading(float dt);
     void UpdateInGame(int screenW, int screenH, float dt);
 
-    void ParseArgs(int argc, char* argv[]);
+    // --- Per-frame helpers ---
+    void StepSimulation(float dt);
+    void SyncAndReconcileVisuals();
+    void CollectUnitOverlays(int screenW, int screenH);
+
+    // --- Input helpers ---
+    void OnMouseDown(const sapp_event* ev);
+    void OnMouseUp(const sapp_event* ev);
+    void OnMouseMove(const sapp_event* ev);
+    void OnMouseScroll(const sapp_event* ev);
+    void OnKeyDown(const sapp_event* ev);
+
+    // --- Selection helpers ---
+    void SetSelectedUnits(const std::vector<CUnit*>& units, int primaryHandle = -1, bool rebuildCommandCard = true);
+    void SelectSingleUnit(CUnit* unit, bool additive);
+    void SelectUnitsInRect(const struct ScreenRect& rect, bool additive);
+    void RefreshSelectionUi(bool rebuildCommandCard);
+    void ClearSelection();
+
+    // --- Unit picking ---
+    CUnit* PickSimulationUnitAtScreenPoint(float screenX, float screenY,
+                                           const Mat4& view, const Mat4& proj,
+                                           int screenW, int screenH,
+                                           int ignoreHandle = -1,
+                                           bool preferBuildings = true,
+                                           bool strictScreenTargeting = false);
+    CDestructable* PickSimulationDestructableAtScreenPoint(float screenX, float screenY,
+                                                           const Mat4& view, const Mat4& proj,
+                                                           int screenW, int screenH);
+
+    // --- Init helpers ---
     void OpenDataSources();
     void LoadCommonJassFiles(JassVM& vm);
     void ReadMapFile(const std::string& mapPath, const std::string& fileName,
                      std::vector<uint8_t>& out);
-    void LoadSelectionAndBuildingSplatMetadata();
     void WireJassCallbacks();
     void EnsureHumanMeleeStartsFromMapConfig();
+    void EnsureHumanMeleeStartForPlayer(int playerIndex, float startX, float startY);
     void FlushStartupSimulationState();
     void FocusCameraAndMinimapOnInitialSpawn();
+    void RefreshRuntimeUnitSplats();
 
+    // --- Core state ---
     GameState state_ = GameState::BOOTSTRAP;
     GameState pendingState_ = GameState::BOOTSTRAP;
     bool stateTransition_ = false;
@@ -182,6 +202,9 @@ private:
     Minimap minimap_;
     MdxViewer mdxViewer_;
     DayNightCycle dayNight_;
+
+    // Splat metadata
+    SplatMetadataStore splatMeta_;
 
     // Resources
     MpqManager mpq_;
@@ -209,4 +232,16 @@ private:
     // Map loading
     std::unique_ptr<MapLoader> mapLoader_;
     float loadingProgress_ = 0.0f;
+
+    // Selection
+    std::vector<int> selectedUnitHandles_;
+    std::unordered_set<int> selectedUnitHandlesSet_;
+    int selectedUnitHandle_ = -1;
+    War3ID selectedUnitTypeId_;
+    bool selectionPressActive_ = false;
+    bool selectionDragVisible_ = false;
+    float selectionStartX_ = 0.0f;
+    float selectionStartY_ = 0.0f;
+    float selectionCurrentX_ = 0.0f;
+    float selectionCurrentY_ = 0.0f;
 };
