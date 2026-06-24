@@ -235,8 +235,12 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
             }
         }
         if (!simUnit) {
-            if (scene_.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId))
+            if (scene_.HasItemPath(u.id, u.skinId)) {
+                if (scene_.AddItem(u.id, u.pos, u.angle, u.scale, u.flags, u.skinId))
+                    unitLoadResult_.visualCreated++;
+            } else if (scene_.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId)) {
                 unitLoadResult_.visualCreated++;
+            }
         }
     }
     std::cout << "  Units: " << unitsDoo_.units.size() << " from map, "

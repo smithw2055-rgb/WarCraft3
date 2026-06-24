@@ -25,13 +25,13 @@ static uint32_t StringToWar3ID(const std::string& id) {
 static std::string NormalizePath(const std::string& p) {
     std::string r = p;
     for (auto& c : r) if (c == '/') c = '\\';
-    // Remove trailing .mdx if present
+    // Remove trailing model extension if present; callers append the desired .mdx.
     if (r.size() > 4) {
         std::string tail = r.substr(r.size() - 4);
         std::transform(tail.begin(), tail.end(), tail.begin(), [](unsigned char c) {
             return (char)std::tolower(c);
         });
-        if (tail == ".mdx") r.resize(r.size() - 4);
+        if (tail == ".mdx" || tail == ".mdl") r.resize(r.size() - 4);
     }
     return r;
 }
@@ -189,7 +189,7 @@ bool SceneManager::Init(const MpqManager& mpq) {
     mpq_ = const_cast<MpqManager*>(&mpq);
     ResetLoadStats();
 
-    // Load UnitUI.slk → unit War3ID → model path
+    // Load UnitUI.slk: unit War3ID to model path.
     {
         std::vector<uint8_t> buf;
         if (mpq.ReadFile("Units\\unitUI.slk", buf)) {
@@ -217,7 +217,41 @@ bool SceneManager::Init(const MpqManager& mpq) {
         }
     }
 
-    // Load Doodads.slk → doodad War3ID → model path
+    {
+        std::vector<uint8_t> buf;
+        if (mpq.ReadFile("Units\\ItemData.slk", buf)) {
+            SlkTable slk;
+            if (slk.Load(buf.data(), buf.size())) {
+                int colID = -1, colFile = -1;
+                for (int i = 0; i < slk.Cols(); ++i) {
+                    const std::string& name = slk.colNames_[i];
+                    if (name == "itemID" || name == "unitID" || name == "ID") colID = i;
+                    if (name == "file") colFile = i;
+                }
+                if (colID < 0 && slk.Cols() > 0) {
+                    colID = 0;
+                }
+                if (colID >= 0 && colFile >= 0) {
+                    for (int r = 0; r < slk.Rows(); ++r) {
+                        std::string id = slk.GetString(r, colID);
+                        std::string file = slk.GetString(r, colFile);
+                        if (id.size() == 4 && !file.empty()) {
+                            uint32_t war3ID = StringToWar3ID(id);
+                            itemPaths_[war3ID] = NormalizePath(file) + ".mdx";
+                            itemFiles_[war3ID] = file;
+                        }
+                    }
+                    std::cout << "Scene: " << itemPaths_.size() << " item paths loaded" << std::endl;
+                }
+                else {
+                    std::cout << "Scene: ItemData.slk missing columns"
+                              << " itemID=" << colID
+                              << " file=" << colFile << std::endl;
+                }
+            }
+        }
+    }
+    // Load Doodads.slk: doodad War3ID to model path.
     {
         std::vector<uint8_t> buf;
         if (mpq.ReadFile("Doodads\\Doodads.slk", buf)) {
@@ -315,6 +349,15 @@ void SceneManager::ApplyMapObjectModifications(const std::string& mapPath) {
         return true;
     };
 
+    auto updateItemPath = [this](uint32_t id) {
+        auto fileIt = itemFiles_.find(id);
+        if (fileIt == itemFiles_.end() || fileIt->second.empty()) {
+            return false;
+        }
+        itemPaths_[id] = NormalizePath(fileIt->second) + ".mdx";
+        return true;
+    };
+
     auto updateDoodadPath = [this](uint32_t id) {
         auto fileIt = doodadFiles_.find(id);
         if (fileIt == doodadFiles_.end() || fileIt->second.empty()) {
@@ -391,6 +434,76 @@ void SceneManager::ApplyMapObjectModifications(const std::string& mapPath) {
         }
 
         std::cout << "SceneObjectMods: war3map.w3u"
+                  << " original=" << mods.original.size()
+                  << " custom=" << mods.custom.size()
+                  << " applied=" << applied
+                  << " unknown=" << unknown
+                  << " customCloned=" << customCloned
+                  << " customSkipped=" << customSkipped << std::endl;
+    };
+
+    auto applyItemMods = [this, &mapPath, &updateItemPath]() {
+        ObjectModificationSet mods;
+        if (!LoadWar3MapObjectMods(mapPath, "war3map.w3t", false, mods)) {
+            return;
+        }
+
+        SlkTable metaSlk;
+        std::vector<uint8_t> metaBuf;
+        if (!mpq_->ReadFile("Units\\UnitMetaData.slk", metaBuf) ||
+            !metaSlk.Load(metaBuf.data(), metaBuf.size())) {
+            std::cerr << "SceneObjectMods: Units\\UnitMetaData.slk unavailable; render path modifications skipped for war3map.w3t" << std::endl;
+            return;
+        }
+
+        const SlkAccessor meta(metaSlk, {"ID"});
+        int applied = 0;
+        int unknown = 0;
+        int customCloned = 0;
+        int customSkipped = 0;
+
+        auto applyEntry = [&](const ObjectModificationEntry& entry, uint32_t id) {
+            bool touchedPath = false;
+            for (const auto& mod : entry.modifications) {
+                std::string fieldName;
+                if (!ResolveObjectModField(meta, mod, fieldName)) {
+                    unknown++;
+                    continue;
+                }
+                std::transform(fieldName.begin(), fieldName.end(), fieldName.begin(), [](unsigned char c) {
+                    return (char)std::tolower(c);
+                });
+                if (fieldName == "file") {
+                    itemFiles_[id] = FormatObjectModificationValue(mod);
+                    applied++;
+                    touchedPath = true;
+                }
+            }
+            if (touchedPath) {
+                updateItemPath(id);
+            }
+        };
+
+        for (const auto& entry : mods.custom) {
+            const uint32_t oldId = StringToWar3ID(entry.oldId.ToString());
+            const uint32_t newId = StringToWar3ID(entry.newId.ToString());
+            auto oldFile = itemFiles_.find(oldId);
+            if (oldFile == itemFiles_.end()) {
+                customSkipped++;
+                continue;
+            }
+            itemFiles_[newId] = oldFile->second;
+            updateItemPath(newId);
+            customCloned++;
+            applyEntry(entry, newId);
+        }
+
+        for (const auto& entry : mods.original) {
+            const uint32_t id = StringToWar3ID(entry.oldId.ToString());
+            applyEntry(entry, id);
+        }
+
+        std::cout << "SceneObjectMods: war3map.w3t"
                   << " original=" << mods.original.size()
                   << " custom=" << mods.custom.size()
                   << " applied=" << applied
@@ -487,6 +600,7 @@ void SceneManager::ApplyMapObjectModifications(const std::string& mapPath) {
     };
 
     applyUnitMods();
+    applyItemMods();
     applyDoodadMods("war3map.w3d", true, "Doodads\\DoodadMetaData.slk");
     applyDoodadMods("war3map.w3b", false, "Units\\DestructableMetaData.slk");
 }
@@ -504,6 +618,7 @@ void SceneManager::ResetLoadStats() {
 
 void SceneManager::PrintLoadStats() const {
     std::cout << "SceneStats: units " << loadStats_.unitSuccess << "/" << loadStats_.unitAttempts
+              << ", items " << loadStats_.itemSuccess << "/" << loadStats_.itemAttempts
               << ", doodads " << loadStats_.doodadSuccess << "/" << loadStats_.doodadAttempts
               << std::endl;
     if (loadStats_.missReasons.empty()) return;
@@ -664,6 +779,50 @@ bool SceneManager::AddDoodad(uint32_t war3ID, const float pos[3], float angle,
         doodadDiagCount++;
     }
     loadStats_.doodadSuccess++;
+    return true;
+}
+
+bool SceneManager::HasItemPath(uint32_t war3ID, uint32_t skinId) const {
+    if (skinId != 0 && skinId != war3ID && itemPaths_.find(skinId) != itemPaths_.end()) {
+        return true;
+    }
+    return itemPaths_.find(war3ID) != itemPaths_.end();
+}
+
+bool SceneManager::AddItem(uint32_t war3ID, const float pos[3], float angle,
+                           const float scale[3], int flags, uint32_t skinId) {
+    (void)flags;
+    loadStats_.itemAttempts++;
+
+    std::vector<uint32_t> ids;
+    if (skinId != 0 && skinId != war3ID) ids.push_back(skinId);
+    ids.push_back(war3ID);
+
+    bool sawItemPath = false;
+    MdxViewer* viewer = nullptr;
+    for (uint32_t id : ids) {
+        auto itemIt = itemPaths_.find(id);
+        if (itemIt == itemPaths_.end()) continue;
+        sawItemPath = true;
+        viewer = GetOrLoadModel(itemIt->second);
+        if (viewer) break;
+    }
+
+    if (!viewer) {
+        loadStats_.missReasons[sawItemPath ? "item-model-miss" : "item-path-miss"]++;
+        return false;
+    }
+
+    auto* inst = new PlacedModel();
+    inst->pos[0] = pos[0]; inst->pos[1] = pos[2]; inst->pos[2] = pos[1];
+    inst->renderPos[0] = inst->pos[0]; inst->renderPos[1] = inst->pos[1]; inst->renderPos[2] = inst->pos[2];
+    inst->angle = angle;
+    inst->renderAngle = angle;
+    inst->scale[0] = scale[0]; inst->scale[1] = scale[2]; inst->scale[2] = scale[1];
+    inst->visible = true;
+    inst->viewer = viewer;
+    instances_.push_back(inst);
+    loadStats_.itemSuccess++;
     return true;
 }
 

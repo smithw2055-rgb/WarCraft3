@@ -37,6 +37,9 @@ public:
     // Add a doodad/unit by War3ID and position
     bool AddDoodad(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
                    int variation, int flags, int life, uint32_t skinId = 0);
+    bool HasItemPath(uint32_t war3ID, uint32_t skinId = 0) const;
+    bool AddItem(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
+                 int flags, uint32_t skinId = 0);
     bool AddUnit(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
                  int player, int hitpoints, int flags, uint32_t skinId = 0,
                  bool playBirthAnimation = false);
@@ -62,6 +65,8 @@ private:
     struct LoadStats {
         int unitAttempts = 0;
         int unitSuccess = 0;
+        int itemAttempts = 0;
+        int itemSuccess = 0;
         int doodadAttempts = 0;
         int doodadSuccess = 0;
         std::unordered_map<std::string, int> missReasons;
@@ -85,6 +90,8 @@ private:
 
     std::unordered_map<uint32_t, std::string> unitPaths_;
     std::unordered_map<uint32_t, std::string> unitFiles_;
+    std::unordered_map<uint32_t, std::string> itemPaths_;
+    std::unordered_map<uint32_t, std::string> itemFiles_;
     std::unordered_map<uint32_t, std::string> doodadPaths_;
     std::unordered_map<uint32_t, std::string> doodadDirs_;
     std::unordered_map<uint32_t, std::string> doodadFiles_;
