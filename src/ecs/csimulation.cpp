@@ -159,6 +159,12 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
             }
         }
 
+        if (!unitType->GetItemsSold().empty()) {
+            abilityHandle = handleIdAlloc_.CreateId();
+            unit->AddAbility(*this, std::make_unique<CAbilitySellItems>(
+                abilityHandle, unitType->GetItemsSold()));
+        }
+
         // Check if building is a gold mine
         for (auto& abilityCode : unitType->GetAbilityList()) {
             if (abilityCode == War3ID("Agld")) {

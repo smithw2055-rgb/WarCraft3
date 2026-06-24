@@ -4,11 +4,17 @@
 #include "ecs/player.h"
 #include "ecs/item.h"
 #include "ecs/abilities/ability_inventory.h"
+#include "data/itemdata.h"
 #include <iostream>
 
 CAbilitySellItems::CAbilitySellItems(int handleId)
     : CAbility(handleId, War3ID("Asei"), CAbilityCategory::SELL_ITEMS) {
     iconShowing_ = false;
+}
+
+CAbilitySellItems::CAbilitySellItems(int handleId, const std::vector<War3ID>& itemsSold)
+    : CAbilitySellItems(handleId) {
+    itemsSold_ = itemsSold;
 }
 
 bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, int orderId) {
@@ -19,16 +25,25 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
     }
 
     War3ID itemTypeId = itemsSold_[itemIndex];
+    const CItemType* itemType = game.GetItemData() ? game.GetItemData()->GetItem(itemTypeId) : nullptr;
 
     // Find a hero for the player to give the item to
-    auto* player = game.GetPlayer(caster->GetPlayerIndex());
+    int playerIndex = orderId & 0xFF;
+    if (playerIndex < 0 || playerIndex >= game.GetPlayerCount()) {
+        playerIndex = caster->GetPlayerIndex();
+    }
+    auto* player = game.GetPlayer(playerIndex);
     if (!player) return false;
 
     // Check if player can afford it
-    // TODO: look up item cost from item data
-    int itemGoldCost = 100; // placeholder
+    int itemGoldCost = itemType ? itemType->goldCost : 0;
+    int itemLumberCost = itemType ? itemType->lumberCost : 0;
     if (player->GetGold() < itemGoldCost) {
         std::cout << "Not enough gold to buy item!" << std::endl;
+        return false;
+    }
+    if (player->GetLumber() < itemLumberCost) {
+        std::cout << "Not enough lumber to buy item!" << std::endl;
         return false;
     }
 
@@ -51,11 +66,24 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
 
     // Deduct gold
     player->AddGold(-itemGoldCost);
+    player->AddLumber(-itemLumberCost);
 
     // Create item at shop location
     int handleId = game.CreateItemId();
     auto* item = new CItem(handleId, itemTypeId, caster->GetX(), caster->GetY());
-    // TODO: add item to world
+    if (itemType) {
+        item->SetName(itemType->name);
+        item->SetIcon(itemType->iconPath);
+        item->SetGoldValue(itemType->goldCost);
+        item->SetLumberValue(itemType->lumberCost);
+        item->SetCharges(itemType->charges);
+        item->SetPerishable(itemType->perishable);
+        item->SetPowerup(itemType->powerup);
+        item->SetUseAutomatically(itemType->useOnly);
+        if (itemType->charges > 0) {
+            item->SetCharged(true);
+        }
+    }
 
     // Give item to hero
     auto* inventory = dynamic_cast<CAbilityInventory*>(hero->GetAbility(War3ID("AInv")));

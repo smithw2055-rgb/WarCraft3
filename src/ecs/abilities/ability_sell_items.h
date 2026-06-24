@@ -7,6 +7,7 @@
 class CAbilitySellItems : public CAbility {
 public:
     CAbilitySellItems(int handleId);
+    CAbilitySellItems(int handleId, const std::vector<War3ID>& itemsSold);
 
     // Order handling
     bool CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, int orderId) override;
