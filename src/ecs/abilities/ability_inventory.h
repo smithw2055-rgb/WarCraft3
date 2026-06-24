@@ -1,5 +1,6 @@
 #pragma once
 #include "ecs/ability.h"
+#include <algorithm>
 #include <array>
 #include <vector>
 
@@ -19,6 +20,7 @@ public:
     // Item management
     bool CanPickUpItem(CSimulation& game, CUnit* unit, CItem* item) const;
     bool PickUpItem(CSimulation& game, CUnit* unit, CItem* item);
+    bool PickUpItem(CSimulation& game, CUnit* unit, CItem* item, int slotPreference);
     bool DropItem(CSimulation& game, CUnit* unit, int slot);
     bool DropItemAt(CSimulation& game, CUnit* unit, int slot, float x, float y);
     bool DropItem(CSimulation& game, CUnit* unit, CItem* item);
@@ -30,7 +32,9 @@ public:
     // Slot access
     CItem* GetItem(int slot) const;
     int GetItemCount() const;
+    int GetItemCapacity() const { return itemCapacity_; }
     int FindEmptySlot() const;
+    int FindEmptySlot(int slotPreference) const;
     int FindItemSlot(CItem* item) const;
     bool HasItem(CItem* item) const;
 

@@ -2024,6 +2024,21 @@ void JassNatives::RegisterItemNatives() {
         }
         return JassValue::Int(itemHandle);
     });
+    vm_.RegisterNative("UnitAddItemToSlotById", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || !sim) return JassValue::Int(0);
+        int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        if (uSim < 0) return JassValue::Int(0);
+        CUnit* unit = sim->GetUnit(uSim);
+        if (!unit) return JassValue::Int(0);
+        War3ID w3id((uint32_t)args[1].intVal);
+        const int itemHandle = CreateJassItemHandle(data, sim, w3id, unit->GetX(), unit->GetY());
+        if (auto* item = GetJassItem(data, itemHandle)) {
+            if (auto* inventory = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")))) {
+                inventory->PickUpItem(*sim, unit, item, args[2].intVal);
+            }
+        }
+        return JassValue::Int(itemHandle);
+    });
     vm_.RegisterNative("UnitRemoveItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Null();
         auto* unit = sim->GetUnit(data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT));
@@ -2061,7 +2076,12 @@ void JassNatives::RegisterItemNatives() {
         if (!item) return JassValue::Int(0);
         return JassValue::Int(data->AllocHandle(JassHandleInfo::ITEM, item->GetHandleId()));
     });
-    vm_.RegisterNative("UnitInventorySize", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(6); });
+    vm_.RegisterNative("UnitInventorySize", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim) return JassValue::Int(0);
+        auto* unit = sim->GetUnit(data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT));
+        auto* inventory = unit ? dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv"))) : nullptr;
+        return JassValue::Int(inventory ? inventory->GetItemCapacity() : 0);
+    });
     vm_.RegisterNative("UnitDropItemPoint", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4 || !sim) return JassValue::Bool(false);
         auto* unit = sim->GetUnit(data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT));

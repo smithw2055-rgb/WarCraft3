@@ -42,9 +42,13 @@ bool CAbilityInventory::CanPickUpItem(CSimulation& game, CUnit* unit, CItem* ite
 }
 
 bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item) {
+    return PickUpItem(game, unit, item, 0);
+}
+
+bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item, int slotPreference) {
     if (!CanPickUpItem(game, unit, item)) return false;
 
-    int slot = FindEmptySlot();
+    int slot = FindEmptySlot(slotPreference);
     if (slot < 0) return false;
 
     // Auto-use powerups
@@ -180,8 +184,16 @@ int CAbilityInventory::GetItemCount() const {
 }
 
 int CAbilityInventory::FindEmptySlot() const {
+    return FindEmptySlot(0);
+}
+
+int CAbilityInventory::FindEmptySlot(int slotPreference) const {
+    if (itemCapacity_ <= 0) return -1;
+    int start = slotPreference % itemCapacity_;
+    if (start < 0) start += itemCapacity_;
     for (int i = 0; i < itemCapacity_; i++) {
-        if (!items_[i]) return i;
+        const int itemIndex = (i + start) % itemCapacity_;
+        if (!items_[itemIndex]) return itemIndex;
     }
     return -1;
 }
