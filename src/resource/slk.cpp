@@ -114,6 +114,12 @@ std::vector<std::string> TxtTable::Sections() const {
     return result;
 }
 
+void TxtTable::SetString(const std::string& section, const std::string& key,
+                         const std::string& value) {
+    if (section.empty() || key.empty()) return;
+    sections_[section][key] = value;
+}
+
 std::unordered_map<std::string, std::string> TxtTable::GetSection(const std::string& section) const {
     auto it = sections_.find(section);
     if (it != sections_.end()) return it->second;

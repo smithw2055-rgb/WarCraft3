@@ -27,6 +27,8 @@ public:
 
     bool HasSection(const std::string& section) const;
     std::vector<std::string> Sections() const;
+    void SetString(const std::string& section, const std::string& key,
+                   const std::string& value);
 
     // Direct access to the key-value pairs of a section
     std::unordered_map<std::string, std::string> GetSection(const std::string& section) const;

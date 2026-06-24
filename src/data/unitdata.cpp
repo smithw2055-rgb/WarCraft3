@@ -3,11 +3,13 @@
 #include "ecs/unit_type.h"
 #include "ecs/unit.h"
 #include "ecs/handle_id.h"
+#include "map/object_mods.h"
 #include "resource/mpq_storm.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <set>
 #include <unordered_map>
 
@@ -153,6 +155,145 @@ static void CollectAllIds(const TxtTable& txt, const SlkAccessor& slk, std::set<
             outIds.insert(id);
         }
     }
+}
+
+static TxtTable* SelectUnitOverlayTable(const std::string& slkName,
+                                        TxtTable& unitDataTxt,
+                                        TxtTable& unitAbilitiesTxt,
+                                        TxtTable& unitBalanceTxt,
+                                        TxtTable& unitWeaponsTxt,
+                                        TxtTable& unitUITxt) {
+    const std::string lower = ToLowerCopy(slkName);
+    if (lower.find("unitabilities") != std::string::npos) return &unitAbilitiesTxt;
+    if (lower.find("unitbalance") != std::string::npos) return &unitBalanceTxt;
+    if (lower.find("unitweapons") != std::string::npos) return &unitWeaponsTxt;
+    if (lower.find("unitui") != std::string::npos) return &unitUITxt;
+    if (lower.find("unitdata") != std::string::npos) return &unitDataTxt;
+    return nullptr;
+}
+
+static std::string FormatObjectModificationValue(const ObjectModification& mod) {
+    switch (mod.varType) {
+    case ObjectModification::INT:
+    case ObjectModification::BOOLEAN:
+        return std::to_string(mod.intValue);
+    case ObjectModification::STRING:
+        return mod.stringValue;
+    case ObjectModification::REAL:
+    case ObjectModification::UNREAL:
+    default: {
+        std::ostringstream ss;
+        ss << mod.realValue;
+        return ss.str();
+    }
+    }
+}
+
+static bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModification& mod,
+                                  std::string& outSlk, std::string& outField) {
+    const std::string metaId = mod.id.ToString();
+    if (!meta.TryGetValue(metaId, "slk", outSlk) || outSlk.empty()) return false;
+    if (!meta.TryGetValue(metaId, "field", outField) || outField.empty()) return false;
+
+    int data = 0;
+    std::string dataValue;
+    if (meta.TryGetValue(metaId, "data", dataValue) && !dataValue.empty()) {
+        data = std::atoi(dataValue.c_str());
+    }
+    if (data > 0) {
+        outField.push_back(static_cast<char>('A' + data - 1));
+    }
+
+    int index = -1;
+    std::string indexValue;
+    if (meta.TryGetValue(metaId, "index", indexValue) && !indexValue.empty()) {
+        index = std::atoi(indexValue.c_str());
+    }
+
+    int repeat = 0;
+    std::string repeatValue;
+    if (meta.TryGetValue(metaId, "repeat", repeatValue) && !repeatValue.empty()) {
+        repeat = std::atoi(repeatValue.c_str());
+    }
+
+    std::string appendIndexMode;
+    meta.TryGetValue(metaId, "appendIndex", appendIndexMode);
+    int level = mod.level;
+    if (repeat > 0) {
+        if (appendIndexMode == "1") {
+            const int upgradeExtensionLevel = level - 1;
+            if (upgradeExtensionLevel > 0) {
+                outField += std::to_string(upgradeExtensionLevel);
+            }
+        } else if (appendIndexMode == "0") {
+            // Indexed list storage is collapsed into one comma field in this C++ data path.
+        } else if (index == -1 || repeat >= 10) {
+            if (level == 0) level = 1;
+            if (repeat >= 10 && level >= 0 && level < 100) {
+                if (level < 10) outField.push_back('0');
+                outField += std::to_string(level);
+            } else {
+                outField += std::to_string(level);
+            }
+        }
+    }
+    return true;
+}
+
+static void ApplyMapUnitObjectMods(const MpqManager& mpq, const std::string& mapPath,
+                                   TxtTable& unitDataTxt,
+                                   TxtTable& unitAbilitiesTxt,
+                                   TxtTable& unitBalanceTxt,
+                                   TxtTable& unitWeaponsTxt,
+                                   TxtTable& unitUITxt) {
+    if (mapPath.empty()) return;
+
+    ObjectModificationSet mods;
+    if (!LoadWar3MapUnitMods(mapPath, mods)) {
+        std::cout << "ObjectMods: no war3map.w3u unit modifications" << std::endl;
+        return;
+    }
+
+    SlkTable unitMetaSlk;
+    std::vector<uint8_t> metaBuf;
+    if (!mpq.ReadFile("Units\\UnitMetaData.slk", metaBuf) ||
+        !unitMetaSlk.Load(metaBuf.data(), metaBuf.size())) {
+        std::cerr << "ObjectMods: UnitMetaData.slk unavailable; unit modifications skipped" << std::endl;
+        return;
+    }
+
+    const SlkAccessor meta(unitMetaSlk, {"ID"});
+    int applied = 0;
+    int unknown = 0;
+    for (const auto& entry : mods.original) {
+        const std::string section = entry.oldId.ToString();
+        if (section.size() != 4) continue;
+        for (const auto& mod : entry.modifications) {
+            std::string slkName;
+            std::string fieldName;
+            if (!ResolveObjectModField(meta, mod, slkName, fieldName)) {
+                unknown++;
+                continue;
+            }
+            TxtTable* target = SelectUnitOverlayTable(
+                slkName, unitDataTxt, unitAbilitiesTxt, unitBalanceTxt, unitWeaponsTxt, unitUITxt);
+            if (!target) {
+                unknown++;
+                continue;
+            }
+            target->SetString(section, fieldName, FormatObjectModificationValue(mod));
+            applied++;
+        }
+    }
+
+    std::cout << "ObjectMods: war3map.w3u original=" << mods.original.size()
+              << " custom=" << mods.custom.size()
+              << " applied=" << applied
+              << " unknown=" << unknown;
+    if (!mods.custom.empty()) {
+        std::cout << " customSkipped=" << mods.custom.size();
+    }
+    std::cout << std::endl;
 }
 
 static void ParseWar3IdList(const std::string& str, std::vector<War3ID>& out) {
@@ -462,6 +603,12 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
 
 CUnitData CUnitData::LoadFromMpq(const MpqManager& mpq,
                                  const CGameplayConstants& gameplayConstants) {
+    return LoadFromMpq(mpq, gameplayConstants, std::string());
+}
+
+CUnitData CUnitData::LoadFromMpq(const MpqManager& mpq,
+                                 const CGameplayConstants& gameplayConstants,
+                                 const std::string& mapPath) {
     SlkTable unitDataSlk;
     SlkTable unitAbilitiesSlk;
     SlkTable unitBalanceSlk;
@@ -520,6 +667,9 @@ CUnitData CUnitData::LoadFromMpq(const MpqManager& mpq,
     for (const auto& file : overlayFiles) {
         loadOverlayEverywhere(file);
     }
+    ApplyMapUnitObjectMods(mpq, mapPath,
+                           unitDataTxt, unitAbilitiesTxt, unitBalanceTxt,
+                           unitWeaponsTxt, unitUITxt);
 
     return CUnitData(gameplayConstants,
                      unitDataSlk, unitDataTxt,

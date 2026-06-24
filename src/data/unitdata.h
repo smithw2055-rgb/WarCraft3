@@ -46,6 +46,8 @@ public:
                                    const CUnitType& unitType, CUnit& unit) const;
 
     static CUnitData LoadFromMpq(const MpqManager& mpq, const CGameplayConstants& gameplayConstants);
+    static CUnitData LoadFromMpq(const MpqManager& mpq, const CGameplayConstants& gameplayConstants,
+                                 const std::string& mapPath);
 
 private:
     std::unordered_map<War3ID, std::unique_ptr<CUnitType>> types_;

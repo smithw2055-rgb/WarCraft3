@@ -139,8 +139,12 @@ void MapLoader::BuildTerrain() {
 
 void MapLoader::LoadObjectModifications(const std::string& mapPath) {
     // Map-specific object modifications (custom unit/ability data in war3map.w3u, etc.)
-    // These override the base SLK data loaded earlier.
-    // For now, modifications are loaded implicitly by the map MPQ system.
+    // Rebuild unit type data before any simulation units exist, so units.doo and JASS-created
+    // units see the same merged object-editor values without invalidating live CUnitType refs.
+    if (mpq_.ArchiveCount() > 0) {
+        unitData_ = CUnitData::LoadFromMpq(mpq_, gameplayConstants_, mapPath);
+        sim_.SetUnitData(&unitData_);
+    }
     std::cout << "  Object modifications applied" << std::endl;
 }
 

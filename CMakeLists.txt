@@ -183,6 +183,7 @@ set(SOURCES
     src/map/wpm.cpp
     src/map/w3r.cpp
     src/map/wts.cpp
+    src/map/object_mods.cpp
     src/map/w3d.cpp
     src/map/unitsdoo.cpp
     src/model/mdx.cpp
