@@ -215,6 +215,7 @@ public:
     int eventRevivingUnitHandle = -1;
     int eventTransportUnitHandle = -1;
     int eventLoadedUnitHandle = -1;
+    int eventExpiredTimerHandle = -1;
 
     // Callbacks for external system access (set from main.cpp)
     std::function<void(float,float,float)> camSetPosition;
@@ -268,6 +269,7 @@ struct JassQueuedContext {
     int eventRevivingUnitHandle = -1;
     int eventTransportUnitHandle = -1;
     int eventLoadedUnitHandle = -1;
+    int eventExpiredTimerHandle = -1;
 };
 
 struct JassQueuedThread {

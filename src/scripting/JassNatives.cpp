@@ -195,6 +195,7 @@ JassQueuedContext JassNatives::CaptureContext() const {
     context.eventRevivingUnitHandle = data_->eventRevivingUnitHandle;
     context.eventTransportUnitHandle = data_->eventTransportUnitHandle;
     context.eventLoadedUnitHandle = data_->eventLoadedUnitHandle;
+    context.eventExpiredTimerHandle = data_->eventExpiredTimerHandle;
     return context;
 }
 
@@ -227,6 +228,7 @@ void JassNatives::ApplyContext(const JassQueuedContext& context) {
     data_->eventRevivingUnitHandle = context.eventRevivingUnitHandle;
     data_->eventTransportUnitHandle = context.eventTransportUnitHandle;
     data_->eventLoadedUnitHandle = context.eventLoadedUnitHandle;
+    data_->eventExpiredTimerHandle = context.eventExpiredTimerHandle;
 }
 
 void JassNatives::QueueFunction(const std::string& functionName) {
@@ -377,9 +379,29 @@ int JassNatives::UpdateTimers(float dt) {
         timer->remaining -= dt;
         if (timer->remaining <= 0) {
             timer->remaining = 0;
+            JassQueuedContext context = CaptureContext();
+            context.eventExpiredTimerHandle = data_->AllocHandle(JassHandleInfo::TIMER, id);
             if (!timer->callbackFunc.empty()) {
-                QueueFunction(timer->callbackFunc);
+                QueueFunctionWithContext(timer->callbackFunc, context);
                 firedCount++;
+            }
+            for (auto& [triggerId, trigger] : data_->triggers) {
+                bool matches = false;
+                for (const auto& event : trigger->registeredEvents) {
+                    if ((event.first == id && event.second == 1001) ||
+                        (event.first == -1 && event.second == 1000 + id)) {
+                        matches = true;
+                        break;
+                    }
+                }
+                if (!matches) continue;
+
+                JassQueuedContext triggerContext = context;
+                triggerContext.currentTriggerId = triggerId;
+                for (const auto& funcName : trigger->actionFuncNames) {
+                    QueueFunctionWithContext(funcName, triggerContext);
+                    firedCount++;
+                }
             }
             if (timer->periodic) {
                 timer->remaining = timer->timeout;
@@ -2593,6 +2615,9 @@ void JassNatives::RegisterEventNatives() {
     });
     vm_.RegisterNative("GetLoadedUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->eventLoadedUnitHandle >= 0 ? JassValue::Int(data->eventLoadedUnitHandle) : JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetExpiredTimer", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return data->eventExpiredTimerHandle >= 0 ? JassValue::Int(data->eventExpiredTimerHandle) : JassValue::Int(0);
     });
 }
 
