@@ -1885,6 +1885,59 @@ void JassNatives::RegisterItemNatives() {
         auto* item = GetJassItem(data, args[0].intVal);
         return JassValue::Bool(item ? item->IsInvulnerable() : false);
     });
+    vm_.RegisterNative("SetItemVisible", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetHidden(!args[1].boolVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("IsItemVisible", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Bool(item ? !item->IsHidden() : false);
+    });
+    vm_.RegisterNative("IsItemPowerup", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Bool(item ? item->IsPowerup() : false);
+    });
+    vm_.RegisterNative("IsItemOwned", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Bool(item ? item->GetOwner() != nullptr : false);
+    });
+    vm_.RegisterNative("IsItemSellable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
+        auto* item = GetJassItem(data, args[0].intVal);
+        const CItemType* type = item ? sim->GetItemData()->GetItem(item->GetTypeId()) : nullptr;
+        return JassValue::Bool(type ? type->sellable : false);
+    });
+    vm_.RegisterNative("IsItemPawnable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Bool(item ? item->IsPawnable() : false);
+    });
+    vm_.RegisterNative("IsItemIdPowerup", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
+        const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
+        return JassValue::Bool(type ? type->powerup : false);
+    });
+    vm_.RegisterNative("IsItemIdSellable", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
+        const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
+        return JassValue::Bool(type ? type->sellable : false);
+    });
+    vm_.RegisterNative("IsItemIdPawnable", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
+        const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
+        return JassValue::Bool(type ? type->pawnable : false);
+    });
+    vm_.RegisterNative("IsItemIdPerishable", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
+        const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
+        return JassValue::Bool(type ? type->perishable : false);
+    });
     vm_.RegisterNative("GetItemPlayer", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         auto* item = GetJassItem(data, args[0].intVal);
@@ -1922,6 +1975,18 @@ void JassNatives::RegisterItemNatives() {
         if (args.empty()) return JassValue::Int(0);
         auto* item = GetJassItem(data, args[0].intVal);
         return JassValue::Int(item ? (int)item->GetItemClass() : 0);
+    });
+    vm_.RegisterNative("SetItemDropID", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetDropId(War3ID((uint32_t)args[1].intVal));
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("GetItemDropID", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Int(item ? (int)item->GetDropId().value : 0);
     });
     vm_.RegisterNative("GetItemUserData", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);

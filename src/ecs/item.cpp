@@ -6,7 +6,7 @@ CItem::CItem(int handleId, War3ID typeId, float x, float y)
 bool CItem::CanBeTargetedBy(CSimulation& simulation, CUnit* source,
                              const std::vector<CTargetType>& targetsAllowed) const {
     (void)simulation; (void)source; (void)targetsAllowed;
-    return !IsDead();
+    return !hidden_ && !IsDead();
 }
 
 float CItem::Damage(CSimulation& simulation, CUnit* source,

@@ -14,6 +14,8 @@ public:
     void SetPosition(float x, float y) { SetX(x); SetY(y); }
 
     War3ID GetTypeId() const { return typeId_; }
+    War3ID GetDropId() const { return dropId_; }
+    void SetDropId(War3ID v) { dropId_ = v; }
     int GetGoldValue() const { return goldValue_; }
     void SetGoldValue(int v) { goldValue_ = v; }
     int GetLumberValue() const { return lumberValue_; }
@@ -24,6 +26,8 @@ public:
     void SetItemClass(CItemClass v) { itemClass_ = v; }
 
     // Usage flags
+    bool IsHidden() const { return hidden_; }
+    void SetHidden(bool v) { hidden_ = v; }
     bool IsPowerup() const { return isPowerup_; }
     void SetPowerup(bool v) { isPowerup_ = v; }
     bool IsPermanent() const { return isPermanent_; }
@@ -95,6 +99,7 @@ public:
 
 private:
     War3ID typeId_;
+    War3ID dropId_;
     CItemClass itemClass_ = CItemClass::UNKNOWN;
     int goldValue_ = 0;
     int lumberValue_ = 0;
@@ -104,6 +109,7 @@ private:
     bool isCharged_ = false;
     bool isPerishable_ = false;
     bool useAutomatically_ = false;
+    bool hidden_ = false;
     bool invulnerable_ = false;
     bool droppable_ = true;
     bool pawnable_ = true;

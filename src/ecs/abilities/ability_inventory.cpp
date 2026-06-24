@@ -52,6 +52,10 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item) 
         // Apply item effects immediately
         std::cout << "Auto-used powerup item" << std::endl;
         // TODO: apply item abilities
+        item->SetInInventory(false);
+        item->SetInventorySlot(-1);
+        item->SetOwner(nullptr);
+        item->SetHidden(true);
         item->SetLife(game, 0); // consume the item
         return true;
     }
@@ -60,6 +64,7 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item) 
     item->SetInInventory(true);
     item->SetInventorySlot(slot);
     item->SetOwner(unit);
+    item->SetHidden(true);
 
     // Grant item abilities to unit
     for (auto& abilityId : item->GetAbilityList()) {
@@ -94,6 +99,7 @@ bool CAbilityInventory::DropItemAt(CSimulation& game, CUnit* unit, int slot, flo
     item->SetInInventory(false);
     item->SetInventorySlot(-1);
     item->SetOwner(nullptr);
+    item->SetHidden(false);
 
     std::cout << "Dropped item from slot " << slot << std::endl;
     return true;
@@ -129,6 +135,7 @@ bool CAbilityInventory::UseItem(CSimulation& game, CUnit* unit, int slot) {
             item->SetInInventory(false);
             item->SetInventorySlot(-1);
             item->SetOwner(nullptr);
+            item->SetHidden(true);
             item->SetLife(game, 0); // destroy the item
             std::cout << "Item consumed (no charges left)" << std::endl;
         }
