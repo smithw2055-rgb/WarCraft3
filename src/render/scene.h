@@ -29,6 +29,7 @@ public:
     ~SceneManager() { Clear(); }
 
     bool Init(const MpqManager& mpq);
+    void ApplyMapObjectModifications(const std::string& mapPath);
     void Clear();
     void ResetLoadStats();
     void PrintLoadStats() const;
@@ -84,5 +85,7 @@ private:
 
     std::unordered_map<uint32_t, std::string> unitPaths_;
     std::unordered_map<uint32_t, std::string> doodadPaths_;
+    std::unordered_map<uint32_t, std::string> doodadDirs_;
+    std::unordered_map<uint32_t, std::string> doodadFiles_;
     LoadStats loadStats_;
 };

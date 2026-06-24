@@ -146,6 +146,7 @@ void MapLoader::LoadObjectModifications(const std::string& mapPath) {
         destructableData_ = CDestructableData::LoadFromMpq(mpq_, mapPath);
         sim_.SetUnitData(&unitData_);
         sim_.SetDestructableData(&destructableData_);
+        scene_.ApplyMapObjectModifications(mapPath);
     }
     std::cout << "  Object modifications applied" << std::endl;
 }

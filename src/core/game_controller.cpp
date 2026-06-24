@@ -266,16 +266,6 @@ bool GameController::Initialize() {
 
     OpenDataSources();
 
-    scene_.Init(mpq_);
-    splatMeta_.Load(mpq_);
-
-    audio_.Init();
-    if (audio_.IsValid() && mpq_.ArchiveCount() > 0) {
-        audio_.SetMpqManager(&mpq_);
-        audio_.LoadSound("ui_click", "UI\\Mouse\\HumanClick1.wav", &mpq_);
-        audio_.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &mpq_);
-    }
-
     // Determine map path
     fs::path resourcesDir = project_root / "resources";
     if (mapPath_.empty()) {
@@ -302,6 +292,20 @@ bool GameController::Initialize() {
     }
 
     std::cout << "\nMap: " << fs::path(mapPath_).filename() << std::endl;
+
+    if (!mapPath_.empty() && fs::exists(mapPath_)) {
+        mpq_.Open(mapPath_);
+    }
+
+    scene_.Init(mpq_);
+    splatMeta_.Load(mpq_);
+
+    audio_.Init();
+    if (audio_.IsValid() && mpq_.ArchiveCount() > 0) {
+        audio_.SetMpqManager(&mpq_);
+        audio_.LoadSound("ui_click", "UI\\Mouse\\HumanClick1.wav", &mpq_);
+        audio_.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &mpq_);
+    }
 
     ui_.Init(&mpq_, 1280, 720);
     initialized_ = true;

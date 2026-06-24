@@ -1,8 +1,11 @@
 #include "scene.h"
+#include "map/object_mods.h"
 #include "resource/slk.h"
 #include <iostream>
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <sstream>
 #include <unordered_set>
 
 static std::string War3IDToString(uint32_t id) {
@@ -39,6 +42,148 @@ static void PushUniquePath(std::vector<std::string>& paths, const std::string& p
         paths.push_back(path);
     }
 }
+
+namespace {
+
+static std::string TrimCopy(std::string value) {
+    const size_t first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return {};
+    }
+    const size_t last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+struct SlkAccessor {
+    const SlkTable* table = nullptr;
+    int idColumn = -1;
+    std::unordered_map<std::string, int> columns;
+    std::unordered_map<std::string, int> rowsById;
+
+    SlkAccessor() = default;
+
+    SlkAccessor(const SlkTable& slk, std::initializer_list<const char*> idColumnCandidates) {
+        Init(slk, idColumnCandidates);
+    }
+
+    void Init(const SlkTable& slk, std::initializer_list<const char*> idColumnCandidates) {
+        table = &slk;
+        columns.clear();
+        rowsById.clear();
+        idColumn = -1;
+
+        for (int i = 0; i < slk.Cols(); ++i) {
+            columns[slk.colNames_[i]] = i;
+        }
+
+        for (const char* candidate : idColumnCandidates) {
+            auto it = columns.find(candidate);
+            if (it != columns.end()) {
+                idColumn = it->second;
+                break;
+            }
+        }
+        if (idColumn < 0 && slk.Cols() > 0) {
+            idColumn = 0;
+        }
+        if (idColumn < 0) {
+            return;
+        }
+
+        for (int row = 0; row < slk.Rows(); ++row) {
+            const std::string id = TrimCopy(slk.GetString(row, idColumn));
+            if (!id.empty()) {
+                rowsById[id] = row;
+            }
+        }
+    }
+
+    bool TryGetValue(const std::string& id, const std::string& key, std::string& outValue) const {
+        if (!table) {
+            return false;
+        }
+        const auto rowIt = rowsById.find(id);
+        if (rowIt == rowsById.end()) {
+            return false;
+        }
+        const auto colIt = columns.find(key);
+        if (colIt == columns.end()) {
+            return false;
+        }
+        outValue = table->GetString(rowIt->second, colIt->second);
+        return !outValue.empty();
+    }
+};
+
+static std::string FormatObjectModificationValue(const ObjectModification& mod) {
+    switch (mod.varType) {
+    case ObjectModification::INT:
+    case ObjectModification::BOOLEAN:
+        return std::to_string(mod.intValue);
+    case ObjectModification::STRING:
+        return mod.stringValue;
+    case ObjectModification::REAL:
+    case ObjectModification::UNREAL:
+    default: {
+        std::ostringstream ss;
+        ss << mod.realValue;
+        return ss.str();
+    }
+    }
+}
+
+static bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModification& mod,
+                                  std::string& outField) {
+    const std::string metaId = mod.id.ToString();
+    std::string slkName;
+    if (!meta.TryGetValue(metaId, "slk", slkName) || slkName.empty()) return false;
+    if (!meta.TryGetValue(metaId, "field", outField) || outField.empty()) return false;
+
+    int data = 0;
+    std::string dataValue;
+    if (meta.TryGetValue(metaId, "data", dataValue) && !dataValue.empty()) {
+        data = std::atoi(dataValue.c_str());
+    }
+    if (data > 0) {
+        outField.push_back(static_cast<char>('A' + data - 1));
+    }
+
+    int index = -1;
+    std::string indexValue;
+    if (meta.TryGetValue(metaId, "index", indexValue) && !indexValue.empty()) {
+        index = std::atoi(indexValue.c_str());
+    }
+
+    int repeat = 0;
+    std::string repeatValue;
+    if (meta.TryGetValue(metaId, "repeat", repeatValue) && !repeatValue.empty()) {
+        repeat = std::atoi(repeatValue.c_str());
+    }
+
+    std::string appendIndexMode;
+    meta.TryGetValue(metaId, "appendIndex", appendIndexMode);
+    int level = mod.level;
+    if (repeat > 0) {
+        if (appendIndexMode == "1") {
+            const int upgradeExtensionLevel = level - 1;
+            if (upgradeExtensionLevel > 0) {
+                outField += std::to_string(upgradeExtensionLevel);
+            }
+        } else if (appendIndexMode == "0") {
+        } else if (index == -1 || repeat >= 10) {
+            if (level == 0) level = 1;
+            if (repeat >= 10 && level >= 0 && level < 100) {
+                if (level < 10) outField.push_back('0');
+                outField += std::to_string(level);
+            } else {
+                outField += std::to_string(level);
+            }
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 bool SceneManager::Init(const MpqManager& mpq) {
     mpq_ = const_cast<MpqManager*>(&mpq);
@@ -96,6 +241,8 @@ bool SceneManager::Init(const MpqManager& mpq) {
                             }
                             // Store the base file path; ResolveAndLoad will try variations
                             doodadPaths_[war3ID] = NormalizePath(basePath);
+                            doodadDirs_[war3ID] = dir;
+                            doodadFiles_[war3ID] = file;
                         }
                     }
                     std::cout << "Scene: " << doodadPaths_.size() << " doodad paths loaded" << std::endl;
@@ -137,6 +284,8 @@ bool SceneManager::Init(const MpqManager& mpq) {
 
                         uint32_t war3ID = StringToWar3ID(sid);
                         doodadPaths_[war3ID] = NormalizePath(file);
+                        doodadDirs_[war3ID].clear();
+                        doodadFiles_[war3ID] = file;
                         destructableCount++;
                     }
                     std::cout << "Scene: " << destructableCount << " destructable paths loaded" << std::endl;
@@ -151,6 +300,114 @@ bool SceneManager::Init(const MpqManager& mpq) {
     }
 
     return true;
+}
+
+void SceneManager::ApplyMapObjectModifications(const std::string& mapPath) {
+    if (!mpq_ || mapPath.empty()) return;
+
+    auto updatePath = [this](uint32_t id) {
+        auto fileIt = doodadFiles_.find(id);
+        if (fileIt == doodadFiles_.end() || fileIt->second.empty()) {
+            return false;
+        }
+        const auto dirIt = doodadDirs_.find(id);
+        std::string basePath = fileIt->second;
+        if (dirIt != doodadDirs_.end() && !dirIt->second.empty()) {
+            basePath = dirIt->second + "\\" + fileIt->second;
+        }
+        doodadPaths_[id] = NormalizePath(basePath);
+        return true;
+    };
+
+    auto applyMods = [this, &mapPath, &updatePath](const char* fileName, bool extended,
+                                                   const char* metaPath) {
+        ObjectModificationSet mods;
+        if (!LoadWar3MapObjectMods(mapPath, fileName, extended, mods)) {
+            return;
+        }
+
+        SlkTable metaSlk;
+        std::vector<uint8_t> metaBuf;
+        if (!mpq_->ReadFile(metaPath, metaBuf) || !metaSlk.Load(metaBuf.data(), metaBuf.size())) {
+            std::cerr << "SceneObjectMods: " << metaPath
+                      << " unavailable; render path modifications skipped for "
+                      << fileName << std::endl;
+            return;
+        }
+
+        const SlkAccessor meta(metaSlk, {"ID"});
+        int applied = 0;
+        int unknown = 0;
+        int customCloned = 0;
+        int customSkipped = 0;
+
+        auto applyEntry = [&](const ObjectModificationEntry& entry, uint32_t id) {
+            bool touchedPath = false;
+            for (const auto& mod : entry.modifications) {
+                std::string fieldName;
+                if (!ResolveObjectModField(meta, mod, fieldName)) {
+                    unknown++;
+                    continue;
+                }
+                const std::string fieldLower = [&fieldName]() {
+                    std::string lower = fieldName;
+                    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+                        return (char)std::tolower(c);
+                    });
+                    return lower;
+                }();
+
+                if (fieldLower == "file") {
+                    doodadFiles_[id] = FormatObjectModificationValue(mod);
+                    applied++;
+                    touchedPath = true;
+                } else if (fieldLower == "dir") {
+                    doodadDirs_[id] = FormatObjectModificationValue(mod);
+                    applied++;
+                    touchedPath = true;
+                }
+            }
+            if (touchedPath) {
+                updatePath(id);
+            }
+        };
+
+        for (const auto& entry : mods.custom) {
+            const uint32_t oldId = StringToWar3ID(entry.oldId.ToString());
+            const uint32_t newId = StringToWar3ID(entry.newId.ToString());
+            auto oldFile = doodadFiles_.find(oldId);
+            if (oldFile == doodadFiles_.end()) {
+                customSkipped++;
+                continue;
+            }
+            doodadFiles_[newId] = oldFile->second;
+            auto oldDir = doodadDirs_.find(oldId);
+            if (oldDir != doodadDirs_.end()) {
+                doodadDirs_[newId] = oldDir->second;
+            } else {
+                doodadDirs_[newId].clear();
+            }
+            updatePath(newId);
+            customCloned++;
+            applyEntry(entry, newId);
+        }
+
+        for (const auto& entry : mods.original) {
+            const uint32_t id = StringToWar3ID(entry.oldId.ToString());
+            applyEntry(entry, id);
+        }
+
+        std::cout << "SceneObjectMods: " << fileName
+                  << " original=" << mods.original.size()
+                  << " custom=" << mods.custom.size()
+                  << " applied=" << applied
+                  << " unknown=" << unknown
+                  << " customCloned=" << customCloned
+                  << " customSkipped=" << customSkipped << std::endl;
+    };
+
+    applyMods("war3map.w3d", true, "Doodads\\DoodadMetaData.slk");
+    applyMods("war3map.w3b", false, "Units\\DestructableMetaData.slk");
 }
 
 void SceneManager::Clear() {
