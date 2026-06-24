@@ -2667,6 +2667,15 @@ void JassNatives::RegisterTriggerNatives() {
 // 18. Event response natives
 // ============================================================
 void JassNatives::RegisterEventNatives() {
+    auto makeSpellTargetLocation = [data = data_]() -> JassValue {
+        auto loc = std::make_shared<JassLocation>();
+        loc->x = data->eventSpellTargetX;
+        loc->y = data->eventSpellTargetY;
+        int id = data->nextLocId++;
+        data->locations[id] = loc;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::LOCATION, id));
+    };
+
     vm_.RegisterNative("GetFilterUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->filterUnitHandle >= 0 ? JassValue::Int(data->filterUnitHandle) : JassValue::Int(0);
     });
@@ -2707,13 +2716,14 @@ void JassNatives::RegisterEventNatives() {
     vm_.RegisterNative("GetSpellTargetUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->eventSpellTargetUnitHandle >= 0 ? JassValue::Int(data->eventSpellTargetUnitHandle) : JassValue::Int(0);
     });
-    vm_.RegisterNative("GetSpellTargetLocation", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        auto loc = std::make_shared<JassLocation>();
-        loc->x = data->eventSpellTargetX;
-        loc->y = data->eventSpellTargetY;
-        int id = data->nextLocId++;
-        data->locations[id] = loc;
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::LOCATION, id));
+    vm_.RegisterNative("GetSpellTargetLoc", [makeSpellTargetLocation](const std::vector<JassValue>&) -> JassValue {
+        return makeSpellTargetLocation();
+    });
+    vm_.RegisterNative("GetSpellTargetPoint", [makeSpellTargetLocation](const std::vector<JassValue>&) -> JassValue {
+        return makeSpellTargetLocation();
+    });
+    vm_.RegisterNative("GetSpellTargetLocation", [makeSpellTargetLocation](const std::vector<JassValue>&) -> JassValue {
+        return makeSpellTargetLocation();
     });
     vm_.RegisterNative("GetTriggerPlayer", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->eventTriggerPlayerHandle >= 0 ? JassValue::Int(data->eventTriggerPlayerHandle) : JassValue::Int(0);
