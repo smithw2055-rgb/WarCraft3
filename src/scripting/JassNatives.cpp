@@ -2723,6 +2723,9 @@ void JassNatives::RegisterEventNatives() {
     vm_.RegisterNative("GetEventAttackingUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->eventAttackingUnitHandle >= 0 ? JassValue::Int(data->eventAttackingUnitHandle) : JassValue::Int(0);
     });
+    vm_.RegisterNative("GetAttacker", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return data->eventAttackingUnitHandle >= 0 ? JassValue::Int(data->eventAttackingUnitHandle) : JassValue::Int(0);
+    });
     vm_.RegisterNative("GetSpellAbilityId", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return JassValue::Int(data->eventSpellAbilityId);
     });
