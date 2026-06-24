@@ -106,8 +106,11 @@ public:
     std::unordered_map<int, animation_utils::PendingUnitAnimation> simUnitQueuedAnimations;
     std::unordered_map<int, std::vector<std::string>> simUnitAnimationPropertyTags;
     std::unordered_set<int> simUnitVisualRegistrationFailed;
+    std::unordered_map<int, int> simItemToVisualIdx;
+    std::unordered_set<int> simItemVisualRegistrationFailed;
 
     bool EnsureSimulationUnitVisual(CUnit* unit);
+    bool EnsureSimulationItemVisual(CItem* item);
 
     // Screenshot
     std::string screenshotPath;

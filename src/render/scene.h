@@ -38,9 +38,9 @@ public:
     bool AddDoodad(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
                    int variation, int flags, int life, uint32_t skinId = 0);
     bool HasItemPath(uint32_t war3ID, uint32_t skinId = 0) const;
-    bool AddItem(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
+    int AddItem(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
                  int flags, uint32_t skinId = 0);
-    bool AddUnit(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
+    int AddUnit(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
                  int player, int hitpoints, int flags, uint32_t skinId = 0,
                  bool playBirthAnimation = false);
 

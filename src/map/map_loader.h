@@ -34,6 +34,14 @@ public:
         int flags = 0;
     };
 
+    struct ItemVisualSeed {
+        int handleId = -1;
+        int visualIndex = -1;
+        float scale[3] = {1.0f, 1.0f, 1.0f};
+        uint32_t skinId = 0;
+        int flags = 0;
+    };
+
     struct UnitLoadResult {
         int simCreated = 0;
         int visualCreated = 0;
@@ -55,6 +63,7 @@ public:
 
     const std::string& GetMapPath() const { return mapPath_; }
     const std::vector<UnitVisualSeed>& GetUnitVisualSeeds() const { return unitVisualSeeds_; }
+    const std::vector<ItemVisualSeed>& GetItemVisualSeeds() const { return itemVisualSeeds_; }
     const UnitLoadResult& GetUnitLoadResult() const { return unitLoadResult_; }
     bool HasFatalError() const { return fatalError_; }
     const std::string& GetFatalError() const { return fatalErrorMessage_; }
@@ -92,6 +101,7 @@ private:
     CGameplayConstants gameplayConstants_;
     std::shared_ptr<JassNativesData> configData_;
     std::vector<UnitVisualSeed> unitVisualSeeds_;
+    std::vector<ItemVisualSeed> itemVisualSeeds_;
     UnitLoadResult unitLoadResult_;
     bool fatalError_ = false;
     std::string fatalErrorMessage_;

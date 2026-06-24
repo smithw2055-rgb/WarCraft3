@@ -21,6 +21,7 @@ void MapLoader::CreateTasks(const std::string& mapPath, int localPlayerIndex) {
     tasks_.clear();
     unitsDoo_ = UnitsDooData{};
     unitVisualSeeds_.clear();
+    itemVisualSeeds_.clear();
     unitLoadResult_ = UnitLoadResult{};
     fatalError_ = false;
     fatalErrorMessage_.clear();
@@ -240,13 +241,29 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
         }
         if (!simUnit) {
             if (scene_.HasItemPath(u.id, u.skinId)) {
+                int itemHandleId = -1;
                 if (configData_ && itemData_.HasItem(id)) {
-                    configData_->CreateItem(&sim_, id, u.pos[0], u.pos[1]);
-                    unitLoadResult_.itemRegistered++;
+                    itemHandleId = configData_->CreateItem(&sim_, id, u.pos[0], u.pos[1]);
+                    if (itemHandleId >= 0) {
+                        unitLoadResult_.itemRegistered++;
+                    }
                 }
-                if (scene_.AddItem(u.id, u.pos, u.angle, u.scale, u.flags, u.skinId))
+                const int visualIndex = scene_.AddItem(u.id, u.pos, u.angle, u.scale, u.flags, u.skinId);
+                if (visualIndex >= 0) {
                     unitLoadResult_.visualCreated++;
-            } else if (scene_.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId)) {
+                    if (itemHandleId >= 0) {
+                        ItemVisualSeed seed;
+                        seed.handleId = itemHandleId;
+                        seed.visualIndex = visualIndex;
+                        seed.scale[0] = u.scale[0];
+                        seed.scale[1] = u.scale[1];
+                        seed.scale[2] = u.scale[2];
+                        seed.skinId = u.skinId;
+                        seed.flags = u.flags;
+                        itemVisualSeeds_.push_back(seed);
+                    }
+                }
+            } else if (scene_.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId) >= 0) {
                 unitLoadResult_.visualCreated++;
             }
         }

@@ -789,7 +789,7 @@ bool SceneManager::HasItemPath(uint32_t war3ID, uint32_t skinId) const {
     return itemPaths_.find(war3ID) != itemPaths_.end();
 }
 
-bool SceneManager::AddItem(uint32_t war3ID, const float pos[3], float angle,
+int SceneManager::AddItem(uint32_t war3ID, const float pos[3], float angle,
                            const float scale[3], int flags, uint32_t skinId) {
     (void)flags;
     loadStats_.itemAttempts++;
@@ -810,7 +810,7 @@ bool SceneManager::AddItem(uint32_t war3ID, const float pos[3], float angle,
 
     if (!viewer) {
         loadStats_.missReasons[sawItemPath ? "item-model-miss" : "item-path-miss"]++;
-        return false;
+        return -1;
     }
 
     auto* inst = new PlacedModel();
@@ -821,12 +821,13 @@ bool SceneManager::AddItem(uint32_t war3ID, const float pos[3], float angle,
     inst->scale[0] = scale[0]; inst->scale[1] = scale[2]; inst->scale[2] = scale[1];
     inst->visible = true;
     inst->viewer = viewer;
+    const int instanceIndex = (int)instances_.size();
     instances_.push_back(inst);
     loadStats_.itemSuccess++;
-    return true;
+    return instanceIndex;
 }
 
-bool SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
+int SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
                             const float scale[3], int player, int hitpoints, int flags, uint32_t skinId,
                             bool playBirthAnimation) {
     (void)hitpoints;
@@ -864,7 +865,7 @@ bool SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
     }
     if (!viewer) {
         loadStats_.missReasons[missReason ? missReason : "unit-unknown-miss"]++;
-        return false;
+        return -1;
     }
 
     auto* inst = new PlacedModel();
@@ -881,9 +882,10 @@ bool SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
     if (playBirthAnimation) {
         inst->viewer->PlayBirthThenStandSequence();
     }
+    const int instanceIndex = (int)instances_.size();
     instances_.push_back(inst);
     loadStats_.unitSuccess++;
-    return true;
+    return instanceIndex;
 }
 
 bool SceneManager::UpdateInstancePosition(int index, const float pos[3], float angle,

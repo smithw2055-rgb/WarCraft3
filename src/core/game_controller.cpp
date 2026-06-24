@@ -7,6 +7,7 @@
 #include "../ecs/orders/order.h"
 #include "../ecs/widget.h"
 #include "../ecs/destructable.h"
+#include "../ecs/item.h"
 #include "../core/path_utils.h"
 #include "../platform/platform.h"
 #include "../debug/move_debug.h"
@@ -472,6 +473,11 @@ void GameController::InitInGame() {
                 seed.skinId, seed.hitpoints, seed.flags
             };
         }
+        for (const auto& seed : mapLoader_->GetItemVisualSeeds()) {
+            if (seed.handleId >= 0 && seed.visualIndex >= 0) {
+                simItemToVisualIdx[seed.handleId] = seed.visualIndex;
+            }
+        }
         const auto& unitLoadResult = mapLoader_->GetUnitLoadResult();
         int visualUnitCreated = unitLoadResult.visualCreated;
         int visualMissForSimUnits = unitLoadResult.visualMissForSimUnits;
@@ -821,6 +827,24 @@ void GameController::SyncAndReconcileVisuals() {
         }
     }
 
+    for (auto* item : simulation_.GetItems()) {
+        if (!item || item->IsDead()) continue;
+        const int handleId = item->GetHandleId();
+        auto visualIt = simItemToVisualIdx.find(handleId);
+        if (visualIt == simItemToVisualIdx.end()) {
+            EnsureSimulationItemVisual(item);
+            visualIt = simItemToVisualIdx.find(handleId);
+        }
+        if (visualIt != simItemToVisualIdx.end()) {
+            float height = texturedTerrain_.IsValid()
+                ? texturedTerrain_.GetGroundHeight(item->GetX(), item->GetY())
+                : 0.0f;
+            float pos[3] = {item->GetX(), height, item->GetY()};
+            scene_.UpdateInstancePosition(visualIt->second, pos, 0.0f);
+            scene_.SetInstanceVisible(visualIt->second, !item->IsHidden());
+        }
+    }
+
     // Reconcile (remove dead, add new)
     std::vector<int> removedHandles;
     for (auto& [handleId, visualIdx] : simUnitToVisualIdx) {
@@ -836,6 +860,19 @@ void GameController::SyncAndReconcileVisuals() {
             std::remove(selectedUnitHandles_.begin(), selectedUnitHandles_.end(), handleId),
             selectedUnitHandles_.end());
         if (selectedUnitHandle_ == handleId) selectedUnitHandle_ = -1;
+    }
+
+    std::vector<int> removedItemHandles;
+    for (auto& [handleId, visualIdx] : simItemToVisualIdx) {
+        CItem* item = simulation_.GetItem(handleId);
+        if (!item || item->IsDead()) {
+            scene_.SetInstanceVisible(visualIdx, false);
+            removedItemHandles.push_back(handleId);
+        }
+    }
+    for (int handleId : removedItemHandles) {
+        simItemToVisualIdx.erase(handleId);
+        simItemVisualRegistrationFailed.erase(handleId);
     }
 }
 
@@ -1353,6 +1390,29 @@ bool GameController::EnsureSimulationUnitVisual(CUnit* unit) {
     if (auto* viewer = scene_.GetViewer(visualIdx)) {
         SyncSimulationUnitAnimation(unit, viewer, this);
     }
+    return true;
+}
+
+bool GameController::EnsureSimulationItemVisual(CItem* item) {
+    if (!item) return false;
+    const int handleId = item->GetHandleId();
+    if (simItemToVisualIdx.find(handleId) != simItemToVisualIdx.end()) return true;
+    if (simItemVisualRegistrationFailed.find(handleId) != simItemVisualRegistrationFailed.end()) return false;
+    if (item->IsDead()) return false;
+
+    float height = texturedTerrain_.IsValid()
+        ? texturedTerrain_.GetGroundHeight(item->GetX(), item->GetY())
+        : 0.0f;
+    float pos[3] = {item->GetX(), height, item->GetY()};
+    float scale[3] = {1.0f, 1.0f, 1.0f};
+    const int visualIdx = scene_.AddItem(item->GetTypeId().value, pos, 0.0f, scale, 0, 0);
+    if (visualIdx < 0) {
+        simItemVisualRegistrationFailed.insert(handleId);
+        return false;
+    }
+
+    simItemToVisualIdx[handleId] = visualIdx;
+    scene_.SetInstanceVisible(visualIdx, !item->IsHidden());
     return true;
 }
 
