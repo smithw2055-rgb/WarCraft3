@@ -38,6 +38,7 @@ public:
         int simCreated = 0;
         int visualCreated = 0;
         int visualMissForSimUnits = 0;
+        int itemRegistered = 0;
         size_t mapUnitCount = 0;
     };
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "JassVM.h"
+#include "resource/slk.h"
 #include <memory>
 #include <unordered_map>
 #include <string>
@@ -138,6 +139,8 @@ public:
     void FreeHandle(int handle);
     int GetSimHandle(int jassHandle, JassHandleInfo::Type type) const;
     JassHandleInfo* GetHandleInfo(int jassHandle);
+    int CreateItem(CSimulation* sim, War3ID typeId, float x, float y);
+    int CreateItemHandle(CSimulation* sim, War3ID typeId, float x, float y);
 
     std::unordered_map<int, JassHandleInfo> handles;
     int nextHandleId = 0x01000000;

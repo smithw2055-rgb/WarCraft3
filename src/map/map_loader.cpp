@@ -240,6 +240,10 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
         }
         if (!simUnit) {
             if (scene_.HasItemPath(u.id, u.skinId)) {
+                if (configData_ && itemData_.HasItem(id)) {
+                    configData_->CreateItem(&sim_, id, u.pos[0], u.pos[1]);
+                    unitLoadResult_.itemRegistered++;
+                }
                 if (scene_.AddItem(u.id, u.pos, u.angle, u.scale, u.flags, u.skinId))
                     unitLoadResult_.visualCreated++;
             } else if (scene_.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId)) {
@@ -248,7 +252,8 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
         }
     }
     std::cout << "  Units: " << unitsDoo_.units.size() << " from map, "
-              << unitLoadResult_.simCreated << " simulation units" << std::endl;
+              << unitLoadResult_.simCreated << " simulation units, "
+              << unitLoadResult_.itemRegistered << " JASS items" << std::endl;
 }
 
 void MapLoader::LoadSounds() {

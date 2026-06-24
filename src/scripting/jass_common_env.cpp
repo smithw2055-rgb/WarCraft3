@@ -117,6 +117,12 @@ bool JassCommonEnv::Init(MpqManager& mpq, const std::string& mapPath, CSimulatio
         data_->configuredPlayerCount = configData->configuredPlayerCount;
         data_->startLocations = configData->startLocations;
         data_->playerMapConfig = configData->playerMapConfig;
+        data_->items = configData->items;
+        data_->nextItemId = std::max(data_->nextItemId, configData->nextItemId);
+        if (!data_->items.empty()) {
+            std::cout << "JASS Common: carried over " << data_->items.size()
+                      << " map items" << std::endl;
+        }
     }
 
     // Register common (full game) natives
