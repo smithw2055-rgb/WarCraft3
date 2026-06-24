@@ -268,11 +268,29 @@ void JassNatives::FireUnitEvent(int unitSimHandle, int eventType) {
             int regEventType = trigger->eventTypes[i];
             if (regEventType != eventType) continue;
 
-            int simHandle = data_->GetSimHandle(regUnitHandle, JassHandleInfo::UNIT);
-            if (simHandle == unitSimHandle || regUnitHandle == 0) {
+            bool matches = regUnitHandle == 0;
+            JassHandleInfo* info = data_->GetHandleInfo(regUnitHandle);
+            if (info && info->type == JassHandleInfo::UNIT) {
+                matches = info->id == unitSimHandle;
+            } else if (info && info->type == JassHandleInfo::PLAYER && sim_) {
+                if (CUnit* unit = sim_->GetUnit(unitSimHandle)) {
+                    matches = unit->GetPlayerIndex() == info->id;
+                }
+            } else {
+                int simHandle = data_->GetSimHandle(regUnitHandle, JassHandleInfo::UNIT);
+                matches = simHandle == unitSimHandle;
+            }
+
+            if (matches) {
                 JassQueuedContext context = CaptureContext();
                 context.currentTriggerId = id;
-                context.currentTriggerUnitHandle = regUnitHandle;
+                context.currentTriggerUnitHandle = data_->AllocHandle(JassHandleInfo::UNIT, unitSimHandle);
+                if (sim_) {
+                    if (CUnit* unit = sim_->GetUnit(unitSimHandle)) {
+                        context.eventTriggerPlayerHandle =
+                            data_->AllocHandle(JassHandleInfo::PLAYER, unit->GetPlayerIndex());
+                    }
+                }
                 for (const auto& funcName : trigger->actionFuncNames) {
                     QueueFunctionWithContext(funcName, context);
                 }
@@ -323,6 +341,25 @@ void JassNatives::FireOrderEvent(int unitSimHandle, int orderId, int targetSimHa
 
     data_->eventOrderedUnitHandle = -1;
     data_->eventIssuedOrderId = 0;
+}
+
+void JassNatives::FireItemEvent(int unitSimHandle, int itemSimHandle, int eventType) {
+    if (unitSimHandle < 0 || itemSimHandle < 0) {
+        return;
+    }
+
+    data_->eventManipulatingUnitHandle = data_->AllocHandle(JassHandleInfo::UNIT, unitSimHandle);
+    data_->eventManipulatedItemHandle = data_->AllocHandle(JassHandleInfo::ITEM, itemSimHandle);
+    if (sim_) {
+        if (CItem* item = sim_->GetItem(itemSimHandle)) {
+            data_->items[itemSimHandle] = item;
+        }
+    }
+
+    FireUnitEvent(unitSimHandle, eventType);
+
+    data_->eventManipulatingUnitHandle = -1;
+    data_->eventManipulatedItemHandle = -1;
 }
 
 int JassNatives::UpdateTimers(float dt) {

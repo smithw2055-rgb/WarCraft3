@@ -186,4 +186,12 @@ void JassCommonEnv::WireCallbacks(CSimulation& sim) {
                 natives_->FireOrderEvent(unitHandle, orderId, targetHandle, x, y);
         }
     );
+
+    // Unit item manipulation events -> JASS trigger system
+    sim.SetItemEventCallback(
+        [this](int unitHandle, int itemHandle, int eventType) {
+            if (natives_)
+                natives_->FireItemEvent(unitHandle, itemHandle, eventType);
+        }
+    );
 }

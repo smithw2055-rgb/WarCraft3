@@ -16,6 +16,10 @@ class AudioSystem;
 
 class CSimulation {
 public:
+    static constexpr int ITEM_EVENT_DROP = 85;
+    static constexpr int ITEM_EVENT_PICKUP = 86;
+    static constexpr int ITEM_EVENT_USE = 87;
+
     CSimulation();
     ~CSimulation();
 
@@ -98,6 +102,10 @@ public:
         unitOrderCallback_ = std::move(cb);
     }
     const std::function<void(int, int, int, float, float)>& GetUnitOrderCallback() const { return unitOrderCallback_; }
+    void SetItemEventCallback(std::function<void(int unitHandle, int itemHandle, int eventType)> cb) {
+        itemEventCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, int)>& GetItemEventCallback() const { return itemEventCallback_; }
 
 private:
     void ProcessUnitRemovals();
@@ -146,4 +154,5 @@ private:
     std::function<void(int, int, int)> unitDeathCallback_;
     std::function<void(int, int, float)> unitDamageCallback_;
     std::function<void(int, int, int, float, float)> unitOrderCallback_;
+    std::function<void(int, int, int)> itemEventCallback_;
 };

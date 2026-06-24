@@ -61,6 +61,11 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item, 
         item->SetOwner(nullptr);
         item->SetHidden(true);
         item->SetLife(game, 0); // consume the item
+        if (const auto& cb = game.GetItemEventCallback()) {
+            cb(unit ? unit->GetHandleId() : -1, item->GetHandleId(), CSimulation::ITEM_EVENT_PICKUP);
+            cb(unit ? unit->GetHandleId() : -1, item->GetHandleId(), CSimulation::ITEM_EVENT_USE);
+        }
+        game.RemoveItem(item);
         return true;
     }
 
@@ -77,6 +82,9 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item, 
     }
 
     std::cout << "Picked up item in slot " << slot << std::endl;
+    if (const auto& cb = game.GetItemEventCallback()) {
+        cb(unit ? unit->GetHandleId() : -1, item->GetHandleId(), CSimulation::ITEM_EVENT_PICKUP);
+    }
     return true;
 }
 
@@ -106,6 +114,9 @@ bool CAbilityInventory::DropItemAt(CSimulation& game, CUnit* unit, int slot, flo
     item->SetHidden(false);
 
     std::cout << "Dropped item from slot " << slot << std::endl;
+    if (const auto& cb = game.GetItemEventCallback()) {
+        cb(unit->GetHandleId(), item->GetHandleId(), CSimulation::ITEM_EVENT_DROP);
+    }
     return true;
 }
 
@@ -129,6 +140,9 @@ bool CAbilityInventory::UseItem(CSimulation& game, CUnit* unit, int slot) {
     // Use item's ability (potion, scroll, etc.)
     // TODO: find and execute item's active ability
     std::cout << "Used item in slot " << slot << std::endl;
+    if (const auto& cb = game.GetItemEventCallback()) {
+        cb(unit ? unit->GetHandleId() : -1, item->GetHandleId(), CSimulation::ITEM_EVENT_USE);
+    }
 
     // Consume charges if perishable
     if (item->IsPerishable() || item->IsCharged()) {
@@ -141,6 +155,7 @@ bool CAbilityInventory::UseItem(CSimulation& game, CUnit* unit, int slot) {
             item->SetOwner(nullptr);
             item->SetHidden(true);
             item->SetLife(game, 0); // destroy the item
+            game.RemoveItem(item);
             std::cout << "Item consumed (no charges left)" << std::endl;
         }
     }
