@@ -195,6 +195,10 @@ private:
     TerrainRenderer simpleTerrain_;
     TexturedTerrain texturedTerrain_;
     bool terrainLoaded_ = false;
+    bool mapConfigInitialized_ = false;
+    bool loadingInitialized_ = false;
+    bool loadingFailed_ = false;
+    std::string loadingFailureReason_;
     W3EMap map_;
     W3iInfo w3i_;
     TileSet tileset_;

@@ -54,6 +54,8 @@ public:
     const std::string& GetMapPath() const { return mapPath_; }
     const std::vector<UnitVisualSeed>& GetUnitVisualSeeds() const { return unitVisualSeeds_; }
     const UnitLoadResult& GetUnitLoadResult() const { return unitLoadResult_; }
+    bool HasFatalError() const { return fatalError_; }
+    const std::string& GetFatalError() const { return fatalErrorMessage_; }
 
 private:
     void LoadUnitDataTables();
@@ -88,4 +90,6 @@ private:
     std::shared_ptr<JassNativesData> configData_;
     std::vector<UnitVisualSeed> unitVisualSeeds_;
     UnitLoadResult unitLoadResult_;
+    bool fatalError_ = false;
+    std::string fatalErrorMessage_;
 };

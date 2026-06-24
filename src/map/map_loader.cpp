@@ -22,6 +22,8 @@ void MapLoader::CreateTasks(const std::string& mapPath, int localPlayerIndex) {
     unitsDoo_ = UnitsDooData{};
     unitVisualSeeds_.clear();
     unitLoadResult_ = UnitLoadResult{};
+    fatalError_ = false;
+    fatalErrorMessage_.clear();
 
     tasks_.push_back([this]() { DetermineTileset(mapPath_); });
     tasks_.push_back([this]() { LoadWorldEditStrings(mapPath_); });
@@ -43,11 +45,15 @@ bool MapLoader::Process() {
     if (tasks_.empty()) return true;
     auto task = std::move(tasks_.front());
     tasks_.pop_front();
+    const size_t stageIndex = startingTaskCount_ - tasks_.size();
     try {
         task();
     } catch (const std::exception& e) {
-        std::cerr << "MapLoader stage " << (startingTaskCount_ - tasks_.size())
-                  << " failed: " << e.what() << std::endl;
+        fatalError_ = true;
+        fatalErrorMessage_ = e.what();
+        tasks_.clear();
+        std::cerr << "MapLoader stage " << stageIndex
+                  << " failed: " << fatalErrorMessage_ << std::endl;
     }
     return tasks_.empty();
 }
@@ -82,6 +88,9 @@ void MapLoader::LoadTerrainData(const std::string& mapPath) {
     if (W3XLoadTerrain(mapPath, mapData_)) {
         std::cout << "  Terrain: " << mapData_.tileWidth << "x" << mapData_.tileHeight << " tiles" << std::endl;
     } else {
+        fatalError_ = true;
+        fatalErrorMessage_ = "Terrain W3E failed to load";
+        tasks_.clear();
         std::cerr << "  Terrain: failed to load" << std::endl;
     }
 }

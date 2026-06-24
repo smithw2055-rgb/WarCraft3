@@ -372,6 +372,21 @@ void GameController::OnLeaveState(GameState state) { (void)state; }
 // --- Init phases ---
 
 void GameController::InitMapConfig() {
+    if (mapConfigInitialized_) {
+        std::cout << "InitMapConfig: already initialized; skipping duplicate config phase" << std::endl;
+        if (!loadingFailed_ && !loadingInitialized_ && !simulationInitialized_) {
+            TransitionTo(GameState::LOADING);
+        }
+        return;
+    }
+
+    if (mapPath_.empty() || !fs::exists(mapPath_)) {
+        loadingFailed_ = true;
+        loadingFailureReason_ = "Map file not found: " + mapPath_;
+        std::cerr << loadingFailureReason_ << std::endl;
+        return;
+    }
+
     scene_.ResetLoadStats();
 
     W3ILoadFromMpq(mapPath_, w3i_);
@@ -386,22 +401,63 @@ void GameController::InitMapConfig() {
         }
     }
 
+    mapConfigInitialized_ = true;
     TransitionTo(GameState::LOADING);
 }
 
 void GameController::InitLoading() {
+    if (simulationInitialized_) {
+        std::cout << "InitLoading: simulation already initialized; skipping duplicate loader creation" << std::endl;
+        return;
+    }
+    if (loadingFailed_) {
+        std::cerr << "InitLoading: skipped because loading already failed: "
+                  << loadingFailureReason_ << std::endl;
+        return;
+    }
+    if (loadingInitialized_) {
+        std::cout << "InitLoading: already initialized; skipping duplicate loader creation" << std::endl;
+        return;
+    }
+
     mapLoader_ = std::make_unique<MapLoader>(
         mpq_, simulation_, unitData_, destructableData_,
         scene_, texturedTerrain_, tileset_, map_, w3i_, wpm_);
     mapLoader_->SetConfigData(configEnv_ ? configEnv_->GetData() : nullptr);
     mapLoader_->CreateTasks(mapPath_, 0);
     loadingProgress_ = 0.0f;
+    loadingInitialized_ = true;
     std::cout << "Loading started..." << std::endl;
 }
 
 void GameController::InitInGame() {
     if (simulationInitialized_) {
         std::cout << "InitInGame: already initialized; skipping duplicate entry" << std::endl;
+        return;
+    }
+
+    if (loadingFailed_) {
+        std::cerr << "InitInGame: skipped because loading failed: "
+                  << loadingFailureReason_ << std::endl;
+        return;
+    }
+    if (!mapLoader_) {
+        loadingFailed_ = true;
+        loadingFailureReason_ = "MapLoader was not initialized";
+        std::cerr << "InitInGame: " << loadingFailureReason_ << std::endl;
+        return;
+    }
+    if (mapLoader_->HasFatalError()) {
+        loadingFailed_ = true;
+        loadingFailureReason_ = mapLoader_->GetFatalError();
+        std::cerr << "InitInGame: map loading failed: "
+                  << loadingFailureReason_ << std::endl;
+        return;
+    }
+    if (!texturedTerrain_.IsValid()) {
+        loadingFailed_ = true;
+        loadingFailureReason_ = "Terrain was not built";
+        std::cerr << "InitInGame: " << loadingFailureReason_ << std::endl;
         return;
     }
 
@@ -436,6 +492,17 @@ void GameController::InitInGame() {
         }
     }
 
+    terrainLoaded_ = texturedTerrain_.IsValid();
+
+    minimap_.Generate(texturedTerrain_, tileset_, map_, w3i_, &mpq_);
+
+    Vec3 center = texturedTerrain_.GetCenter();
+    camera_.SetTarget(center.x, center.y, center.z);
+    camera_.SetDistance(2500.0f);
+    camera_.SetMaxDistance(5000.0f);
+    camera_.SaveHomeState();
+    FocusCameraAndMinimapOnInitialSpawn();
+
     if (mpq_.ArchiveCount() > 0) {
         commonEnv_ = std::make_unique<JassCommonEnv>();
         if (commonEnv_->Init(mpq_, mapPath_, &simulation_, config_.jassFileList,
@@ -455,37 +522,61 @@ void GameController::InitInGame() {
         std::cout << "JASS Common: skipped because no resource MPQs are open" << std::endl;
     }
 
-    terrainLoaded_ = texturedTerrain_.IsValid();
-
-    // Generate minimap
-    if (terrainLoaded_) {
-        minimap_.Generate(texturedTerrain_, tileset_, map_, w3i_, &mpq_);
-    }
-
-    // Camera
-    Vec3 center = texturedTerrain_.IsValid() ? texturedTerrain_.GetCenter()
-                                              : simpleTerrain_.GetCenter();
-    camera_.SetTarget(center.x, center.y, center.z);
-    camera_.SetDistance(2500.0f);
-    camera_.SetMaxDistance(5000.0f);
-    camera_.SaveHomeState();
-    FocusCameraAndMinimapOnInitialSpawn();
-
     std::cout << "Initialization complete. Starting render loop..." << std::endl;
 }
 
 void GameController::RunSyncInit() {
     InitMapConfig();
+    if (loadingFailed_) {
+        pendingState_ = state_;
+        stateTransition_ = false;
+        return;
+    }
     InitLoading();
+    if (loadingFailed_) {
+        pendingState_ = state_;
+        stateTransition_ = false;
+        return;
+    }
     int stage = 0;
     while (mapLoader_ && !mapLoader_->Process()) {
         stage++;
         std::cout << "  Loading stage " << stage << " ("
                   << (int)(mapLoader_->GetCompletionRatio() * 100.0f) << "%)" << std::endl;
     }
+    if (!mapLoader_) {
+        loadingFailed_ = true;
+        loadingFailureReason_ = "MapLoader was not initialized";
+        std::cerr << "RunSyncInit: " << loadingFailureReason_ << std::endl;
+        pendingState_ = state_;
+        stateTransition_ = false;
+        return;
+    }
+    if (mapLoader_->HasFatalError()) {
+        loadingFailed_ = true;
+        loadingFailureReason_ = mapLoader_->GetFatalError();
+        std::cerr << "RunSyncInit: map loading failed: "
+                  << loadingFailureReason_ << std::endl;
+        pendingState_ = state_;
+        stateTransition_ = false;
+        return;
+    }
     terrainLoaded_ = texturedTerrain_.IsValid();
+    if (!terrainLoaded_) {
+        loadingFailed_ = true;
+        loadingFailureReason_ = "Terrain was not built";
+        std::cerr << "RunSyncInit: " << loadingFailureReason_ << std::endl;
+        pendingState_ = state_;
+        stateTransition_ = false;
+        return;
+    }
     scene_.PrintLoadStats();
     InitInGame();
+    if (!simulationInitialized_) {
+        pendingState_ = state_;
+        stateTransition_ = false;
+        return;
+    }
 
     state_ = GameState::IN_GAME;
     pendingState_ = GameState::IN_GAME;
@@ -607,8 +698,22 @@ void GameController::Update(int screenW, int screenH, float dt) {
 
 void GameController::UpdateLoading(float dt) {
     (void)dt;
+    if (loadingFailed_) return;
     if (mapLoader_ && mapLoader_->Process()) {
+        if (mapLoader_->HasFatalError()) {
+            loadingFailed_ = true;
+            loadingFailureReason_ = mapLoader_->GetFatalError();
+            std::cerr << "UpdateLoading: map loading failed: "
+                      << loadingFailureReason_ << std::endl;
+            return;
+        }
         terrainLoaded_ = texturedTerrain_.IsValid();
+        if (!terrainLoaded_) {
+            loadingFailed_ = true;
+            loadingFailureReason_ = "Terrain was not built";
+            std::cerr << "UpdateLoading: " << loadingFailureReason_ << std::endl;
+            return;
+        }
         scene_.PrintLoadStats();
         TransitionTo(GameState::IN_GAME);
     }
