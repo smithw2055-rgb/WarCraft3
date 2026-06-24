@@ -58,6 +58,12 @@ static int ParseOrderString(const std::string& orderStr) {
     return 0;
 }
 
+static int ResolvePlayerId(const std::shared_ptr<JassNativesData>& data, int value) {
+    int playerId = data ? data->GetSimHandle(value, JassHandleInfo::PLAYER) : -1;
+    if (playerId >= 0) return playerId;
+    return (value >= 0 && value < 24) ? value : -1;
+}
+
 int JassNativesData::CreateItem(CSimulation* sim, War3ID typeId, float x, float y) {
     if (!sim) {
         return -1;
@@ -175,6 +181,8 @@ JassQueuedContext JassNatives::CaptureContext() const {
     context.enumUnitHandle = data_->enumUnitHandle;
     context.filterItemHandle = data_->filterItemHandle;
     context.enumItemHandle = data_->enumItemHandle;
+    context.filterPlayerHandle = data_->filterPlayerHandle;
+    context.enumPlayerHandle = data_->enumPlayerHandle;
     context.eventDamage = data_->eventDamage;
     context.eventDamageSourceHandle = data_->eventDamageSourceHandle;
     context.eventAttackingUnitHandle = data_->eventAttackingUnitHandle;
@@ -212,6 +220,8 @@ void JassNatives::ApplyContext(const JassQueuedContext& context) {
     data_->enumUnitHandle = context.enumUnitHandle;
     data_->filterItemHandle = context.filterItemHandle;
     data_->enumItemHandle = context.enumItemHandle;
+    data_->filterPlayerHandle = context.filterPlayerHandle;
+    data_->enumPlayerHandle = context.enumPlayerHandle;
     data_->eventDamage = context.eventDamage;
     data_->eventDamageSourceHandle = context.eventDamageSourceHandle;
     data_->eventAttackingUnitHandle = context.eventAttackingUnitHandle;
@@ -1130,8 +1140,102 @@ void JassNatives::RegisterForceNatives() {
         if (simId >= 0) { auto fit = data->forces.find(simId); if (fit != data->forces.end()) fit->second->playerIds.clear(); }
         return JassValue::Null();
     });
-    vm_.RegisterNative("ForceEnumPlayers", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("ForceEnumAllies", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    auto addPlayerToForce = [data = data_](JassForce& force, int playerId) {
+        if (std::find(force.playerIds.begin(), force.playerIds.end(), playerId) == force.playerIds.end()) {
+            force.playerIds.push_back(playerId);
+        }
+    };
+    auto acceptPlayer = [data = data_, vmPtr = vmPtr_](int playerId, const std::string& filterFunc) {
+        if (filterFunc.empty() || !vmPtr) return true;
+        const int previousFilterPlayer = data->filterPlayerHandle;
+        data->filterPlayerHandle = data->AllocHandle(JassHandleInfo::PLAYER, playerId);
+        const bool accepted = JassValueToBool(vmPtr->CallFunction(filterFunc));
+        data->filterPlayerHandle = previousFilterPlayer;
+        return accepted;
+    };
+    vm_.RegisterNative("ForceEnumPlayers", [data = data_, sim = sim_, addPlayerToForce, acceptPlayer](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        int forceId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
+        if (forceId < 0) return JassValue::Null();
+        auto fit = data->forces.find(forceId);
+        if (fit == data->forces.end()) return JassValue::Null();
+        const std::string filterFunc = (args.size() > 1 && args[1].type == JassValue::STRING) ? args[1].strVal : "";
+        const int playerCount = sim ? sim->GetPlayerCount() : 24;
+        for (int playerId = 0; playerId < playerCount; ++playerId) {
+            if (acceptPlayer(playerId, filterFunc)) {
+                addPlayerToForce(*fit->second, playerId);
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ForceEnumPlayersCounted", [data = data_, sim = sim_, addPlayerToForce, acceptPlayer](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        int forceId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
+        if (forceId < 0) return JassValue::Null();
+        auto fit = data->forces.find(forceId);
+        if (fit == data->forces.end()) return JassValue::Null();
+        const std::string filterFunc = (args[1].type == JassValue::STRING) ? args[1].strVal : "";
+        const int limit = std::max(0, args[2].intVal);
+        const int playerCount = sim ? sim->GetPlayerCount() : 24;
+        int acceptedCount = 0;
+        for (int playerId = 0; playerId < playerCount && acceptedCount < limit; ++playerId) {
+            if (acceptPlayer(playerId, filterFunc)) {
+                addPlayerToForce(*fit->second, playerId);
+                ++acceptedCount;
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ForceEnumAllies", [data = data_, sim = sim_, addPlayerToForce, acceptPlayer](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Null();
+        int forceId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
+        int sourcePlayerId = ResolvePlayerId(data, args[1].intVal);
+        if (forceId < 0 || sourcePlayerId < 0) return JassValue::Null();
+        auto fit = data->forces.find(forceId);
+        CPlayer* sourcePlayer = sim->GetPlayer(sourcePlayerId);
+        if (fit == data->forces.end() || !sourcePlayer) return JassValue::Null();
+        const std::string filterFunc = (args.size() > 2 && args[2].type == JassValue::STRING) ? args[2].strVal : "";
+        for (int playerId = 0; playerId < sim->GetPlayerCount(); ++playerId) {
+            CPlayer* player = sim->GetPlayer(playerId);
+            if (player && sourcePlayer->HasAlliance(*player, CAllianceType::PASSIVE) && acceptPlayer(playerId, filterFunc)) {
+                addPlayerToForce(*fit->second, playerId);
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ForceEnumEnemies", [data = data_, sim = sim_, addPlayerToForce, acceptPlayer](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Null();
+        int forceId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
+        int sourcePlayerId = ResolvePlayerId(data, args[1].intVal);
+        if (forceId < 0 || sourcePlayerId < 0) return JassValue::Null();
+        auto fit = data->forces.find(forceId);
+        CPlayer* sourcePlayer = sim->GetPlayer(sourcePlayerId);
+        if (fit == data->forces.end() || !sourcePlayer) return JassValue::Null();
+        const std::string filterFunc = (args.size() > 2 && args[2].type == JassValue::STRING) ? args[2].strVal : "";
+        for (int playerId = 0; playerId < sim->GetPlayerCount(); ++playerId) {
+            CPlayer* player = sim->GetPlayer(playerId);
+            if (player && !sourcePlayer->HasAlliance(*player, CAllianceType::PASSIVE) && acceptPlayer(playerId, filterFunc)) {
+                addPlayerToForce(*fit->second, playerId);
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ForForce", [data = data_, vmPtr = vmPtr_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int forceId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
+        if (forceId < 0) return JassValue::Null();
+        auto fit = data->forces.find(forceId);
+        if (fit == data->forces.end()) return JassValue::Null();
+        const std::string& funcName = args[1].strVal;
+        if (funcName.empty()) return JassValue::Null();
+        const int previousEnumPlayer = data->enumPlayerHandle;
+        for (int playerId : fit->second->playerIds) {
+            data->enumPlayerHandle = data->AllocHandle(JassHandleInfo::PLAYER, playerId);
+            if (vmPtr) vmPtr->Execute(funcName);
+        }
+        data->enumPlayerHandle = previousEnumPlayer;
+        return JassValue::Null();
+    });
     vm_.RegisterNative("CountPlayersInForce", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
@@ -1807,9 +1911,9 @@ void JassNatives::RegisterPlayerNatives() {
     });
     vm_.RegisterNative("GetPlayerName", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Str("Player"); });
     vm_.RegisterNative("SetPlayerName", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("GetPlayerState", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("GetPlayerState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Int(0);
-        int playerId = args[0].intVal;
+        int playerId = ResolvePlayerId(data, args[0].intVal);
         auto* p = sim->GetPlayer(playerId);
         if (!p) return JassValue::Int(0);
         switch (args[1].intVal) {
@@ -1821,9 +1925,9 @@ void JassNatives::RegisterPlayerNatives() {
             default: return JassValue::Int(0);
         }
     });
-    vm_.RegisterNative("SetPlayerState", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("SetPlayerState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !sim) return JassValue::Null();
-        auto* p = sim->GetPlayer(args[0].intVal);
+        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
         if (!p) return JassValue::Null();
         switch (args[1].intVal) {
             case 1: p->SetGold(args[2].intVal); break;
@@ -1832,47 +1936,53 @@ void JassNatives::RegisterPlayerNatives() {
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("IsPlayerAlly", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("IsPlayerAlly", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Bool(false);
-        auto* p1 = sim->GetPlayer(args[0].intVal), *p2 = sim->GetPlayer(args[1].intVal);
+        auto* p1 = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
+        auto* p2 = sim->GetPlayer(ResolvePlayerId(data, args[1].intVal));
         if (p1 && p2) return JassValue::Bool(p1->HasAlliance(*p2, CAllianceType::ALLIED));
         return JassValue::Bool(false);
     });
-    vm_.RegisterNative("IsPlayerEnemy", [](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("IsPlayerEnemy", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);
-        return JassValue::Bool(args[0].intVal != args[1].intVal);
+        return JassValue::Bool(ResolvePlayerId(data, args[0].intVal) != ResolvePlayerId(data, args[1].intVal));
     });
     vm_.RegisterNative("IsPlayerInForce", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);
-        int pSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::FORCE);
-        if (pSim < 0) return JassValue::Bool(false);
-        auto fit = data->forces.find(pSim);
+        int playerId = ResolvePlayerId(data, args[0].intVal);
+        int forceId = data->GetSimHandle(args[1].intVal, JassHandleInfo::FORCE);
+        if (playerId < 0 || forceId < 0) return JassValue::Bool(false);
+        auto fit = data->forces.find(forceId);
         if (fit == data->forces.end()) return JassValue::Bool(false);
-        return JassValue::Bool(std::find(fit->second->playerIds.begin(), fit->second->playerIds.end(), args[0].intVal) != fit->second->playerIds.end());
+        return JassValue::Bool(std::find(fit->second->playerIds.begin(), fit->second->playerIds.end(), playerId) != fit->second->playerIds.end());
     });
     vm_.RegisterNative("IsPlayerObserver", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
     vm_.RegisterNative("IsPlayerRacePrefSet", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
     vm_.RegisterNative("GetPlayerRace", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
     vm_.RegisterNative("GetPlayerColor", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
     vm_.RegisterNative("GetPlayerStartLocation", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
-    vm_.RegisterNative("GetPlayerTechMaxAllowed", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("GetPlayerTechMaxAllowed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Int(1);
-        auto* p = sim->GetPlayer(args[0].intVal);
+        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
         if (p) return JassValue::Int(p->GetTechLevel(War3ID((uint32_t)args[1].intVal)));
         return JassValue::Int(0);
     });
     vm_.RegisterNative("SetPlayerTechMaxAllowed", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("SetPlayerTechResearched", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("SetPlayerTechResearched", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !sim) return JassValue::Null();
-        auto* p = sim->GetPlayer(args[0].intVal);
+        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
         if (p) p->SetTechLevel(War3ID((uint32_t)args[1].intVal), args[2].intVal);
         return JassValue::Null();
     });
     vm_.RegisterNative("GetPlayerTechCount", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
-    vm_.RegisterNative("SetPlayerAlliance", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("SetPlayerAlliance", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4 || !sim) return JassValue::Null();
-        auto* src = sim->GetPlayer(args[0].intVal);
-        if (src) src->SetAlliance(args[1].intVal, static_cast<CAllianceType>(args[2].intVal & 0xF), args[3].boolVal);
+        const int sourcePlayerId = ResolvePlayerId(data, args[0].intVal);
+        const int targetPlayerId = ResolvePlayerId(data, args[1].intVal);
+        auto* src = sim->GetPlayer(sourcePlayerId);
+        if (src && targetPlayerId >= 0) {
+            src->SetAlliance(targetPlayerId, static_cast<CAllianceType>(args[2].intVal & 0xF), args[3].boolVal);
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("GetPlayerHandicap", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Real(1.0f); });
@@ -2716,6 +2826,12 @@ void JassNatives::RegisterEventNatives() {
     vm_.RegisterNative("GetEnumItem", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->enumItemHandle >= 0 ? JassValue::Int(data->enumItemHandle) : JassValue::Int(0);
     });
+    vm_.RegisterNative("GetFilterPlayer", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return data->filterPlayerHandle >= 0 ? JassValue::Int(data->filterPlayerHandle) : JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetEnumPlayer", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return data->enumPlayerHandle >= 0 ? JassValue::Int(data->enumPlayerHandle) : JassValue::Int(0);
+    });
     vm_.RegisterNative("GetEventDamage", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return JassValue::Real(data->eventDamage);
     });
@@ -3474,43 +3590,45 @@ void JassNatives::RegisterGameNatives() {
     });
 
     // ===== Extended Player Natives =====
-    vm_.RegisterNative("GetPlayerGold", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("GetPlayerGold", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty() || !sim) return JassValue::Int(0);
-        auto* p = sim->GetPlayer(args[0].intVal);
+        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
         return JassValue::Int(p ? p->GetGold() : 0);
     });
-    vm_.RegisterNative("SetPlayerGold", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("SetPlayerGold", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Null();
-        auto* p = sim->GetPlayer(args[0].intVal);
+        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
         if (p) p->SetGold(args[1].intVal);
         return JassValue::Null();
     });
-    vm_.RegisterNative("GetPlayerLumber", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("GetPlayerLumber", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty() || !sim) return JassValue::Int(0);
-        auto* p = sim->GetPlayer(args[0].intVal);
+        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
         return JassValue::Int(p ? p->GetLumber() : 0);
     });
-    vm_.RegisterNative("SetPlayerLumber", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("SetPlayerLumber", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Null();
-        auto* p = sim->GetPlayer(args[0].intVal);
+        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
         if (p) p->SetLumber(args[1].intVal);
         return JassValue::Null();
     });
-    vm_.RegisterNative("SetPlayerAlliance", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("SetPlayerAlliance", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4 || !sim) return JassValue::Null();
-        auto* p1 = sim->GetPlayer(args[0].intVal);
-        auto* p2 = sim->GetPlayer(args[1].intVal);
+        const int playerId1 = ResolvePlayerId(data, args[0].intVal);
+        const int playerId2 = ResolvePlayerId(data, args[1].intVal);
+        auto* p1 = sim->GetPlayer(playerId1);
+        auto* p2 = sim->GetPlayer(playerId2);
         if (p1 && p2) {
             int allianceType = args[2].intVal;
             bool flag = args[3].boolVal;
-            p1->SetAlliance(args[1].intVal, static_cast<CAllianceType>(allianceType), flag);
+            p1->SetAlliance(playerId2, static_cast<CAllianceType>(allianceType), flag);
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("GetPlayerAlliance", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("GetPlayerAlliance", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !sim) return JassValue::Bool(false);
-        auto* p1 = sim->GetPlayer(args[0].intVal);
-        auto* p2 = sim->GetPlayer(args[1].intVal);
+        auto* p1 = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
+        auto* p2 = sim->GetPlayer(ResolvePlayerId(data, args[1].intVal));
         if (p1 && p2) {
             return JassValue::Bool(p1->HasAlliance(*p2, static_cast<CAllianceType>(args[2].intVal)));
         }
