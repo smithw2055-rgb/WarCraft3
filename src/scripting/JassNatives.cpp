@@ -349,9 +349,15 @@ void JassNatives::FireUnitEvent(int unitSimHandle, int eventType) {
 }
 
 void JassNatives::FireDamageEvent(int unitSimHandle, int sourceSimHandle, float damage, int eventType) {
+    int sourceHandle = -1;
+    if (sim_) {
+        if (CUnit* sourceUnit = sim_->GetUnit(sourceSimHandle)) {
+            sourceHandle = data_->AllocHandle(JassHandleInfo::UNIT, sourceUnit->GetHandleId());
+        }
+    }
     data_->eventDamage = damage;
-    data_->eventDamageSourceHandle = sourceSimHandle;
-    data_->eventAttackingUnitHandle = sourceSimHandle;
+    data_->eventDamageSourceHandle = sourceHandle;
+    data_->eventAttackingUnitHandle = sourceHandle;
     FireUnitEvent(unitSimHandle, eventType);
     data_->eventDamage = 0;
     data_->eventDamageSourceHandle = -1;
