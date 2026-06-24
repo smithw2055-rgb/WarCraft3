@@ -208,6 +208,7 @@ bool SceneManager::Init(const MpqManager& mpq) {
                             uint32_t war3ID = StringToWar3ID(id);
                             std::string modelPath = NormalizePath(file) + ".mdx";
                             unitPaths_[war3ID] = modelPath;
+                            unitFiles_[war3ID] = file;
                         }
                     }
                     std::cout << "Scene: " << unitPaths_.size() << " unit paths loaded" << std::endl;
@@ -305,7 +306,16 @@ bool SceneManager::Init(const MpqManager& mpq) {
 void SceneManager::ApplyMapObjectModifications(const std::string& mapPath) {
     if (!mpq_ || mapPath.empty()) return;
 
-    auto updatePath = [this](uint32_t id) {
+    auto updateUnitPath = [this](uint32_t id) {
+        auto fileIt = unitFiles_.find(id);
+        if (fileIt == unitFiles_.end() || fileIt->second.empty()) {
+            return false;
+        }
+        unitPaths_[id] = NormalizePath(fileIt->second) + ".mdx";
+        return true;
+    };
+
+    auto updateDoodadPath = [this](uint32_t id) {
         auto fileIt = doodadFiles_.find(id);
         if (fileIt == doodadFiles_.end() || fileIt->second.empty()) {
             return false;
@@ -319,8 +329,78 @@ void SceneManager::ApplyMapObjectModifications(const std::string& mapPath) {
         return true;
     };
 
-    auto applyMods = [this, &mapPath, &updatePath](const char* fileName, bool extended,
-                                                   const char* metaPath) {
+    auto applyUnitMods = [this, &mapPath, &updateUnitPath]() {
+        ObjectModificationSet mods;
+        if (!LoadWar3MapObjectMods(mapPath, "war3map.w3u", false, mods)) {
+            return;
+        }
+
+        SlkTable metaSlk;
+        std::vector<uint8_t> metaBuf;
+        if (!mpq_->ReadFile("Units\\UnitMetaData.slk", metaBuf) ||
+            !metaSlk.Load(metaBuf.data(), metaBuf.size())) {
+            std::cerr << "SceneObjectMods: Units\\UnitMetaData.slk unavailable; render path modifications skipped for war3map.w3u" << std::endl;
+            return;
+        }
+
+        const SlkAccessor meta(metaSlk, {"ID"});
+        int applied = 0;
+        int unknown = 0;
+        int customCloned = 0;
+        int customSkipped = 0;
+
+        auto applyEntry = [&](const ObjectModificationEntry& entry, uint32_t id) {
+            bool touchedPath = false;
+            for (const auto& mod : entry.modifications) {
+                std::string fieldName;
+                if (!ResolveObjectModField(meta, mod, fieldName)) {
+                    unknown++;
+                    continue;
+                }
+                std::transform(fieldName.begin(), fieldName.end(), fieldName.begin(), [](unsigned char c) {
+                    return (char)std::tolower(c);
+                });
+                if (fieldName == "file") {
+                    unitFiles_[id] = FormatObjectModificationValue(mod);
+                    applied++;
+                    touchedPath = true;
+                }
+            }
+            if (touchedPath) {
+                updateUnitPath(id);
+            }
+        };
+
+        for (const auto& entry : mods.custom) {
+            const uint32_t oldId = StringToWar3ID(entry.oldId.ToString());
+            const uint32_t newId = StringToWar3ID(entry.newId.ToString());
+            auto oldFile = unitFiles_.find(oldId);
+            if (oldFile == unitFiles_.end()) {
+                customSkipped++;
+                continue;
+            }
+            unitFiles_[newId] = oldFile->second;
+            updateUnitPath(newId);
+            customCloned++;
+            applyEntry(entry, newId);
+        }
+
+        for (const auto& entry : mods.original) {
+            const uint32_t id = StringToWar3ID(entry.oldId.ToString());
+            applyEntry(entry, id);
+        }
+
+        std::cout << "SceneObjectMods: war3map.w3u"
+                  << " original=" << mods.original.size()
+                  << " custom=" << mods.custom.size()
+                  << " applied=" << applied
+                  << " unknown=" << unknown
+                  << " customCloned=" << customCloned
+                  << " customSkipped=" << customSkipped << std::endl;
+    };
+
+    auto applyDoodadMods = [this, &mapPath, &updateDoodadPath](const char* fileName, bool extended,
+                                                               const char* metaPath) {
         ObjectModificationSet mods;
         if (!LoadWar3MapObjectMods(mapPath, fileName, extended, mods)) {
             return;
@@ -368,7 +448,7 @@ void SceneManager::ApplyMapObjectModifications(const std::string& mapPath) {
                 }
             }
             if (touchedPath) {
-                updatePath(id);
+                updateDoodadPath(id);
             }
         };
 
@@ -387,7 +467,7 @@ void SceneManager::ApplyMapObjectModifications(const std::string& mapPath) {
             } else {
                 doodadDirs_[newId].clear();
             }
-            updatePath(newId);
+            updateDoodadPath(newId);
             customCloned++;
             applyEntry(entry, newId);
         }
@@ -406,8 +486,9 @@ void SceneManager::ApplyMapObjectModifications(const std::string& mapPath) {
                   << " customSkipped=" << customSkipped << std::endl;
     };
 
-    applyMods("war3map.w3d", true, "Doodads\\DoodadMetaData.slk");
-    applyMods("war3map.w3b", false, "Units\\DestructableMetaData.slk");
+    applyUnitMods();
+    applyDoodadMods("war3map.w3d", true, "Doodads\\DoodadMetaData.slk");
+    applyDoodadMods("war3map.w3b", false, "Units\\DestructableMetaData.slk");
 }
 
 void SceneManager::Clear() {

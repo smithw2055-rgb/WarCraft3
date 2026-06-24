@@ -84,6 +84,7 @@ private:
     MpqManager* mpq_ = nullptr;
 
     std::unordered_map<uint32_t, std::string> unitPaths_;
+    std::unordered_map<uint32_t, std::string> unitFiles_;
     std::unordered_map<uint32_t, std::string> doodadPaths_;
     std::unordered_map<uint32_t, std::string> doodadDirs_;
     std::unordered_map<uint32_t, std::string> doodadFiles_;
