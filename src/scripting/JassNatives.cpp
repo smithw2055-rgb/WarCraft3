@@ -20,6 +20,21 @@
 
 static std::mt19937 s_rng(std::random_device{}());
 
+static CItemClass ItemClassFromJassOrdinal(int ordinal) {
+    switch (ordinal) {
+    case 0: return CItemClass::PERMANENT;
+    case 1: return CItemClass::CHARGED;
+    case 2: return CItemClass::POWERUP;
+    case 3: return CItemClass::ARTIFACT;
+    case 4: return CItemClass::PURCHASABLE;
+    case 5: return CItemClass::CAMPAIGN;
+    case 6: return CItemClass::MISCELLANEOUS;
+    case 7: return CItemClass::UNKNOWN;
+    case 8: return CItemClass::ANY;
+    default: return CItemClass::UNKNOWN;
+    }
+}
+
 static int ParseOrderString(const std::string& orderStr) {
     if (orderStr == "smart") return OrderIds::SMART;
     if (orderStr == "move") return OrderIds::MOVE;
@@ -57,6 +72,7 @@ static void ApplyItemTypeData(CItem& item, CSimulation* sim) {
     item.SetLife(*sim, (float)type->maxLife);
     item.SetGoldValue(type->goldCost);
     item.SetLumberValue(type->lumberCost);
+    item.SetItemClass(type->itemClass);
     item.SetCharges(type->charges);
     item.SetPerishable(type->perishable);
     item.SetPowerup(type->powerup);
@@ -1743,6 +1759,17 @@ void JassNatives::RegisterItemNatives() {
         War3ID w3id((uint32_t)args[0].intVal);
         float x = args[1].realVal, y = args[2].realVal;
         return JassValue::Int(CreateJassItemHandle(data, sim, w3id, x, y));
+    });
+    vm_.RegisterNative("ChooseRandomItem", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Int(0);
+        const War3ID itemId = sim->GetItemData()->ChooseRandomItem(args[0].intVal, s_rng);
+        return JassValue::Int((int)itemId.value);
+    });
+    vm_.RegisterNative("ChooseRandomItemEx", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim || !sim->GetItemData()) return JassValue::Int(0);
+        const CItemClass itemClass = ItemClassFromJassOrdinal(args[0].intVal);
+        const War3ID itemId = sim->GetItemData()->ChooseRandomItem(itemClass, args[1].intVal, s_rng);
+        return JassValue::Int((int)itemId.value);
     });
     vm_.RegisterNative("CreateItemLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Int(0);

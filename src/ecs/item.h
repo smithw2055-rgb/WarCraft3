@@ -1,13 +1,9 @@
 #pragma once
 #include "ecs/widget.h"
+#include "ecs/item_class.h"
 #include "resource/slk.h"
 #include <vector>
 #include <string>
-
-// Item class type (matches WC3 item classification)
-enum class CItemClass : uint8_t {
-    PERMANENT, CHARGED, POWERUP, ARTIFACT, PURCHASABLE, CAMPAIGN, MISCELLANEOUS
-};
 
 // CItem - world item entity
 class CItem : public CWidget {
@@ -99,7 +95,7 @@ public:
 
 private:
     War3ID typeId_;
-    CItemClass itemClass_ = CItemClass::PERMANENT;
+    CItemClass itemClass_ = CItemClass::UNKNOWN;
     int goldValue_ = 0;
     int lumberValue_ = 0;
 

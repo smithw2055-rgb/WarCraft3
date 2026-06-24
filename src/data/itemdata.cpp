@@ -1,8 +1,11 @@
 #include "itemdata.h"
 #include "map/object_mods.h"
 #include "resource/mpq_storm.h"
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
+#include <random>
 #include <set>
 #include <sstream>
 #include <unordered_map>
@@ -55,6 +58,27 @@ std::string TrimCopy(std::string value) {
     }
     const size_t last = value.find_last_not_of(" \t\r\n");
     return value.substr(first, last - first + 1);
+}
+
+std::string LowerCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    return value;
+}
+
+CItemClass ParseItemClass(const std::string& classification) {
+    const std::string value = LowerCopy(TrimCopy(classification));
+    if (value == "permanent") return CItemClass::PERMANENT;
+    if (value == "charged") return CItemClass::CHARGED;
+    if (value == "powerup") return CItemClass::POWERUP;
+    if (value == "artifact") return CItemClass::ARTIFACT;
+    if (value == "purchasable") return CItemClass::PURCHASABLE;
+    if (value == "campaign") return CItemClass::CAMPAIGN;
+    if (value == "miscellaneous") return CItemClass::MISCELLANEOUS;
+    if (value == "unknown") return CItemClass::UNKNOWN;
+    if (value == "any") return CItemClass::ANY;
+    return CItemClass::UNKNOWN;
 }
 
 struct SlkAccessor {
@@ -362,6 +386,8 @@ CItemData CItemData::LoadFromMpq(const MpqManager& mpq, const std::string& mapPa
     const int lumberColumn = FindFirstColumn(itemSlk, {"lumbercost", "lumberCost"});
     const int maxLifeColumn = FindFirstColumn(itemSlk, {"HP"});
     const int levelColumn = FindFirstColumn(itemSlk, {"Level", "level"});
+    const int classColumn = FindFirstColumn(itemSlk, {"class"});
+    const int pickRandomColumn = FindFirstColumn(itemSlk, {"pickRandom"});
     const int chargesColumn = FindFirstColumn(itemSlk, {"uses", "charges"});
     const int perishableColumn = FindFirstColumn(itemSlk, {"perishable"});
     const int powerupColumn = FindFirstColumn(itemSlk, {"powerup"});
@@ -398,7 +424,10 @@ CItemData CItemData::LoadFromMpq(const MpqManager& mpq, const std::string& mapPa
         item->goldCost = GetMergedInt(itemSlk, row, goldColumn, skinTbl, sid, "goldCost", 0);
         item->lumberCost = GetMergedInt(itemSlk, row, lumberColumn, skinTbl, sid, "lumberCost", 0);
         item->maxLife = GetMergedInt(itemSlk, row, maxLifeColumn, skinTbl, sid, "HP", 50);
-        item->level = GetMergedInt(itemSlk, row, levelColumn, skinTbl, sid, "level", 0);
+        item->level = GetMergedInt(itemSlk, row, levelColumn, skinTbl, sid, "Level", 0);
+        item->itemClass = ParseItemClass(GetMergedString(itemSlk, row, classColumn, skinTbl, sid, "class"));
+        item->includeAsRandomChoice =
+            GetMergedInt(itemSlk, row, pickRandomColumn, skinTbl, sid, "pickRandom", 0) != 0;
         item->charges = GetMergedInt(itemSlk, row, chargesColumn, skinTbl, sid, "charges", 0);
         item->perishable = GetMergedInt(itemSlk, row, perishableColumn, skinTbl, sid, "perishable", 0) != 0;
         item->powerup = GetMergedInt(itemSlk, row, powerupColumn, skinTbl, sid, "powerup", 0) != 0;
@@ -412,6 +441,12 @@ CItemData CItemData::LoadFromMpq(const MpqManager& mpq, const std::string& mapPa
         item->stockRegen = GetMergedInt(itemSlk, row, stockRegenColumn, skinTbl, sid, "stockRegen", 0);
         item->stockMax = GetMergedInt(itemSlk, row, stockMaxColumn, skinTbl, sid, "stockMax", 0);
         item->cooldownID = GetMergedInt(itemSlk, row, cooldownColumn, skinTbl, sid, "coolID", 0);
+
+        if (item->includeAsRandomChoice) {
+            auto& choices = data.levelToRandomChoices_[item->level];
+            choices.unclassifiedItems.push_back(id);
+            choices.classificationToItems[(int)item->itemClass].push_back(id);
+        }
 
         data.items_[id] = std::move(item);
     }
@@ -427,4 +462,31 @@ bool CItemData::HasItem(War3ID id) const {
 const CItemType* CItemData::GetItem(War3ID id) const {
     auto it = items_.find(id);
     return (it != items_.end()) ? it->second.get() : nullptr;
+}
+
+War3ID CItemData::ChooseRandomItem(int level, std::mt19937& rng) const {
+    auto it = levelToRandomChoices_.find(level);
+    if (it == levelToRandomChoices_.end() || it->second.unclassifiedItems.empty()) {
+        return War3ID();
+    }
+    const auto& items = it->second.unclassifiedItems;
+    const size_t index = std::uniform_int_distribution<size_t>(0, items.size() - 1)(rng);
+    return items[index];
+}
+
+War3ID CItemData::ChooseRandomItem(CItemClass itemClass, int level, std::mt19937& rng) const {
+    auto it = levelToRandomChoices_.find(level);
+    if (it == levelToRandomChoices_.end()) {
+        std::cerr << "chooseRandomItem: no item set: " << level << std::endl;
+        return War3ID();
+    }
+    auto classIt = it->second.classificationToItems.find((int)itemClass);
+    if (classIt == it->second.classificationToItems.end() || classIt->second.empty()) {
+        std::cerr << "chooseRandomItem: no items of class: " << (int)itemClass
+                  << " " << level << std::endl;
+        return War3ID();
+    }
+    const auto& items = classIt->second;
+    const size_t index = std::uniform_int_distribution<size_t>(0, items.size() - 1)(rng);
+    return items[index];
 }

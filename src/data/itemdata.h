@@ -3,7 +3,9 @@
 #include <string>
 #include <unordered_map>
 #include <memory>
+#include <random>
 #include <vector>
+#include "ecs/item_class.h"
 #include "resource/slk.h"
 
 struct CItemType {
@@ -17,6 +19,8 @@ struct CItemType {
     int lumberCost = 0;
     int maxLife = 50;
     int level = 0;
+    CItemClass itemClass = CItemClass::UNKNOWN;
+    bool includeAsRandomChoice = false;
     int charges = 0;
     bool perishable = false;
     bool powerup = false;
@@ -38,10 +42,18 @@ public:
 
     bool HasItem(War3ID id) const;
     const CItemType* GetItem(War3ID id) const;
+    War3ID ChooseRandomItem(int level, std::mt19937& rng) const;
+    War3ID ChooseRandomItem(CItemClass itemClass, int level, std::mt19937& rng) const;
 
     static CItemData LoadFromMpq(const class MpqManager& mpq);
     static CItemData LoadFromMpq(const class MpqManager& mpq, const std::string& mapPath);
 
 private:
+    struct RandomItemSet {
+        std::vector<War3ID> unclassifiedItems;
+        std::unordered_map<int, std::vector<War3ID>> classificationToItems;
+    };
+
     std::unordered_map<War3ID, std::unique_ptr<CItemType>> items_;
+    std::unordered_map<int, RandomItemSet> levelToRandomChoices_;
 };
