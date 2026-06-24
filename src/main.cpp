@@ -75,33 +75,15 @@
 #include "scripting/jass_config_env.h"
 #include "scripting/jass_common_env.h"
 #include "map/map_loader.h"
+#include "core/path_utils.h"
+#include "ecs/unit_text_utils.h"
 
 namespace fs = std::filesystem;
 
 static fs::path ResolveConfiguredPath(const fs::path& projectRoot,
-                                      const fs::path& resourcesDir,
-                                      const std::string& configuredPath) {
-    fs::path path(configuredPath);
-    if (path.is_absolute()) {
-        return path;
-    }
-
-    const fs::path fromProject = projectRoot / path;
-    if (fs::exists(fromProject)) {
-        return fromProject;
-    }
-
-    const fs::path fromResources = resourcesDir / path;
-    if (fs::exists(fromResources)) {
-        return fromResources;
-    }
-
-    const fs::path fromResourceFileName = resourcesDir / path.filename();
-    if (fs::exists(fromResourceFileName)) {
-        return fromResourceFileName;
-    }
-
-    return fromProject;
+                                       const fs::path& resourcesDir,
+                                       const std::string& configuredPath) {
+    return path_utils::ResolveConfiguredPath(projectRoot, resourcesDir, configuredPath);
 }
 
 // --- Global state (for callbacks) ---
@@ -396,26 +378,13 @@ static float ComputeUnitSelectionVisualHeight(const CUnit& unit) {
 }
 
 static std::string TrimMetadataValue(std::string value) {
-    const size_t first = value.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) {
-        return {};
-    }
-    const size_t last = value.find_last_not_of(" \t\r\n");
-    return value.substr(first, last - first + 1);
+    return path_utils::TrimMetadataValue(std::move(value));
 }
 
 static bool IsUnitSelected(int handleId);
 
 static std::string NormalizeMetadataPath(std::string path) {
-    for (char& c : path) {
-        if (c == '/') {
-            c = '\\';
-        }
-    }
-    if (!path.empty() && path.find('.') == std::string::npos) {
-        path += ".blp";
-    }
-    return path;
+    return path_utils::NormalizeMetadataPath(std::move(path));
 }
 
 static bool ReadMpqFile(const std::string& path, std::vector<uint8_t>& out) {
@@ -914,92 +883,31 @@ static CDestructable* PickSimulationDestructableAtScreenPoint(float screenX,
 }
 
 static std::string DescribeUnitType(War3ID typeId) {
-    auto* unitType = g.unitData.GetUnitType(typeId);
-    if (!unitType) {
-        return typeId.ToString();
-    }
-    return unitType->GetName() + " [" + typeId.ToString() + "]";
+    return unit_text_utils::DescribeUnitType(typeId, g.unitData);
 }
 
 static const char* BehaviorCategoryName(CBehaviorCategory category) {
-    switch (category) {
-        case CBehaviorCategory::NONE: return "NONE";
-        case CBehaviorCategory::STOP: return "STOP";
-        case CBehaviorCategory::MOVE: return "MOVE";
-        case CBehaviorCategory::ATTACK: return "ATTACK";
-        case CBehaviorCategory::SPELL: return "SPELL";
-        case CBehaviorCategory::ATTACK_MOVE: return "ATTACK_MOVE";
-        case CBehaviorCategory::PATROL: return "PATROL";
-        case CBehaviorCategory::FOLLOW: return "FOLLOW";
-        case CBehaviorCategory::HOLD_POSITION: return "HOLD_POSITION";
-        case CBehaviorCategory::BUILD: return "BUILD";
-        case CBehaviorCategory::HARVEST: return "HARVEST";
-        case CBehaviorCategory::RETURN_RESOURCES: return "RETURN_RESOURCES";
-        case CBehaviorCategory::BOARD_TRANSPORT: return "BOARD_TRANSPORT";
-        case CBehaviorCategory::STUN: return "STUN";
-        case CBehaviorCategory::INVENTORY: return "INVENTORY";
-        case CBehaviorCategory::ROOT: return "ROOT";
-        default: return "UNKNOWN";
-    }
+    return unit_text_utils::BehaviorCategoryName(category);
 }
 
 static std::string JoinStrings(const std::vector<std::string>& values, const char* delimiter) {
-    std::ostringstream oss;
-    for (size_t i = 0; i < values.size(); ++i) {
-        if (i > 0) {
-            oss << delimiter;
-        }
-        oss << values[i];
-    }
-    return oss.str();
+    return unit_text_utils::JoinStrings(values, delimiter);
 }
 
 static std::string FormatSelectedUnitsBrief(const std::vector<CUnit*>& units) {
-    std::ostringstream oss;
-    oss << "[";
-    bool first = true;
-    for (const auto* unit : units) {
-        if (!unit) {
-            continue;
-        }
-        if (!first) {
-            oss << ";";
-        }
-        first = false;
-        oss << unit->GetHandleId() << ":" << unit->GetTypeId().ToString()
-            << "@(" << unit->GetX() << "," << unit->GetY() << ")";
-    }
-    oss << "]";
-    return oss.str();
+    return unit_text_utils::FormatSelectedUnitsBrief(units);
 }
 
 static CResourceType GetUnitCarriedResourceType(const CUnit* unit) {
-    if (!unit) return CResourceType::NONE;
-    auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(unit->GetAbility(War3ID("Ahar")));
-    if (!harvestAbility || !harvestAbility->IsCarryingResources()) {
-        return CResourceType::NONE;
-    }
-    return harvestAbility->GetCarriedResourceType();
+    return unit_text_utils::GetUnitCarriedResourceType(unit);
 }
 
 static CBehaviorCategory GetUnitCurrentBehaviorCategory(const CUnit* unit) {
-    if (!unit) {
-        return CBehaviorCategory::NONE;
-    }
-    auto* behavior = unit->GetCurrentBehavior();
-    return behavior ? behavior->GetCategory() : CBehaviorCategory::NONE;
+    return unit_text_utils::GetUnitCurrentBehaviorCategory(unit);
 }
 
 static bool IsMovementBehaviorCategory(CBehaviorCategory category) {
-    switch (category) {
-        case CBehaviorCategory::MOVE:
-        case CBehaviorCategory::FOLLOW:
-        case CBehaviorCategory::PATROL:
-        case CBehaviorCategory::ATTACK_MOVE:
-            return true;
-        default:
-            return false;
-    }
+    return unit_text_utils::IsMovementBehaviorCategory(category);
 }
 
 static void ClassifyScriptedAnimationName(const std::string& lowerName,
