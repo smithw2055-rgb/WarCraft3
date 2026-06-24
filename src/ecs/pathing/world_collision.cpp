@@ -1,5 +1,6 @@
 #include "world_collision.h"
 #include "ecs/unit.h"
+#include "ecs/item.h"
 #include <cmath>
 
 CWorldCollision::CWorldCollision() {}
@@ -19,6 +20,19 @@ void CWorldCollision::RemoveUnit(CUnit* unit) {
 
 void CWorldCollision::UpdateUnit(CUnit* unit) {
     (void)unit;
+}
+
+void CWorldCollision::AddItem(CItem* item) {
+    allItems_.push_back(item);
+}
+
+void CWorldCollision::RemoveItem(CItem* item) {
+    for (size_t i = 0; i < allItems_.size(); i++) {
+        if (allItems_[i] == item) {
+            allItems_.erase(allItems_.begin() + i);
+            return;
+        }
+    }
 }
 
 void CWorldCollision::EnumUnitsInRect(float x, float y, float w, float h,
@@ -41,6 +55,17 @@ void CWorldCollision::EnumUnitsInRange(float cx, float cy, float radius,
         float dy = u->GetY() - cy;
         if (dx * dx + dy * dy <= r2) {
             out.push_back(u);
+        }
+    }
+}
+
+void CWorldCollision::EnumItemsInRect(float x, float y, float w, float h,
+                                      std::vector<CItem*>& out) const {
+    for (auto* item : allItems_) {
+        if (!item || item->IsHidden() || item->IsDead()) continue;
+        float ix = item->GetX(), iy = item->GetY();
+        if (ix >= x && ix <= x + w && iy >= y && iy <= y + h) {
+            out.push_back(item);
         }
     }
 }

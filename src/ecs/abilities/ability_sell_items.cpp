@@ -69,28 +69,8 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
     player->AddLumber(-itemLumberCost);
 
     // Create item at shop location
-    int handleId = game.CreateItemId();
-    auto* item = new CItem(handleId, itemTypeId, caster->GetX(), caster->GetY());
-    if (itemType) {
-        item->SetName(itemType->name);
-        item->SetIcon(itemType->iconPath);
-        item->SetAbilityList(itemType->abilityList);
-        item->SetMaxLife((float)itemType->maxLife);
-        item->SetLife(game, (float)itemType->maxLife);
-        item->SetGoldValue(itemType->goldCost);
-        item->SetLumberValue(itemType->lumberCost);
-        item->SetItemClass(itemType->itemClass);
-        item->SetCharges(itemType->charges);
-        item->SetPerishable(itemType->perishable);
-        item->SetPowerup(itemType->powerup);
-        item->SetUseAutomatically(itemType->useOnly);
-        item->SetDroppable(itemType->droppable);
-        item->SetPawnable(itemType->pawnable);
-        item->SetDroppedOnDeath(itemType->dropOnDeath);
-        if (itemType->charges > 0) {
-            item->SetCharged(true);
-        }
-    }
+    auto* item = game.CreateItem(itemTypeId, caster->GetX(), caster->GetY());
+    if (!item) return false;
 
     // Give item to hero
     auto* inventory = dynamic_cast<CAbilityInventory*>(hero->GetAbility(War3ID("AInv")));

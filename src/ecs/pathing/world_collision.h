@@ -14,14 +14,20 @@ public:
     void RemoveUnit(CUnit* unit);
     void UpdateUnit(CUnit* unit);
 
+    void AddItem(CItem* item);
+    void RemoveItem(CItem* item);
+
     void EnumUnitsInRect(float x, float y, float w, float h,
                          std::vector<CUnit*>& out) const;
     void EnumUnitsInRange(float cx, float cy, float radius,
                           std::vector<CUnit*>& out) const;
+    void EnumItemsInRect(float x, float y, float w, float h,
+                         std::vector<CItem*>& out) const;
 
     bool CheckCollision(float x, float y, float radius,
                         CUnit* ignoreUnit = nullptr) const;
 
 private:
     std::vector<CUnit*> allUnits_;
+    std::vector<CItem*> allItems_;
 };

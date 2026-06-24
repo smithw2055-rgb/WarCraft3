@@ -7,6 +7,7 @@
 #include "ecs/abilities/ability_inventory.h"
 #include "ecs/destructable.h"
 #include "ecs/orders/order.h"
+#include "ecs/pathing/world_collision.h"
 #include "data/unitdata.h"
 #include "data/itemdata.h"
 #include "data/combat_types.h"
@@ -57,44 +58,24 @@ static int ParseOrderString(const std::string& orderStr) {
     return 0;
 }
 
-static void ApplyItemTypeData(CItem& item, CSimulation* sim) {
-    if (!sim || !sim->GetItemData()) {
-        return;
-    }
-    const CItemType* type = sim->GetItemData()->GetItem(item.GetTypeId());
-    if (!type) {
-        return;
-    }
-    item.SetName(type->name);
-    item.SetIcon(type->iconPath);
-    item.SetAbilityList(type->abilityList);
-    item.SetMaxLife((float)type->maxLife);
-    item.SetLife(*sim, (float)type->maxLife);
-    item.SetGoldValue(type->goldCost);
-    item.SetLumberValue(type->lumberCost);
-    item.SetItemClass(type->itemClass);
-    item.SetCharges(type->charges);
-    item.SetPerishable(type->perishable);
-    item.SetPowerup(type->powerup);
-    item.SetUseAutomatically(type->useOnly);
-    item.SetDroppable(type->droppable);
-    item.SetPawnable(type->pawnable);
-    item.SetDroppedOnDeath(type->dropOnDeath);
-    if (type->charges > 0) {
-        item.SetCharged(true);
-    }
-}
-
 int JassNativesData::CreateItem(CSimulation* sim, War3ID typeId, float x, float y) {
-    const int itemId = nextItemId++;
-    auto item = std::make_shared<CItem>(itemId, typeId, x, y);
-    ApplyItemTypeData(*item, sim);
+    if (!sim) {
+        return -1;
+    }
+    CItem* item = sim->CreateItem(typeId, x, y);
+    if (!item) {
+        return -1;
+    }
+    const int itemId = item->GetHandleId();
     items[itemId] = item;
     return itemId;
 }
 
 int JassNativesData::CreateItemHandle(CSimulation* sim, War3ID typeId, float x, float y) {
     const int itemId = CreateItem(sim, typeId, x, y);
+    if (itemId < 0) {
+        return 0;
+    }
     return AllocHandle(JassHandleInfo::ITEM, itemId);
 }
 
@@ -107,7 +88,7 @@ static CItem* GetJassItem(const std::shared_ptr<JassNativesData>& data, int jass
         return nullptr;
     }
     auto it = data->items.find(itemId);
-    return it != data->items.end() ? it->second.get() : nullptr;
+    return it != data->items.end() ? it->second : nullptr;
 }
 
 static CWidget* GetJassWidget(const std::shared_ptr<JassNativesData>& data,
@@ -1824,12 +1805,15 @@ void JassNatives::RegisterItemNatives() {
     });
     vm_.RegisterNative("RemoveItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
-        if (sim) {
+        const int itemId = data ? data->GetSimHandle(args[0].intVal, JassHandleInfo::ITEM) : -1;
+        if (sim && itemId >= 0) {
             if (auto* item = GetJassItem(data, args[0].intVal)) {
                 item->SetLife(*sim, 0.0f);
+                sim->RemoveItem(item);
             }
         }
-        if (data->GetSimHandle(args[0].intVal, JassHandleInfo::ITEM) >= 0) {
+        if (itemId >= 0) {
+            data->items.erase(itemId);
             data->FreeHandle(args[0].intVal);
         }
         return JassValue::Null();
@@ -1959,7 +1943,7 @@ void JassNatives::RegisterItemNatives() {
         const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
         return JassValue::Bool(type ? type->perishable : false);
     });
-    vm_.RegisterNative("EnumItemsInRect", [data = data_, vmPtr = vmPtr_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("EnumItemsInRect", [data = data_, sim = sim_, vmPtr = vmPtr_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         const int rectId = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
         if (rectId < 0) return JassValue::Null();
@@ -1973,12 +1957,9 @@ void JassNatives::RegisterItemNatives() {
         const auto rect = rectIt->second;
 
         std::vector<int> matchingItems;
-        for (const auto& [itemId, item] : data->items) {
-            if (!item || item->IsDead() || item->IsHidden()) continue;
-            const float x = item->GetX();
-            const float y = item->GetY();
-            if (x < rect->minX || x > rect->maxX || y < rect->minY || y > rect->maxY) continue;
-
+        auto acceptItem = [&](int itemId, CItem* item) {
+            if (!item || item->IsDead() || item->IsHidden()) return;
+            data->items[itemId] = item;
             const int itemHandle = data->AllocHandle(JassHandleInfo::ITEM, itemId);
             bool accepted = true;
             if (!filterFunc.empty() && vmPtr) {
@@ -1987,6 +1968,28 @@ void JassNatives::RegisterItemNatives() {
             }
             if (accepted) {
                 matchingItems.push_back(itemHandle);
+            }
+        };
+
+        bool usedWorldCollision = false;
+        if (sim && sim->GetWorldCollision()) {
+            std::vector<CItem*> worldItems;
+            sim->GetWorldCollision()->EnumItemsInRect(rect->minX, rect->minY,
+                                                      rect->maxX - rect->minX,
+                                                      rect->maxY - rect->minY,
+                                                      worldItems);
+            for (CItem* item : worldItems) {
+                acceptItem(item->GetHandleId(), item);
+            }
+            usedWorldCollision = true;
+        }
+        if (!usedWorldCollision) {
+            for (const auto& [itemId, item] : data->items) {
+                if (!item || item->IsDead() || item->IsHidden()) continue;
+                const float x = item->GetX();
+                const float y = item->GetY();
+                if (x < rect->minX || x > rect->maxX || y < rect->minY || y > rect->maxY) continue;
+                acceptItem(itemId, item);
             }
         }
 

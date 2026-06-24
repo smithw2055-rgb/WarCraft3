@@ -42,6 +42,10 @@ public:
     CDestructable* GetDestructable(int handleId) const;
     virtual void RemoveDestructable(CDestructable* destructable);
     const std::vector<CDestructable*>& GetDestructables() const { return destructables_; }
+    virtual CItem* CreateItem(War3ID typeId, float x, float y);
+    CItem* GetItem(int handleId) const;
+    virtual void RemoveItem(CItem* item);
+    const std::vector<CItem*>& GetItems() const { return items_; }
     CWidget* GetWidget(int handleId) const;
 
     // Player management
@@ -80,9 +84,6 @@ public:
     CCombatSystem* GetCombatSystem() { return &combatSystem_; }
     const CCombatSystem* GetCombatSystem() const { return &combatSystem_; }
 
-    // Item ID allocation
-    int CreateItemId() { return handleIdAlloc_.CreateId(); }
-
     // Callbacks
     void AddPostUpdateCallback(std::function<void()> cb);
     void SetUnitDeathCallback(std::function<void(int unitHandle, int killerHandle, int playerIndex)> cb) {
@@ -103,6 +104,7 @@ private:
     void ProcessNewUnits();
     void ProcessDestructableRemovals();
     void ProcessNewDestructables();
+    void ProcessItemRemovals();
 
     int gameTurnTick_ = 0;
 
@@ -120,6 +122,9 @@ private:
     std::vector<CDestructable*> newDestructables_;
     std::vector<CDestructable*> removedDestructables_;
     std::unordered_map<int, std::unique_ptr<CDestructable>> destructableMap_;
+    std::vector<CItem*> items_;
+    std::vector<CItem*> removedItems_;
+    std::unordered_map<int, std::unique_ptr<CItem>> itemMap_;
 
     // Players
     std::vector<std::unique_ptr<CPlayer>> players_;

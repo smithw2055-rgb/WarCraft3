@@ -2,6 +2,7 @@
 #include "player.h"
 #include "unit.h"
 #include "destructable.h"
+#include "item.h"
 #include "handle_id.h"
 #include "ability.h"
 #include "abilities/ability_attack.h"
@@ -22,6 +23,7 @@
 #include "pathing/pathfinding.h"
 #include "data/unitdata.h"
 #include "data/destructabledata.h"
+#include "data/itemdata.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -76,6 +78,35 @@ static War3ID BuildRaceAbilityCode(CBuildRace race) {
     }
 }
 
+static void ApplyItemTypeData(CItem& item, CSimulation& simulation) {
+    const CItemData* itemData = simulation.GetItemData();
+    if (!itemData) {
+        return;
+    }
+    const CItemType* itemType = itemData->GetItem(item.GetTypeId());
+    if (!itemType) {
+        return;
+    }
+    item.SetName(itemType->name);
+    item.SetIcon(itemType->iconPath);
+    item.SetAbilityList(itemType->abilityList);
+    item.SetMaxLife((float)itemType->maxLife);
+    item.SetLife(simulation, (float)itemType->maxLife);
+    item.SetGoldValue(itemType->goldCost);
+    item.SetLumberValue(itemType->lumberCost);
+    item.SetItemClass(itemType->itemClass);
+    item.SetCharges(itemType->charges);
+    item.SetPerishable(itemType->perishable);
+    item.SetPowerup(itemType->powerup);
+    item.SetUseAutomatically(itemType->useOnly);
+    item.SetDroppable(itemType->droppable);
+    item.SetPawnable(itemType->pawnable);
+    item.SetDroppedOnDeath(itemType->dropOnDeath);
+    if (itemType->charges > 0) {
+        item.SetCharged(true);
+    }
+}
+
 } // namespace
 
 void CSimulation::Update() {
@@ -91,6 +122,7 @@ void CSimulation::Update() {
     ProcessNewUnits();
     ProcessDestructableRemovals();
     ProcessNewDestructables();
+    ProcessItemRemovals();
 
     // Advance game time
     AdvanceGameTime(SIM_STEP_TIME);
@@ -262,6 +294,30 @@ CDestructable* CSimulation::GetDestructable(int handleId) const {
     return (it != destructableMap_.end()) ? it->second.get() : nullptr;
 }
 
+CItem* CSimulation::CreateItem(War3ID typeId, float x, float y) {
+    int handleId = handleIdAlloc_.CreateId();
+    auto item = std::make_unique<CItem>(handleId, typeId, x, y);
+    ApplyItemTypeData(*item, *this);
+    CItem* ptr = item.get();
+    itemMap_[handleId] = std::move(item);
+    items_.push_back(ptr);
+    if (worldCollision_) {
+        worldCollision_->AddItem(ptr);
+    }
+    return ptr;
+}
+
+CItem* CSimulation::GetItem(int handleId) const {
+    auto it = itemMap_.find(handleId);
+    return (it != itemMap_.end()) ? it->second.get() : nullptr;
+}
+
+void CSimulation::RemoveItem(CItem* item) {
+    if (item) {
+        removedItems_.push_back(item);
+    }
+}
+
 void CSimulation::RemoveDestructable(CDestructable* destructable) {
     if (destructable) {
         removedDestructables_.push_back(destructable);
@@ -272,7 +328,10 @@ CWidget* CSimulation::GetWidget(int handleId) const {
     if (auto* unit = GetUnit(handleId)) {
         return unit;
     }
-    return GetDestructable(handleId);
+    if (auto* destructable = GetDestructable(handleId)) {
+        return destructable;
+    }
+    return GetItem(handleId);
 }
 
 void CSimulation::RemoveUnit(CUnit* unit) {
@@ -355,4 +414,20 @@ void CSimulation::ProcessNewDestructables() {
         destructables_.push_back(destructable);
     }
     newDestructables_.clear();
+}
+
+void CSimulation::ProcessItemRemovals() {
+    for (auto* item : removedItems_) {
+        if (worldCollision_) {
+            worldCollision_->RemoveItem(item);
+        }
+
+        auto it = std::find(items_.begin(), items_.end(), item);
+        if (it != items_.end()) {
+            items_.erase(it);
+        }
+
+        itemMap_.erase(item->GetHandleId());
+    }
+    removedItems_.clear();
 }
