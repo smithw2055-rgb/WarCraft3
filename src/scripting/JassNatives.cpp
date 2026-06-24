@@ -1627,10 +1627,44 @@ void JassNatives::RegisterUnitNatives() {
         if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetY()); }
         return JassValue::Real(0);
     });
-    vm_.RegisterNative("SetUnitPosition", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Null();
+    vm_.RegisterNative("SetUnitX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPosition(args[1].realVal, args[2].realVal); }
+        if (simId >= 0) {
+            CUnit* unit = sim->GetUnit(simId);
+            if (unit) unit->SetPositionAndCheckUnstuck(args[1].realVal, unit->GetY(), *sim);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetUnitY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Null();
+        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        if (simId >= 0) {
+            CUnit* unit = sim->GetUnit(simId);
+            if (unit) unit->SetPositionAndCheckUnstuck(unit->GetX(), args[1].realVal, *sim);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetUnitPosition", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || !sim) return JassValue::Null();
+        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        if (simId >= 0) {
+            CUnit* unit = sim->GetUnit(simId);
+            if (unit) unit->SetPositionAndCheckUnstuck(args[1].realVal, args[2].realVal, *sim);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetUnitPositionLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Null();
+        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        int locSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::LOCATION);
+        if (simId >= 0 && locSim >= 0) {
+            CUnit* unit = sim->GetUnit(simId);
+            auto locIt = data->locations.find(locSim);
+            if (unit && locIt != data->locations.end()) {
+                unit->SetPositionAndCheckUnstuck(locIt->second->x, locIt->second->y, *sim);
+            }
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("UnitDamageTarget", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
