@@ -1476,15 +1476,71 @@ void JassNatives::RegisterRegionNatives() {
 // 11. Unit natives (expanded)
 // ============================================================
 void JassNatives::RegisterUnitNatives() {
+    auto createUnitByTypeId = [data = data_, sim = sim_](int playerArg, War3ID typeId,
+                                                          float x, float y, float facing) -> JassValue {
+        if (!sim) return JassValue::Null();
+        const int playerId = ResolvePlayerId(data, playerArg);
+        if (playerId < 0) return JassValue::Null();
+        CUnit* unit = sim->CreateUnit(typeId, playerId, x, y, facing);
+        if (!unit) return JassValue::Null();
+        if (CPlayer* player = sim->GetPlayer(playerId)) {
+            player->AddTechUnlocked(*sim, typeId);
+        }
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
+    };
+
     vm_.RegisterNative("CreateUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (!sim || args.size() < 5) return JassValue::Null();
-        int playerId = args[0].intVal;
+        int playerId = ResolvePlayerId(data, args[0].intVal);
+        if (playerId < 0) return JassValue::Null();
         int unitTypeId = args[1].intVal;
         float x = args[2].realVal, y = args[3].realVal, facing = args[4].realVal;
         War3ID w3id((uint32_t)unitTypeId);
         CUnit* unit = sim->CreateUnit(w3id, playerId, x, y, facing);
+        if (unit) {
+            if (CPlayer* player = sim->GetPlayer(playerId)) {
+                player->AddTechUnlocked(*sim, w3id);
+            }
+        }
         if (unit) return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
         return JassValue::Null();
+    });
+    vm_.RegisterNative("CreateUnitByName", [sim = sim_, createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue {
+        if (!sim || args.size() < 5) return JassValue::Null();
+        const int typeId = UnitIdFromLegacyName(sim, args[1].strVal);
+        if (typeId == 0) return JassValue::Null();
+        return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)typeId),
+                                  args[2].realVal, args[3].realVal, args[4].realVal);
+    });
+    vm_.RegisterNative("CreateUnitAtLoc", [data = data_, createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        float x = 0.0f;
+        float y = 0.0f;
+        const int locId = data->GetSimHandle(args[2].intVal, JassHandleInfo::LOCATION);
+        if (locId >= 0) {
+            auto locIt = data->locations.find(locId);
+            if (locIt != data->locations.end()) {
+                x = locIt->second->x;
+                y = locIt->second->y;
+            }
+        }
+        return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)args[1].intVal), x, y, args[3].realVal);
+    });
+    vm_.RegisterNative("CreateUnitAtLocByName", [data = data_, sim = sim_, createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue {
+        if (!sim || args.size() < 4) return JassValue::Null();
+        const int typeId = UnitIdFromLegacyName(sim, args[1].strVal);
+        if (typeId == 0) return JassValue::Null();
+        float x = 0.0f;
+        float y = 0.0f;
+        const int locId = data->GetSimHandle(args[2].intVal, JassHandleInfo::LOCATION);
+        if (locId >= 0) {
+            auto locIt = data->locations.find(locId);
+            if (locIt != data->locations.end()) {
+                x = locIt->second->x;
+                y = locIt->second->y;
+            }
+        }
+        return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)typeId), x, y, args[3].realVal);
     });
     vm_.RegisterNative("RemoveUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (!sim || args.empty()) return JassValue::Null();
