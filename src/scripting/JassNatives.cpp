@@ -64,6 +64,36 @@ static int ResolvePlayerId(const std::shared_ptr<JassNativesData>& data, int val
     return (value >= 0 && value < 24) ? value : -1;
 }
 
+static int RawcodeFromString(const std::string& value) {
+    if (value.size() < 4) return 0;
+    return ((unsigned char)value[0] << 24) | ((unsigned char)value[1] << 16) |
+           ((unsigned char)value[2] << 8) | (unsigned char)value[3];
+}
+
+static std::string RawcodeToString(int value) {
+    char buf[5] = {
+        (char)((value >> 24) & 0xFF), (char)((value >> 16) & 0xFF),
+        (char)((value >> 8) & 0xFF), (char)(value & 0xFF), 0
+    };
+    return std::string(buf);
+}
+
+static int UnitIdFromLegacyName(CSimulation* sim, const std::string& legacyName) {
+    if (!sim || !sim->GetUnitData()) return 0;
+    for (const auto& [typeId, unitType] : sim->GetUnitData()->GetAllTypes()) {
+        if (unitType && unitType->GetLegacyName() == legacyName) {
+            return (int)typeId.value;
+        }
+    }
+    return 0;
+}
+
+static std::string UnitLegacyNameFromId(CSimulation* sim, int typeId) {
+    if (!sim || !sim->GetUnitData()) return "";
+    CUnitType* unitType = sim->GetUnitData()->GetUnitType(War3ID((uint32_t)typeId));
+    return unitType ? unitType->GetLegacyName() : "";
+}
+
 int JassNativesData::CreateItem(CSimulation* sim, War3ID typeId, float x, float y) {
     if (!sim) {
         return -1;
@@ -543,6 +573,7 @@ void JassNatives::RegisterConfigNatives() {
 }
 
 void JassNatives::RegisterCommonNatives() {
+    RegisterHandleNatives();
     RegisterTimerNatives();
     RegisterGroupNatives();
     RegisterForceNatives();
@@ -582,37 +613,26 @@ void JassNatives::RegisterHandleNatives() {
     });
     vm_.RegisterNative("OrderId2String", [](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Str("");
-        int id = args[0].intVal;
-        char buf[5] = {
-            (char)((id >> 24) & 0xFF), (char)((id >> 16) & 0xFF),
-            (char)((id >> 8) & 0xFF), (char)(id & 0xFF), 0
-        };
-        return JassValue::Str(buf);
+        return JassValue::Str(RawcodeToString(args[0].intVal));
     });
-    vm_.RegisterNative("UnitId2String", [](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("UnitId", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        const std::string& name = args[0].strVal;
+        int id = UnitIdFromLegacyName(sim, name);
+        return JassValue::Int(id != 0 ? id : RawcodeFromString(name));
+    });
+    vm_.RegisterNative("UnitId2String", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Str("");
-        int id = args[0].intVal;
-        char buf[5] = {
-            (char)((id >> 24) & 0xFF), (char)((id >> 16) & 0xFF),
-            (char)((id >> 8) & 0xFF), (char)(id & 0xFF), 0
-        };
-        return JassValue::Str(buf);
+        std::string legacyName = UnitLegacyNameFromId(sim, args[0].intVal);
+        return JassValue::Str(!legacyName.empty() ? legacyName : RawcodeToString(args[0].intVal));
     });
     vm_.RegisterNative("String2UnitId", [](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);
-        const std::string& s = args[0].strVal;
-        if (s.size() < 4) return JassValue::Int(0);
-        int id = ((unsigned char)s[0] << 24) | ((unsigned char)s[1] << 16) |
-                 ((unsigned char)s[2] << 8) | ((unsigned char)s[3]);
-        return JassValue::Int(id);
+        return JassValue::Int(RawcodeFromString(args[0].strVal));
     });
     vm_.RegisterNative("String2OrderId", [](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);
-        const std::string& s = args[0].strVal;
-        if (s.size() < 4) return JassValue::Int(0);
-        int id = ((unsigned char)s[0] << 24) | ((unsigned char)s[1] << 16) |
-                 ((unsigned char)s[2] << 8) | ((unsigned char)s[3]);
-        return JassValue::Int(id);
+        return JassValue::Int(RawcodeFromString(args[0].strVal));
     });
 }
 
