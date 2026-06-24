@@ -263,6 +263,40 @@ int JassNatives::PumpQueuedThreads(int maxCount) {
     return pumped;
 }
 
+bool JassNatives::EvaluateTriggerConditions(const JassTrigger& trigger, const JassQueuedContext& context,
+                                            bool requireEnabled) {
+    if (requireEnabled && !trigger.enabled) {
+        return false;
+    }
+    for (const auto& conditionName : trigger.conditionFuncNames) {
+        if (conditionName.empty()) {
+            continue;
+        }
+        if (!vm_.HasFunction(conditionName)) {
+            std::cerr << "JASS trigger: missing condition " << conditionName << std::endl;
+            return false;
+        }
+
+        JassQueuedContext previous = CaptureContext();
+        ApplyContext(context);
+        JassValue result = vm_.CallFunction(conditionName);
+        ApplyContext(previous);
+        if (!JassValueToBool(result)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void JassNatives::QueueTriggerActions(const JassTrigger& trigger, const JassQueuedContext& context) {
+    if (!EvaluateTriggerConditions(trigger, context)) {
+        return;
+    }
+    for (const auto& funcName : trigger.actionFuncNames) {
+        QueueFunctionWithContext(funcName, context);
+    }
+}
+
 void JassNatives::FireUnitEvent(int unitSimHandle, int eventType) {
     for (auto& [id, trigger] : data_->triggers) {
         for (size_t i = 0; i < trigger->registeredUnitHandles.size(); i++) {
@@ -293,9 +327,7 @@ void JassNatives::FireUnitEvent(int unitSimHandle, int eventType) {
                             data_->AllocHandle(JassHandleInfo::PLAYER, unit->GetPlayerIndex());
                     }
                 }
-                for (const auto& funcName : trigger->actionFuncNames) {
-                    QueueFunctionWithContext(funcName, context);
-                }
+                QueueTriggerActions(*trigger, context);
                 break;
             }
         }
@@ -398,10 +430,9 @@ int JassNatives::UpdateTimers(float dt) {
 
                 JassQueuedContext triggerContext = context;
                 triggerContext.currentTriggerId = triggerId;
-                for (const auto& funcName : trigger->actionFuncNames) {
-                    QueueFunctionWithContext(funcName, triggerContext);
-                    firedCount++;
-                }
+                const size_t before = queuedThreads_.size();
+                QueueTriggerActions(*trigger, triggerContext);
+                firedCount += static_cast<int>(queuedThreads_.size() - before);
             }
             if (timer->periodic) {
                 timer->remaining = timer->timeout;
@@ -2386,8 +2417,20 @@ void JassNatives::RegisterTriggerNatives() {
         data->triggers.erase(args[0].intVal);
         return JassValue::Null();
     });
-    vm_.RegisterNative("DisableTrigger", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("EnableTrigger", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("DisableTrigger", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!args.empty()) {
+            auto it = data->triggers.find(args[0].intVal);
+            if (it != data->triggers.end()) it->second->enabled = false;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("EnableTrigger", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!args.empty()) {
+            auto it = data->triggers.find(args[0].intVal);
+            if (it != data->triggers.end()) it->second->enabled = true;
+        }
+        return JassValue::Null();
+    });
     vm_.RegisterNative("TriggerRegisterUnitEvent", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3) return JassValue::Null();
         auto it = data->triggers.find(args[0].intVal);
@@ -2483,7 +2526,30 @@ void JassNatives::RegisterTriggerNatives() {
         if (it != data->triggers.end()) it->second->actionFuncNames.push_back(args[1].strVal);
         return JassValue::Null();
     });
-    vm_.RegisterNative("TriggerAddCondition", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
+    vm_.RegisterNative("TriggerAddCondition", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        auto it = data->triggers.find(args[0].intVal);
+        if (it != data->triggers.end()) {
+            it->second->conditionFuncNames.push_back(args[1].strVal);
+        }
+        return args[1];
+    });
+    vm_.RegisterNative("TriggerRemoveCondition", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        auto it = data->triggers.find(args[0].intVal);
+        if (it != data->triggers.end()) {
+            auto& conditions = it->second->conditionFuncNames;
+            auto condIt = std::find(conditions.begin(), conditions.end(), args[1].strVal);
+            if (condIt != conditions.end()) conditions.erase(condIt);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("TriggerClearConditions", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        auto it = data->triggers.find(args[0].intVal);
+        if (it != data->triggers.end()) it->second->conditionFuncNames.clear();
+        return JassValue::Null();
+    });
     vm_.RegisterNative("TriggerClearActions", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         auto it = data->triggers.find(args[0].intVal);
@@ -2495,6 +2561,36 @@ void JassNatives::RegisterTriggerNatives() {
     });
     vm_.RegisterNative("GetTriggerUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->currentTriggerUnitHandle >= 0 ? JassValue::Int(data->currentTriggerUnitHandle) : JassValue::Null();
+    });
+    vm_.RegisterNative("TriggerEvaluate", [this](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        auto it = data_->triggers.find(args[0].intVal);
+        if (it == data_->triggers.end()) return JassValue::Bool(false);
+        JassQueuedContext context = CaptureContext();
+        context.currentTriggerId = args[0].intVal;
+        return JassValue::Bool(EvaluateTriggerConditions(*it->second, context, false));
+    });
+    vm_.RegisterNative("TriggerExecute", [this](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        auto it = data_->triggers.find(args[0].intVal);
+        if (it == data_->triggers.end()) return JassValue::Null();
+        JassQueuedContext context = CaptureContext();
+        context.currentTriggerId = args[0].intVal;
+        for (const auto& funcName : it->second->actionFuncNames) {
+            QueueFunctionWithContext(funcName, context);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("TriggerExecuteWait", [this](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        auto it = data_->triggers.find(args[0].intVal);
+        if (it == data_->triggers.end()) return JassValue::Null();
+        JassQueuedContext context = CaptureContext();
+        context.currentTriggerId = args[0].intVal;
+        for (const auto& funcName : it->second->actionFuncNames) {
+            QueueFunctionWithContext(funcName, context);
+        }
+        return JassValue::Null();
     });
     vm_.RegisterNative("GetTriggerEvalCount", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
     vm_.RegisterNative("GetTriggerExecCount", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });

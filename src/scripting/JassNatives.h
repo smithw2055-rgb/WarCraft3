@@ -53,8 +53,10 @@ enum JassEventType {
 
 struct JassTrigger {
     int id = -1;
+    bool enabled = true;
     std::vector<int> registeredUnitHandles;
     std::vector<int> eventTypes;
+    std::vector<std::string> conditionFuncNames;
     std::vector<std::string> actionFuncNames;
     std::vector<std::pair<int, int>> registeredEvents;
 };
@@ -307,6 +309,9 @@ public:
 private:
     JassQueuedContext CaptureContext() const;
     void ApplyContext(const JassQueuedContext& context);
+    bool EvaluateTriggerConditions(const JassTrigger& trigger, const JassQueuedContext& context,
+                                   bool requireEnabled = true);
+    void QueueTriggerActions(const JassTrigger& trigger, const JassQueuedContext& context);
     void RegisterHandleNatives();
     void RegisterMathNatives();
     void RegisterConversionNatives();
