@@ -316,6 +316,9 @@ void JassNatives::FireUnitEvent(int unitSimHandle, int eventType) {
             JassHandleInfo* info = data_->GetHandleInfo(regUnitHandle);
             if (info && info->type == JassHandleInfo::UNIT) {
                 matches = info->id == unitSimHandle;
+            } else if (info && (info->type == JassHandleInfo::DESTRUCTABLE ||
+                                info->type == JassHandleInfo::ITEM)) {
+                matches = info->id == unitSimHandle;
             } else if (info && info->type == JassHandleInfo::PLAYER && sim_) {
                 if (CUnit* unit = sim_->GetUnit(unitSimHandle)) {
                     matches = unit->GetPlayerIndex() == info->id;
@@ -328,10 +331,12 @@ void JassNatives::FireUnitEvent(int unitSimHandle, int eventType) {
             if (matches) {
                 JassQueuedContext context = CaptureContext();
                 context.currentTriggerId = id;
-                context.currentTriggerUnitHandle = data_->AllocHandle(JassHandleInfo::UNIT, unitSimHandle);
+                context.currentTriggerUnitHandle = -1;
                 context.currentTriggerEventId = eventType;
                 if (sim_) {
                     if (CUnit* unit = sim_->GetUnit(unitSimHandle)) {
+                        context.currentTriggerUnitHandle =
+                            data_->AllocHandle(JassHandleInfo::UNIT, unitSimHandle);
                         context.eventTriggerPlayerHandle =
                             data_->AllocHandle(JassHandleInfo::PLAYER, unit->GetPlayerIndex());
                     }
@@ -354,12 +359,29 @@ void JassNatives::FireDamageEvent(int unitSimHandle, int sourceSimHandle, float 
 }
 
 void JassNatives::FireDeathEvent(int unitSimHandle, int killerSimHandle, int eventType) {
-    // Set event context: dying unit and killing unit
-    // We need to create JASS handles for these sim handles
-    data_->eventDyingUnitHandle = data_->AllocHandle(JassHandleInfo::UNIT, unitSimHandle);
-    data_->eventKillingUnitHandle = killerSimHandle >= 0 ?
-        data_->AllocHandle(JassHandleInfo::UNIT, killerSimHandle) : -1;
-    data_->eventTriggerWidgetHandle = data_->eventDyingUnitHandle;
+    data_->eventDyingUnitHandle = -1;
+    data_->eventTriggerWidgetHandle = -1;
+    if (sim_) {
+        if (CUnit* unit = sim_->GetUnit(unitSimHandle)) {
+            data_->eventDyingUnitHandle =
+                data_->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId());
+            data_->eventTriggerWidgetHandle = data_->eventDyingUnitHandle;
+        } else if (CDestructable* destructable = sim_->GetDestructable(unitSimHandle)) {
+            data_->eventTriggerWidgetHandle =
+                data_->AllocHandle(JassHandleInfo::DESTRUCTABLE, destructable->GetHandleId());
+        } else if (CItem* item = sim_->GetItem(unitSimHandle)) {
+            data_->items[item->GetHandleId()] = item;
+            data_->eventTriggerWidgetHandle =
+                data_->AllocHandle(JassHandleInfo::ITEM, item->GetHandleId());
+        }
+    } else {
+        data_->eventDyingUnitHandle = data_->AllocHandle(JassHandleInfo::UNIT, unitSimHandle);
+        data_->eventTriggerWidgetHandle = data_->eventDyingUnitHandle;
+    }
+    data_->eventKillingUnitHandle =
+        (killerSimHandle >= 0 && (!sim_ || sim_->GetUnit(killerSimHandle)))
+            ? data_->AllocHandle(JassHandleInfo::UNIT, killerSimHandle)
+            : -1;
 
     FireUnitEvent(unitSimHandle, eventType);
 
@@ -2730,6 +2752,12 @@ void JassNatives::RegisterEventNatives() {
     });
     vm_.RegisterNative("GetTriggerWidget", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->eventTriggerWidgetHandle >= 0 ? JassValue::Int(data->eventTriggerWidgetHandle) : JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetTriggerDestructable", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        auto* info = data->GetHandleInfo(data->eventTriggerWidgetHandle);
+        return (info && info->type == JassHandleInfo::DESTRUCTABLE)
+            ? JassValue::Int(data->eventTriggerWidgetHandle)
+            : JassValue::Int(0);
     });
     vm_.RegisterNative("GetEnteringUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->eventEnteringUnitHandle >= 0 ? JassValue::Int(data->eventEnteringUnitHandle) : JassValue::Int(0);
