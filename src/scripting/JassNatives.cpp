@@ -937,14 +937,21 @@ void JassNatives::RegisterGroupNatives() {
         if (simId < 0) return JassValue::Null();
         auto git = data->groups.find(simId);
         if (git == data->groups.end()) return JassValue::Null();
-        int typeId = args[1].intVal;
-        War3ID w3id((uint32_t)typeId);
+        const std::string unitName = args[1].type == JassValue::STRING
+            ? args[1].strVal
+            : "";
+        const War3ID rawcodeType((uint32_t)args[1].intVal);
         const std::string filterFunc = filterFuncAt(args, 2);
         git->second->unitHandles.clear();
         if (sim) {
             for (auto* unit : sim->GetUnits()) {
+                const CUnitType* unitType = unit ? unit->GetUnitType() : nullptr;
+                const bool typeMatches = unitType
+                    ? (!unitName.empty() ? unitType->GetLegacyName() == unitName
+                                         : unit->GetTypeId() == rawcodeType)
+                    : false;
                 const int unitHandle = data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId());
-                if (unit->GetTypeId() == w3id && acceptFilteredUnit(unitHandle, filterFunc))
+                if (typeMatches && acceptFilteredUnit(unitHandle, filterFunc))
                     git->second->unitHandles.push_back(unitHandle);
             }
         }
