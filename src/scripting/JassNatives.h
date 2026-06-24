@@ -10,6 +10,7 @@
 
 // Forward declaration (avoid circular include)
 class CSimulation;
+class CItem;
 
 // JASS event type constants (matching Blizzard common.j / JassGameEventsWar3 ordinals)
 enum JassEventType {
@@ -154,6 +155,9 @@ public:
 
     std::unordered_map<int, std::shared_ptr<JassForce>> forces;
     int nextForceId = 0x05000000;
+
+    std::unordered_map<int, std::shared_ptr<CItem>> items;
+    int nextItemId = 0x0D000000;
 
     std::unordered_map<int, std::shared_ptr<JassLocation>> locations;
     int nextLocId = 0x06000000;

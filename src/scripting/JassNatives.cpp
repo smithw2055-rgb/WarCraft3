@@ -4,6 +4,7 @@
 #include "audio/AudioSystem.h"
 #include "ecs/player.h"
 #include "ecs/item.h"
+#include "ecs/abilities/ability_inventory.h"
 #include "ecs/destructable.h"
 #include "ecs/orders/order.h"
 #include "data/unitdata.h"
@@ -39,6 +40,51 @@ static int ParseOrderString(const std::string& orderStr) {
     }
 
     return 0;
+}
+
+static void ApplyItemTypeData(CItem& item, CSimulation* sim) {
+    if (!sim || !sim->GetItemData()) {
+        return;
+    }
+    const CItemType* type = sim->GetItemData()->GetItem(item.GetTypeId());
+    if (!type) {
+        return;
+    }
+    item.SetName(type->name);
+    item.SetIcon(type->iconPath);
+    item.SetGoldValue(type->goldCost);
+    item.SetLumberValue(type->lumberCost);
+    item.SetCharges(type->charges);
+    item.SetPerishable(type->perishable);
+    item.SetPowerup(type->powerup);
+    item.SetUseAutomatically(type->useOnly);
+    if (type->charges > 0) {
+        item.SetCharged(true);
+    }
+}
+
+static int CreateJassItemHandle(const std::shared_ptr<JassNativesData>& data,
+                                CSimulation* sim, War3ID typeId, float x, float y) {
+    if (!data) {
+        return 0;
+    }
+    const int itemId = data->nextItemId++;
+    auto item = std::make_shared<CItem>(itemId, typeId, x, y);
+    ApplyItemTypeData(*item, sim);
+    data->items[itemId] = item;
+    return data->AllocHandle(JassHandleInfo::ITEM, itemId);
+}
+
+static CItem* GetJassItem(const std::shared_ptr<JassNativesData>& data, int jassHandle) {
+    if (!data) {
+        return nullptr;
+    }
+    const int itemId = data->GetSimHandle(jassHandle, JassHandleInfo::ITEM);
+    if (itemId < 0) {
+        return nullptr;
+    }
+    auto it = data->items.find(itemId);
+    return it != data->items.end() ? it->second.get() : nullptr;
 }
 
 // ============================================================
@@ -1684,13 +1730,13 @@ void JassNatives::RegisterItemNatives() {
         if (args.size() < 3 || !sim) return JassValue::Int(0);
         War3ID w3id((uint32_t)args[0].intVal);
         float x = args[1].realVal, y = args[2].realVal;
-        auto item = std::make_unique<CItem>(data->nextHandleId, w3id, x, y);
-        int handleId = item->GetHandleId();
-        if (sim) {
-            int jassHandle = data->AllocHandle(JassHandleInfo::ITEM, handleId);
-            return JassValue::Int(jassHandle);
-        }
-        return JassValue::Int(0);
+        return JassValue::Int(CreateJassItemHandle(data, sim, w3id, x, y));
+    });
+    vm_.RegisterNative("BlzCreateItemWithSkin", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || !sim) return JassValue::Int(0);
+        War3ID w3id((uint32_t)args[0].intVal);
+        float x = args[1].realVal, y = args[2].realVal;
+        return JassValue::Int(CreateJassItemHandle(data, sim, w3id, x, y));
     });
     vm_.RegisterNative("CreateItemLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Int(0);
@@ -1699,59 +1745,127 @@ void JassNatives::RegisterItemNatives() {
         auto locIt = data->locations.find(locId);
         if (locIt == data->locations.end()) return JassValue::Int(0);
         War3ID w3id((uint32_t)args[0].intVal);
-        auto item = std::make_unique<CItem>(data->nextHandleId, w3id, locIt->second->x, locIt->second->y);
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::ITEM, item->GetHandleId()));
+        return JassValue::Int(CreateJassItemHandle(data, sim, w3id, locIt->second->x, locIt->second->y));
     });
     vm_.RegisterNative("RemoveItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::ITEM);
-        if (id >= 0) data->FreeHandle(args[0].intVal);
+        if (sim) {
+            if (auto* item = GetJassItem(data, args[0].intVal)) {
+                item->SetLife(*sim, 0.0f);
+            }
+        }
+        if (data->GetSimHandle(args[0].intVal, JassHandleInfo::ITEM) >= 0) {
+            data->FreeHandle(args[0].intVal);
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("GetItemTypeId", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);
-        (void)sim; (void)data;
-        return JassValue::Int(0);
+        (void)sim;
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Int(item ? (int)item->GetTypeId().value : 0);
     });
     vm_.RegisterNative("GetItemLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Real(100);
-        (void)sim; (void)data;
-        return JassValue::Real(100);
+        (void)sim;
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Real(item ? item->GetLife() : 100.0f);
     });
-    vm_.RegisterNative("SetItemLife", [data = data_, sim = sim_](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("SetItemLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Null();
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetLife(*sim, args[1].realVal);
+        }
+        return JassValue::Null();
+    });
     vm_.RegisterNative("GetItemX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Real(0);
-        (void)sim; (void)data;
-        return JassValue::Real(0);
+        (void)sim;
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Real(item ? item->GetX() : 0.0f);
     });
     vm_.RegisterNative("GetItemY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Real(0);
-        (void)sim; (void)data;
-        return JassValue::Real(0);
+        (void)sim;
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Real(item ? item->GetY() : 0.0f);
     });
-    vm_.RegisterNative("SetItemPosition", [data = data_, sim = sim_](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("GetItemPlayer", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
+    vm_.RegisterNative("SetItemPosition", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        (void)sim;
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetPosition(args[1].realVal, args[2].realVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("GetItemPlayer", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        auto* item = GetJassItem(data, args[0].intVal);
+        auto* owner = item ? item->GetOwner() : nullptr;
+        return owner ? JassValue::Int(data->AllocHandle(JassHandleInfo::PLAYER, owner->GetPlayerIndex()))
+                     : JassValue::Null();
+    });
     vm_.RegisterNative("SetItemPlayer", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("GetItemCharges", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
-    vm_.RegisterNative("SetItemCharges", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("GetItemName", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Str(""); });
+    vm_.RegisterNative("GetItemCharges", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Int(item ? item->GetCharges() : 0);
+    });
+    vm_.RegisterNative("SetItemCharges", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetCharges(args[1].intVal);
+            item->SetCharged(args[1].intVal > 0);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("GetItemName", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Str("");
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Str(item ? item->GetName() : "");
+    });
     vm_.RegisterNative("UnitAddItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Bool(false);
-        return JassValue::Bool(true);
+        int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        auto* unit = sim->GetUnit(uSim);
+        auto* item = GetJassItem(data, args[1].intVal);
+        if (!unit || !item) return JassValue::Bool(false);
+        auto* inventory = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")));
+        return JassValue::Bool(inventory ? inventory->PickUpItem(*sim, unit, item) : false);
     });
     vm_.RegisterNative("UnitAddItemById", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Bool(false);
+        if (args.size() < 2 || !sim) return JassValue::Int(0);
         int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (uSim < 0) return JassValue::Bool(false);
+        if (uSim < 0) return JassValue::Int(0);
         War3ID w3id((uint32_t)args[1].intVal);
         CUnit* unit = sim->GetUnit(uSim);
-        if (!unit) return JassValue::Bool(false);
-        return JassValue::Bool(true);
+        if (!unit) return JassValue::Int(0);
+        const int itemHandle = CreateJassItemHandle(data, sim, w3id, unit->GetX(), unit->GetY());
+        if (auto* item = GetJassItem(data, itemHandle)) {
+            if (auto* inventory = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")))) {
+                inventory->PickUpItem(*sim, unit, item);
+            }
+        }
+        return JassValue::Int(itemHandle);
     });
-    vm_.RegisterNative("UnitRemoveItem", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
+    vm_.RegisterNative("UnitRemoveItem", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("UnitRemoveItemFromSlot", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
-    vm_.RegisterNative("UnitHasItem", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
-    vm_.RegisterNative("UnitItemInSlot", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
+    vm_.RegisterNative("UnitHasItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Bool(false);
+        auto* unit = sim->GetUnit(data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT));
+        auto* item = GetJassItem(data, args[1].intVal);
+        auto* inventory = unit ? dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv"))) : nullptr;
+        return JassValue::Bool(inventory && item && inventory->HasItem(item));
+    });
+    vm_.RegisterNative("UnitItemInSlot", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Int(0);
+        auto* unit = sim->GetUnit(data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT));
+        auto* inventory = unit ? dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv"))) : nullptr;
+        if (!inventory) return JassValue::Int(0);
+        CItem* item = inventory->GetItem(args[1].intVal);
+        if (!item) return JassValue::Int(0);
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::ITEM, item->GetHandleId()));
+    });
     vm_.RegisterNative("UnitInventorySize", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(6); });
     vm_.RegisterNative("UnitDropItemPoint", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
     vm_.RegisterNative("UnitDropItemSlot", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
