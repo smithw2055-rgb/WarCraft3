@@ -40,3 +40,13 @@ struct ObjectModificationSet {
 bool LoadWar3MapUnitMods(const std::string& mapPath,
                          ObjectModificationSet& out,
                          WtsTable* wts = nullptr);
+
+bool LoadWar3MapDestructableMods(const std::string& mapPath,
+                                  ObjectModificationSet& out,
+                                  WtsTable* wts = nullptr);
+
+bool LoadWar3MapObjectMods(const std::string& mapPath,
+                           const char* fileName,
+                           bool extended,
+                           ObjectModificationSet& out,
+                           WtsTable* wts = nullptr);

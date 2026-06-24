@@ -31,7 +31,8 @@ public:
     bool HasDestructable(War3ID id) const;
     const CDestructableType* GetDestructable(War3ID id) const;
 
-    static CDestructableData LoadFromMpq(const class MpqManager& mpq);
+    static CDestructableData LoadFromMpq(const class MpqManager& mpq,
+                                         const std::string& mapPath = "");
 
 private:
     std::unordered_map<War3ID, std::unique_ptr<CDestructableType>> destructables_;

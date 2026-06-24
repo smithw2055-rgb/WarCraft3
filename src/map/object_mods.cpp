@@ -99,11 +99,10 @@ private:
     size_t off_ = 0;
 };
 
-bool ParseModificationTable(Reader& r, int version, bool custom,
+bool ParseModificationTable(Reader& r, int version, bool custom, bool extended,
                             WtsTable* wts,
                             std::vector<ObjectModificationEntry>& out) {
     (void)version;
-    const bool extended = false;
     int count = 0;
     if (!r.I32(count) || count < 0 || count > 200000) return false;
     out.reserve(out.size() + static_cast<size_t>(count));
@@ -164,7 +163,7 @@ bool ParseModificationTable(Reader& r, int version, bool custom,
 }
 
 bool ParseObjectMods(const uint8_t* data, size_t size,
-                     ObjectModificationSet& out, WtsTable* wts) {
+                     bool extended, ObjectModificationSet& out, WtsTable* wts) {
     Reader r(data, size);
     int version = 0;
     if (!r.I32(version)) return false;
@@ -172,8 +171,8 @@ bool ParseObjectMods(const uint8_t* data, size_t size,
 
     ObjectModificationSet parsed;
     parsed.version = version;
-    if (!ParseModificationTable(r, version, false, wts, parsed.original)) return false;
-    if (!ParseModificationTable(r, version, true, wts, parsed.custom)) return false;
+    if (!ParseModificationTable(r, version, false, extended, wts, parsed.original)) return false;
+    if (!ParseModificationTable(r, version, true, extended, wts, parsed.custom)) return false;
 
     out = std::move(parsed);
     return true;
@@ -181,9 +180,11 @@ bool ParseObjectMods(const uint8_t* data, size_t size,
 
 } // namespace
 
-bool LoadWar3MapUnitMods(const std::string& mapPath,
-                         ObjectModificationSet& out,
-                         WtsTable* wts) {
+bool LoadWar3MapObjectMods(const std::string& mapPath,
+                           const char* fileName,
+                           bool extended,
+                           ObjectModificationSet& out,
+                           WtsTable* wts) {
     std::vector<uint8_t> wtsData;
     WtsTable localWts;
     if (!wts && ReadMapFile(mapPath, "war3map.wts", wtsData)) {
@@ -192,13 +193,25 @@ bool LoadWar3MapUnitMods(const std::string& mapPath,
     }
 
     std::vector<uint8_t> data;
-    if (!ReadMapFile(mapPath, "war3map.w3u", data)) {
+    if (!ReadMapFile(mapPath, fileName, data)) {
         return false;
     }
 
-    if (!ParseObjectMods(data.data(), data.size(), out, wts)) {
-        std::cerr << "ObjectMods: failed to parse war3map.w3u" << std::endl;
+    if (!ParseObjectMods(data.data(), data.size(), extended, out, wts)) {
+        std::cerr << "ObjectMods: failed to parse " << fileName << std::endl;
         return false;
     }
     return true;
+}
+
+bool LoadWar3MapUnitMods(const std::string& mapPath,
+                         ObjectModificationSet& out,
+                         WtsTable* wts) {
+    return LoadWar3MapObjectMods(mapPath, "war3map.w3u", false, out, wts);
+}
+
+bool LoadWar3MapDestructableMods(const std::string& mapPath,
+                                  ObjectModificationSet& out,
+                                  WtsTable* wts) {
+    return LoadWar3MapObjectMods(mapPath, "war3map.w3b", false, out, wts);
 }

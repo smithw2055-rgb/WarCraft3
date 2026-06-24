@@ -143,7 +143,9 @@ void MapLoader::LoadObjectModifications(const std::string& mapPath) {
     // units see the same merged object-editor values without invalidating live CUnitType refs.
     if (mpq_.ArchiveCount() > 0) {
         unitData_ = CUnitData::LoadFromMpq(mpq_, gameplayConstants_, mapPath);
+        destructableData_ = CDestructableData::LoadFromMpq(mpq_, mapPath);
         sim_.SetUnitData(&unitData_);
+        sim_.SetDestructableData(&destructableData_);
     }
     std::cout << "  Object modifications applied" << std::endl;
 }
