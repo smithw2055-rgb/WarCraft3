@@ -7,6 +7,7 @@
 #include "asset/stb_image.h"
 #include <algorithm>
 #include <iostream>
+#include <cctype>
 #include <cstring>
 #include <cmath>
 #include <unordered_map>
@@ -83,61 +84,296 @@ static std::string ToLowerCopy(const std::string& value) {
     return lower;
 }
 
-static int FindBestDefaultStandSequenceIndex(const MdxModel& model) {
-    int exactStandReady = -1;
-    int fallbackStandReady = -1;
-    int fallbackStand = -1;
-    int exactStand = -1;
-    for (int i = 0; i < (int)model.sequences.size(); ++i) {
-        const std::string lowerName = ToLowerCopy(model.sequences[i].name);
-        if (lowerName == "stand ready") {
-            exactStandReady = i;
-            continue;
-        }
-        if (lowerName == "stand") {
-            exactStand = i;
-            continue;
-        }
-        if (lowerName.rfind("stand", 0) != 0) {
-            continue;
-        }
-        const bool hasReadyTag = lowerName.find("ready") != std::string::npos;
-        const bool hasDisallowedTag = lowerName.find("alternate") != std::string::npos
-            || lowerName.find("work") != std::string::npos
-            || lowerName.find("swim") != std::string::npos
-            || lowerName.find("gold") != std::string::npos
-            || lowerName.find("lumber") != std::string::npos
-            || lowerName.find("talk") != std::string::npos
-            || lowerName.find("channel") != std::string::npos
-            || lowerName.find("spell") != std::string::npos
-            || lowerName.find("defend") != std::string::npos
-            || lowerName.find("victory") != std::string::npos
-            || lowerName.find("hit") != std::string::npos
-            || lowerName.find("flesh") != std::string::npos
-            || lowerName.find("bone") != std::string::npos;
-        if (hasReadyTag && !hasDisallowedTag && fallbackStandReady < 0) {
-            fallbackStandReady = i;
-        }
-        if (!hasReadyTag && !hasDisallowedTag && fallbackStand < 0) {
-            fallbackStand = i;
+static std::string TrimAsciiWhitespace(const std::string& value) {
+    size_t start = 0;
+    while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) {
+        ++start;
+    }
+    size_t end = value.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
+        --end;
+    }
+    return value.substr(start, end - start);
+}
+
+static std::string GetSequenceBaseNameLower(const std::string& sequenceName) {
+    const size_t dash = sequenceName.find('-');
+    const std::string baseName = (dash == std::string::npos)
+        ? sequenceName
+        : sequenceName.substr(0, dash);
+    return ToLowerCopy(TrimAsciiWhitespace(baseName));
+}
+
+static const std::array<const char*, 53> kKnownSecondaryTagNames = {{
+    "alternate", "alternateex", "bone", "chain", "channel", "complete", "critical", "defend",
+    "drain", "eattree", "fast", "fill", "flail", "flesh", "fifth", "fire",
+    "first", "five", "four", "fourth", "gold", "hit", "large", "left",
+    "light", "looping", "lumber", "medium", "moderate", "off", "one", "puke",
+    "ready", "right", "second", "severe", "slam", "small", "spiked", "spin",
+    "spell", "cinematic", "swim", "talk", "third", "three", "throw", "two",
+    "turn", "victory", "work", "wounded", "upgrade"
+}};
+
+static int GetKnownSecondaryTagOrdinal(const std::string& token) {
+    for (int i = 0; i < (int)kKnownSecondaryTagNames.size(); ++i) {
+        if (token == kKnownSecondaryTagNames[(size_t)i]) {
+            return i;
         }
     }
-    if (exactStandReady >= 0) return exactStandReady;
-    if (fallbackStandReady >= 0) return fallbackStandReady;
-    if (exactStand >= 0) return exactStand;
-    if (fallbackStand >= 0) return fallbackStand;
-    return model.sequences.empty() ? -1 : 0;
+    return -1;
+}
+
+static bool IsPrimarySequenceToken(const std::string& token) {
+    return token == "attack"
+        || token == "birth"
+        || token == "death"
+        || token == "decay"
+        || token == "dissipate"
+        || token == "morph"
+        || token == "portrait"
+        || token == "sleep"
+        || token == "stand"
+        || token == "walk";
+}
+
+static std::vector<std::string> TokenizeSequenceNameLower(const std::string& sequenceName) {
+    std::vector<std::string> tokens;
+    std::string token;
+    token.reserve(sequenceName.size());
+    for (unsigned char ch : sequenceName) {
+        if (std::isalnum(ch) != 0) {
+            token.push_back((char)std::tolower(ch));
+        }
+        else if (!token.empty()) {
+            tokens.push_back(token);
+            token.clear();
+        }
+    }
+    if (!token.empty()) {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+
+static void SortSecondaryTagsByOrdinal(std::vector<std::string>& tags) {
+    std::sort(tags.begin(), tags.end(), [](const std::string& a, const std::string& b) {
+        const int aOrdinal = GetKnownSecondaryTagOrdinal(a);
+        const int bOrdinal = GetKnownSecondaryTagOrdinal(b);
+        if (aOrdinal != bOrdinal) {
+            return aOrdinal < bOrdinal;
+        }
+        return a < b;
+    });
+}
+
+static std::vector<std::string> NormalizeKnownSecondaryTags(const std::vector<std::string>& inputTags) {
+    std::vector<std::string> normalizedTags;
+    normalizedTags.reserve(inputTags.size());
+    for (const std::string& inputTag : inputTags) {
+        std::string lowerTag = ToLowerCopy(inputTag);
+        if (GetKnownSecondaryTagOrdinal(lowerTag) < 0) {
+            continue;
+        }
+        if (std::find(normalizedTags.begin(), normalizedTags.end(), lowerTag) == normalizedTags.end()) {
+            normalizedTags.push_back(std::move(lowerTag));
+        }
+    }
+    SortSecondaryTagsByOrdinal(normalizedTags);
+    return normalizedTags;
+}
+
+static std::vector<std::string> ExtractKnownSequenceSecondaryTags(const std::string& sequenceName) {
+    std::vector<std::string> tags;
+    const auto tokens = TokenizeSequenceNameLower(sequenceName);
+    for (const std::string& token : tokens) {
+        if (IsPrimarySequenceToken(token)) {
+            continue;
+        }
+        if (GetKnownSecondaryTagOrdinal(token) < 0) {
+            continue;
+        }
+        if (std::find(tags.begin(), tags.end(), token) == tags.end()) {
+            tags.push_back(token);
+        }
+    }
+    SortSecondaryTagsByOrdinal(tags);
+    return tags;
+}
+
+static bool SequenceHasPrimaryToken(const MdxSequence& sequence, const std::string& primaryToken) {
+    if (primaryToken.empty()) {
+        return true;
+    }
+    const auto tokens = TokenizeSequenceNameLower(sequence.name);
+    return std::find(tokens.begin(), tokens.end(), primaryToken) != tokens.end();
+}
+
+static int ComputeRequestedSecondaryTagMatchRank(const std::vector<std::string>& requestedTags,
+                                                 const std::vector<std::string>& candidateTags) {
+    int matchRank = 0;
+    for (const std::string& requestedTag : requestedTags) {
+        if (std::find(candidateTags.begin(), candidateTags.end(), requestedTag) == candidateTags.end()) {
+            continue;
+        }
+        const int ordinal = GetKnownSecondaryTagOrdinal(requestedTag);
+        if (ordinal >= 0) {
+            matchRank += 200000 + ((int)kKnownSecondaryTagNames.size() - ordinal);
+        }
+    }
+    return matchRank;
+}
+
+static int ComputeSecondaryTagOrdinalRank(const std::vector<std::string>& candidateTags) {
+    int rank = 0;
+    for (const std::string& tag : candidateTags) {
+        const int ordinal = GetKnownSecondaryTagOrdinal(tag);
+        if (ordinal >= 0) {
+            rank += ((int)kKnownSecondaryTagNames.size() - ordinal);
+        }
+    }
+    return rank;
+}
+
+struct SequenceSelectionScore {
+    bool exactRequested = false;
+    bool positiveMatch = false;
+    int matchRank = 0;
+    int secondaryCount = 0;
+    bool exactBase = false;
+    int ordinalRank = 0;
+    int index = -1;
+};
+
+static bool IsBetterSequenceSelectionScore(const SequenceSelectionScore& candidate,
+                                           const SequenceSelectionScore& currentBest) {
+    if (candidate.exactRequested != currentBest.exactRequested) {
+        return candidate.exactRequested;
+    }
+    if (candidate.positiveMatch != currentBest.positiveMatch) {
+        return candidate.positiveMatch;
+    }
+    if (candidate.matchRank != currentBest.matchRank) {
+        return candidate.matchRank > currentBest.matchRank;
+    }
+    if (candidate.secondaryCount != currentBest.secondaryCount) {
+        return candidate.secondaryCount < currentBest.secondaryCount;
+    }
+    if (candidate.exactBase != currentBest.exactBase) {
+        return candidate.exactBase;
+    }
+    if (candidate.ordinalRank != currentBest.ordinalRank) {
+        return candidate.ordinalRank > currentBest.ordinalRank;
+    }
+    return candidate.index < currentBest.index;
+}
+
+static int FindBestSequenceIndexByPrimaryAndTags(const MdxModel& model,
+                                                 const char* primaryToken,
+                                                 const std::vector<std::string>& secondaryTags) {
+    const std::string primary = primaryToken ? ToLowerCopy(std::string(primaryToken)) : std::string();
+    const auto requestedTags = NormalizeKnownSecondaryTags(secondaryTags);
+    bool foundCandidate = false;
+    SequenceSelectionScore bestScore;
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        const auto& sequence = model.sequences[(size_t)i];
+        if (!SequenceHasPrimaryToken(sequence, primary)) {
+            continue;
+        }
+
+        const auto candidateTags = ExtractKnownSequenceSecondaryTags(sequence.name);
+        SequenceSelectionScore candidateScore;
+        candidateScore.exactRequested = candidateTags == requestedTags;
+        candidateScore.matchRank = ComputeRequestedSecondaryTagMatchRank(requestedTags, candidateTags);
+        candidateScore.positiveMatch = candidateScore.matchRank > 0;
+        candidateScore.secondaryCount = (int)candidateTags.size();
+        candidateScore.exactBase = GetSequenceBaseNameLower(sequence.name) == primary;
+        candidateScore.ordinalRank = ComputeSecondaryTagOrdinalRank(candidateTags);
+        candidateScore.index = i;
+
+        if (!foundCandidate || IsBetterSequenceSelectionScore(candidateScore, bestScore)) {
+            bestScore = candidateScore;
+            foundCandidate = true;
+        }
+    }
+    return foundCandidate ? bestScore.index : -1;
+}
+
+static int FindSequenceByBaseName(const MdxModel& model, const char* baseName) {
+    const std::string target = ToLowerCopy(baseName ? std::string(baseName) : std::string());
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        if (GetSequenceBaseNameLower(model.sequences[i].name) == target) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool IsEmbeddedSplatTexturePath(const std::string& path) {
+    const std::string lowerPath = ToLowerCopy(path);
+    return lowerPath.find("replaceabletextures\\splats\\") != std::string::npos;
+}
+
+enum BatchSequenceHint : uint32_t {
+    BatchSequenceHint_None = 0,
+    BatchSequenceHint_Birth = 1u << 0,
+    BatchSequenceHint_Death = 1u << 1,
+    BatchSequenceHint_Decay = 1u << 2,
+};
+
+static void AppendSequenceHintsFromTexturePath(uint32_t& hintMask, const std::string& lowerText) {
+    if (lowerText.find("birth") != std::string::npos) {
+        hintMask |= BatchSequenceHint_Birth;
+    }
+    if (lowerText.find("death") != std::string::npos) {
+        hintMask |= BatchSequenceHint_Death;
+    }
+    if (lowerText.find("decay") != std::string::npos
+        || lowerText.find("corpse") != std::string::npos
+        || lowerText.find("flesh") != std::string::npos
+        || lowerText.find("bone") != std::string::npos
+        || lowerText.find("gutz") != std::string::npos
+        || lowerText.find("smug") != std::string::npos) {
+        hintMask |= BatchSequenceHint_Decay;
+    }
+}
+
+static void AppendSequenceHintsFromNodeName(uint32_t& hintMask, const std::string& lowerText) {
+    if (lowerText.find("birth") != std::string::npos) {
+        hintMask |= BatchSequenceHint_Birth;
+    }
+    if (lowerText.find("death") != std::string::npos) {
+        hintMask |= BatchSequenceHint_Death;
+    }
+    if (lowerText.find("decay") != std::string::npos
+        || lowerText.find("corpse") != std::string::npos
+        || lowerText.find("flesh") != std::string::npos
+        || lowerText.find("gutz") != std::string::npos
+        || lowerText.find("smug") != std::string::npos) {
+        hintMask |= BatchSequenceHint_Decay;
+    }
+}
+
+static int FindBestDefaultStandSequenceIndex(const MdxModel& model) {
+    return FindBestSequenceIndexByPrimaryAndTags(model, "stand", {});
+}
+
+static int FindBestTaggedStandSequenceIndex(const MdxModel& model, const char* secondaryTag) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return FindBestSequenceIndexByPrimaryAndTags(model, "stand", tags);
 }
 
 static int FindBestBirthSequenceIndex(const MdxModel& model) {
+    const int exactBirth = FindSequenceByBaseName(model, "birth");
+    if (exactBirth >= 0) {
+        return exactBirth;
+    }
+
     int fallbackBirth = -1;
-    int exactBirth = -1;
     for (int i = 0; i < (int)model.sequences.size(); ++i) {
         const std::string lowerName = ToLowerCopy(model.sequences[i].name);
-        if (lowerName == "birth") {
-            exactBirth = i;
-            break;
-        }
         if (lowerName.rfind("birth", 0) != 0) {
             continue;
         }
@@ -159,8 +395,143 @@ static int FindBestBirthSequenceIndex(const MdxModel& model) {
             fallbackBirth = i;
         }
     }
-    if (exactBirth >= 0) return exactBirth;
     return fallbackBirth;
+}
+
+static int FindBestWalkSequenceIndex(const MdxModel& model) {
+    return FindBestSequenceIndexByPrimaryAndTags(model, "walk", {});
+}
+
+static int FindBestTaggedWalkSequenceIndex(const MdxModel& model, const char* secondaryTag) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return FindBestSequenceIndexByPrimaryAndTags(model, "walk", tags);
+}
+
+static int FindBestAttackSequenceIndex(const MdxModel& model) {
+    return FindBestSequenceIndexByPrimaryAndTags(model, "attack", {});
+}
+
+static int FindBestPrimaryActionSequenceIndex(const MdxModel& model,
+                                              const char* primaryToken,
+                                              const char* secondaryTag) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return FindBestSequenceIndexByPrimaryAndTags(model, primaryToken, tags);
+}
+
+static float ComputeWalkSequenceSpeedRatio(const MdxModel& model,
+                                           int sequenceIndex,
+                                           float currentMovementSpeed,
+                                           float animationScale) {
+    if (sequenceIndex < 0 || sequenceIndex >= (int)model.sequences.size()) {
+        return 1.0f;
+    }
+    const float animationMoveSpeed = model.sequences[sequenceIndex].moveSpeed * std::max(0.001f, animationScale);
+    if (animationMoveSpeed <= 0.0f || currentMovementSpeed <= 0.0f) {
+        return 1.0f;
+    }
+    return std::clamp(currentMovementSpeed / animationMoveSpeed, 0.25f, 4.0f);
+}
+
+static float ComputeSequenceDurationSpeedRatio(const MdxModel& model,
+                                               int sequenceIndex,
+                                               float durationSeconds) {
+    if (sequenceIndex < 0 || sequenceIndex >= (int)model.sequences.size() || durationSeconds <= 0.0f) {
+        return 1.0f;
+    }
+    const auto& sequence = model.sequences[sequenceIndex];
+    const float sequenceDurationSeconds = std::max(0.001f, (float)(sequence.endFrame - sequence.startFrame) / 1000.0f);
+    return std::clamp(sequenceDurationSeconds / durationSeconds, 0.1f, 4.0f);
+}
+
+static int FindBestDeathSequenceIndex(const MdxModel& model) {
+    const int exactDeath = FindSequenceByBaseName(model, "death");
+    if (exactDeath >= 0) {
+        return exactDeath;
+    }
+
+    int fallbackDeath = -1;
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        const std::string lowerName = ToLowerCopy(model.sequences[i].name);
+        if (lowerName.rfind("death", 0) != 0) {
+            continue;
+        }
+        const bool hasDisallowedTag = lowerName.find("alternate") != std::string::npos
+            || lowerName.find("work") != std::string::npos
+            || lowerName.find("swim") != std::string::npos
+            || lowerName.find("ready") != std::string::npos
+            || lowerName.find("gold") != std::string::npos
+            || lowerName.find("lumber") != std::string::npos
+            || lowerName.find("talk") != std::string::npos
+            || lowerName.find("channel") != std::string::npos
+            || lowerName.find("spell") != std::string::npos
+            || lowerName.find("defend") != std::string::npos
+            || lowerName.find("victory") != std::string::npos
+            || lowerName.find("hit") != std::string::npos;
+        if (!hasDisallowedTag && fallbackDeath < 0) {
+            fallbackDeath = i;
+        }
+    }
+    return fallbackDeath;
+}
+
+static int FindBestDecaySequenceIndex(const MdxModel& model, const char* secondaryTag) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    int decayIndex = FindBestSequenceIndexByPrimaryAndTags(model, "decay", tags);
+    if (decayIndex >= 0) {
+        return decayIndex;
+    }
+    const auto normalizedTags = NormalizeKnownSecondaryTags(tags);
+    bool foundCorpse = false;
+    SequenceSelectionScore bestCorpseScore;
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        const auto& sequence = model.sequences[(size_t)i];
+        const auto tokens = TokenizeSequenceNameLower(sequence.name);
+        if (std::find(tokens.begin(), tokens.end(), "corpse") == tokens.end()) {
+            continue;
+        }
+        const auto candidateTags = ExtractKnownSequenceSecondaryTags(sequence.name);
+        SequenceSelectionScore candidateScore;
+        candidateScore.exactRequested = candidateTags == normalizedTags;
+        candidateScore.matchRank = ComputeRequestedSecondaryTagMatchRank(normalizedTags, candidateTags);
+        candidateScore.positiveMatch = candidateScore.matchRank > 0;
+        candidateScore.secondaryCount = (int)candidateTags.size();
+        candidateScore.exactBase = GetSequenceBaseNameLower(sequence.name) == "corpse";
+        candidateScore.ordinalRank = ComputeSecondaryTagOrdinalRank(candidateTags);
+        candidateScore.index = i;
+        if (!foundCorpse || IsBetterSequenceSelectionScore(candidateScore, bestCorpseScore)) {
+            bestCorpseScore = candidateScore;
+            foundCorpse = true;
+        }
+    }
+    return foundCorpse ? bestCorpseScore.index : -1;
+}
+
+static int FindBestDissipateSequenceIndex(const MdxModel& model) {
+    const int exactDissipate = FindSequenceByBaseName(model, "dissipate");
+    if (exactDissipate >= 0) {
+        return exactDissipate;
+    }
+
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        const std::string lowerName = ToLowerCopy(model.sequences[i].name);
+        if (lowerName.find("dissipate") != std::string::npos) {
+            return i;
+        }
+    }
+    return FindBestDecaySequenceIndex(model, "bone");
+}
+
+static bool SequenceNameContains(const std::string& lowerName, const char* token) {
+    return token && lowerName.find(token) != std::string::npos;
 }
 
 MdxViewer::MdxViewer()
@@ -195,14 +566,22 @@ sg_shader MdxViewer::sharedShader_ = {0};
 sg_pipeline MdxViewer::sharedPipeline_ = {0};
 sg_pipeline MdxViewer::sharedNoDepthWritePipeline_ = {0};
 sg_pipeline MdxViewer::sharedBlendPipeline_ = {0};
+sg_pipeline MdxViewer::sharedAdditivePipeline_ = {0};
+sg_pipeline MdxViewer::sharedAddAlphaPipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlayPipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlayBlendPipeline_ = {0};
+sg_pipeline MdxViewer::sharedOverlayAdditivePipeline_ = {0};
+sg_pipeline MdxViewer::sharedOverlayAddAlphaPipeline_ = {0};
 sg_shader MdxViewer::sharedSkinnedShader_ = {0};
 sg_pipeline MdxViewer::sharedSkinnedPipeline_ = {0};
 sg_pipeline MdxViewer::sharedSkinnedNoDepthWritePipeline_ = {0};
 sg_pipeline MdxViewer::sharedSkinnedBlendPipeline_ = {0};
+sg_pipeline MdxViewer::sharedSkinnedAdditivePipeline_ = {0};
+sg_pipeline MdxViewer::sharedSkinnedAddAlphaPipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlaySkinnedPipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlaySkinnedBlendPipeline_ = {0};
+sg_pipeline MdxViewer::sharedOverlaySkinnedAdditivePipeline_ = {0};
+sg_pipeline MdxViewer::sharedOverlaySkinnedAddAlphaPipeline_ = {0};
 sg_sampler MdxViewer::sharedSampler_ = {0};
 sg_image MdxViewer::sharedWhiteTexture_ = {0};
 sg_view MdxViewer::sharedWhiteTextureView_ = {0};
@@ -480,6 +859,14 @@ void MdxViewer::InitSharedShader() {
         pd.depth.write_enabled = false;
         sharedBlendPipeline_ = sg_make_pipeline(&pd);
 
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedAdditivePipeline_ = sg_make_pipeline(&pd);
+
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedAddAlphaPipeline_ = sg_make_pipeline(&pd);
+
         pd.colors[0].blend.enabled = false;
         pd.depth.compare = SG_COMPAREFUNC_ALWAYS;
         pd.depth.write_enabled = false;
@@ -489,6 +876,14 @@ void MdxViewer::InitSharedShader() {
         pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
         pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
         sharedOverlayBlendPipeline_ = sg_make_pipeline(&pd);
+
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedOverlayAdditivePipeline_ = sg_make_pipeline(&pd);
+
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedOverlayAddAlphaPipeline_ = sg_make_pipeline(&pd);
     }
 
     // ---- Skinned pipeline ----
@@ -521,6 +916,14 @@ void MdxViewer::InitSharedShader() {
         pd.depth.write_enabled = false;
         sharedSkinnedBlendPipeline_ = sg_make_pipeline(&pd);
 
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedSkinnedAdditivePipeline_ = sg_make_pipeline(&pd);
+
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedSkinnedAddAlphaPipeline_ = sg_make_pipeline(&pd);
+
         pd.colors[0].blend.enabled = false;
         pd.depth.compare = SG_COMPAREFUNC_ALWAYS;
         pd.depth.write_enabled = false;
@@ -530,17 +933,33 @@ void MdxViewer::InitSharedShader() {
         pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
         pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
         sharedOverlaySkinnedBlendPipeline_ = sg_make_pipeline(&pd);
+
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedOverlaySkinnedAdditivePipeline_ = sg_make_pipeline(&pd);
+
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedOverlaySkinnedAddAlphaPipeline_ = sg_make_pipeline(&pd);
     }
 }
 
 void MdxViewer::ReleaseSharedShader() {
+    if (sharedOverlayAddAlphaPipeline_.id) sg_destroy_pipeline(sharedOverlayAddAlphaPipeline_);
+    if (sharedOverlayAdditivePipeline_.id) sg_destroy_pipeline(sharedOverlayAdditivePipeline_);
     if (sharedOverlayBlendPipeline_.id) sg_destroy_pipeline(sharedOverlayBlendPipeline_);
     if (sharedOverlayPipeline_.id) sg_destroy_pipeline(sharedOverlayPipeline_);
+    if (sharedAddAlphaPipeline_.id) sg_destroy_pipeline(sharedAddAlphaPipeline_);
+    if (sharedAdditivePipeline_.id) sg_destroy_pipeline(sharedAdditivePipeline_);
     if (sharedBlendPipeline_.id) sg_destroy_pipeline(sharedBlendPipeline_);
     if (sharedNoDepthWritePipeline_.id) sg_destroy_pipeline(sharedNoDepthWritePipeline_);
     if (sharedPipeline_.id) sg_destroy_pipeline(sharedPipeline_);
+    if (sharedOverlaySkinnedAddAlphaPipeline_.id) sg_destroy_pipeline(sharedOverlaySkinnedAddAlphaPipeline_);
+    if (sharedOverlaySkinnedAdditivePipeline_.id) sg_destroy_pipeline(sharedOverlaySkinnedAdditivePipeline_);
     if (sharedOverlaySkinnedBlendPipeline_.id) sg_destroy_pipeline(sharedOverlaySkinnedBlendPipeline_);
     if (sharedOverlaySkinnedPipeline_.id) sg_destroy_pipeline(sharedOverlaySkinnedPipeline_);
+    if (sharedSkinnedAddAlphaPipeline_.id) sg_destroy_pipeline(sharedSkinnedAddAlphaPipeline_);
+    if (sharedSkinnedAdditivePipeline_.id) sg_destroy_pipeline(sharedSkinnedAdditivePipeline_);
     if (sharedSkinnedBlendPipeline_.id) sg_destroy_pipeline(sharedSkinnedBlendPipeline_);
     if (sharedSkinnedNoDepthWritePipeline_.id) sg_destroy_pipeline(sharedSkinnedNoDepthWritePipeline_);
     if (sharedShader_.id) sg_destroy_shader(sharedShader_);
@@ -550,9 +969,13 @@ void MdxViewer::ReleaseSharedShader() {
     if (sharedWhiteTexture_.id) sg_destroy_image(sharedWhiteTexture_);
     if (sharedSampler_.id) sg_destroy_sampler(sharedSampler_);
     sharedShader_ = {0}; sharedPipeline_ = {0}; sharedNoDepthWritePipeline_ = {0}; sharedBlendPipeline_ = {0};
+    sharedAdditivePipeline_ = {0}; sharedAddAlphaPipeline_ = {0};
     sharedOverlayPipeline_ = {0}; sharedOverlayBlendPipeline_ = {0};
+    sharedOverlayAdditivePipeline_ = {0}; sharedOverlayAddAlphaPipeline_ = {0};
     sharedSkinnedShader_ = {0}; sharedSkinnedPipeline_ = {0}; sharedSkinnedNoDepthWritePipeline_ = {0}; sharedSkinnedBlendPipeline_ = {0};
+    sharedSkinnedAdditivePipeline_ = {0}; sharedSkinnedAddAlphaPipeline_ = {0};
     sharedOverlaySkinnedPipeline_ = {0}; sharedOverlaySkinnedBlendPipeline_ = {0};
+    sharedOverlaySkinnedAdditivePipeline_ = {0}; sharedOverlaySkinnedAddAlphaPipeline_ = {0};
     sharedSampler_ = {0};
     sharedWhiteTexture_ = {0};
     sharedWhiteTextureView_ = {0};
@@ -797,6 +1220,13 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
         }
     }
     std::unordered_map<int, const MdxNode*> debugNodesByObjectId;
+    std::unordered_map<int, std::string> nodeNamesLowerByObjectId;
+    for (const auto& bone : sourceModel.bones) {
+        nodeNamesLowerByObjectId[bone.objectId] = ToLowerCopy(bone.name);
+    }
+    for (const auto& helper : sourceModel.helpers) {
+        nodeNamesLowerByObjectId[helper.objectId] = ToLowerCopy(helper.name);
+    }
     if (logModelDebug) {
         std::cout << "ModelDebug[" << name_ << "]: bones=" << sourceModel.bones.size()
                   << " helpers=" << sourceModel.helpers.size() << std::endl;
@@ -1002,11 +1432,25 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
                     texHandle = texCache[texId].handle;
                     replaceableId = texCache[texId].replaceableId;
                     replaceablePath = texCache[texId].replaceablePath;
+                    if (texId >= 0 && texId < (int)sourceModel.textures.size()
+                        && IsEmbeddedSplatTexturePath(sourceModel.textures[texId].path)) {
+                        continue;
+                    }
                 }
             }
             const std::vector<float>* uvSource = &geo.uvs;
             if (!geo.uvSets.empty() && coordId >= 0 && coordId < (int)geo.uvSets.size()) {
                 uvSource = &geo.uvSets[coordId];
+            }
+            uint32_t sequenceHintMask = BatchSequenceHint_None;
+            if (layer && layer->textureId >= 0 && layer->textureId < (int)sourceModel.textures.size()) {
+                AppendSequenceHintsFromTexturePath(sequenceHintMask, ToLowerCopy(sourceModel.textures[layer->textureId].path));
+            }
+            for (uint16_t objectId : geo.matrixIndices) {
+                const auto nodeNameIt = nodeNamesLowerByObjectId.find((int)objectId);
+                if (nodeNameIt != nodeNamesLowerByObjectId.end()) {
+                    AppendSequenceHintsFromNodeName(sequenceHintMask, nodeNameIt->second);
+                }
             }
 
             if (isSkinned && hasAnimations_) {
@@ -1030,6 +1474,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
                         batch.layerFlags = layer->flags;
                         batch.layerAlpha = layer->alpha;
                     }
+                    batch.sequenceHintMask = sequenceHintMask;
                     if (geosetAnim) {
                         batch.geosetAlpha = geosetAnim->alpha;
                         batch.geosetColor[0] = geosetAnim->color[0];
@@ -1084,6 +1529,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
                     batch.layerFlags = layer->flags;
                     batch.layerAlpha = layer->alpha;
                 }
+                batch.sequenceHintMask = sequenceHintMask;
                 if (geosetAnim) {
                     batch.geosetAlpha = geosetAnim->alpha;
                     batch.geosetColor[0] = geosetAnim->color[0];
@@ -1123,6 +1569,19 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
 
     std::cout << "MdxViewer: " << name_ << " loaded (batches=" << batches_.size()
               << ", animated=" << hasAnimations_ << ", particles=" << hasParticles_ << ")" << std::endl;
+    if (ToLowerCopy(name_).find("peasant") != std::string::npos) {
+        std::cout << "WalkDiag[Model]: " << name_ << std::endl;
+        for (size_t i = 0; i < sourceModel.sequences.size(); ++i) {
+            const auto& seq = sourceModel.sequences[i];
+            const std::string lowerName = ToLowerCopy(seq.name);
+            if (lowerName.find("walk") != std::string::npos) {
+                std::cout << "  seq[" << i << "] name=" << seq.name
+                          << " moveSpeed=" << seq.moveSpeed
+                          << " flags=" << seq.flags
+                          << std::endl;
+            }
+        }
+    }
     if (traceLoad) {
         std::fprintf(stderr, "MdxViewer::Load end name=%s\n", name_.c_str());
         std::fflush(stderr);
@@ -1139,7 +1598,221 @@ bool MdxViewer::PlayStandSequence() {
     if (defaultSequenceIndex < 0) {
         return false;
     }
-    return animator_.SetSequence(defaultSequenceIndex, true, 1.0f);
+    return SetSequencePreservingWalk(defaultSequenceIndex, true, 1.0f);
+}
+
+bool MdxViewer::PlayStandSequenceWithTags(const std::vector<std::string>& secondaryTags) {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int sequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "stand", secondaryTags);
+    if (sequenceIndex < 0) {
+        return false;
+    }
+    return SetSequencePreservingWalk(sequenceIndex, true, 1.0f);
+}
+
+bool MdxViewer::PlayStandSequenceWithTag(const char* secondaryTag) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return PlayStandSequenceWithTags(tags);
+}
+
+bool MdxViewer::PlayWalkSequence() {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int walkSequenceIndex = FindBestWalkSequenceIndex(*modelSource_);
+    if (walkSequenceIndex < 0) {
+        return false;
+    }
+    return SetSequencePreservingWalk(walkSequenceIndex, true, 1.0f);
+}
+
+bool MdxViewer::PlayWalkSequenceWithTags(const std::vector<std::string>& secondaryTags) {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int walkSequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "walk", secondaryTags);
+    if (walkSequenceIndex < 0) {
+        return false;
+    }
+    return SetSequencePreservingWalk(walkSequenceIndex, true, 1.0f);
+}
+
+bool MdxViewer::PlayWalkSequenceWithTag(const char* secondaryTag) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return PlayWalkSequenceWithTags(tags);
+}
+
+bool MdxViewer::PlayWalkSequenceAtSpeed(float currentMovementSpeed) {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int walkSequenceIndex = FindBestWalkSequenceIndex(*modelSource_);
+    if (walkSequenceIndex < 0) {
+        return false;
+    }
+    const float speedRatio = ComputeWalkSequenceSpeedRatio(*modelSource_, walkSequenceIndex,
+        currentMovementSpeed, animationSpeedScale_);
+    return SetSequencePreservingWalk(walkSequenceIndex, true, speedRatio);
+}
+
+bool MdxViewer::PlayWalkSequenceWithTagsAtSpeed(const std::vector<std::string>& secondaryTags,
+                                                float currentMovementSpeed) {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int walkSequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "walk", secondaryTags);
+    if (walkSequenceIndex < 0) {
+        return false;
+    }
+    const float speedRatio = ComputeWalkSequenceSpeedRatio(*modelSource_, walkSequenceIndex,
+        currentMovementSpeed, animationSpeedScale_);
+    return SetSequencePreservingWalk(walkSequenceIndex, true, speedRatio);
+}
+
+bool MdxViewer::PlayWalkSequenceWithTagAtSpeed(const char* secondaryTag, float currentMovementSpeed) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return PlayWalkSequenceWithTagsAtSpeed(tags, currentMovementSpeed);
+}
+
+bool MdxViewer::PlayWalkSequenceAtSpeedRatio(float speedRatio) {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int walkSequenceIndex = FindBestWalkSequenceIndex(*modelSource_);
+    if (walkSequenceIndex < 0) {
+        return false;
+    }
+    return SetSequencePreservingWalk(walkSequenceIndex, true, std::clamp(speedRatio, 0.1f, 4.0f));
+}
+
+bool MdxViewer::PlayWalkSequenceWithTagsAtSpeedRatio(const std::vector<std::string>& secondaryTags,
+                                                     float speedRatio) {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int walkSequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "walk", secondaryTags);
+    if (walkSequenceIndex < 0) {
+        return false;
+    }
+    return SetSequencePreservingWalk(walkSequenceIndex, true, std::clamp(speedRatio, 0.1f, 4.0f));
+}
+
+bool MdxViewer::PlayWalkSequenceWithTagAtSpeedRatio(const char* secondaryTag, float speedRatio) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return PlayWalkSequenceWithTagsAtSpeedRatio(tags, speedRatio);
+}
+
+bool MdxViewer::PlayAttackSequence() {
+    return PlayAttackSequenceWithTags({});
+}
+
+bool MdxViewer::PlayAttackSequenceWithTags(const std::vector<std::string>& secondaryTags) {
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int attackSequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "attack", secondaryTags);
+    if (attackSequenceIndex < 0) {
+        return false;
+    }
+    pendingStandSequenceAfterCurrent_ = true;
+    return SetSequencePreservingWalk(attackSequenceIndex, false, 1.0f);
+}
+
+bool MdxViewer::PlayAttackSequenceWithDuration(float durationSeconds) {
+    return PlayAttackSequenceWithTagsAndDuration({}, durationSeconds);
+}
+
+bool MdxViewer::PlayAttackSequenceWithTagsAndDuration(const std::vector<std::string>& secondaryTags,
+                                                      float durationSeconds) {
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int attackSequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "attack", secondaryTags);
+    if (attackSequenceIndex < 0) {
+        return false;
+    }
+    float speedRatio = 1.0f;
+    if (durationSeconds > 0.0f) {
+        const auto& seq = modelSource_->sequences[attackSequenceIndex];
+        const float sequenceDurationSeconds = std::max(0.001f, (float)(seq.endFrame - seq.startFrame) / 1000.0f);
+        speedRatio = std::clamp(sequenceDurationSeconds / durationSeconds, 0.1f, 4.0f);
+    }
+    pendingStandSequenceAfterCurrent_ = true;
+    return SetSequencePreservingWalk(attackSequenceIndex, false, speedRatio);
+}
+
+bool MdxViewer::PlaySpellSequence(float durationSeconds) {
+    return PlaySpellSequenceWithTags({}, durationSeconds);
+}
+
+bool MdxViewer::PlaySpellSequenceWithTags(const std::vector<std::string>& secondaryTags, float durationSeconds) {
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int sequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "spell", secondaryTags);
+    if (sequenceIndex < 0) {
+        return false;
+    }
+    const float speedRatio = ComputeSequenceDurationSpeedRatio(*modelSource_, sequenceIndex, durationSeconds);
+    pendingStandSequenceAfterCurrent_ = true;
+    return SetSequencePreservingWalk(sequenceIndex, false, speedRatio);
+}
+
+bool MdxViewer::PlaySpellSequenceWithTag(const char* secondaryTag, float durationSeconds) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return PlaySpellSequenceWithTags(tags, durationSeconds);
+}
+
+bool MdxViewer::PlayChannelSequence(float durationSeconds) {
+    return PlayChannelSequenceWithTags({}, durationSeconds);
+}
+
+bool MdxViewer::PlayChannelSequenceWithTags(const std::vector<std::string>& secondaryTags, float durationSeconds) {
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    int sequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "channel", secondaryTags);
+    if (sequenceIndex < 0) {
+        sequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "spell", secondaryTags);
+    }
+    if (sequenceIndex < 0) {
+        return false;
+    }
+    const float speedRatio = ComputeSequenceDurationSpeedRatio(*modelSource_, sequenceIndex, durationSeconds);
+    pendingStandSequenceAfterCurrent_ = false;
+    return SetSequencePreservingWalk(sequenceIndex, false, speedRatio);
+}
+
+bool MdxViewer::PlayChannelSequenceWithTag(const char* secondaryTag, float durationSeconds) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return PlayChannelSequenceWithTags(tags, durationSeconds);
 }
 
 bool MdxViewer::PlayBirthThenStandSequence() {
@@ -1150,8 +1823,144 @@ bool MdxViewer::PlayBirthThenStandSequence() {
     if (birthSequenceIndex < 0) {
         return PlayStandSequence();
     }
-    pendingStandSequenceAfterCurrent_ = animator_.SetSequence(birthSequenceIndex, false, 1.0f);
+    pendingStandSequenceAfterCurrent_ = SetSequencePreservingWalk(birthSequenceIndex, false, 1.0f);
     return pendingStandSequenceAfterCurrent_;
+}
+
+bool MdxViewer::PlayDeathSequence() {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int deathSequenceIndex = FindBestDeathSequenceIndex(*modelSource_);
+    if (deathSequenceIndex < 0) {
+        return false;
+    }
+    return SetSequencePreservingWalk(deathSequenceIndex, false, 1.0f);
+}
+
+bool MdxViewer::PlayDecaySequenceWithTags(const std::vector<std::string>& secondaryTags, float durationSeconds) {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    std::vector<std::string> tags = secondaryTags;
+    const char* tagPtr = nullptr;
+    if (!tags.empty()) {
+        tagPtr = tags.front().c_str();
+    }
+    const int sequenceIndex = FindBestDecaySequenceIndex(*modelSource_, tagPtr);
+    if (sequenceIndex < 0) {
+        return false;
+    }
+    const float speedRatio = ComputeSequenceDurationSpeedRatio(*modelSource_, sequenceIndex, durationSeconds);
+    return SetSequencePreservingWalk(sequenceIndex, false, speedRatio);
+}
+
+bool MdxViewer::PlayDecaySequenceWithTag(const char* secondaryTag, float durationSeconds) {
+    std::vector<std::string> tags;
+    if (secondaryTag && secondaryTag[0]) {
+        tags.push_back(secondaryTag);
+    }
+    return PlayDecaySequenceWithTags(tags, durationSeconds);
+}
+
+bool MdxViewer::PlayDissipateSequence(float durationSeconds) {
+    pendingStandSequenceAfterCurrent_ = false;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int sequenceIndex = FindBestDissipateSequenceIndex(*modelSource_);
+    if (sequenceIndex < 0) {
+        return false;
+    }
+    const float speedRatio = ComputeSequenceDurationSpeedRatio(*modelSource_, sequenceIndex, durationSeconds);
+    return SetSequencePreservingWalk(sequenceIndex, false, speedRatio);
+}
+
+bool MdxViewer::SetSequencePreservingWalk(int sequenceIndex, bool loop, float speed) {
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    if (sequenceIndex < 0 || sequenceIndex >= (int)modelSource_->sequences.size()) {
+        return false;
+    }
+
+    const bool nextIsWalk = SequenceHasPrimaryToken(modelSource_->sequences[(size_t)sequenceIndex], "walk");
+    if (currentSequenceIsWalk_ && !nextIsWalk) {
+        lastWalkSequenceProgress_ = animator_.GetSequenceProgress();
+    }
+
+    const bool played = animator_.SetSequence(sequenceIndex, loop, speed);
+    if (!played) {
+        return false;
+    }
+
+    if (nextIsWalk && !currentSequenceIsWalk_ && lastWalkSequenceProgress_ >= 0.0f) {
+        animator_.SetFrameByRatio(std::clamp(lastWalkSequenceProgress_, 0.0f, 1.0f));
+    }
+    currentSequenceIsWalk_ = nextIsWalk;
+    return true;
+}
+
+bool MdxViewer::PlaySequenceByName(const char* sequenceName, bool loop, float speed,
+                                   bool queueStandAfterCurrent) {
+    pendingStandSequenceAfterCurrent_ = queueStandAfterCurrent && !loop;
+    if (!initializedAnimator_ || !sequenceName || !sequenceName[0]) {
+        return false;
+    }
+    const bool played = animator_.PlaySequence(sequenceName, loop, speed);
+    if (!played) {
+        pendingStandSequenceAfterCurrent_ = false;
+    }
+    return played;
+}
+
+bool MdxViewer::PlaySequenceByIndex(int index, bool loop, float speed, bool queueStandAfterCurrent) {
+    pendingStandSequenceAfterCurrent_ = queueStandAfterCurrent && !loop;
+    if (!initializedAnimator_) {
+        return false;
+    }
+    const bool played = SetSequencePreservingWalk(index, loop, speed);
+    if (!played) {
+        pendingStandSequenceAfterCurrent_ = false;
+    }
+    return played;
+}
+
+bool MdxViewer::SetCurrentSequenceFrameByRatio(float ratio) {
+    if (!initializedAnimator_) {
+        return false;
+    }
+    return animator_.SetFrameByRatio(ratio);
+}
+
+bool MdxViewer::IsPlayingSequenceWithToken(const char* token) const {
+    if (!initializedAnimator_ || !modelSource_ || !token) {
+        return false;
+    }
+    const int sequenceIndex = animator_.GetCurrentSequence();
+    if (sequenceIndex < 0 || sequenceIndex >= (int)modelSource_->sequences.size()) {
+        return false;
+    }
+    return SequenceNameContains(ToLowerCopy(modelSource_->sequences[sequenceIndex].name), token);
+}
+
+bool MdxViewer::IsCurrentSequenceFinished() const {
+    return initializedAnimator_ && animator_.IsSequenceFinished();
+}
+
+bool MdxViewer::IsCurrentSequenceLooping() const {
+    return initializedAnimator_ && animator_.IsSequenceLooping();
+}
+
+bool MdxViewer::GetSequenceName(int index, std::string& outName) const {
+    outName.clear();
+    if (!modelSource_ || index < 0 || index >= (int)modelSource_->sequences.size()) {
+        return false;
+    }
+    outName = modelSource_->sequences[index].name;
+    return true;
 }
 
 void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
@@ -1435,6 +2244,7 @@ sg_image MdxViewer::GetPlayerTexture(Batch& batch, int player) {
 void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, float scale,
                          int player, float yawRadians, float alpha, bool depthTest) {
     if (batches_.empty() || (!sharedShader_.id && !sharedSkinnedShader_.id)) return;
+    animationSpeedScale_ = std::max(0.001f, std::fabs(scale));
     auto isValidBuffer = [](sg_buffer buffer) {
         return buffer.id && sg_query_buffer_state(buffer) == SG_RESOURCESTATE_VALID;
     };
@@ -1450,6 +2260,27 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
     };
     auto isValidSampler = [](sg_sampler samplerHandle) {
         return samplerHandle.id && sg_query_sampler_state(samplerHandle) == SG_RESOURCESTATE_VALID;
+    };
+    const std::string currentSequenceName = (initializedAnimator_ && modelSource_
+        && animator_.GetCurrentSequence() >= 0
+        && animator_.GetCurrentSequence() < (int)modelSource_->sequences.size())
+        ? ToLowerCopy(modelSource_->sequences[animator_.GetCurrentSequence()].name)
+        : std::string();
+    const bool currentSequenceIsBirth = SequenceNameContains(currentSequenceName, "birth");
+    const bool currentSequenceIsDeath = SequenceNameContains(currentSequenceName, "death");
+    const bool currentSequenceIsDecay = SequenceNameContains(currentSequenceName, "decay")
+        || SequenceNameContains(currentSequenceName, "corpse");
+    auto shouldRenderBatchForCurrentSequence = [&](const Batch& batch) {
+        if ((batch.sequenceHintMask & BatchSequenceHint_Birth) != 0 && !currentSequenceIsBirth) {
+            return false;
+        }
+        if ((batch.sequenceHintMask & BatchSequenceHint_Death) != 0 && !currentSequenceIsDeath && !currentSequenceIsDecay) {
+            return false;
+        }
+        if ((batch.sequenceHintMask & BatchSequenceHint_Decay) != 0 && !currentSequenceIsDeath && !currentSequenceIsDecay) {
+            return false;
+        }
+        return true;
     };
     static bool s_loggedFirstOverlayRender = false;
     if (!s_loggedFirstOverlayRender && !depthTest) {
@@ -1493,6 +2324,9 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
 
     for (auto& batch : batches_) {
         if (!isValidBuffer(batch.vbo) || !isValidBuffer(batch.ebo)) {
+            continue;
+        }
+        if (!shouldRenderBatchForCurrentSequence(batch)) {
             continue;
         }
         sg_image tex = batch.textureHandle;
@@ -1541,7 +2375,9 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
         fsU.color[1] = geosetColorG;
         fsU.color[2] = geosetColorB;
         fsU.color[3] = alpha * layerAlpha * geosetAlpha;
-        const bool blended = batch.filterMode >= 2;
+        const bool alphaBlend = batch.filterMode == 2;
+        const bool additiveBlend = batch.filterMode == 3;
+        const bool addAlphaBlend = batch.filterMode == 4;
         const bool depthEnabled = depthTest && ((batch.layerFlags & 0x40) == 0);
         const bool noDepthWrite = (batch.layerFlags & 0x80) != 0;
 
@@ -1549,9 +2385,29 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
             sg_image boneTex = animator_.GetBoneTexture();
             if (!isValidImage(boneTex)) continue;
 
-            sg_apply_pipeline(depthEnabled
-                ? (blended ? sharedSkinnedBlendPipeline_ : (noDepthWrite ? sharedSkinnedNoDepthWritePipeline_ : sharedSkinnedPipeline_))
-                : (blended ? sharedOverlaySkinnedBlendPipeline_ : sharedOverlaySkinnedPipeline_));
+            sg_pipeline selectedPipeline = {0};
+            if (depthEnabled) {
+                if (additiveBlend) {
+                    selectedPipeline = sharedSkinnedAdditivePipeline_;
+                } else if (addAlphaBlend) {
+                    selectedPipeline = sharedSkinnedAddAlphaPipeline_;
+                } else if (alphaBlend) {
+                    selectedPipeline = sharedSkinnedBlendPipeline_;
+                } else {
+                    selectedPipeline = noDepthWrite ? sharedSkinnedNoDepthWritePipeline_ : sharedSkinnedPipeline_;
+                }
+            } else {
+                if (additiveBlend) {
+                    selectedPipeline = sharedOverlaySkinnedAdditivePipeline_;
+                } else if (addAlphaBlend) {
+                    selectedPipeline = sharedOverlaySkinnedAddAlphaPipeline_;
+                } else if (alphaBlend) {
+                    selectedPipeline = sharedOverlaySkinnedBlendPipeline_;
+                } else {
+                    selectedPipeline = sharedOverlaySkinnedPipeline_;
+                }
+            }
+            sg_apply_pipeline(selectedPipeline);
             sg_apply_uniforms(0, sg_rng(vsUS));
             sg_apply_uniforms(1, sg_rng(fsU));
 
@@ -1577,9 +2433,29 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
             sg_apply_bindings(&bind);
             sg_draw(0, batch.indexCount, 1);
         } else if (sharedShader_.id && sharedPipeline_.id) {
-            sg_apply_pipeline(depthEnabled
-                ? (blended ? sharedBlendPipeline_ : (noDepthWrite ? sharedNoDepthWritePipeline_ : sharedPipeline_))
-                : (blended ? sharedOverlayBlendPipeline_ : sharedOverlayPipeline_));
+            sg_pipeline selectedPipeline = {0};
+            if (depthEnabled) {
+                if (additiveBlend) {
+                    selectedPipeline = sharedAdditivePipeline_;
+                } else if (addAlphaBlend) {
+                    selectedPipeline = sharedAddAlphaPipeline_;
+                } else if (alphaBlend) {
+                    selectedPipeline = sharedBlendPipeline_;
+                } else {
+                    selectedPipeline = noDepthWrite ? sharedNoDepthWritePipeline_ : sharedPipeline_;
+                }
+            } else {
+                if (additiveBlend) {
+                    selectedPipeline = sharedOverlayAdditivePipeline_;
+                } else if (addAlphaBlend) {
+                    selectedPipeline = sharedOverlayAddAlphaPipeline_;
+                } else if (alphaBlend) {
+                    selectedPipeline = sharedOverlayBlendPipeline_;
+                } else {
+                    selectedPipeline = sharedOverlayPipeline_;
+                }
+            }
+            sg_apply_pipeline(selectedPipeline);
             sg_apply_uniforms(0, sg_rng(vsU));
             sg_apply_uniforms(1, sg_rng(fsU));
 

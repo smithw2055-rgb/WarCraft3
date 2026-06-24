@@ -8,6 +8,7 @@ CUnitType::CUnitType(
     const std::vector<War3ID>& abilityList,
     bool building, PathingGridMovementType movementType,
     float defaultFlyingHeight, float collisionSize,
+    const std::vector<std::string>& requiredAnimationTags,
     const std::unordered_set<CUnitClassification>& classifications,
     const std::vector<CUnitAttack>& attacks,
     int attacksEnabled, const std::string& armorType,
@@ -54,6 +55,7 @@ CUnitType::CUnitType(
     , defaultAutocastAbility_(defaultAutocastAbility), abilityList_(abilityList)
     , building_(building), movementType_(movementType)
     , defaultFlyingHeight_(defaultFlyingHeight), collisionSize_(collisionSize)
+    , requiredAnimationTags_(requiredAnimationTags)
     , classifications_(classifications), attacks_(attacks), attacksEnabled_(attacksEnabled)
     , armorType_(armorType), raise_(raise), decay_(decay), defenseType_(defenseType)
     , impactZ_(impactZ), deathTime_(deathTime), targetedAs_(targetedAs)

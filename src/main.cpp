@@ -4,8 +4,12 @@
 #include <memory>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cctype>
 #include <cstring>
+#include <fstream>
 #include <limits>
+#include <sstream>
 #include <unordered_set>
 
 #include "third_party/sokol/sokol_app.h"
@@ -32,7 +36,6 @@
 #include "map/unitsdoo.h"
 #include "model/mdx.h"
 #include "render/mdx_viewer.h"
-// Temporary rebuild anchor for MdxViewer layout debugging.
 #include "render/scene.h"
 #include "render/shadow_manager.h"
 #include "render/fog_of_war.h"
@@ -41,13 +44,26 @@
 #include "render/shapes.h"
 #include "render/minimap.h"
 #include "ecs/csimulation.h"
+#include "ecs/destructable.h"
 #include "ecs/unit.h"
 #include "ecs/player.h"
+#include "ecs/abilities/ability_harvest.h"
+#include "ecs/abilities/ability_gold_mine.h"
+#include "ecs/abilities/ability_queue.h"
+#include "ecs/behaviors/behavior_attack.h"
+#include "ecs/behaviors/behavior_build.h"
+#include "ecs/behaviors/behavior_harvest.h"
+#include "ecs/behaviors/behavior_move.h"
+#include "ecs/behaviors/behavior_repair.h"
+#include "ecs/behaviors/behavior_return_resources.h"
+#include "ecs/behaviors/behavior_spell.h"
 #include "ecs/orders/order.h"
 #include "data/unitdata.h"
+#include "data/destructabledata.h"
 #include "data/gameplay_constants.h"
 #include "ui/MainUI.h"
 #include "audio/AudioSystem.h"
+#include "debug/move_debug.h"
 #include "scripting/JassVM.h"
 #include "scripting/JassNatives.h"
 #ifndef __STORMLIB_NO_STATIC_LINK__
@@ -55,8 +71,38 @@
 #endif
 #include <StormLib.h>
 #include "render/daynight.h"
+#include "core/warsmash_config.h"
+#include "scripting/jass_config_env.h"
+#include "scripting/jass_common_env.h"
+#include "map/map_loader.h"
 
 namespace fs = std::filesystem;
+
+static fs::path ResolveConfiguredPath(const fs::path& projectRoot,
+                                      const fs::path& resourcesDir,
+                                      const std::string& configuredPath) {
+    fs::path path(configuredPath);
+    if (path.is_absolute()) {
+        return path;
+    }
+
+    const fs::path fromProject = projectRoot / path;
+    if (fs::exists(fromProject)) {
+        return fromProject;
+    }
+
+    const fs::path fromResources = resourcesDir / path;
+    if (fs::exists(fromResources)) {
+        return fromResources;
+    }
+
+    const fs::path fromResourceFileName = resourcesDir / path.filename();
+    if (fs::exists(fromResourceFileName)) {
+        return fromResourceFileName;
+    }
+
+    return fromProject;
+}
 
 // --- Global state (for callbacks) ---
 static struct {
@@ -64,6 +110,7 @@ static struct {
     bool running = true;
     int frameCount = 0;
     float lastTime = 0;
+    float simulationAccumulator = 0.0f;
 
     MpqManager mpq;
     SceneManager scene;
@@ -87,6 +134,7 @@ static struct {
 
     std::string screenshotPath;
     int screenshotFrame = -1;
+    bool enableJass = false;
 
     float mouseDX = 0, mouseDY = 0, mouseScroll = 0;
     bool mouseDown[3] = {};
@@ -120,18 +168,73 @@ static struct {
         bool useSequenceIndex = false;
     };
 
+    enum class UnitVisualAnimationMode : uint8_t {
+        NONE,
+        READY,
+        READY_GOLD,
+        READY_LUMBER,
+        WALK,
+        WALK_GOLD,
+        WALK_LUMBER,
+        WALK_WORK,
+        WORK,
+        SPELL,
+        ATTACK,
+        CONSTRUCT,
+        DEAD,
+        CORPSE,
+        BONE_CORPSE,
+        DISSIPATE
+    };
+
+    struct ScriptedUnitAnimationState {
+        PendingUnitAnimation request;
+        bool loop = false;
+        bool queueStandAfterCurrent = false;
+    };
+
+    struct SelectionCircleVisual {
+        float size = 0.0f;
+        std::string texturePath;
+        std::string dottedTexturePath;
+    };
+
+    struct UnitRenderSplatMeta {
+        float selectionScale = 0.0f;
+        float selectionHeight = 0.0f;
+        float animationWalkSpeed = 0.0f;
+        float animationRunSpeed = 0.0f;
+        std::string uberSplatPath;
+        float uberSplatScale = 0.0f;
+        std::string buildingShadow;
+    };
+
     CSimulation simulation;
     CUnitData unitData;
+    CDestructableData destructableData;
     WpmData wpm;
     bool simulationInitialized = false;
     std::unordered_map<int, UnitVisualSeed> simUnitVisualSeeds;
     std::unordered_map<int, PendingUnitAnimation> simUnitPendingAnimations;
     std::unordered_map<int, int> simUnitToVisualIdx; // handleId → visual instance index
+    std::unordered_map<int, std::pair<float, float>> simUnitVisualLastPositions;
+    std::unordered_map<int, bool> simUnitVisualMovingStates;
+    std::unordered_map<int, UnitVisualAnimationMode> simUnitVisualAnimationModes;
+    std::unordered_map<int, int> simUnitVisualLastAttackAnimationTicks;
+    std::unordered_map<int, CResourceType> simUnitVisualResourceTags;
+    std::unordered_map<int, bool> simUnitVisualConstructionStates;
+    std::unordered_map<int, std::vector<std::string>> simUnitVisualPropertyTags;
+    std::unordered_map<int, ScriptedUnitAnimationState> simUnitScriptedAnimations;
+    std::unordered_map<int, PendingUnitAnimation> simUnitQueuedAnimations;
+    std::unordered_map<int, std::vector<std::string>> simUnitAnimationPropertyTags;
     std::unordered_set<int> simUnitVisualRegistrationFailed;
     std::vector<int> selectedUnitHandles;
     std::unordered_set<int> selectedUnitHandleSet;
     int selectedUnitHandle = -1;
     War3ID selectedUnitTypeId;
+    std::unordered_map<uint32_t, UnitRenderSplatMeta> unitRenderSplatMeta;
+    std::vector<SelectionCircleVisual> selectionCircleVisuals;
+    float selectionCircleScaleFactor = 1.0f;
     bool selectionPressActive = false;
     bool selectionDragVisible = false;
     float selectionStartX = 0.0f;
@@ -163,6 +266,42 @@ static Vec3 ScreenToWorld(float screenX, float screenY, const Mat4& view, const 
     HMM_Vec4 farP = HMM_MulM4V4(invVP, HMM_V4(ndcX, ndcY, 1.0f, 1.0f));
     if (nearP.W != 0) { nearP.X /= nearP.W; nearP.Y /= nearP.W; nearP.Z /= nearP.W; }
     if (farP.W != 0) { farP.X /= farP.W; farP.Y /= farP.W; farP.Z /= farP.W; }
+    const Vec3 rayOrigin(nearP.X, nearP.Y, nearP.Z);
+    const Vec3 rayDirection = Normalize(Vec3(farP.X - nearP.X, farP.Y - nearP.Y, farP.Z - nearP.Z));
+
+    if (g.texturedTerrain.IsValid() && rayDirection.y < -0.0001f) {
+        const float maxDistance = std::max(8192.0f, g.texturedTerrain.GetRadius() * 4.0f);
+        float previousT = 0.0f;
+
+        for (int stepIndex = 1; stepIndex <= 256; ++stepIndex) {
+            const float t = maxDistance * (static_cast<float>(stepIndex) / 256.0f);
+            Vec3 point = rayOrigin + rayDirection * t;
+            const float groundHeight = g.texturedTerrain.GetGroundHeight(point.x, point.z);
+            const float delta = point.y - groundHeight;
+
+            if (delta <= 0.0f) {
+                float lowT = previousT;
+                float highT = t;
+                Vec3 hitPoint = point;
+                for (int iter = 0; iter < 12; ++iter) {
+                    const float midT = (lowT + highT) * 0.5f;
+                    Vec3 midPoint = rayOrigin + rayDirection * midT;
+                    const float midGroundHeight = g.texturedTerrain.GetGroundHeight(midPoint.x, midPoint.z);
+                    const float midDelta = midPoint.y - midGroundHeight;
+                    if (midDelta <= 0.0f) {
+                        highT = midT;
+                        hitPoint = Vec3(midPoint.x, midGroundHeight, midPoint.z);
+                    } else {
+                        lowT = midT;
+                    }
+                }
+                return hitPoint;
+            }
+
+            previousT = t;
+        }
+    }
+
     float dx = farP.X - nearP.X, dy = farP.Y - nearP.Y, dz = farP.Z - nearP.Z;
     if (fabsf(dy) < 0.0001f) return Vec3(nearP.X, 0, nearP.Z);
     float t = -nearP.Y / dy;
@@ -257,6 +396,248 @@ static float ComputeUnitSelectionVisualHeight(const CUnit& unit) {
     return height;
 }
 
+static std::string TrimMetadataValue(std::string value) {
+    const size_t first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return {};
+    }
+    const size_t last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+static bool IsUnitSelected(int handleId);
+
+static std::string NormalizeMetadataPath(std::string path) {
+    for (char& c : path) {
+        if (c == '/') {
+            c = '\\';
+        }
+    }
+    if (!path.empty() && path.find('.') == std::string::npos) {
+        path += ".blp";
+    }
+    return path;
+}
+
+static bool ReadMpqFile(const std::string& path, std::vector<uint8_t>& out) {
+    return g.mpq.ReadFile(path, out);
+}
+
+static bool ReadMpqFileAny(const std::initializer_list<const char*>& paths, std::vector<uint8_t>& out) {
+    for (const char* path : paths) {
+        if (g.mpq.ReadFile(path, out)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void LoadSelectionAndBuildingSplatMetadata() {
+    g.unitRenderSplatMeta.clear();
+    g.selectionCircleVisuals.clear();
+    g.selectionCircleScaleFactor = 1.0f;
+
+    if (g.mpq.ArchiveCount() <= 0) {
+        return;
+    }
+
+    SlkTable unitUiSlk;
+    SlkTable uberSplatSlk;
+    TxtTable miscData;
+    std::vector<uint8_t> buf;
+
+    if (ReadMpqFileAny({"Units\\UnitUI.slk", "Units\\unitUI.slk"}, buf)) {
+        unitUiSlk.Load(buf.data(), buf.size());
+    }
+    buf.clear();
+    if (ReadMpqFile("Splats\\UberSplatData.slk", buf)) {
+        uberSplatSlk.Load(buf.data(), buf.size());
+    }
+
+    for (const char* miscPath : {
+             "UI\\MiscData.txt",
+             "Units\\MiscData.txt",
+             "Units\\MiscGame.txt",
+             "UI\\MiscUI.txt",
+             "war3mapMisc.txt"
+         }) {
+        buf.clear();
+        if (ReadMpqFile(miscPath, buf)) {
+            miscData.Load(buf.data(), buf.size());
+        }
+    }
+
+    std::unordered_map<std::string, std::pair<std::string, float>> uberSplatLookup;
+    if (uberSplatSlk.Rows() > 0) {
+        int idCol = uberSplatSlk.FindColumn("UberSplatID");
+        if (idCol < 0) idCol = uberSplatSlk.FindColumn("splatID");
+        if (idCol < 0) idCol = 0;
+        const int dirCol = uberSplatSlk.FindColumn("Dir");
+        const int fileCol = uberSplatSlk.FindColumn("file");
+        const int scaleCol = uberSplatSlk.FindColumn("Scale");
+        for (int row = 0; row < uberSplatSlk.Rows(); ++row) {
+            const std::string id = TrimMetadataValue(uberSplatSlk.GetString(row, idCol));
+            if (id.empty()) {
+                continue;
+            }
+            std::string path = NormalizeMetadataPath(uberSplatSlk.GetString(row, dirCol) + "\\" +
+                                                     uberSplatSlk.GetString(row, fileCol));
+            if (dirCol < 0 || fileCol < 0) {
+                path.clear();
+            }
+            const float scale = scaleCol >= 0 ? std::strtof(uberSplatSlk.GetString(row, scaleCol).c_str(), nullptr) : 0.0f;
+            uberSplatLookup[id] = {path, scale};
+        }
+    }
+
+    if (unitUiSlk.Rows() > 0) {
+        int idCol = unitUiSlk.FindColumn("unitUIID");
+        if (idCol < 0) idCol = unitUiSlk.FindColumn("unitID");
+        if (idCol < 0) idCol = 0;
+        const int scaleCol = unitUiSlk.FindColumn("scale");
+        const int selZCol = unitUiSlk.FindColumn("selZ");
+        const int walkSpeedCol = unitUiSlk.FindColumn("walk");
+        const int runSpeedCol = unitUiSlk.FindColumn("run");
+        const int uberCol = unitUiSlk.FindColumn("uberSplat");
+        const int buildingShadowCol = unitUiSlk.FindColumn("buildingShadow");
+        for (int row = 0; row < unitUiSlk.Rows(); ++row) {
+            const std::string id = TrimMetadataValue(unitUiSlk.GetString(row, idCol));
+            if (id.size() != 4) {
+                continue;
+            }
+
+            auto& meta = g.unitRenderSplatMeta[War3ID::FromString(id).value];
+            meta.selectionScale = scaleCol >= 0 ? std::strtof(unitUiSlk.GetString(row, scaleCol).c_str(), nullptr) : 0.0f;
+            meta.selectionHeight = selZCol >= 0 ? std::strtof(unitUiSlk.GetString(row, selZCol).c_str(), nullptr) : 0.0f;
+            meta.animationWalkSpeed = walkSpeedCol >= 0 ? std::strtof(unitUiSlk.GetString(row, walkSpeedCol).c_str(), nullptr) : 0.0f;
+            meta.animationRunSpeed = runSpeedCol >= 0 ? std::strtof(unitUiSlk.GetString(row, runSpeedCol).c_str(), nullptr) : 0.0f;
+            meta.buildingShadow = buildingShadowCol >= 0 ? unitUiSlk.GetString(row, buildingShadowCol) : std::string();
+
+            if (id == "hpea" || id == "pea1" || id == "aeph") {
+                const int animPropsCol = unitUiSlk.FindColumn("animProps");
+                std::cout << "WalkDiag[UnitUI]: id=" << id
+                          << " walk=" << meta.animationWalkSpeed
+                          << " run=" << meta.animationRunSpeed
+                          << " animProps=" << (animPropsCol >= 0 ? unitUiSlk.GetString(row, animPropsCol) : "")
+                          << std::endl;
+            }
+
+            const std::string uberId = uberCol >= 0 ? TrimMetadataValue(unitUiSlk.GetString(row, uberCol)) : std::string();
+            if (!uberId.empty()) {
+                auto uberIt = uberSplatLookup.find(uberId);
+                if (uberIt != uberSplatLookup.end()) {
+                    meta.uberSplatPath = uberIt->second.first;
+                    meta.uberSplatScale = uberIt->second.second;
+                }
+            }
+        }
+    }
+
+    const TxtTable& misc = miscData;
+    const int numSizes = misc.GetInt("SelectionCircle", "NumSizes", 0);
+    g.selectionCircleScaleFactor = misc.GetFloat("SelectionCircle", "ScaleFactor", 1.0f);
+    for (int i = 0; i < numSizes; ++i) {
+        char index[3] = {};
+        std::snprintf(index, sizeof(index), "%02d", i);
+        decltype(g.selectionCircleVisuals)::value_type visual;
+        visual.size = misc.GetFloat("SelectionCircle", std::string("Size") + index, 0.0f);
+        visual.texturePath = NormalizeMetadataPath(misc.GetString("SelectionCircle", std::string("Texture") + index));
+        visual.dottedTexturePath = NormalizeMetadataPath(
+            misc.GetString("SelectionCircle", std::string("TextureDotted") + index));
+        if (!visual.texturePath.empty()) {
+            g.selectionCircleVisuals.push_back(std::move(visual));
+        }
+    }
+    std::sort(g.selectionCircleVisuals.begin(), g.selectionCircleVisuals.end(),
+              [](const auto& a, const auto& b) { return a.size < b.size; });
+
+    std::cout << "UnitRenderMetadata: units=" << g.unitRenderSplatMeta.size()
+              << " selectionCircles=" << g.selectionCircleVisuals.size()
+              << " scaleFactor=" << g.selectionCircleScaleFactor
+              << std::endl;
+}
+
+static const decltype(g.unitRenderSplatMeta)::mapped_type* GetUnitRenderSplatMeta(const CUnit& unit) {
+    const auto it = g.unitRenderSplatMeta.find(unit.GetTypeId().value);
+    return (it != g.unitRenderSplatMeta.end()) ? &it->second : nullptr;
+}
+
+static float ComputeSelectionCircleSizeWorld(const CUnit& unit) {
+    if (const auto* meta = GetUnitRenderSplatMeta(unit)) {
+        if (meta->selectionScale > 0.0f) {
+            const float scaleFactor = g.selectionCircleScaleFactor > 0.0f ? g.selectionCircleScaleFactor : 1.0f;
+            return meta->selectionScale * scaleFactor;
+        }
+    }
+    return ComputeUnitSelectionWorldRadius(unit) * 2.0f;
+}
+
+static std::string PickSelectionCircleTexturePath(float selectionSizeWorld) {
+    if (g.selectionCircleVisuals.empty()) {
+        return {};
+    }
+    for (const auto& visual : g.selectionCircleVisuals) {
+        if (selectionSizeWorld < visual.size) {
+            return visual.texturePath;
+        }
+    }
+    return g.selectionCircleVisuals.back().texturePath;
+}
+
+static void RefreshRuntimeUnitSplats() {
+    if (!g.texturedTerrain.IsValid()) {
+        return;
+    }
+
+    g.texturedTerrain.ClearRuntimeSplats();
+    if (!g.simulationInitialized) {
+        return;
+    }
+
+    for (auto* unit : g.simulation.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->IsHidden()) {
+            continue;
+        }
+
+        const auto* meta = GetUnitRenderSplatMeta(*unit);
+        if (meta && unit->IsBuilding() && !meta->uberSplatPath.empty() && meta->uberSplatScale > 0.0f) {
+            const float halfSize = meta->uberSplatScale * 0.5f;
+            g.texturedTerrain.AddRuntimeSplatRect(
+                "building:" + std::to_string(unit->GetHandleId()),
+                meta->uberSplatPath,
+                unit->GetX() - halfSize,
+                unit->GetY() - halfSize,
+                unit->GetX() + halfSize,
+                unit->GetY() + halfSize,
+                2.0f,
+                false,
+                false);
+        }
+
+        if (!IsUnitSelected(unit->GetHandleId())) {
+            continue;
+        }
+
+        const float selectionSize = ComputeSelectionCircleSizeWorld(*unit);
+        const std::string texturePath = PickSelectionCircleTexturePath(selectionSize);
+        if (texturePath.empty() || selectionSize <= 0.0f) {
+            continue;
+        }
+
+        const float halfSize = selectionSize * 0.5f;
+        g.texturedTerrain.AddRuntimeSplatRect(
+            "selection:" + std::to_string(unit->GetHandleId()),
+            texturePath,
+            unit->GetX() - halfSize,
+            unit->GetY() - halfSize,
+            unit->GetX() + halfSize,
+            unit->GetY() + halfSize,
+            6.0f,
+            true,
+            false);
+    }
+}
+
 static bool IntersectSphere(const PickRay& ray, const Vec3& center, float radius, float& outT) {
     const Vec3 oc = ray.origin - center;
     const float a = Dot(ray.direction, ray.direction);
@@ -338,16 +719,23 @@ static CUnit* PickSimulationUnitAtScreenPoint(float screenX,
                                               const Mat4& proj,
                                               int screenW,
                                               int screenH,
-                                              int ignoreHandle = -1) {
+                                              int ignoreHandle = -1,
+                                              bool preferBuildings = true,
+                                              bool strictScreenTargeting = false) {
     const PickRay ray = BuildScreenPickRay(screenX, screenY, view, proj, screenW, screenH);
+    CUnit* bestScreenUnit = nullptr;
+    CUnit* bestScreenNonBuildingUnit = nullptr;
     CUnit* bestRayUnit = nullptr;
-    CUnit* bestFallbackUnit = nullptr;
+    CUnit* bestRayNonBuildingUnit = nullptr;
+    float bestScreenScore = std::numeric_limits<float>::infinity();
+    float bestScreenNonBuildingScore = std::numeric_limits<float>::infinity();
+    float bestScreenDistSq = std::numeric_limits<float>::infinity();
+    float bestScreenNonBuildingDistSq = std::numeric_limits<float>::infinity();
     float bestRayT = std::numeric_limits<float>::infinity();
-    float bestFallbackScore = std::numeric_limits<float>::infinity();
-    float bestFallbackDistSq = std::numeric_limits<float>::infinity();
+    float bestRayNonBuildingT = std::numeric_limits<float>::infinity();
 
     for (auto* unit : g.simulation.GetUnits()) {
-        if (!unit || unit->IsDead()) continue;
+        if (!unit || unit->IsDead() || unit->IsHidden()) continue;
         if (ignoreHandle >= 0 && unit->GetHandleId() == ignoreHandle) continue;
 
         float sphereRadius = ComputeUnitSelectionWorldRadius(*unit);
@@ -370,39 +758,160 @@ static CUnit* PickSimulationUnitAtScreenPoint(float screenX,
         }
         sphereRadius = std::max(sphereRadius, unit->IsBuilding() ? 72.0f : 28.0f);
 
-        float hitT = 0.0f;
-        if (IntersectSphere(ray, sphereCenter, sphereRadius, hitT)) {
-            if (hitT < bestRayT) {
-                bestRayT = hitT;
-                bestRayUnit = unit;
-            }
-            continue;
-        }
-
         float footX = 0.0f;
         float footY = 0.0f;
         float headX = 0.0f;
         float headY = 0.0f;
         float radiusPixels = 0.0f;
-        if (!ComputeUnitSelectionScreenShape(*unit, view, proj, screenW, screenH,
-                                             footX, footY, headX, headY, radiusPixels)) {
+        bool hasScreenShape = ComputeUnitSelectionScreenShape(*unit, view, proj, screenW, screenH,
+                                                              footX, footY, headX, headY, radiusPixels);
+
+        float hitT = 0.0f;
+        const bool rayHit = IntersectSphere(ray, sphereCenter, sphereRadius, hitT);
+        if (rayHit && hitT < bestRayT) {
+            bestRayT = hitT;
+            bestRayUnit = unit;
+        }
+        if (rayHit && !unit->IsBuilding() && hitT < bestRayNonBuildingT) {
+            bestRayNonBuildingT = hitT;
+            bestRayNonBuildingUnit = unit;
+        }
+
+        if (!hasScreenShape) {
             continue;
         }
 
         const float distSq = DistanceToSegmentSquared(screenX, screenY, footX, footY, headX, headY);
+        float hitRadiusPixels = radiusPixels;
+        if (strictScreenTargeting) {
+            hitRadiusPixels *= unit->IsBuilding() ? 0.6f : 0.75f;
+        }
+        if (distSq > hitRadiusPixels * hitRadiusPixels) {
+            continue;
+        }
+
+        float score = distSq / std::max(1.0f, hitRadiusPixels * hitRadiusPixels);
+        if (preferBuildings && unit->IsBuilding()) {
+            score = std::max(0.0f, score - 0.05f);
+        }
+
+        const bool betterScore = score < bestScreenScore;
+        const bool closeScore = std::abs(score - bestScreenScore) <= 0.03f;
+        const bool preferBuilding = preferBuildings && closeScore && unit->IsBuilding()
+            && bestScreenUnit && !bestScreenUnit->IsBuilding();
+        const bool betterDist = closeScore && (distSq < bestScreenDistSq);
+        if (betterScore || preferBuilding || betterDist) {
+            bestScreenScore = score;
+            bestScreenDistSq = distSq;
+            bestScreenUnit = unit;
+        }
+
+        if (!unit->IsBuilding()) {
+            const bool betterNonBuildingScore = score < bestScreenNonBuildingScore;
+            const bool closeNonBuildingScore =
+                std::abs(score - bestScreenNonBuildingScore) <= 0.03f;
+            const bool betterNonBuildingDist =
+                closeNonBuildingScore && (distSq < bestScreenNonBuildingDistSq);
+            if (betterNonBuildingScore || betterNonBuildingDist) {
+                bestScreenNonBuildingScore = score;
+                bestScreenNonBuildingDistSq = distSq;
+                bestScreenNonBuildingUnit = unit;
+            }
+        }
+    }
+
+    if (!preferBuildings && bestScreenNonBuildingUnit) {
+        return bestScreenNonBuildingUnit;
+    }
+    if (bestScreenUnit) {
+        return bestScreenUnit;
+    }
+    if (strictScreenTargeting) {
+        return nullptr;
+    }
+    if (!preferBuildings && bestRayNonBuildingUnit) {
+        return bestRayNonBuildingUnit;
+    }
+    return bestRayUnit;
+}
+
+static CDestructable* PickSimulationDestructableAtScreenPoint(float screenX,
+                                                              float screenY,
+                                                              const Mat4& view,
+                                                              const Mat4& proj,
+                                                              int screenW,
+                                                              int screenH) {
+    if (!g.simulationInitialized) {
+        return nullptr;
+    }
+
+    const PickRay ray = BuildScreenPickRay(screenX, screenY, view, proj, screenW, screenH);
+    CDestructable* bestScreenTarget = nullptr;
+    CDestructable* bestRayTarget = nullptr;
+    float bestScreenScore = std::numeric_limits<float>::infinity();
+    float bestRayT = std::numeric_limits<float>::infinity();
+
+    for (auto* destructable : g.simulation.GetDestructables()) {
+        if (!destructable || destructable->IsDead()) {
+            continue;
+        }
+
+        float worldRadius = 56.0f;
+        float worldHeight = 140.0f;
+        if (const auto* destructableType = g.destructableData.GetDestructable(destructable->GetTypeId())) {
+            if (destructableType->isTree) {
+                worldRadius = 72.0f;
+                worldHeight = 180.0f;
+            }
+            else if (destructableType->isWall) {
+                worldRadius = 64.0f;
+                worldHeight = 96.0f;
+            }
+        }
+
+        const Vec3 sphereCenter(destructable->GetX(), worldHeight * 0.5f, destructable->GetY());
+        float hitT = 0.0f;
+        if (IntersectSphere(ray, sphereCenter, worldRadius, hitT) && hitT < bestRayT) {
+            bestRayT = hitT;
+            bestRayTarget = destructable;
+        }
+
+        float centerX = 0.0f;
+        float centerY = 0.0f;
+        if (!WorldToScreen(sphereCenter, view, proj, screenW, screenH, centerX, centerY)) {
+            continue;
+        }
+
+        float radiusPixels = 0.0f;
+        auto updateRadiusFromPoint = [&](const Vec3& point) {
+            float sx = 0.0f;
+            float sy = 0.0f;
+            if (!WorldToScreen(point, view, proj, screenW, screenH, sx, sy)) {
+                return;
+            }
+            const float dx = sx - centerX;
+            const float dy = sy - centerY;
+            radiusPixels = std::max(radiusPixels, std::sqrt(dx * dx + dy * dy));
+        };
+        updateRadiusFromPoint(Vec3(destructable->GetX() + worldRadius, worldHeight * 0.5f, destructable->GetY()));
+        updateRadiusFromPoint(Vec3(destructable->GetX(), worldHeight * 0.5f, destructable->GetY() + worldRadius));
+        radiusPixels = std::max(radiusPixels, 20.0f);
+
+        const float dx = screenX - centerX;
+        const float dy = screenY - centerY;
+        const float distSq = dx * dx + dy * dy;
         if (distSq > radiusPixels * radiusPixels) {
             continue;
         }
 
         const float score = distSq / std::max(1.0f, radiusPixels * radiusPixels);
-        if ((score < bestFallbackScore) || ((score == bestFallbackScore) && (distSq < bestFallbackDistSq))) {
-            bestFallbackScore = score;
-            bestFallbackDistSq = distSq;
-            bestFallbackUnit = unit;
+        if (score < bestScreenScore) {
+            bestScreenScore = score;
+            bestScreenTarget = destructable;
         }
     }
 
-    return bestRayUnit ? bestRayUnit : bestFallbackUnit;
+    return bestScreenTarget ? bestScreenTarget : bestRayTarget;
 }
 
 static std::string DescribeUnitType(War3ID typeId) {
@@ -413,19 +922,948 @@ static std::string DescribeUnitType(War3ID typeId) {
     return unitType->GetName() + " [" + typeId.ToString() + "]";
 }
 
+static const char* BehaviorCategoryName(CBehaviorCategory category) {
+    switch (category) {
+        case CBehaviorCategory::NONE: return "NONE";
+        case CBehaviorCategory::STOP: return "STOP";
+        case CBehaviorCategory::MOVE: return "MOVE";
+        case CBehaviorCategory::ATTACK: return "ATTACK";
+        case CBehaviorCategory::SPELL: return "SPELL";
+        case CBehaviorCategory::ATTACK_MOVE: return "ATTACK_MOVE";
+        case CBehaviorCategory::PATROL: return "PATROL";
+        case CBehaviorCategory::FOLLOW: return "FOLLOW";
+        case CBehaviorCategory::HOLD_POSITION: return "HOLD_POSITION";
+        case CBehaviorCategory::BUILD: return "BUILD";
+        case CBehaviorCategory::HARVEST: return "HARVEST";
+        case CBehaviorCategory::RETURN_RESOURCES: return "RETURN_RESOURCES";
+        case CBehaviorCategory::BOARD_TRANSPORT: return "BOARD_TRANSPORT";
+        case CBehaviorCategory::STUN: return "STUN";
+        case CBehaviorCategory::INVENTORY: return "INVENTORY";
+        case CBehaviorCategory::ROOT: return "ROOT";
+        default: return "UNKNOWN";
+    }
+}
+
+static std::string JoinStrings(const std::vector<std::string>& values, const char* delimiter) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            oss << delimiter;
+        }
+        oss << values[i];
+    }
+    return oss.str();
+}
+
+static std::string FormatSelectedUnitsBrief(const std::vector<CUnit*>& units) {
+    std::ostringstream oss;
+    oss << "[";
+    bool first = true;
+    for (const auto* unit : units) {
+        if (!unit) {
+            continue;
+        }
+        if (!first) {
+            oss << ";";
+        }
+        first = false;
+        oss << unit->GetHandleId() << ":" << unit->GetTypeId().ToString()
+            << "@(" << unit->GetX() << "," << unit->GetY() << ")";
+    }
+    oss << "]";
+    return oss.str();
+}
+
+static CResourceType GetUnitCarriedResourceType(const CUnit* unit) {
+    if (!unit) return CResourceType::NONE;
+    auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(unit->GetAbility(War3ID("Ahar")));
+    if (!harvestAbility || !harvestAbility->IsCarryingResources()) {
+        return CResourceType::NONE;
+    }
+    return harvestAbility->GetCarriedResourceType();
+}
+
+static CBehaviorCategory GetUnitCurrentBehaviorCategory(const CUnit* unit) {
+    if (!unit) {
+        return CBehaviorCategory::NONE;
+    }
+    auto* behavior = unit->GetCurrentBehavior();
+    return behavior ? behavior->GetCategory() : CBehaviorCategory::NONE;
+}
+
+static bool IsMovementBehaviorCategory(CBehaviorCategory category) {
+    switch (category) {
+        case CBehaviorCategory::MOVE:
+        case CBehaviorCategory::FOLLOW:
+        case CBehaviorCategory::PATROL:
+        case CBehaviorCategory::ATTACK_MOVE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void ClassifyScriptedAnimationName(const std::string& lowerName,
+                                          bool& outLoop,
+                                          bool& outQueueStandAfterCurrent) {
+    if (lowerName.find("death") != std::string::npos
+        || lowerName.find("decay") != std::string::npos
+        || lowerName.find("corpse") != std::string::npos
+        || lowerName.find("dissipate") != std::string::npos) {
+        outLoop = false;
+        outQueueStandAfterCurrent = false;
+        return;
+    }
+    if (lowerName.find("stand") != std::string::npos
+        || lowerName.find("walk") != std::string::npos
+        || lowerName.find("swim") != std::string::npos
+        || lowerName.find("channel") != std::string::npos
+        || lowerName.find("work") != std::string::npos) {
+        outLoop = true;
+        outQueueStandAfterCurrent = false;
+        return;
+    }
+    outLoop = false;
+    outQueueStandAfterCurrent = true;
+}
+
+static bool GetRequestedAnimationLowerName(const MdxViewer* viewer,
+                                           const decltype(g.simUnitPendingAnimations)::mapped_type& request,
+                                           std::string& outLowerName) {
+    outLowerName.clear();
+    if (request.useSequenceIndex) {
+        std::string sequenceName;
+        if (!viewer || !viewer->GetSequenceName(request.sequenceIndex, sequenceName)) {
+            return false;
+        }
+        outLowerName = sequenceName;
+    }
+    else if (!request.sequenceName.empty()) {
+        outLowerName = request.sequenceName;
+    }
+    else {
+        return false;
+    }
+    std::transform(outLowerName.begin(), outLowerName.end(), outLowerName.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    return true;
+}
+
+static std::vector<std::string> ExtractAnimationSecondaryTags(const std::string& properties) {
+    std::vector<std::string> tags;
+    std::string lower = properties;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    auto maybeAdd = [&](const char* tag) {
+        if (lower.find(tag) != std::string::npos
+            && std::find(tags.begin(), tags.end(), tag) == tags.end()) {
+            tags.emplace_back(tag);
+        }
+    };
+    maybeAdd("work");
+    maybeAdd("gold");
+    maybeAdd("lumber");
+    maybeAdd("alternate");
+    maybeAdd("swim");
+    maybeAdd("fast");
+    maybeAdd("defend");
+    maybeAdd("spell");
+    maybeAdd("channel");
+    maybeAdd("throw");
+    return tags;
+}
+
+static void AppendUniqueAnimationTag(std::vector<std::string>& tags, std::string tag) {
+    if (tag.empty()) {
+        return;
+    }
+    std::transform(tag.begin(), tag.end(), tag.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    if (std::find(tags.begin(), tags.end(), tag) == tags.end()) {
+        tags.push_back(std::move(tag));
+    }
+}
+
+static bool IsUnitWorkingFromPassiveState(const CUnit* unit) {
+    if (!unit) {
+        return false;
+    }
+    if (const auto* queueAbility = dynamic_cast<const CAbilityQueue*>(unit->GetAbility(War3ID("Aque")))) {
+        if (queueAbility->GetQueueCount() > 0) {
+            return true;
+        }
+    }
+    if (const auto* goldMineAbility = dynamic_cast<const CAbilityGoldMine*>(unit->GetAbility(War3ID("Agld")))) {
+        if (goldMineAbility->GetActiveMinerCount() > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::vector<std::string> CollectUnitAnimationPropertyTags(const CUnit* unit) {
+    std::vector<std::string> tags;
+    if (!unit) {
+        return tags;
+    }
+
+    if (const auto* unitType = unit->GetUnitType()) {
+        for (const std::string& tag : unitType->GetRequiredAnimationTags()) {
+            AppendUniqueAnimationTag(tags, tag);
+        }
+    }
+
+    const auto scriptIt = g.simUnitAnimationPropertyTags.find(unit->GetHandleId());
+    if (scriptIt != g.simUnitAnimationPropertyTags.end()) {
+        for (const std::string& tag : scriptIt->second) {
+            AppendUniqueAnimationTag(tags, tag);
+        }
+    }
+
+    if (IsUnitWorkingFromPassiveState(unit)) {
+        AppendUniqueAnimationTag(tags, "work");
+    }
+
+    return tags;
+}
+
+static std::vector<std::string> BuildContextualAnimationTags(const CUnit* unit,
+                                                             CResourceType carriedType,
+                                                             std::initializer_list<const char*> extraTags = {}) {
+    std::vector<std::string> tags = CollectUnitAnimationPropertyTags(unit);
+    for (const char* extraTag : extraTags) {
+        if (extraTag && extraTag[0]) {
+            AppendUniqueAnimationTag(tags, extraTag);
+        }
+    }
+    switch (carriedType) {
+        case CResourceType::GOLD:
+            AppendUniqueAnimationTag(tags, "gold");
+            break;
+        case CResourceType::LUMBER:
+            AppendUniqueAnimationTag(tags, "lumber");
+            break;
+        default:
+            break;
+    }
+    return tags;
+}
+
+static void PlayReadyVisualForUnit(CUnit* unit,
+                                   MdxViewer* viewer,
+                                   CBehaviorCategory behaviorCategory,
+                                   CResourceType carriedType) {
+    if (!viewer) {
+        return;
+    }
+
+    auto tags = BuildContextualAnimationTags(unit, carriedType);
+    const bool preferReady = behaviorCategory == CBehaviorCategory::ATTACK
+        || behaviorCategory == CBehaviorCategory::ATTACK_MOVE
+        || behaviorCategory == CBehaviorCategory::HOLD_POSITION;
+    if (preferReady) {
+        AppendUniqueAnimationTag(tags, "ready");
+    }
+    if (viewer->PlayStandSequenceWithTags(tags)) {
+        return;
+    }
+    if (preferReady) {
+        auto readyOnlyTags = BuildContextualAnimationTags(unit, CResourceType::NONE, {"ready"});
+        if (viewer->PlayStandSequenceWithTags(readyOnlyTags)) {
+            return;
+        }
+    }
+    viewer->PlayStandSequence();
+}
+
+static bool PlayWalkVisualForUnit(CUnit* unit,
+                                  MdxViewer* viewer,
+                                  CBehaviorCategory behaviorCategory,
+                                  CResourceType carriedType) {
+    (void)behaviorCategory;
+    if (!unit || !viewer) {
+        return false;
+    }
+    const float movementSpeed = unit->GetSpeed();
+    auto tags = BuildContextualAnimationTags(unit, carriedType);
+
+    float animationMoveSpeed = 0.0f;
+    const float animationScale = std::max(0.001f, viewer->GetAnimationSpeedScale());
+    if (const auto* meta = GetUnitRenderSplatMeta(*unit)) {
+        const float walkSpeed = meta->animationWalkSpeed;
+        const float runSpeed = meta->animationRunSpeed;
+        if (walkSpeed > 0.0f && runSpeed > walkSpeed) {
+            const float midpoint = (walkSpeed + runSpeed) * 0.5f;
+            if (movementSpeed >= midpoint) {
+                AppendUniqueAnimationTag(tags, "fast");
+                animationMoveSpeed = runSpeed;
+            }
+            else {
+                animationMoveSpeed = walkSpeed;
+            }
+        }
+        else if (walkSpeed > 0.0f) {
+            animationMoveSpeed = walkSpeed;
+        }
+    }
+    if (animationMoveSpeed > 0.0f) {
+        animationMoveSpeed *= animationScale;
+    }
+
+    if (animationMoveSpeed > 0.0f && movementSpeed > 0.0f) {
+        const float speedRatio = std::clamp(movementSpeed / animationMoveSpeed, 0.1f, 4.0f);
+        if (viewer->PlayWalkSequenceWithTagsAtSpeedRatio(tags, speedRatio)) {
+            return true;
+        }
+        return viewer->PlayWalkSequenceAtSpeedRatio(speedRatio);
+    }
+
+    if (viewer->PlayWalkSequenceWithTagsAtSpeed(tags, movementSpeed)) {
+        return true;
+    }
+    return viewer->PlayWalkSequenceAtSpeed(movementSpeed);
+}
+
+static bool PlayWalkWorkVisualForUnit(CUnit* unit,
+                                      MdxViewer* viewer,
+                                      CBehaviorCategory behaviorCategory,
+                                      CResourceType carriedType) {
+    if (!unit || !viewer) {
+        return false;
+    }
+
+    const float movementSpeed = unit->GetSpeed();
+    auto workWalkTags = BuildContextualAnimationTags(unit, carriedType, {"work"});
+
+    float animationMoveSpeed = 0.0f;
+    const float animationScale = std::max(0.001f, viewer->GetAnimationSpeedScale());
+    if (const auto* meta = GetUnitRenderSplatMeta(*unit)) {
+        const float walkSpeed = meta->animationWalkSpeed;
+        const float runSpeed = meta->animationRunSpeed;
+        if (walkSpeed > 0.0f && runSpeed > walkSpeed) {
+            const float midpoint = (walkSpeed + runSpeed) * 0.5f;
+            if (movementSpeed >= midpoint) {
+                AppendUniqueAnimationTag(workWalkTags, "fast");
+                animationMoveSpeed = runSpeed;
+            }
+            else {
+                animationMoveSpeed = walkSpeed;
+            }
+        }
+        else if (walkSpeed > 0.0f) {
+            animationMoveSpeed = walkSpeed;
+        }
+    }
+    if (animationMoveSpeed > 0.0f) {
+        animationMoveSpeed *= animationScale;
+    }
+
+    if (animationMoveSpeed > 0.0f && movementSpeed > 0.0f) {
+        const float speedRatio = std::clamp(movementSpeed / animationMoveSpeed, 0.1f, 4.0f);
+        if (viewer->PlayWalkSequenceWithTagsAtSpeedRatio(workWalkTags, speedRatio)) {
+            return true;
+        }
+    }
+    else if (viewer->PlayWalkSequenceWithTagsAtSpeed(workWalkTags, movementSpeed)) {
+        return true;
+    }
+
+    return PlayWalkVisualForUnit(unit, viewer, behaviorCategory, carriedType);
+}
+
+static bool PlayWorkVisualForUnit(CUnit* unit,
+                                  MdxViewer* viewer,
+                                  CBehaviorCategory behaviorCategory,
+                                  CResourceType carriedType) {
+    if (!viewer) {
+        return false;
+    }
+
+    auto workTags = BuildContextualAnimationTags(unit, carriedType, {"work"});
+    if (viewer->PlayStandSequenceWithTags(workTags)) {
+        return true;
+    }
+
+    auto workOnlyTags = BuildContextualAnimationTags(unit, CResourceType::NONE, {"work"});
+    if (viewer->PlayStandSequenceWithTags(workOnlyTags)) {
+        return true;
+    }
+
+    PlayReadyVisualForUnit(unit, viewer, behaviorCategory, carriedType);
+    return true;
+}
+
+static const CBehaviorSpell* GetSpellBehavior(const CUnit* unit);
+
+static bool PlayDeathVisualForUnit(CUnit* unit,
+                                   MdxViewer* viewer,
+                                   decltype(g.simUnitVisualAnimationModes)::mapped_type mode) {
+    if (!unit || !viewer) {
+        return false;
+    }
+    switch (mode) {
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::DEAD:
+            return viewer->PlayDeathSequence();
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::CORPSE:
+            return viewer->PlayDecaySequenceWithTag("flesh", g.simulation.GetGameplayConstants().decayTime);
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::BONE_CORPSE:
+            return viewer->PlayDecaySequenceWithTag("bone", unit->GetEndingDecayTime(g.simulation));
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::DISSIPATE:
+            return viewer->PlayDissipateSequence(unit->GetEndingDecayTime(g.simulation));
+        default:
+            return false;
+    }
+}
+
+static bool PlaySpellVisualForUnit(CUnit* unit, MdxViewer* viewer) {
+    if (!unit || !viewer) {
+        return false;
+    }
+    const auto* spellBehavior = GetSpellBehavior(unit);
+    if (!spellBehavior) {
+        return false;
+    }
+    const float duration = spellBehavior->GetSpellAnimationDuration();
+    if (spellBehavior->IsCasting()) {
+        auto spellTags = BuildContextualAnimationTags(unit, CResourceType::NONE, {"spell"});
+        if (viewer->PlaySpellSequenceWithTags(spellTags, duration)) {
+            return true;
+        }
+        return viewer->PlaySpellSequence(duration);
+    }
+    if (spellBehavior->IsBackswing()) {
+        auto channelTags = BuildContextualAnimationTags(unit, CResourceType::NONE, {"channel"});
+        if (viewer->PlayChannelSequenceWithTags(channelTags, duration)) {
+            return true;
+        }
+        if (viewer->PlayChannelSequence(duration)) {
+            return true;
+        }
+        auto spellTags = BuildContextualAnimationTags(unit, CResourceType::NONE, {"spell"});
+        if (viewer->PlaySpellSequenceWithTags(spellTags, duration)) {
+            return true;
+        }
+        return viewer->PlaySpellSequence(duration);
+    }
+    return false;
+}
+
+static const CBehaviorHarvest* GetHarvestBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorHarvest*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static const CBehaviorAttack* GetAttackBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorAttack*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static const CBehaviorMove* GetMoveBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorMove*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static const CBehaviorFollow* GetFollowBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorFollow*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static const CBehaviorPatrol* GetPatrolBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorPatrol*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static const CBehaviorAttackMove* GetAttackMoveBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorAttackMove*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static const CBehaviorReturnResources* GetReturnResourcesBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorReturnResources*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static const CBehaviorBuild* GetBuildBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorBuild*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static const CBehaviorRepair* GetRepairBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorRepair*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static const CBehaviorSpell* GetSpellBehavior(const CUnit* unit) {
+    return unit ? dynamic_cast<const CBehaviorSpell*>(unit->GetCurrentBehavior()) : nullptr;
+}
+
+static bool ApplyAnimationRequestToViewer(int handleId,
+                                          MdxViewer* viewer,
+                                          const decltype(g.simUnitPendingAnimations)::mapped_type& request) {
+    if (!viewer || !viewer->GetAnimator()) {
+        return false;
+    }
+
+    bool loop = false;
+    bool queueStandAfterCurrent = true;
+    std::string lowerName;
+    if (GetRequestedAnimationLowerName(viewer, request, lowerName)) {
+        ClassifyScriptedAnimationName(lowerName, loop, queueStandAfterCurrent);
+    }
+
+    bool played = false;
+    if (request.useSequenceIndex) {
+        played = viewer->PlaySequenceByIndex(request.sequenceIndex, loop, 1.0f, queueStandAfterCurrent);
+    }
+    else if (!request.sequenceName.empty()) {
+        played = viewer->PlaySequenceByName(request.sequenceName.c_str(), loop, 1.0f, queueStandAfterCurrent);
+    }
+
+    if (played) {
+        g.simUnitScriptedAnimations[handleId] = {request, loop, queueStandAfterCurrent};
+    }
+    return played;
+}
+
 static void ApplyPendingUnitAnimation(int handleId, MdxViewer* viewer) {
     if (!viewer || !viewer->GetAnimator()) return;
 
     const auto pendingIt = g.simUnitPendingAnimations.find(handleId);
     if (pendingIt == g.simUnitPendingAnimations.end()) return;
 
-    if (pendingIt->second.useSequenceIndex) {
-        viewer->GetAnimator()->SetSequence(pendingIt->second.sequenceIndex);
-    } else if (!pendingIt->second.sequenceName.empty()) {
-        viewer->GetAnimator()->PlaySequence(pendingIt->second.sequenceName);
+    ApplyAnimationRequestToViewer(handleId, viewer, pendingIt->second);
+    g.simUnitPendingAnimations.erase(pendingIt);
+}
+
+static bool ComputeUnitVisualIsMoving(CUnit* unit) {
+    if (!unit) {
+        return false;
+    }
+    if (const auto* moveBehavior = GetMoveBehavior(unit)) {
+        return moveBehavior->IsPropelling();
+    }
+    if (const auto* followBehavior = GetFollowBehavior(unit)) {
+        return followBehavior->IsPropelling();
+    }
+    if (const auto* patrolBehavior = GetPatrolBehavior(unit)) {
+        return patrolBehavior->IsPropelling();
+    }
+    if (const auto* attackMoveBehavior = GetAttackMoveBehavior(unit)) {
+        return attackMoveBehavior->IsPropelling();
+    }
+    if (const auto* harvestBehavior = GetHarvestBehavior(unit)) {
+        return harvestBehavior->IsPropelling();
+    }
+    if (const auto* returnBehavior = GetReturnResourcesBehavior(unit)) {
+        return returnBehavior->IsPropelling();
+    }
+    if (const auto* buildBehavior = GetBuildBehavior(unit)) {
+        return buildBehavior->IsPropelling();
+    }
+    if (const auto* repairBehavior = GetRepairBehavior(unit)) {
+        return repairBehavior->IsPropelling();
+    }
+    if (const auto* spellBehavior = GetSpellBehavior(unit)) {
+        return spellBehavior->IsPropelling();
+    }
+    if (const auto* attackBehavior = GetAttackBehavior(unit)) {
+        return attackBehavior->IsPropelling();
     }
 
-    g.simUnitPendingAnimations.erase(pendingIt);
+    const int handleId = unit->GetHandleId();
+    const std::pair<float, float> currentPos{unit->GetX(), unit->GetY()};
+    const auto lastPosIt = g.simUnitVisualLastPositions.find(handleId);
+    const bool hadLastPos = lastPosIt != g.simUnitVisualLastPositions.end();
+    bool isMoving = false;
+
+    if (hadLastPos) {
+        const float dx = currentPos.first - lastPosIt->second.first;
+        const float dy = currentPos.second - lastPosIt->second.second;
+        isMoving = (dx * dx + dy * dy) > 0.01f;
+    }
+    if (!isMoving) {
+        isMoving = IsMovementBehaviorCategory(GetUnitCurrentBehaviorCategory(unit));
+    }
+    return isMoving;
+}
+
+static const char* UnitVisualAnimationModeName(decltype(g.simUnitVisualAnimationModes)::mapped_type mode) {
+    switch (mode) {
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::NONE: return "NONE";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::READY: return "READY";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_GOLD: return "READY_GOLD";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_LUMBER: return "READY_LUMBER";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK: return "WALK";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_GOLD: return "WALK_GOLD";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_LUMBER: return "WALK_LUMBER";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_WORK: return "WALK_WORK";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WORK: return "WORK";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::SPELL: return "SPELL";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::ATTACK: return "ATTACK";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::CONSTRUCT: return "CONSTRUCT";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::DEAD: return "DEAD";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::CORPSE: return "CORPSE";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::BONE_CORPSE: return "BONE_CORPSE";
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::DISSIPATE: return "DISSIPATE";
+        default: return "UNKNOWN";
+    }
+}
+
+static bool ShouldHoldScriptedAnimation(CUnit* unit,
+                                        MdxViewer* viewer,
+                                        bool isMoving,
+                                        CBehaviorCategory behaviorCategory) {
+    if (!unit || !viewer) {
+        return false;
+    }
+    const int handleId = unit->GetHandleId();
+    const auto it = g.simUnitScriptedAnimations.find(handleId);
+    if (it == g.simUnitScriptedAnimations.end()) {
+        return false;
+    }
+
+    if (unit->IsDead() || unit->IsConstructing() || unit->IsHidden()) {
+        g.simUnitScriptedAnimations.erase(it);
+        g.simUnitQueuedAnimations.erase(handleId);
+        return false;
+    }
+    if (it->second.loop && (isMoving || behaviorCategory == CBehaviorCategory::ATTACK
+        || behaviorCategory == CBehaviorCategory::BUILD
+        || behaviorCategory == CBehaviorCategory::HARVEST
+        || behaviorCategory == CBehaviorCategory::RETURN_RESOURCES)) {
+        g.simUnitScriptedAnimations.erase(it);
+        return false;
+    }
+    if (it->second.loop) {
+        return true;
+    }
+    if (!viewer->IsCurrentSequenceFinished()) {
+        return true;
+    }
+    g.simUnitScriptedAnimations.erase(it);
+    const auto queuedIt = g.simUnitQueuedAnimations.find(handleId);
+    if (queuedIt != g.simUnitQueuedAnimations.end()) {
+        const auto queuedRequest = queuedIt->second;
+        g.simUnitQueuedAnimations.erase(queuedIt);
+        if (ApplyAnimationRequestToViewer(handleId, viewer, queuedRequest)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static decltype(g.simUnitVisualAnimationModes)::mapped_type ResolveUnitVisualAnimationMode(
+    CUnit* unit,
+    bool isMoving,
+    CBehaviorCategory behaviorCategory,
+    CResourceType carriedType) {
+    if (!unit) {
+        return decltype(g.simUnitVisualAnimationModes)::mapped_type::NONE;
+    }
+    if (unit->IsDead()) {
+        if (!unit->IsCorpse()) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::DEAD;
+        }
+        if (unit->IsHero() && unit->IsBoneCorpse()) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::DISSIPATE;
+        }
+        if (unit->IsBoneCorpse()) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::BONE_CORPSE;
+        }
+        return decltype(g.simUnitVisualAnimationModes)::mapped_type::CORPSE;
+    }
+    if (unit->IsConstructing()) {
+        return decltype(g.simUnitVisualAnimationModes)::mapped_type::CONSTRUCT;
+    }
+    if (unit->IsBuilding()) {
+        return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+    }
+
+    if (const auto* moveBehavior = GetMoveBehavior(unit)) {
+        if (!moveBehavior->IsPropelling()) {
+            switch (carriedType) {
+                case CResourceType::GOLD:
+                    return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_GOLD;
+                case CResourceType::LUMBER:
+                    return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_LUMBER;
+                default:
+                    return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+            }
+        }
+    }
+
+    if (const auto* buildBehavior = GetBuildBehavior(unit)) {
+        if (buildBehavior->IsMovingToSite()) {
+            return buildBehavior->IsPropelling()
+                ? decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_WORK
+                : decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+        }
+        if (buildBehavior->IsActivelyBuilding()) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::WORK;
+        }
+    }
+
+    if (const auto* repairBehavior = GetRepairBehavior(unit)) {
+        if (repairBehavior->IsMovingToTarget()) {
+            return repairBehavior->IsPropelling()
+                ? decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_WORK
+                : decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+        }
+        if (repairBehavior->IsRepairing()) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::WORK;
+        }
+    }
+
+    if (const auto* harvestBehavior = GetHarvestBehavior(unit)) {
+        if (harvestBehavior->IsMovingToResource()) {
+            return harvestBehavior->IsPropelling()
+                ? decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_WORK
+                : decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+        }
+        if (harvestBehavior->IsGathering()) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::WORK;
+        }
+    }
+
+    if (const auto* returnBehavior = GetReturnResourcesBehavior(unit)) {
+        if (returnBehavior->IsMovingToDropoff()) {
+            if (returnBehavior->IsPropelling()) {
+                if (carriedType == CResourceType::GOLD) {
+                    return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_GOLD;
+                }
+                if (carriedType == CResourceType::LUMBER) {
+                    return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_LUMBER;
+                }
+                return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK;
+            }
+            if (carriedType == CResourceType::GOLD) {
+                return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_GOLD;
+            }
+            if (carriedType == CResourceType::LUMBER) {
+                return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_LUMBER;
+            }
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+        }
+        if (returnBehavior->IsDepositing()) {
+            if (carriedType == CResourceType::GOLD) {
+                return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_GOLD;
+            }
+            if (carriedType == CResourceType::LUMBER) {
+                return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_LUMBER;
+            }
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+        }
+    }
+
+    if (const auto* spellBehavior = GetSpellBehavior(unit)) {
+        if (spellBehavior->IsMovingToRange()) {
+            return spellBehavior->IsPropelling()
+                ? decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK
+                : decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+        }
+        if (spellBehavior->IsFacingTarget()) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+        }
+        if (spellBehavior->IsCasting() || spellBehavior->IsBackswing()) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::SPELL;
+        }
+    }
+
+    if (const auto* attackBehavior = GetAttackBehavior(unit)) {
+        if (attackBehavior->IsPropelling()) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK;
+        }
+        if (attackBehavior->IsAttackAnimationActive(g.simulation.GetGameTurnTick())) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::ATTACK;
+        }
+        return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+    }
+
+    switch (behaviorCategory) {
+        case CBehaviorCategory::RETURN_RESOURCES:
+            if (isMoving) {
+                if (carriedType == CResourceType::GOLD) {
+                    return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_GOLD;
+                }
+                if (carriedType == CResourceType::LUMBER) {
+                    return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_LUMBER;
+                }
+                return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK;
+            }
+            break;
+        default:
+            break;
+    }
+
+    if (isMoving) {
+        if (carriedType == CResourceType::GOLD) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_GOLD;
+        }
+        if (carriedType == CResourceType::LUMBER) {
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_LUMBER;
+        }
+        return decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK;
+    }
+
+    switch (carriedType) {
+        case CResourceType::GOLD:
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_GOLD;
+        case CResourceType::LUMBER:
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_LUMBER;
+        default:
+            return decltype(g.simUnitVisualAnimationModes)::mapped_type::READY;
+    }
+}
+
+static void PlayResolvedUnitAnimation(CUnit* unit,
+                                      MdxViewer* viewer,
+                                      decltype(g.simUnitVisualAnimationModes)::mapped_type mode,
+                                      CBehaviorCategory behaviorCategory,
+                                      CResourceType carriedType) {
+    if (!unit || !viewer) {
+        return;
+    }
+    const int handleId = unit->GetHandleId();
+    switch (mode) {
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::READY:
+            PlayReadyVisualForUnit(unit, viewer, behaviorCategory, CResourceType::NONE);
+            break;
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_GOLD:
+            PlayReadyVisualForUnit(unit, viewer, behaviorCategory, CResourceType::GOLD);
+            break;
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::READY_LUMBER:
+            PlayReadyVisualForUnit(unit, viewer, behaviorCategory, CResourceType::LUMBER);
+            break;
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK:
+            PlayWalkVisualForUnit(unit, viewer, behaviorCategory, CResourceType::NONE);
+            break;
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_GOLD:
+            PlayWalkVisualForUnit(unit, viewer, behaviorCategory, CResourceType::GOLD);
+            break;
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_LUMBER:
+            PlayWalkVisualForUnit(unit, viewer, behaviorCategory, CResourceType::LUMBER);
+            break;
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WALK_WORK:
+            PlayWalkWorkVisualForUnit(unit, viewer, behaviorCategory, CResourceType::NONE);
+            break;
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::WORK:
+            PlayWorkVisualForUnit(unit, viewer, behaviorCategory, carriedType);
+            break;
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::SPELL:
+            if (!PlaySpellVisualForUnit(unit, viewer)) {
+                PlayReadyVisualForUnit(unit, viewer, behaviorCategory, carriedType);
+            }
+            break;
+        case decltype(g.simUnitVisualAnimationModes)::mapped_type::ATTACK: {
+            const int currentTick = g.simulation.GetGameTurnTick();
+            auto* attackBehavior = dynamic_cast<CBehaviorAttack*>(unit->GetCurrentBehavior());
+            const int behaviorAttackStartTick = attackBehavior ? attackBehavior->GetAttackAnimationStartTick() : -1;
+            const float behaviorAttackDuration = attackBehavior ? attackBehavior->GetAttackAnimationDuration() : 0.0f;
+            const auto lastAttackIt = g.simUnitVisualLastAttackAnimationTicks.find(handleId);
+            const int lastAttackTick = (lastAttackIt != g.simUnitVisualLastAttackAnimationTicks.end())
+                ? lastAttackIt->second
+                : std::numeric_limits<int>::min();
+            const bool shouldStartAttackAnimation = attackBehavior
+                && attackBehavior->IsAttackAnimationActive(currentTick)
+                && behaviorAttackStartTick >= 0
+                && behaviorAttackStartTick != lastAttackTick;
+            if (shouldStartAttackAnimation) {
+                const auto attackTags = BuildContextualAnimationTags(unit, CResourceType::NONE);
+                if (viewer->PlayAttackSequenceWithTagsAndDuration(attackTags, behaviorAttackDuration)) {
+                    g.simUnitVisualLastAttackAnimationTicks[handleId] = behaviorAttackStartTick;
+                }
+                else {
+                    PlayReadyVisualForUnit(unit, viewer, behaviorCategory, carriedType);
+                }
+            }
+            else if (!attackBehavior || !attackBehavior->IsAttackAnimationActive(currentTick)) {
+                if (!viewer->IsPlayingSequenceWithToken("stand") || viewer->IsCurrentSequenceFinished()) {
+                    PlayReadyVisualForUnit(unit, viewer, CBehaviorCategory::ATTACK, carriedType);
+                }
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+static void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer) {
+    if (!unit || !viewer) return;
+
+    const int handleId = unit->GetHandleId();
+    const bool isMoving = ComputeUnitVisualIsMoving(unit);
+    const CBehaviorCategory behaviorCategory = GetUnitCurrentBehaviorCategory(unit);
+    const CResourceType carriedType = GetUnitCarriedResourceType(unit);
+    const std::vector<std::string> currentPropertyTags = CollectUnitAnimationPropertyTags(unit);
+    const auto lastModeIt = g.simUnitVisualAnimationModes.find(handleId);
+    const auto lastMode = (lastModeIt != g.simUnitVisualAnimationModes.end())
+        ? lastModeIt->second
+        : decltype(g.simUnitVisualAnimationModes)::mapped_type::NONE;
+    const auto lastPropertyTagsIt = g.simUnitVisualPropertyTags.find(handleId);
+    const bool propertyTagsChanged = (lastPropertyTagsIt == g.simUnitVisualPropertyTags.end())
+        || (lastPropertyTagsIt->second != currentPropertyTags);
+
+    if (ShouldHoldScriptedAnimation(unit, viewer, isMoving, behaviorCategory)) {
+        g.simUnitVisualLastPositions[handleId] = {unit->GetX(), unit->GetY()};
+        g.simUnitVisualMovingStates[handleId] = isMoving;
+        g.simUnitVisualPropertyTags[handleId] = currentPropertyTags;
+        return;
+    }
+
+    if (unit->IsConstructing()) {
+        if (lastMode != decltype(g.simUnitVisualAnimationModes)::mapped_type::CONSTRUCT) {
+            viewer->PlayBirthThenStandSequence();
+        }
+
+        float buildRatio = 0.0f;
+        if (auto* unitType = unit->GetUnitType()) {
+            const float buildTime = (float)unitType->GetBuildTime();
+            if (buildTime > 0.0f) {
+                buildRatio = unit->GetConstructionProgress() / buildTime;
+            }
+        }
+        viewer->SetCurrentSequenceFrameByRatio(std::clamp(buildRatio, 0.0f, 1.0f));
+        g.simUnitVisualAnimationModes[handleId] = decltype(g.simUnitVisualAnimationModes)::mapped_type::CONSTRUCT;
+    }
+    else if (!unit->IsDead()) {
+        const auto resolvedMode = ResolveUnitVisualAnimationMode(unit, isMoving, behaviorCategory, carriedType);
+        const bool shouldRefreshAttack = (resolvedMode == decltype(g.simUnitVisualAnimationModes)::mapped_type::ATTACK)
+            && viewer->IsCurrentSequenceFinished();
+        if (resolvedMode != lastMode || propertyTagsChanged) {
+            std::ostringstream oss;
+            oss << "[MoveDebug] anim"
+                << " unit=" << handleId
+                << " type=" << unit->GetTypeId().ToString()
+                << " behavior=" << BehaviorCategoryName(behaviorCategory)
+                << " isMoving=" << (isMoving ? 1 : 0)
+                << " from=" << UnitVisualAnimationModeName(lastMode)
+                << " to=" << UnitVisualAnimationModeName(resolvedMode)
+                << " tagCount=" << currentPropertyTags.size();
+            if (!currentPropertyTags.empty()) {
+                oss << " tags=[" << JoinStrings(currentPropertyTags, ",") << "]";
+            }
+            MoveDebugLogLine(oss.str());
+        }
+        if (resolvedMode != lastMode || shouldRefreshAttack || propertyTagsChanged) {
+            PlayResolvedUnitAnimation(unit, viewer, resolvedMode, behaviorCategory, carriedType);
+        }
+        g.simUnitVisualAnimationModes[handleId] = resolvedMode;
+    }
+    else {
+        const auto resolvedMode = ResolveUnitVisualAnimationMode(unit, isMoving, behaviorCategory, carriedType);
+        if (resolvedMode != lastMode) {
+            PlayDeathVisualForUnit(unit, viewer, resolvedMode);
+        }
+        g.simUnitVisualAnimationModes[handleId] = resolvedMode;
+    }
+
+    g.simUnitVisualConstructionStates[handleId] = unit->IsConstructing();
+    g.simUnitVisualResourceTags[handleId] = carriedType;
+    g.simUnitVisualPropertyTags[handleId] = currentPropertyTags;
+    g.simUnitVisualLastPositions[handleId] = {unit->GetX(), unit->GetY()};
+    g.simUnitVisualMovingStates[handleId] = isMoving;
+    if (g.simUnitVisualAnimationModes[handleId] != decltype(g.simUnitVisualAnimationModes)::mapped_type::ATTACK) {
+        g.simUnitVisualLastAttackAnimationTicks.erase(handleId);
+    }
+}
+
+static void SetSimulationUnitVisualVisible(int handleId, bool visible) {
+    const auto visualIt = g.simUnitToVisualIdx.find(handleId);
+    if (visualIt == g.simUnitToVisualIdx.end()) return;
+    g.scene.SetInstanceVisible(visualIt->second, visible);
 }
 
 static bool EnsureSimulationUnitVisual(CUnit* unit) {
@@ -463,7 +1901,10 @@ static bool EnsureSimulationUnitVisual(CUnit* unit) {
     }
 
     g.simUnitToVisualIdx[handleId] = visIdx;
-    ApplyPendingUnitAnimation(handleId, g.scene.GetViewer(visIdx));
+    if (MdxViewer* viewer = g.scene.GetViewer(visIdx)) {
+        ApplyPendingUnitAnimation(handleId, viewer);
+        SyncSimulationUnitAnimation(unit, viewer);
+    }
     std::cout << "SceneUnitSync: registered on-demand visual for sim unit "
               << DescribeUnitType(unit->GetTypeId())
               << " handle=" << handleId << std::endl;
@@ -471,9 +1912,20 @@ static bool EnsureSimulationUnitVisual(CUnit* unit) {
 }
 
 static void SyncSimulationUnitVisual(CUnit* unit) {
+    if (!unit) return;
+
+    const int handleId = unit->GetHandleId();
+    const auto existingIt = g.simUnitToVisualIdx.find(handleId);
+    if (unit->IsHidden()) {
+        if (existingIt != g.simUnitToVisualIdx.end()) {
+            SetSimulationUnitVisualVisible(handleId, false);
+        }
+        return;
+    }
+
     if (!EnsureSimulationUnitVisual(unit)) return;
 
-    auto it = g.simUnitToVisualIdx.find(unit->GetHandleId());
+    auto it = g.simUnitToVisualIdx.find(handleId);
     if (it == g.simUnitToVisualIdx.end()) return;
 
     float pos[3] = {
@@ -481,7 +1933,12 @@ static void SyncSimulationUnitVisual(CUnit* unit) {
         unit->GetY(),
         ComputeUnitVisualHeight(*unit)
     };
-    g.scene.UpdateInstancePosition(it->second, pos, unit->GetFacing());
+    SetSimulationUnitVisualVisible(handleId, true);
+    g.scene.UpdateInstancePosition(it->second, pos, unit->GetFacing(),
+                                   unit->GetSpeed(), unit->GetTurnRate(), true);
+    if (MdxViewer* viewer = g.scene.GetViewer(it->second)) {
+        SyncSimulationUnitAnimation(unit, viewer);
+    }
 }
 
 static void SyncAllSimulationUnitVisuals() {
@@ -490,11 +1947,50 @@ static void SyncAllSimulationUnitVisuals() {
     }
 }
 
+static void ReconcileSimulationUnitVisuals() {
+    std::vector<int> removedHandles;
+    removedHandles.reserve(g.simUnitToVisualIdx.size());
+    for (const auto& [handleId, visualIndex] : g.simUnitToVisualIdx) {
+        CUnit* unit = g.simulation.GetUnit(handleId);
+        if (!unit) {
+            g.scene.SetInstanceVisible(visualIndex, false);
+            removedHandles.push_back(handleId);
+            continue;
+        }
+        SetSimulationUnitVisualVisible(handleId, !unit->IsHidden());
+    }
+
+    for (int handleId : removedHandles) {
+        g.simUnitToVisualIdx.erase(handleId);
+        g.simUnitVisualSeeds.erase(handleId);
+        g.simUnitPendingAnimations.erase(handleId);
+        g.simUnitVisualLastPositions.erase(handleId);
+        g.simUnitVisualMovingStates.erase(handleId);
+        g.simUnitVisualAnimationModes.erase(handleId);
+        g.simUnitVisualLastAttackAnimationTicks.erase(handleId);
+        g.simUnitVisualResourceTags.erase(handleId);
+        g.simUnitVisualConstructionStates.erase(handleId);
+        g.simUnitVisualPropertyTags.erase(handleId);
+        g.simUnitScriptedAnimations.erase(handleId);
+        g.simUnitQueuedAnimations.erase(handleId);
+        g.simUnitAnimationPropertyTags.erase(handleId);
+        g.simUnitVisualRegistrationFailed.erase(handleId);
+        g.selectedUnitHandleSet.erase(handleId);
+        g.selectedUnitHandles.erase(
+            std::remove(g.selectedUnitHandles.begin(), g.selectedUnitHandles.end(), handleId),
+            g.selectedUnitHandles.end());
+        if (g.selectedUnitHandle == handleId) {
+            g.selectedUnitHandle = -1;
+        }
+    }
+}
+
 static void FlushStartupSimulationState() {
     if (!g.simulationInitialized) return;
 
     // Make editor and JASS-created units visible before the first render frame.
     SyncAllSimulationUnitVisuals();
+    ReconcileSimulationUnitVisuals();
 
     if (!g.jassNatives) return;
 
@@ -504,6 +2000,7 @@ static void FlushStartupSimulationState() {
         const int firedTimers = g.jassNatives->UpdateTimers(CSimulation::SIM_STEP_TIME);
         g.simulation.Update();
         SyncAllSimulationUnitVisuals();
+        ReconcileSimulationUnitVisuals();
         if (firedTimers == 0 && g.simulation.GetUnits().size() == unitCountBefore) {
             break;
         }
@@ -565,18 +2062,26 @@ static std::vector<CUnit*> CollectUnitsInScreenRect(const ScreenRect& rect,
                                                     int screenW,
                                                     int screenH) {
     std::vector<CUnit*> result;
+    std::vector<CUnit*> buildingFallback;
     if (!rect.IsValid()) return result;
 
     for (auto* unit : g.simulation.GetUnits()) {
-        if (!unit || unit->IsDead()) continue;
+        if (!unit || unit->IsDead() || unit->IsHidden()) continue;
 
         ScreenRect unitRect;
         if (!ComputeUnitSelectionScreenBounds(*unit, view, proj, screenW, screenH, unitRect)) {
             continue;
         }
         if (RectanglesOverlap(rect, unitRect)) {
-            result.push_back(unit);
+            if (unit->IsBuilding()) {
+                buildingFallback.push_back(unit);
+            } else {
+                result.push_back(unit);
+            }
         }
+    }
+    if (result.empty()) {
+        return buildingFallback;
     }
     return result;
 }
@@ -586,7 +2091,7 @@ static std::vector<CUnit*> GetSelectedSimulationUnits() {
     units.reserve(g.selectedUnitHandles.size());
     for (int handleId : g.selectedUnitHandles) {
         CUnit* unit = g.simulation.GetUnit(handleId);
-        if (!unit || unit->IsDead()) continue;
+        if (!unit || unit->IsDead() || unit->IsHidden()) continue;
         units.push_back(unit);
     }
     return units;
@@ -622,8 +2127,6 @@ static std::vector<MultiSelectUnitInfo> BuildMultiSelectionInfo(const std::vecto
 }
 
 static void RefreshSelectionUi(bool rebuildCommandCard) {
-    const int previousPrimaryHandle = g.selectedUnitHandle;
-    const uint32_t previousPrimaryTypeValue = g.selectedUnitTypeId.value;
     std::vector<CUnit*> selectedUnits = GetSelectedSimulationUnits();
     g.selectedUnitHandles.clear();
     g.selectedUnitHandleSet.clear();
@@ -658,15 +2161,9 @@ static void RefreshSelectionUi(bool rebuildCommandCard) {
     g.selectedUnitTypeId = primaryUnit->GetTypeId();
     g.ui.SetSelectedUnit(g.selectedUnitHandle);
 
-    if (!rebuildCommandCard) {
-        rebuildCommandCard = (g.selectedUnitHandle != previousPrimaryHandle)
-            || (g.selectedUnitTypeId.value != previousPrimaryTypeValue);
-    }
-
-    if (rebuildCommandCard) {
-        g.ui.SetUnitData(&g.unitData);
-        g.ui.PopulateCommandCardForUnitType(g.selectedUnitTypeId);
-    }
+    (void)rebuildCommandCard;
+    g.ui.SetUnitData(&g.unitData);
+    g.ui.PopulateCommandCardForUnit(primaryUnit);
 
     if (selectedUnits.size() > 1) {
         g.ui.SetMultiSelection(BuildMultiSelectionInfo(selectedUnits));
@@ -700,7 +2197,7 @@ static void SetSelectedUnits(const std::vector<CUnit*>& units, int primaryHandle
     g.selectedUnitHandleSet.clear();
 
     for (auto* unit : units) {
-        if (!unit || unit->IsDead()) continue;
+        if (!unit || unit->IsDead() || unit->IsHidden()) continue;
         const int handleId = unit->GetHandleId();
         if (g.selectedUnitHandleSet.insert(handleId).second) {
             g.selectedUnitHandles.push_back(handleId);
@@ -716,10 +2213,20 @@ static void SetSelectedUnits(const std::vector<CUnit*>& units, int primaryHandle
     }
 
     RefreshSelectionUi(rebuildCommandCard);
+
+    {
+        std::vector<CUnit*> selectedUnits = GetSelectedSimulationUnits();
+        std::ostringstream oss;
+        oss << "[MoveDebug] selection"
+            << " primary=" << g.selectedUnitHandle
+            << " count=" << selectedUnits.size()
+            << " units=" << FormatSelectedUnitsBrief(selectedUnits);
+        MoveDebugLogLine(oss.str());
+    }
 }
 
 static void SelectSingleUnit(CUnit* unit, bool additive) {
-    if (!unit || unit->IsDead()) {
+    if (!unit || unit->IsDead() || unit->IsHidden()) {
         if (!additive) {
             SetSelectedUnits({}, -1);
         }
@@ -1026,32 +2533,97 @@ static void event_cb(const sapp_event* ev) {
                     Mat4 proj = g.camera.GetProjectionMatrix(aspect);
                     CUnit* targetUnit = PickSimulationUnitAtScreenPoint(ev->mouse_x, ev->mouse_y,
                                                                         view, proj, winW, winH,
-                                                                        g.selectedUnitHandle);
+                                                                        g.selectedUnitHandle,
+                                                                        false,
+                                                                        true);
+                    CDestructable* targetDestructable = targetUnit ? nullptr
+                        : PickSimulationDestructableAtScreenPoint(ev->mouse_x, ev->mouse_y, view, proj, winW, winH);
+                    CWidget* targetWidget = targetUnit ? static_cast<CWidget*>(targetUnit)
+                        : static_cast<CWidget*>(targetDestructable);
 
                     int pendingCmd = g.ui.GetPendingCommand();
                     if (pendingCmd >= 0) {
+                        const auto pendingMode = g.ui.GetPendingCommandMode();
                         g.ui.ClearPendingCommand();
                         Vec3 wPos = ScreenToWorld(ev->mouse_x, ev->mouse_y, view, proj, winW, winH);
+                        {
+                            std::ostringstream oss;
+                            oss << "[MoveDebug] issue_pending"
+                                << " pendingCmd=" << pendingCmd
+                                << " pendingMode=" << static_cast<int>(pendingMode)
+                                << " primary=" << g.selectedUnitHandle
+                                << " selected=" << FormatSelectedUnitsBrief(selectedUnits);
+                            if (targetWidget) {
+                                oss << " targetWidget=" << targetWidget->GetHandleId()
+                                    << " targetPos=(" << targetWidget->GetX() << ", " << targetWidget->GetY() << ")";
+                            } else {
+                                oss << " targetPoint=(" << wPos.x << ", " << wPos.z << ")";
+                            }
+                            MoveDebugLogLine(oss.str());
+                        }
                         for (auto* selectedUnit : selectedUnits) {
                             if (!selectedUnit) continue;
-                            if (targetUnit) {
-                                selectedUnit->IssueOrder(std::make_unique<COrderTargetWidget>(pendingCmd, targetUnit));
+                            if (pendingMode == MainUI::PendingCommandMode::POINT_ONLY) {
+                                selectedUnit->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
+                            } else if (targetWidget) {
+                                selectedUnit->IssueOrder(std::make_unique<COrderTargetWidget>(pendingCmd, targetWidget));
                             } else {
                                 selectedUnit->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
                             }
                         }
                         issuedOrder = true;
-                    } else if (targetUnit) {
+                    } else if (targetWidget) {
                         for (auto* selectedUnit : selectedUnits) {
                             if (!selectedUnit) continue;
-                            selectedUnit->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::ATTACK, targetUnit));
+                            int orderId = OrderIds::SMART;
+                            if (targetDestructable) {
+                                if (auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(selectedUnit->GetAbility(War3ID("Ahar")))) {
+                                    if (harvestAbility->CheckCanTarget(g.simulation, selectedUnit, OrderIds::HARVEST, targetDestructable)) {
+                                        orderId = OrderIds::HARVEST;
+                                    }
+                                }
+                            }
+                            std::ostringstream oss;
+                            oss << "[MoveDebug] issue_widget"
+                                << " unit=" << selectedUnit->GetHandleId()
+                                << " type=" << selectedUnit->GetTypeId().ToString()
+                                << " order=" << orderId
+                                << " primary=" << g.selectedUnitHandle
+                                << " targetWidget=" << targetWidget->GetHandleId()
+                                << " targetPos=(" << targetWidget->GetX() << ", " << targetWidget->GetY() << ")"
+                                << " targetKind=" << (targetUnit ? "unit" : "destructable")
+                                << " selected=" << FormatSelectedUnitsBrief(selectedUnits);
+                            MoveDebugLogLine(oss.str());
+                            selectedUnit->IssueOrder(std::make_unique<COrderTargetWidget>(orderId, targetWidget));
                         }
                         issuedOrder = true;
                     } else {
                         Vec3 wPos = ScreenToWorld(ev->mouse_x, ev->mouse_y, view, proj, winW, winH);
+                        const float groundHeight = g.texturedTerrain.IsValid()
+                            ? g.texturedTerrain.GetGroundHeight(wPos.x, wPos.z)
+                            : 0.0f;
+                        {
+                            std::ostringstream oss;
+                            oss << "[MoveDebug] click_point"
+                                << " screen=(" << ev->mouse_x << ", " << ev->mouse_y << ")"
+                                << " world=(" << wPos.x << ", " << wPos.z << ")"
+                                << " terrainH=" << groundHeight
+                                << " primary=" << g.selectedUnitHandle
+                                << " selectedCount=" << selectedUnits.size()
+                                << " selected=" << FormatSelectedUnitsBrief(selectedUnits);
+                            MoveDebugLogLine(oss.str());
+                        }
                         for (auto* selectedUnit : selectedUnits) {
                             if (!selectedUnit) continue;
-                            selectedUnit->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::MOVE, wPos.x, wPos.z));
+                            std::ostringstream oss;
+                            oss << "[MoveDebug] issue_order"
+                                << " unit=" << selectedUnit->GetHandleId()
+                                << " type=" << selectedUnit->GetTypeId().ToString()
+                                << " order=" << OrderIds::SMART
+                                << " from=(" << selectedUnit->GetX() << ", " << selectedUnit->GetY() << ")"
+                                << " target=(" << wPos.x << ", " << wPos.z << ")";
+                            MoveDebugLogLine(oss.str());
+                            selectedUnit->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, wPos.x, wPos.z));
                         }
                         issuedOrder = true;
                     }
@@ -1089,7 +2661,10 @@ static void event_cb(const sapp_event* ev) {
                     Mat4 view = g.camera.GetViewMatrix();
                     Mat4 proj = g.camera.GetProjectionMatrix(aspect);
                     CUnit* bestUnit = PickSimulationUnitAtScreenPoint(ev->mouse_x, ev->mouse_y,
-                                                                      view, proj, winW, winH);
+                                                                      view, proj, winW, winH,
+                                                                      -1,
+                                                                      false,
+                                                                      true);
                     if (bestUnit) {
                         if (g.audio.IsValid() && g.frameCount > 10) {
                             g.audio.Play2D("ui_click", 0.5f);
@@ -1272,16 +2847,24 @@ static void frame_cb() {
 
     // Run simulation step
     if (g.simulationInitialized) {
-        if (g.jassNatives) {
-            g.jassNatives->UpdateTimers(CSimulation::SIM_STEP_TIME);
+        const float simStep = CSimulation::SIM_STEP_TIME;
+        g.simulationAccumulator = std::min(g.simulationAccumulator + dt, simStep * 3.0f);
+        bool ranSimulationStep = false;
+        while (g.simulationAccumulator >= simStep) {
+            if (g.jassNatives) {
+                g.jassNatives->UpdateTimers(simStep);
+            }
+            g.simulation.Update();
+            g.simulationAccumulator -= simStep;
+            ranSimulationStep = true;
         }
 
-        g.simulation.Update();
-
-        // Sync simulation positions to visual models after timer-driven spawns and orders.
-        SyncAllSimulationUnitVisuals();
-
-        RefreshSelectionUi(false);
+        if (ranSimulationStep) {
+            // Sync simulation positions to visual models after timer-driven spawns and orders.
+            SyncAllSimulationUnitVisuals();
+            ReconcileSimulationUnitVisuals();
+            RefreshSelectionUi(false);
+        }
     }
 
     int winW = sapp_width(), winH = sapp_height();
@@ -1289,6 +2872,7 @@ static void frame_cb() {
 
     Mat4 view = g.camera.GetViewMatrix();
     Mat4 proj = g.camera.GetProjectionMatrix(aspect);
+    RefreshRuntimeUnitSplats();
 
     Renderer::BeginFrame();
     Renderer::SetWireframe(g.wireframe);
@@ -1301,7 +2885,7 @@ static void frame_cb() {
     sg_reset_state_cache();
     sg_apply_viewport(0, 0, winW, winH, true);
     sg_apply_scissor_rect(0, 0, winW, winH, true);
-    g.scene.RenderAll(view, proj);
+    g.scene.RenderAll(view, proj, dt);
 
     g.ui.Update(winW, winH);
     ScreenRect minimapRect = g.ui.GetMinimapRect();
@@ -1379,20 +2963,43 @@ static const char* DEFAULT_MAP = "Maps/FrozenThrone/(4)Avalanche.w3x";
 // --- Init callback ---
 static void init_cb() {
     std::cout << "Warsmash C++ Recreation - Initializing..." << std::endl;
+    {
+        std::ofstream(MoveDebugLogPath(), std::ios::trunc).close();
+        MoveDebugLogLine("[MoveDebug] session_begin");
+    }
 
     if (!Renderer::Initialize()) return;
 
     fs::path project_root = PROJECT_SOURCE_DIR;
     fs::path resources_dir = project_root / "resources";
 
-    for (const auto& name : {"War3Patch.mpq", "War3xLocal.mpq", "war3x.mpq", "war3.mpq"}) {
-        fs::path p = resources_dir / name;
-        if (fs::exists(p)) g.mpq.Open(p.string());
+    // Load warsmash.ini config
+    WarsmashConfig warsmashCfg;
+    fs::path iniPath = project_root / "resources" / "warsmash.ini";
+    warsmashCfg.Load(iniPath.string());
+
+    // Open MPQs (config-driven or default)
+    if (!warsmashCfg.dataSources.empty()) {
+        for (const auto& ds : warsmashCfg.dataSources) {
+            if (ds.first == "MPQ" || ds.first == "mpq") {
+                fs::path p = ResolveConfiguredPath(project_root, resources_dir, ds.second);
+                if (fs::exists(p)) g.mpq.Open(p.string());
+                else std::cerr << "MpqStorm: configured MPQ not found " << p.string() << std::endl;
+            }
+        }
+    }
+    if (g.mpq.ArchiveCount() == 0) {
+        for (const auto& name : {"War3Patch.mpq", "War3xLocal.mpq", "war3x.mpq", "war3.mpq"}) {
+            fs::path p = resources_dir / name;
+            if (fs::exists(p)) g.mpq.Open(p.string());
+        }
     }
 
-    if (g.mpq.ArchiveCount() > 0) g.scene.Init(g.mpq);
+    if (g.mpq.ArchiveCount() > 0) {
+        LoadSelectionAndBuildingSplatMetadata();
+        g.scene.Init(g.mpq);
+    }
 
-    // Initialize audio
     g.audio.Init();
     if (g.audio.IsValid() && g.mpq.ArchiveCount() > 0) {
         g.audio.SetMpqManager(&g.mpq);
@@ -1400,7 +3007,6 @@ static void init_cb() {
         g.audio.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &g.mpq);
     }
 
-    // Initialize UI
     g.ui.Init(&g.mpq, sapp_width(), sapp_height());
 
     // Find and load map
@@ -1414,192 +3020,106 @@ static void init_cb() {
     }
 
     if (!g.mapPath.empty()) {
-        // Resolve relative path against resources directory
-        fs::path map_file_path = g.mapPath;
-        if (map_file_path.is_relative()) {
-            fs::path resolved = resources_dir / map_file_path;
-            if (fs::exists(resolved)) {
-                map_file_path = resolved;
-            }
+        fs::path mapFilePath = g.mapPath;
+        if (mapFilePath.is_relative()) {
+            fs::path resolved = resources_dir / mapFilePath;
+            if (fs::exists(resolved)) mapFilePath = resolved;
         }
-        g.mapPath = map_file_path.string();
+        g.mapPath = mapFilePath.string();
     } else if (!mapFiles.empty()) {
-        // Check if default map exists
-        fs::path default_path = resources_dir / DEFAULT_MAP;
-        if (fs::exists(default_path)) {
-            g.mapPath = default_path.string();
-        } else {
-            std::cout << "\nAvailable maps:" << std::endl;
-            for (size_t i = 0; i < mapFiles.size(); i++)
-                std::cout << "  [" << (i+1) << "] " << fs::relative(mapFiles[i], resources_dir).string() << std::endl;
+        fs::path defaultPath = resources_dir / DEFAULT_MAP;
+        if (fs::exists(defaultPath))
+            g.mapPath = defaultPath.string();
+        else
             g.mapPath = mapFiles[0].string();
-        }
     }
 
-    if (!g.mapPath.empty()) {
-        std::cout << "\nLoading: " << fs::path(g.mapPath).filename() << std::endl;
-        g.scene.ResetLoadStats();
-
-        W3ILoadFromMpq(g.mapPath, g.w3i);
-        W3IPrint(g.w3i);
-
-        WpmLoadFromMpq(g.mapPath, g.wpm);
-        g.simulation.SetPathingMap(&g.wpm);
-        W3rData w3r; W3rLoadFromMpq(g.mapPath, w3r);
-
-        // Load map units and doodads (single pass)
-        UnitsDooData units;
-        if (UnitsDooLoadFromMpq(g.mapPath, units, &g.w3i)) {
-            std::cout << "UnitsDoo: version=" << units.version
-                      << " units=" << units.units.size()
-                      << " skinId=" << ((((g.w3i.gameVersionMajor * 100) + g.w3i.gameVersionMinor) >= 132) ? "on" : "off")
-                      << std::endl;
-            // Initialize game simulation
-            if (g.mpq.ArchiveCount() > 0) {
-                CGameplayConstants gameplayConstants;
-                g.unitData = CUnitData::LoadFromMpq(g.mpq, gameplayConstants);
-                g.simulation.SetUnitData(&g.unitData);
-                g.simulation.SetGameplayConstants(gameplayConstants);
-                g.simulation.SetAudioSystem(&g.audio);
-
-                for (int i = 0; i < 12; i++) {
-                    auto player = std::make_unique<CPlayer>(i, "Player " + std::to_string(i + 1),
-                                                              CMapControl::USER);
-                    player->SetGold(500);
-                    player->SetLumber(200);
-                    player->SetFoodCap(10);
-                    g.simulation.AddPlayer(std::move(player));
-                }
-
-                // Create simulation units from units.doo and let the simulation own
-                // their visuals so animation/state starts from runtime data instead of
-                // a separate editor-scene copy.
-                int simUnitCreated = 0;
-                int visualUnitCreated = 0;
-                int visualMissForSimUnits = 0;
-                for (auto& u : units.units) {
-                    War3ID id(u.id);
-                    CUnit* simUnit = nullptr;
-                    if (g.unitData.HasUnitType(id)) {
-                        simUnit = g.simulation.CreateUnit(
-                            id, u.player, u.pos[0], u.pos[1], u.angle);
-                        if (simUnit) {
-                            simUnitCreated++;
-                            g.simUnitVisualSeeds[simUnit->GetHandleId()] = {
-                                {u.scale[0], u.scale[1], u.scale[2]},
-                                u.skinId,
-                                u.hitpoints,
-                                u.flags
-                            };
-                            if (u.hitpoints > 0) simUnit->SetLife(g.simulation, (float)u.hitpoints);
-                            if (u.mana > 0) simUnit->SetMana((float)u.mana);
-                        }
-                    }
-                    // Keep direct scene visuals only for units we couldn't instantiate
-                    // in the simulation.
-                    if (!simUnit) {
-                        if (g.scene.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId)) {
-                            visualUnitCreated++;
-                        }
-                    }
-                }
-                // Force process new units
-                g.simulation.Update();
-                g.simulationInitialized = true;
-                g.ui.SetSimulation(&g.simulation);
-                for (auto* unit : g.simulation.GetUnits()) {
-                    if (EnsureSimulationUnitVisual(unit)) {
-                        visualUnitCreated++;
-                    } else {
-                        visualMissForSimUnits++;
-                    }
-                }
-                std::cout << "Simulation: " << g.unitData.GetAllTypes().size()
-                          << " types, " << g.simulation.GetUnits().size() << " units" << std::endl;
-                std::cout << "SceneUnitSync: simCreated=" << simUnitCreated
-                          << " visualCreated=" << visualUnitCreated
-                          << " visualMissForSimUnits=" << visualMissForSimUnits
-                          << std::endl;
-
-                // Give UI access to unit data and populate command card for first unit
-                g.ui.SetUnitData(&g.unitData);
-                if (!g.simulation.GetUnits().empty()) {
-                    War3ID firstType = g.simulation.GetUnits()[0]->GetTypeId();
-                    g.ui.PopulateCommandCardForUnitType(firstType);
-                }
-            } else {
-                // No MPQ: just add visual models
-                for (auto& u : units.units) {
-                    g.scene.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId);
-                }
-            }
-        } else {
-            std::cout << "UnitsDoo: failed to load war3mapUnits.doo" << std::endl;
-        }
-
-        // Fallback: load unit data and populate command card for footman
-        if (!g.simulationInitialized) {
-            if (g.mpq.ArchiveCount() > 0) {
-                CGameplayConstants gameplayConstants;
-                g.unitData = CUnitData::LoadFromMpq(g.mpq, gameplayConstants);
-                g.ui.SetUnitData(&g.unitData);
-                std::cout << "CUnitData: loaded " << g.unitData.GetAllTypes().size() << " types (fallback)" << std::endl;
-            }
-            if (g.ui.GetGameUI().rootFrame) {
-                g.ui.PopulateCommandCardForUnitType(War3ID("hfoo"));
-            }
-        }
-
-        W3dData w3d;
-        if (W3dLoadFromMpq(g.mapPath, w3d)) {
-            int doodAdded = 0;
-            for (auto& d : w3d.doodads) {
-                if (g.scene.AddDoodad(d.id, d.pos, d.angle, d.scale, d.variation, d.flags, d.life, d.skinId))
-                    doodAdded++;
-            }
-            if (doodAdded > 0) std::cout << "  Rendered " << doodAdded << " doodads" << std::endl;
-        }
-        g.scene.PrintLoadStats();
-
-        if (W3XLoadTerrain(g.mapPath, g.map)) {
-            bool hasTextures = false;
-            if (g.mpq.ArchiveCount() > 0 && g.tileset.LoadFromMpq(g.mpq, g.map))
-                hasTextures = true;
-            else if (g.mpq.ArchiveCount() > 0 && g.tileset.LoadFromWorldEditData(g.mpq, g.map.tileset, g.map.groundTilePalette.size()))
-                hasTextures = true;
-
-            if (hasTextures) {
-                g.tileset.LoadCliffTextures(g.mpq, g.map);
-                g.tileset.LoadCliffModelInfo(g.mpq);
-                g.tileset.LoadWaterInfo(g.mpq, g.map);
-                g.tileset.LoadWaterTextures(g.mpq);
-                g.texturedTerrain.SetMpq(&g.mpq);
-                g.terrainLoaded = g.texturedTerrain.Build(g.map, &g.tileset);
-            } else {
-                std::cout << "Terrain: falling back to simple (no textures)" << std::endl;
-                g.terrainLoaded = g.simpleTerrain.Build(g.map);
-            }
-
-            g.texturedTerrain.SetPathing(&g.wpm);
-            g.texturedTerrain.SetRegions(&w3r);
-            if (g.w3i.playableWidth > 0) {
-                g.texturedTerrain.SetMapBounds(g.w3i.cameraBounds[0], g.w3i.cameraBounds[1],
-                                                 g.w3i.cameraBounds[2], g.w3i.cameraBounds[3]);
-            } else {
-                Vec3 c = g.texturedTerrain.GetCenter();
-                float r = g.texturedTerrain.GetRadius();
-                g.texturedTerrain.SetMapBounds(c.x - r, c.z - r, c.x + r, c.z + r);
-            }
-        }
+    if (g.mapPath.empty()) {
+        std::cerr << "No map found!" << std::endl;
+        return;
     }
 
-    // Initialize JASS VM and load map scripts
-    auto ReadMapFile = [](const std::string& mapPath, const std::string& fileName, std::vector<uint8_t>& out) -> bool {
+    std::cout << "\nLoading: " << fs::path(g.mapPath).filename() << std::endl;
+    g.scene.ResetLoadStats();
+
+    // --- Phase 1: map metadata, with optional JASS config() ---
+    W3ILoadFromMpq(g.mapPath, g.w3i);
+    W3IPrint(g.w3i);
+
+    JassConfigEnv configEnv;
+    if (g.enableJass && configEnv.Init(g.mpq, warsmashCfg.jassFileList)) {
+        configEnv.Config();
+        int playerCount = configEnv.GetConfiguredPlayerCount();
+        if (playerCount > 0)
+            std::cout << "JASS Config: " << playerCount << " players configured" << std::endl;
+    } else if (!g.enableJass) {
+        std::cout << "JASS: disabled for startup; pass --jass to run map scripts" << std::endl;
+    }
+
+    // --- Phase 2: Staged map loading [align with Java MapLoader] ---
+    MapLoader mapLoader(g.mpq, g.simulation, g.unitData, g.destructableData,
+                        g.scene, g.texturedTerrain, g.tileset, g.map, g.w3i, g.wpm);
+    mapLoader.CreateTasks(g.mapPath, 0);
+
+    int stage = 0;
+    while (!mapLoader.Process()) {
+        stage++;
+        std::cout << "  Loading stage " << stage << " ("
+                  << (int)(mapLoader.GetCompletionRatio() * 100.0f) << "%)" << std::endl;
+    }
+
+    // Post-loading: sync terrain/pathing state
+    g.simulation.SetPathingMap(g.wpm.IsValid() ? &g.wpm : nullptr, g.map.offsetX, g.map.offsetY);
+    g.terrainLoaded = g.texturedTerrain.IsValid();
+    g.scene.PrintLoadStats();
+
+    // Process units from units.doo into simulation
+    UnitsDooData unitsDoo;
+    if (UnitsDooLoadFromMpq(g.mapPath, unitsDoo, &g.w3i)) {
+        int simUnitCreated = 0, visualUnitCreated = 0, visualMissForSimUnits = 0;
+        for (auto& u : unitsDoo.units) {
+            War3ID id(u.id);
+            CUnit* simUnit = nullptr;
+            if (g.unitData.HasUnitType(id)) {
+                simUnit = g.simulation.CreateUnit(id, u.player, u.pos[0], u.pos[1], u.angle);
+                if (simUnit) {
+                    simUnitCreated++;
+                    g.simUnitVisualSeeds[simUnit->GetHandleId()] = {
+                        {u.scale[0], u.scale[1], u.scale[2]}, u.skinId, u.hitpoints, u.flags
+                    };
+                    if (u.hitpoints > 0) simUnit->SetLife(g.simulation, (float)u.hitpoints);
+                    if (u.mana > 0) simUnit->SetMana((float)u.mana);
+                }
+            }
+            if (!simUnit) {
+                if (g.scene.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId))
+                    visualUnitCreated++;
+            }
+        }
+        g.simulation.Update();
+        g.simulationInitialized = true;
+        g.ui.SetSimulation(&g.simulation);
+        for (auto* unit : g.simulation.GetUnits()) {
+            if (EnsureSimulationUnitVisual(unit)) visualUnitCreated++;
+            else visualMissForSimUnits++;
+        }
+        g.ui.SetUnitData(&g.unitData);
+        if (!g.simulation.GetUnits().empty()) {
+            g.ui.PopulateCommandCardForUnitType(g.simulation.GetUnits()[0]->GetTypeId());
+        }
+        std::cout << "Simulation: " << g.simulation.GetUnits().size() << " units" << std::endl;
+        std::cout << "SceneUnitSync: simCreated=" << simUnitCreated
+                  << " visualCreated=" << visualUnitCreated
+                  << " visualMissForSimUnits=" << visualMissForSimUnits << std::endl;
+    }
+
+    // --- Phase 3: optional JASS main() [align with Java loadCommon] ---
+    auto ReadMapFile = [](const std::string& mp, const std::string& fn, std::vector<uint8_t>& out) -> bool {
         #ifndef WITHOUT_STORMLIB
         HANDLE hMpq = nullptr;
-        if (!SFileOpenArchive(mapPath.c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) return false;
+        if (!SFileOpenArchive(mp.c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) return false;
         HANDLE hFile = nullptr;
-        if (!SFileOpenFileEx(hMpq, fileName.c_str(), SFILE_OPEN_BASE_FILE, &hFile)) {
+        if (!SFileOpenFileEx(hMpq, fn.c_str(), SFILE_OPEN_BASE_FILE, &hFile)) {
             SFileCloseArchive(hMpq); return false;
         }
         DWORD sz = SFileGetFileSize(hFile, nullptr);
@@ -1610,116 +3130,117 @@ static void init_cb() {
         SFileCloseArchive(hMpq);
         return true;
         #else
-        (void)mapPath; (void)fileName; (void)out;
-        return false;
+        (void)mp; (void)fn; (void)out; return false;
         #endif
     };
 
-    if (g.mpq.ArchiveCount() > 0) {
+    if (g.enableJass && g.mpq.ArchiveCount() > 0) {
         std::vector<uint8_t> jassData;
         if (ReadMapFile(g.mapPath, "war3map.j", jassData)) {
             std::string jassSource((const char*)jassData.data(), jassData.size());
             std::cout << "JASS: loaded war3map.j (" << jassSource.size() << " bytes)" << std::endl;
-            if (g.jass.LoadScript(jassSource)) {
-                // Register native functions with simulation bindings (heap-allocated for lifetime safety)
-                g.jassNatives = std::make_unique<JassNatives>(g.jass, &g.simulation);
-                g.jassNatives->RegisterAll();
 
-                // Wire camera callbacks
-                auto* jassData = g.jassNatives->GetData().get();
-                jassData->camSetPosition = [](float x, float y, float z) {
-                    g.camera.SetTarget(x, y, z);
-                    g.camera.ResetToHome();
-                };
-                jassData->camSetTarget = [](float x, float y, float z) {
-                    g.camera.SetTarget(x, y, z);
-                    g.camera.ResetToHome();
-                };
-                jassData->camReset = []() {
-                    g.camera.ResetToHome();
-                };
-                jassData->camGetX = []() -> float {
-                    return g.camera.GetTarget().x;
-                };
-                jassData->camGetY = []() -> float {
-                    return g.camera.GetTarget().y;
-                };
-                jassData->camGetZ = []() -> float {
-                    return g.camera.GetTarget().z;
-                };
-                jassData->camGetEyeX = []() -> float {
-                    return g.camera.GetPosition().x;
-                };
-                jassData->camGetEyeY = []() -> float {
-                    return g.camera.GetPosition().y;
-                };
-                jassData->camGetEyeZ = []() -> float {
-                    return g.camera.GetPosition().z;
-                };
+            JassCommonEnv commonEnv;
+            if (commonEnv.Init(g.mpq, &g.simulation, warsmashCfg.jassFileList,
+                               configEnv.GetData())) {
+                // Wire callbacks
+                commonEnv.WireCallbacks(g.simulation);
 
-                // Wire animation callbacks
-                jassData->unitSetAnimation = [](int simHandle, const std::string& animName) {
-                    auto it = g.simUnitToVisualIdx.find(simHandle);
+                auto* jassDataPtr = commonEnv.GetData().get();
+                jassDataPtr->camSetPosition = [](float x, float y, float z) {
+                    g.camera.SetTarget(x, y, z); g.camera.ResetToHome(); };
+                jassDataPtr->camSetTarget = [](float x, float y, float z) {
+                    g.camera.SetTarget(x, y, z); g.camera.ResetToHome(); };
+                jassDataPtr->camReset = []() { g.camera.ResetToHome(); };
+                jassDataPtr->camGetX = []() -> float { return g.camera.GetTarget().x; };
+                jassDataPtr->camGetY = []() -> float { return g.camera.GetTarget().y; };
+                jassDataPtr->camGetZ = []() -> float { return g.camera.GetTarget().z; };
+                jassDataPtr->camGetEyeX = []() -> float { return g.camera.GetPosition().x; };
+                jassDataPtr->camGetEyeY = []() -> float { return g.camera.GetPosition().y; };
+                jassDataPtr->camGetEyeZ = []() -> float { return g.camera.GetPosition().z; };
+
+                jassDataPtr->unitSetAnimation = [](int h, const std::string& a) {
+                    const decltype(g.simUnitPendingAnimations)::mapped_type r{a, -1, false};
+                    g.simUnitQueuedAnimations.erase(h);
+                    auto it = g.simUnitToVisualIdx.find(h);
                     if (it != g.simUnitToVisualIdx.end()) {
-                        auto* viewer = g.scene.GetViewer(it->second);
-                        if (viewer && viewer->GetAnimator()) {
-                            viewer->GetAnimator()->PlaySequence(animName);
-                            g.simUnitPendingAnimations.erase(simHandle);
-                            return;
+                        auto* v = g.scene.GetViewer(it->second);
+                        if (v && ApplyAnimationRequestToViewer(h, v, r)) {
+                            g.simUnitPendingAnimations.erase(h); return;
                         }
                     }
-                    g.simUnitPendingAnimations[simHandle] = {animName, -1, false};
+                    g.simUnitPendingAnimations[h] = r;
                 };
-                jassData->unitSetAnimationByIndex = [](int simHandle, int index) {
-                    auto it = g.simUnitToVisualIdx.find(simHandle);
+                jassDataPtr->unitQueueAnimation = [](int h, const std::string& a) {
+                    const decltype(g.simUnitPendingAnimations)::mapped_type r{a, -1, false};
+                    auto it = g.simUnitToVisualIdx.find(h);
                     if (it != g.simUnitToVisualIdx.end()) {
-                        auto* viewer = g.scene.GetViewer(it->second);
-                        if (viewer && viewer->GetAnimator()) {
-                            viewer->GetAnimator()->SetSequence(index);
-                            g.simUnitPendingAnimations.erase(simHandle);
-                            return;
+                        auto* v = g.scene.GetViewer(it->second);
+                        if (v && v->GetAnimator()) {
+                            bool q = !v->IsCurrentSequenceLooping() && !v->IsCurrentSequenceFinished();
+                            if (q) { g.simUnitQueuedAnimations[h] = r; }
+                            else if (ApplyAnimationRequestToViewer(h, v, r)) { g.simUnitPendingAnimations.erase(h); return; }
                         }
+                    } else { g.simUnitPendingAnimations[h] = r; }
+                };
+                jassDataPtr->unitSetAnimationByIndex = [](int h, int idx) {
+                    const decltype(g.simUnitPendingAnimations)::mapped_type r{"", idx, true};
+                    g.simUnitQueuedAnimations.erase(h);
+                    auto it = g.simUnitToVisualIdx.find(h);
+                    if (it != g.simUnitToVisualIdx.end()) {
+                        auto* v = g.scene.GetViewer(it->second);
+                        if (v && ApplyAnimationRequestToViewer(h, v, r)) { g.simUnitPendingAnimations.erase(h); return; }
                     }
-                    g.simUnitPendingAnimations[simHandle] = {"", index, true};
+                    g.simUnitPendingAnimations[h] = r;
+                };
+                jassDataPtr->unitAddAnimationProperties = [](int h, const std::string& p, bool add) {
+                    auto tags = ExtractAnimationSecondaryTags(p);
+                    if (tags.empty()) return;
+                    auto& at = g.simUnitAnimationPropertyTags[h];
+                    if (add) {
+                        for (auto& t : tags) if (std::find(at.begin(), at.end(), t) == at.end()) at.push_back(t);
+                    } else {
+                        at.erase(std::remove_if(at.begin(), at.end(), [&](const std::string& t) {
+                            return std::find(tags.begin(), tags.end(), t) != tags.end(); }), at.end());
+                        if (at.empty()) g.simUnitAnimationPropertyTags.erase(h);
+                    }
+                    g.simUnitVisualAnimationModes.erase(h);
+                };
+                jassDataPtr->unitClearAnimations = [](int h) {
+                    g.simUnitPendingAnimations.erase(h); g.simUnitQueuedAnimations.erase(h);
+                    g.simUnitScriptedAnimations.erase(h); g.simUnitVisualAnimationModes.erase(h);
                 };
 
-                // Wire unit death events to trigger system
-                g.simulation.SetUnitDeathCallback(
-                    [](int unitSimHandle, int killerSimHandle, int /*playerIdx*/) {
-                        if (g.jassNatives)
-                            g.jassNatives->FireDeathEvent(unitSimHandle, killerSimHandle, JASS_EVENT_UNIT_DEATH);
+                // Death/damage/order events
+                g.simulation.SetUnitDeathCallback([](int uh, int kh, int) {
+                    g.simUnitPendingAnimations.erase(uh); g.simUnitScriptedAnimations.erase(uh);
+                    g.simUnitQueuedAnimations.erase(uh);
+                    g.simUnitVisualAnimationModes[uh] = decltype(g.simUnitVisualAnimationModes)::mapped_type::DEAD;
+                    auto it = g.simUnitToVisualIdx.find(uh);
+                    if (it != g.simUnitToVisualIdx.end()) {
+                        SetSimulationUnitVisualVisible(uh, true);
+                        if (auto* v = g.scene.GetViewer(it->second)) v->PlayDeathSequence();
                     }
-                );
-                // Wire unit damage events to trigger system
-                g.simulation.SetUnitDamageCallback(
-                    [](int unitHandle, int sourceHandle, float damage) {
-                        if (g.jassNatives)
-                            g.jassNatives->FireDamageEvent(unitHandle, sourceHandle, damage, JASS_EVENT_UNIT_DAMAGED);
-                    }
-                );
-                // Wire unit order events to trigger system
-                g.simulation.SetUnitOrderCallback(
-                    [](int unitHandle, int orderId, int targetHandle, float x, float y) {
-                        if (g.jassNatives)
-                            g.jassNatives->FireOrderEvent(unitHandle, orderId, targetHandle, x, y);
-                    }
-                );
-                // Warcraft III maps expect config() before main().
-                if (g.jass.IsValid()) {
-                    g.jass.Execute("config");
-                    g.jass.Execute("main");
-                    // Flush any CreateUnit() calls issued by JASS before we inspect the map state.
-                    g.simulation.Update();
-                    EnsureHumanMeleeStartsFromMapConfig();
-                    FlushStartupSimulationState();
-                }
-            } else {
-                for (auto& e : g.jass.GetErrors())
-                    std::cerr << "JASS: " << e << std::endl;
+                    if (g.jassNatives) g.jassNatives->FireDeathEvent(uh, kh, JASS_EVENT_UNIT_DEATH);
+                });
+                g.simulation.SetUnitDamageCallback([](int uh, int sh, float d) {
+                    if (g.jassNatives) g.jassNatives->FireDamageEvent(uh, sh, d, JASS_EVENT_UNIT_DAMAGED);
+                });
+                g.simulation.SetUnitOrderCallback([](int uh, int oi, int th, float x, float y) {
+                    if (g.jassNatives) g.jassNatives->FireOrderEvent(uh, oi, th, x, y);
+                });
+
+                // Transfer natives ownership to global for timer updates in frame_cb
+                g.jassNatives = commonEnv.ReleaseNatives();
+
+                commonEnv.Main();
+                g.simulation.Update();
+                EnsureHumanMeleeStartsFromMapConfig();
+                FlushStartupSimulationState();
             }
-        } else {
-            std::cout << "JASS: no war3map.j found in map" << std::endl;
         }
+    } else if (!g.enableJass) {
+        std::cout << "JASS: main() skipped; terrain and static scene loaded" << std::endl;
     }
 
     // Generate minimap
@@ -1727,48 +3248,9 @@ static void init_cb() {
         g.minimap.Generate(g.texturedTerrain, g.tileset, g.map, g.w3i, &g.mpq);
     }
 
-    if (!g.terrainLoaded) {
-        std::cout << "Generating synthetic terrain..." << std::endl;
-        g.map = GenerateTestTerrain();
-        bool hasTextures = g.mpq.ArchiveCount() > 0 && g.tileset.LoadFromMpq(g.mpq, g.map);
-        if (!hasTextures)
-            hasTextures = g.mpq.ArchiveCount() > 0 && g.tileset.LoadFromWorldEditData(g.mpq, g.map.tileset, g.map.groundTilePalette.size());
-        if (hasTextures)
-            g.terrainLoaded = g.texturedTerrain.Build(g.map, &g.tileset);
-        else
-            g.terrainLoaded = g.simpleTerrain.Build(g.map);
-    }
-
-    if (!g.terrainLoaded) {
-        std::cerr << "Failed to build terrain!" << std::endl;
-    }
-
-    Vec3 center;
-    float radius;
-    if (g.texturedTerrain.IsValid()) {
-        center = g.texturedTerrain.GetCenter();
-        radius = g.texturedTerrain.GetRadius();
-    } else {
-        center = g.simpleTerrain.GetCenter();
-        radius = g.simpleTerrain.GetRadius();
-    }
-
-    {
-        float sampleH = g.texturedTerrain.IsValid() ? g.texturedTerrain.GetGroundHeight(center.x, center.z) : 0;
-        float sampleW = g.texturedTerrain.IsValid() ? g.texturedTerrain.GetWaterHeight(center.x, center.z) : 0;
-        bool playable = g.texturedTerrain.IsValid() ? g.texturedTerrain.InPlayableArea(center.x, center.z) : true;
-        Vec3 campos = g.camera.GetPosition();
-        std::cout << "Terrain center: (" << center.x << ", " << center.y << ", " << center.z
-                  << ") radius=" << radius << std::endl;
-        std::cout << "Camera pos: (" << campos.x << ", " << campos.y << ", " << campos.z
-                  << ") target: (" << g.camera.GetPosition().x << "...)" << std::endl;
-        std::cout << "Terrain center height: " << sampleH
-                  << " water: " << sampleW
-                  << " playable: " << playable << std::endl;
-    }
-
-    // Default camera fallback at terrain center. We may overwrite this below
-    // with the initial spawn focus once map/JASS state is ready.
+    // Camera setup
+    Vec3 center = g.texturedTerrain.IsValid() ? g.texturedTerrain.GetCenter()
+                                              : g.simpleTerrain.GetCenter();
     g.camera.SetTarget(center.x, center.y, center.z);
     g.camera.SetDistance(2500.0f);
     g.camera.SetMaxDistance(5000.0f);
@@ -1785,22 +3267,30 @@ static void cleanup_cb() {
     g.ui.Shutdown();
     Renderer::Shutdown();
     g.audio.Shutdown();
-    // All sokol resource destructors are now guarded by Renderer::IsActive()
 }
 
 // --- sokol_main ---
 sapp_desc sokol_main(int argc, char* argv[]) {
+    // Store args for GameController (it handles its own parsing)
     for (int i = 1; i < argc; ++i) {
         const char* arg = argv[i];
         if (std::strcmp(arg, "--screenshot") == 0 && i + 1 < argc) {
             g.screenshotPath = argv[++i];
             g.screenshotFrame = 1;
+        } else if (std::strcmp(arg, "--jass") == 0) {
+            g.enableJass = true;
+        } else if (std::strcmp(arg, "--no-jass") == 0) {
+            g.enableJass = false;
         } else if (std::strncmp(arg, "--run=", 6) == 0) {
-            g.mapPath = arg + 6; // --run=path
+            g.mapPath = arg + 6;
         } else if (std::strcmp(arg, "--run") == 0 && i + 1 < argc) {
-            g.mapPath = argv[++i]; // --run path
+            g.mapPath = argv[++i];
+        } else if (std::strncmp(arg, "--map=", 6) == 0) {
+            g.mapPath = arg + 6;
+        } else if (std::strcmp(arg, "--map") == 0 && i + 1 < argc) {
+            g.mapPath = argv[++i];
         } else if (arg[0] != '-') {
-            g.mapPath = arg; // bare path
+            g.mapPath = arg;
         }
     }
 

@@ -41,6 +41,7 @@ public:
     PathingGridMovementType GetMovementType() const { return movementType_; }
     float GetSpeed() const { return speed_; }
     void SetSpeed(int s) { speed_ = s; }
+    bool TurnTowardPoint(float targetX, float targetY);
 
     // Position (override from CWidget)
     void SetPosition(float x, float y);
@@ -139,6 +140,9 @@ public:
     // Death
     int GetDeathTurnTick() const { return deathTurnTick_; }
     void SetDeathTurnTick(int t) { deathTurnTick_ = t; }
+    bool IsCorpse() const { return corpse_; }
+    bool IsBoneCorpse() const { return boneCorpse_; }
+    float GetEndingDecayTime(const CSimulation& simulation) const;
 
     // Collision
     float GetCollisionSize() const { return collisionSize_; }
@@ -181,6 +185,8 @@ private:
     bool constructionPaused_ = false;
     float constructionProgress_ = 0;
     int deathTurnTick_ = 0;
+    bool corpse_ = false;
+    bool boneCorpse_ = false;
     int foodUsed_ = 0;
     int foodMade_ = 0;
 

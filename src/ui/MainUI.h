@@ -11,6 +11,7 @@
 #include "../resource/mpq_storm.h"
 #include "../data/abilitydata.h"
 #include "../resource/slk.h"
+#include <cstdint>
 #include <memory>
 #include <array>
 #include <string>
@@ -19,6 +20,7 @@
 
 class CUnitData;
 class CSimulation;
+class CUnit;
 class NoesisHudHost;
 struct sapp_event;
 
@@ -67,6 +69,7 @@ public:
     GameUI& GetGameUI() { return gameUI_; }
 
     void PopulateCommandCardForUnitType(War3ID unitTypeId);
+    void PopulateCommandCardForUnit(CUnit* unit);
     void PopulateCommandCardFromAbilities(const std::vector<War3ID>& abilityIds);
     void SetSimulation(CSimulation* sim) { simulation_ = sim; }
     void SetSelectedUnit(int handleId);
@@ -107,23 +110,53 @@ public:
     void UpdateHeroPanelFromUnit(War3ID unitTypeId, int handleId);
 
     // Pending command (for buttons that need a target click)
-    void SetPendingCommand(int orderId) { pendingCommandOrderId_ = orderId; }
+    enum class PendingCommandMode : uint8_t {
+        NONE,
+        POINT_OR_WIDGET,
+        POINT_ONLY,
+    };
+
+    void SetPendingCommand(int orderId, PendingCommandMode mode = PendingCommandMode::POINT_OR_WIDGET) {
+        pendingCommandOrderId_ = orderId;
+        pendingCommandMode_ = (orderId >= 0) ? mode : PendingCommandMode::NONE;
+    }
     int GetPendingCommand() const { return pendingCommandOrderId_; }
-    void ClearPendingCommand() { pendingCommandOrderId_ = -1; }
+    PendingCommandMode GetPendingCommandMode() const { return pendingCommandMode_; }
+    void ClearPendingCommand() {
+        pendingCommandOrderId_ = -1;
+        pendingCommandMode_ = PendingCommandMode::NONE;
+    }
     ScreenRect GetMinimapRect() const;
     ScreenRect GetPortraitRect() const;
 
 private:
+    enum class CommandClickMode : uint8_t {
+        NONE,
+        IMMEDIATE,
+        TARGET,
+        POINT_ONLY,
+        OPEN_MENU,
+        CLOSE_MENU,
+    };
+
     struct CommandSlot {
         std::string label;
         int orderId = -1;
         bool visible = false;
         bool enabled = false;
         std::shared_ptr<Texture> icon;
+        CommandClickMode clickMode = CommandClickMode::NONE;
     };
 
     void ClearCommandSlots();
     void HandleCommandButtonClick(int index);
+    void SetCommandSlotAt(int row, int col,
+                          int orderId,
+                          CommandClickMode clickMode,
+                          bool enabled,
+                          const std::string& label,
+                          const std::shared_ptr<Texture>& icon);
+    int FindNextOpenCommandSlot() const;
     void SubmitChatMessage();
     void BrowseChatHistory(int delta);
     void RenderCommandIcons(UiRenderer& r);
@@ -167,6 +200,8 @@ private:
 
     // Pending command mode
     int pendingCommandOrderId_ = -1;
+    PendingCommandMode pendingCommandMode_ = PendingCommandMode::NONE;
+    int activeSubmenuOrderId_ = 0;
 
     // Current HUD state
     std::string selectedName_ = "No unit selected";

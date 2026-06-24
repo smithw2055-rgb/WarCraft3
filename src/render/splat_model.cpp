@@ -115,6 +115,16 @@ void SplatModel::RemoveSplat(int index) {
     }
 }
 
+void SplatModel::ClearGeometry() {
+    if (instances_.empty() && meshInstances_.empty() && batches_.empty()) {
+        return;
+    }
+    instances_.clear();
+    meshInstances_.clear();
+    dirty_ = true;
+    ClearBatches();
+}
+
 void SplatModel::SetNoDepthTest(bool v) {
     if (noDepthTest_ == v) {
         return;

@@ -31,8 +31,8 @@ void CAbilityAttack::OnRemove(CSimulation& game, CUnit* unit) {
 }
 
 bool CAbilityAttack::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const {
-    (void)orderId;
     if (IsDisabled()) return false;
+    if ((orderId != OrderIds::SMART) && (orderId != OrderIds::ATTACK)) return false;
     if (!target || target->IsDead()) return false;
     if (target == unit) return false; // no self-attack
 

@@ -137,6 +137,7 @@ void TexturedTerrain::Release() {
     uberSplatModels_.clear();
     uberSplatModelsList_.clear();
     uberSplatPathCache_.clear();
+    runtimeUberSplatKeys_.clear();
 
     delete[] groundHeights_; groundHeights_ = nullptr;
     delete[] groundCornerHeights_; groundCornerHeights_ = nullptr;
@@ -1317,17 +1318,24 @@ void TexturedTerrain::AddUberSplat(const std::string& path, float x, float y, fl
 }
 
 SplatModel* TexturedTerrain::GetOrCreateUberSplatModel(const std::string& path, bool highPriority, bool terrainColorMask) {
-    if (path.empty()) {
+    return GetOrCreateUberSplatModelForKey(path, path, highPriority, terrainColorMask);
+}
+
+SplatModel* TexturedTerrain::GetOrCreateUberSplatModelForKey(const std::string& cacheKey,
+                                                             const std::string& texturePath,
+                                                             bool highPriority,
+                                                             bool terrainColorMask) {
+    if (cacheKey.empty() || texturePath.empty()) {
         return nullptr;
     }
 
-    const std::string resolvedPath = ResolveUberSplatPath(path);
+    const std::string resolvedPath = ResolveUberSplatPath(texturePath);
     if (resolvedPath.empty()) {
         buildStats_.uberSplatMisses++;
         return nullptr;
     }
 
-    auto it = uberSplatModels_.find(resolvedPath);
+    auto it = uberSplatModels_.find(cacheKey);
     if (it != uberSplatModels_.end()) {
         it->second->SetHighPriority(highPriority);
         it->second->SetUseTerrainColorMask(terrainColorMask);
@@ -1387,7 +1395,7 @@ SplatModel* TexturedTerrain::GetOrCreateUberSplatModel(const std::string& path, 
     splat->SetHighPriority(highPriority);
     splat->SetUseTerrainColorMask(terrainColorMask);
     splat->SetNoDepthTest(false);
-    uberSplatModels_[resolvedPath] = splat;
+    uberSplatModels_[cacheKey] = splat;
     uberSplatModelsList_.push_back(splat);
     buildStats_.uberSplatLoads = (int)uberSplatModels_.size();
     return splat;
@@ -1481,6 +1489,38 @@ void TexturedTerrain::CreateUnitShadow(float x, float y, const std::string& shad
     splat->AddSplat(x, y, 1.0f, 0.0f);
     uberSplatModels_[key] = splat;
     uberSplatModelsList_.push_back(splat);
+}
+
+void TexturedTerrain::ClearRuntimeSplats() {
+    for (const auto& key : runtimeUberSplatKeys_) {
+        auto it = uberSplatModels_.find(key);
+        if (it != uberSplatModels_.end() && it->second) {
+            it->second->ClearGeometry();
+        }
+    }
+}
+
+void TexturedTerrain::AddRuntimeSplatRect(const std::string& key, const std::string& texturePath,
+                                          float x0, float y0, float x1, float y1, float zOffset,
+                                          bool highPriority, bool noDepthTest,
+                                          bool absoluteHeight, float absoluteHeightValue) {
+    if (key.empty() || texturePath.empty()) {
+        return;
+    }
+
+    const std::string runtimeKey = "__runtime__:" + key;
+    runtimeUberSplatKeys_.insert(runtimeKey);
+    auto* splat = GetOrCreateUberSplatModelForKey(runtimeKey, texturePath, highPriority, false);
+    if (!splat) {
+        return;
+    }
+
+    splat->SetHighPriority(highPriority);
+    splat->SetNoDepthTest(noDepthTest);
+    splat->AddSplatRect(x0, y0, x1, y1, zOffset,
+                        absoluteHeight, absoluteHeightValue,
+                        false, 0.0f, 0.0f, 0.0f, 0.0f,
+                        false, 0.0f, 0.0f, 0.0f, 0.0f);
 }
 
 MdxViewer* TexturedTerrain::GetOrLoadCliffModel(const std::string& path) {

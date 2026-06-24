@@ -23,9 +23,11 @@ class CUnitData {
 public:
     CUnitData() = default;
     CUnitData(const CGameplayConstants& gameplayConstants,
-              const TxtTable& unitData, const TxtTable& unitAbilities,
-              const TxtTable& unitBalance, const TxtTable& unitWeapons,
-              const TxtTable& unitUI);
+              const SlkTable& unitDataSlk, const TxtTable& unitDataTxt,
+              const SlkTable& unitAbilitiesSlk, const TxtTable& unitAbilitiesTxt,
+              const SlkTable& unitBalanceSlk, const TxtTable& unitBalanceTxt,
+              const SlkTable& unitWeaponsSlk, const TxtTable& unitWeaponsTxt,
+              const SlkTable& unitUISlk, const TxtTable& unitUITxt);
 
     CUnit* CreateUnit(CSimulation& simulation, int playerIndex,
                       War3ID typeId, float x, float y, float facing,
@@ -46,9 +48,5 @@ public:
     static CUnitData LoadFromMpq(const MpqManager& mpq, const CGameplayConstants& gameplayConstants);
 
 private:
-    CUnitType* ParseUnitType(War3ID id, const TxtTable& unitData, const TxtTable& unitAbilities,
-                             const TxtTable& unitBalance, const TxtTable& unitWeapons,
-                             const TxtTable& unitUI) const;
-
     std::unordered_map<War3ID, std::unique_ptr<CUnitType>> types_;
 };

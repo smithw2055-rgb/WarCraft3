@@ -17,13 +17,18 @@ void CAbilityRally::OnAdd(CSimulation& game, CUnit* unit) {
 }
 
 bool CAbilityRally::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const {
-    (void)game; (void)unit; (void)orderId;
-    return target != nullptr;
+    (void)game; (void)unit;
+    if (IsDisabled()) return false;
+    if ((orderId != OrderIds::SMART) && (orderId != OrderIds::SET_RALLY) && (orderId != OrderIds::RALLY)) {
+        return false;
+    }
+    return target != nullptr && !target->IsDead();
 }
 
 bool CAbilityRally::CheckCanTargetPoint(CSimulation& game, CUnit* unit, int orderId, float x, float y) const {
-    (void)game; (void)unit; (void)orderId; (void)x; (void)y;
-    return true;
+    (void)game; (void)unit; (void)x; (void)y;
+    if (IsDisabled()) return false;
+    return (orderId == OrderIds::SMART) || (orderId == OrderIds::SET_RALLY) || (orderId == OrderIds::RALLY);
 }
 
 CBehavior* CAbilityRally::Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) {

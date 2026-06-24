@@ -2,7 +2,7 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
-#include <iostream>
+#include "ecs/behaviors/behavior_repair.h"
 
 CAbilityRepair::CAbilityRepair(int handleId)
     : CAbility(handleId, War3ID("Arep"), CAbilityCategory::BUILD) {
@@ -18,6 +18,7 @@ void CAbilityRepair::OnRemove(CSimulation& game, CUnit* unit) {
 }
 
 bool CAbilityRepair::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const {
+    (void)game;
     (void)orderId;
     if (IsDisabled()) return false;
     if (!target || target->IsDead()) return false;
@@ -27,22 +28,20 @@ bool CAbilityRepair::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
     if (!targetUnit) return false;
     if (!targetUnit->IsBuilding()) return false;
     if (targetUnit->GetPlayerIndex() != unit->GetPlayerIndex()) return false;
+    if (targetUnit->IsConstructing()) return false;
     if (targetUnit->GetLife() >= targetUnit->GetMaxLife()) return false;
 
     return true;
 }
 
 CBehavior* CAbilityRepair::Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) {
+    (void)game;
     (void)orderId;
     if (!target) return nullptr;
 
-    // Create a repair behavior (reuse attack behavior pattern)
-    auto* attackBehavior = caster->GetAttackBehavior();
-    if (attackBehavior) {
-        // Set target to the building to repair
-        attackBehavior->SetTarget(target);
-        return attackBehavior;
-    }
-
-    return nullptr;
+    auto* behavior = new CBehaviorRepair();
+    behavior->SetUnit(caster);
+    behavior->SetRepairAbility(this);
+    behavior->SetTarget(target);
+    return behavior;
 }

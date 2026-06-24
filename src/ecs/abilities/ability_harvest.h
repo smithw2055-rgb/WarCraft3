@@ -29,6 +29,10 @@ public:
     int GetCarriedAmount() const { return carriedAmount_; }
     void SetCarried(CResourceType type, int amount) { carriedType_ = type; carriedAmount_ = amount; }
     void ClearCarried() { carriedType_ = CResourceType::NONE; carriedAmount_ = 0; }
+    int GetGoldCapacity() const { return goldCapacity_; }
+    int GetLumberCapacity() const { return lumberCapacity_; }
+    int GetLastTargetHandle() const { return lastTargetHandle_; }
+    void SetLastTargetHandle(int handleId) { lastTargetHandle_ = handleId; }
 
     // Configuration
     void SetGoldCapacity(int cap) { goldCapacity_ = cap; }

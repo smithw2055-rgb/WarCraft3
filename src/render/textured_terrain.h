@@ -9,8 +9,9 @@
 #include "light_manager.h"
 #include "splat_model.h"
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 class TileSet;
 class MdxViewer;
@@ -97,6 +98,11 @@ public:
 
     void AddUberSplat(const std::string& path, float x, float y, float scale, bool highPriority);
     void CreateUnitShadow(float x, float y, const std::string& shadowFile);
+    void ClearRuntimeSplats();
+    void AddRuntimeSplatRect(const std::string& key, const std::string& texturePath,
+                             float x0, float y0, float x1, float y1, float zOffset,
+                             bool highPriority, bool noDepthTest,
+                             bool absoluteHeight = false, float absoluteHeightValue = 0.0f);
 
     void Render(const Mat4& view, const Mat4& proj, float time = 0);
 
@@ -133,6 +139,8 @@ private:
     void AddUberSplatMesh(const std::string& path, const std::vector<SplatModel::MeshVertex>& vertices,
                           const std::vector<uint32_t>& indices, bool highPriority);
     SplatModel* GetOrCreateUberSplatModel(const std::string& path, bool highPriority, bool terrainColorMask);
+    SplatModel* GetOrCreateUberSplatModelForKey(const std::string& cacheKey, const std::string& texturePath,
+                                                bool highPriority, bool terrainColorMask);
     std::string ResolveUberSplatPath(const std::string& path);
 
     struct CornerExtra {
@@ -213,6 +221,7 @@ private:
     std::vector<CliffInstance> cliffInstances_;
     std::unordered_map<std::string, SplatModel*> uberSplatModels_;
     std::unordered_map<std::string, std::string> uberSplatPathCache_;
+    std::unordered_set<std::string> runtimeUberSplatKeys_;
     std::vector<SplatModel*> uberSplatModelsList_;
     std::unordered_map<std::string, CachedImage> shadowTextureCache_;
     WaveBuilder waveBuilder_;

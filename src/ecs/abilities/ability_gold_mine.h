@@ -2,6 +2,8 @@
 #include "ecs/ability.h"
 #include <vector>
 
+class CBehaviorHarvest;
+
 // CAbilityGoldMine - gold mine ability
 // Tracks gold amount and active miners
 class CAbilityGoldMine : public CAbility {
@@ -18,10 +20,10 @@ public:
 
     // Mining capacity
     int GetMiningCapacity() const { return miningCapacity_; }
-    int GetActiveMinerCount() const { return activeMinerCount_; }
-    bool CanAddMiner() const { return activeMinerCount_ < miningCapacity_; }
-    void AddMiner() { activeMinerCount_++; }
-    void RemoveMiner() { if (activeMinerCount_ > 0) activeMinerCount_--; }
+    int GetActiveMinerCount() const { return static_cast<int>(activeMiners_.size()); }
+    bool CanAddMiner() const { return GetActiveMinerCount() < miningCapacity_; }
+    void AddMiner(CBehaviorHarvest* miner);
+    void RemoveMiner(CBehaviorHarvest* miner);
 
     // Mining duration (seconds)
     float GetMiningDuration() const { return miningDuration_; }
@@ -34,7 +36,7 @@ public:
 private:
     int gold_ = 12500; // standard WC3 gold mine
     int miningCapacity_ = 3;
-    int activeMinerCount_ = 0;
     float miningDuration_ = 5.0f; // seconds per mining trip
     int goldPerTrip_ = 10;
+    std::vector<CBehaviorHarvest*> activeMiners_;
 };

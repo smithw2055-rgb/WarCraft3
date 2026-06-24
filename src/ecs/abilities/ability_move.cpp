@@ -47,16 +47,19 @@ void CAbilityMove::OnRemove(CSimulation& game, CUnit* unit) {
 }
 
 bool CAbilityMove::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const {
-    (void)game; (void)unit; (void)orderId; (void)target;
+    (void)game;
     if (IsDisabled()) return false;
-    // Move/follow can target any widget
-    return target != nullptr && !target->IsDead();
+    if ((orderId != OrderIds::SMART) && (orderId != OrderIds::MOVE) && (orderId != OrderIds::PATROL)) {
+        return false;
+    }
+    auto* targetUnit = dynamic_cast<CUnit*>(target);
+    return (targetUnit != nullptr) && (targetUnit != unit) && !targetUnit->IsDead();
 }
 
 bool CAbilityMove::CheckCanTargetPoint(CSimulation& game, CUnit* unit, int orderId, float x, float y) const {
-    (void)game; (void)unit; (void)orderId; (void)x; (void)y;
+    (void)game; (void)unit; (void)x; (void)y;
     if (IsDisabled()) return false;
-    return true; // move can target any point
+    return (orderId == OrderIds::SMART) || (orderId == OrderIds::MOVE) || (orderId == OrderIds::PATROL);
 }
 
 bool CAbilityMove::CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const {

@@ -6,12 +6,21 @@
 #include "../ecs/unit.h"
 #include "../ecs/csimulation.h"
 #include "../ecs/player.h"
+#include "../ecs/abilities/ability_attack.h"
+#include "../ecs/abilities/ability_build.h"
+#include "../ecs/abilities/ability_harvest.h"
+#include "../ecs/abilities/ability_move.h"
+#include "../ecs/abilities/ability_queue.h"
+#include "../ecs/abilities/ability_rally.h"
+#include "../ecs/abilities/ability_repair.h"
+#include "../ecs/abilities/ability_upgrade.h"
 #include "third_party/sokol/sokol_app.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 
 namespace {
 
@@ -146,11 +155,41 @@ void MainUI::ClearCommandSlots() {
 }
 
 void MainUI::SetSelectedUnit(int handleId) {
+    if (selectedUnitHandle_ != handleId) {
+        activeSubmenuOrderId_ = 0;
+        ClearPendingCommand();
+    }
     selectedUnitHandle_ = handleId;
     if (handleId < 0) {
-        ClearPendingCommand();
         ClearCommandSlots();
     }
+}
+
+void MainUI::SetCommandSlotAt(int row, int col,
+                              int orderId,
+                              CommandClickMode clickMode,
+                              bool enabled,
+                              const std::string& label,
+                              const std::shared_ptr<Texture>& icon) {
+    if (row < 0 || row >= kCommandRows || col < 0 || col >= kCommandCols) {
+        return;
+    }
+    CommandSlot& slot = commandSlots_[SlotIndex(row, col)];
+    slot.label = label;
+    slot.orderId = orderId;
+    slot.visible = true;
+    slot.enabled = enabled;
+    slot.icon = icon;
+    slot.clickMode = clickMode;
+}
+
+int MainUI::FindNextOpenCommandSlot() const {
+    for (int i = 0; i < kCommandCount; ++i) {
+        if (!commandSlots_[i].visible) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 void MainUI::Update(int screenW, int screenH) {
@@ -332,18 +371,31 @@ void MainUI::HandleCommandButtonClick(int index) {
     auto* unit = simulation_->GetUnit(selectedUnitHandle_);
     if (!unit) return;
 
-    if (slot.orderId == OrderIds::STOP) {
-        unit->ClearOrders();
-        unit->IssueOrder(std::make_unique<COrderNoTarget>(OrderIds::STOP));
-        return;
+    switch (slot.clickMode) {
+    case CommandClickMode::IMMEDIATE:
+        if (slot.orderId == OrderIds::STOP) {
+            unit->ClearOrders();
+        }
+        unit->IssueOrder(std::make_unique<COrderNoTarget>(slot.orderId));
+        break;
+    case CommandClickMode::TARGET:
+        SetPendingCommand(slot.orderId, PendingCommandMode::POINT_OR_WIDGET);
+        break;
+    case CommandClickMode::POINT_ONLY:
+        SetPendingCommand(slot.orderId, PendingCommandMode::POINT_ONLY);
+        break;
+    case CommandClickMode::OPEN_MENU:
+        activeSubmenuOrderId_ = slot.orderId;
+        PopulateCommandCardForUnit(unit);
+        break;
+    case CommandClickMode::CLOSE_MENU:
+        activeSubmenuOrderId_ = 0;
+        ClearPendingCommand();
+        PopulateCommandCardForUnit(unit);
+        break;
+    default:
+        break;
     }
-
-    if (slot.orderId == OrderIds::HOLD_POSITION) {
-        unit->IssueOrder(std::make_unique<COrderNoTarget>(OrderIds::HOLD_POSITION));
-        return;
-    }
-
-    SetPendingCommand(slot.orderId);
 }
 
 void MainUI::ShowTooltip(const std::string& text, float screenX, float screenY) {
@@ -546,6 +598,195 @@ void MainUI::PopulateCommandCardForUnitType(War3ID unitTypeId) {
     std::cout << std::endl;
 
     PopulateCommandCardFromAbilities(abilList);
+}
+
+void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
+    ClearCommandSlots();
+    if (!unit) {
+        return;
+    }
+
+    const auto addAbilityButton = [&](const CAbility* ability,
+                                      int orderId,
+                                      CommandClickMode clickMode,
+                                      bool enabledOverride = true) -> bool {
+        if (!ability) {
+            return false;
+        }
+        const auto* def = abilityData_.GetAbility(ability->GetAlias());
+        if (!def) {
+            return false;
+        }
+
+        int row = def->buttonPosY;
+        int col = def->buttonPosX;
+        if ((row < 0) || (row >= kCommandRows) || (col < 0) || (col >= kCommandCols)
+            || commandSlots_[SlotIndex(row, col)].visible) {
+            const int nextIndex = FindNextOpenCommandSlot();
+            if (nextIndex < 0) {
+                return false;
+            }
+            row = nextIndex / kCommandCols;
+            col = nextIndex % kCommandCols;
+        }
+
+        std::shared_ptr<Texture> icon = LoadTextureFromMpq(def->iconArt);
+        std::string label = icon ? std::string() : ShortLabel(def->name.empty() ? def->tooltip : def->name);
+        SetCommandSlotAt(row, col, orderId, clickMode, !ability->IsDisabled() && enabledOverride, label, icon);
+        return true;
+    };
+
+    const auto addFallbackButton = [&](int row,
+                                       int col,
+                                       int orderId,
+                                       CommandClickMode clickMode,
+                                       bool enabled,
+                                       const char* label,
+                                       const char* iconPath) {
+        SetCommandSlotAt(row, col, orderId, clickMode, enabled, {},
+                         iconPath ? LoadTextureFromMpq(iconPath) : nullptr);
+        if (!commandSlots_[SlotIndex(row, col)].icon) {
+            commandSlots_[SlotIndex(row, col)].label = label ? label : std::string();
+        }
+    };
+
+    if (activeSubmenuOrderId_ != 0) {
+        addFallbackButton(2, 3, 0, CommandClickMode::CLOSE_MENU, true, "Back",
+                          "ReplaceableTextures\\CommandButtons\\BTNCancel.blp");
+
+        for (auto* ability : unit->GetAbilities()) {
+            auto* buildAbility = dynamic_cast<CAbilityBuild*>(ability);
+            if (!buildAbility || buildAbility->GetBaseOrderId() != activeSubmenuOrderId_) {
+                continue;
+            }
+
+            std::vector<War3ID> structures(buildAbility->GetBuildableStructures().begin(),
+                                           buildAbility->GetBuildableStructures().end());
+            if (structures.empty()) {
+                structures = unit->GetUnitType()->GetStructuresBuilt();
+            }
+            std::sort(structures.begin(), structures.end(),
+                      [](const War3ID& lhs, const War3ID& rhs) { return lhs.value < rhs.value; });
+            structures.erase(std::unique(structures.begin(), structures.end()), structures.end());
+
+            for (const War3ID& structureId : structures) {
+                const int nextIndex = FindNextOpenCommandSlot();
+                if (nextIndex < 0) {
+                    break;
+                }
+                const int row = nextIndex / kCommandCols;
+                const int col = nextIndex % kCommandCols;
+                std::string label = structureId.ToString();
+                if (const auto* structureType = unitData_ ? unitData_->GetUnitType(structureId) : nullptr) {
+                    label = ShortLabel(structureType->GetName());
+                }
+                SetCommandSlotAt(row, col, static_cast<int>(structureId.value), CommandClickMode::POINT_ONLY,
+                                 !ability->IsDisabled(), label, nullptr);
+            }
+            return;
+        }
+
+        activeSubmenuOrderId_ = 0;
+        ClearCommandSlots();
+    }
+
+    if (!unit->IsBuilding() && unit->GetMoveBehavior()) {
+        addFallbackButton(0, 0, OrderIds::MOVE, CommandClickMode::TARGET, true, "Move",
+                          "ReplaceableTextures\\CommandButtons\\BTNMove.blp");
+        addFallbackButton(0, 1, OrderIds::PATROL, CommandClickMode::TARGET, true, "Patrol",
+                          "ReplaceableTextures\\CommandButtons\\BTNPatrol.blp");
+        addFallbackButton(0, 2, OrderIds::ATTACK, CommandClickMode::TARGET, true, "Attack",
+                          "ReplaceableTextures\\CommandButtons\\BTNAttack.blp");
+        addFallbackButton(0, 3, OrderIds::HOLD_POSITION, CommandClickMode::IMMEDIATE, true, "Hold",
+                          "ReplaceableTextures\\CommandButtons\\BTNHoldPosition.blp");
+        addFallbackButton(2, 3, OrderIds::STOP, CommandClickMode::IMMEDIATE, true, "Stop",
+                          "ReplaceableTextures\\CommandButtons\\BTNStop.blp");
+    }
+
+    for (auto* ability : unit->GetAbilities()) {
+        if (!ability) {
+            continue;
+        }
+
+        if (auto* buildAbility = dynamic_cast<CAbilityBuild*>(ability)) {
+            addAbilityButton(buildAbility, buildAbility->GetBaseOrderId(), CommandClickMode::OPEN_MENU);
+            continue;
+        }
+        if (auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(ability)) {
+            const int orderId = harvestAbility->IsCarryingResources()
+                ? OrderIds::RETURN_RESOURCES
+                : OrderIds::HARVEST;
+            addAbilityButton(harvestAbility, orderId, CommandClickMode::TARGET);
+            continue;
+        }
+        if (auto* repairAbility = dynamic_cast<CAbilityRepair*>(ability)) {
+            addAbilityButton(repairAbility, static_cast<int>(repairAbility->GetAlias().value), CommandClickMode::TARGET);
+            continue;
+        }
+        if (auto* rallyAbility = dynamic_cast<CAbilityRally*>(ability)) {
+            addAbilityButton(rallyAbility, OrderIds::SET_RALLY, CommandClickMode::TARGET);
+            continue;
+        }
+        if (auto* queueAbility = dynamic_cast<CAbilityQueue*>(ability)) {
+            std::vector<War3ID> trained(queueAbility->GetTrainedUnits().begin(), queueAbility->GetTrainedUnits().end());
+            std::sort(trained.begin(), trained.end(),
+                      [](const War3ID& lhs, const War3ID& rhs) { return lhs.value < rhs.value; });
+            for (const War3ID& trainedId : trained) {
+                const int nextIndex = FindNextOpenCommandSlot();
+                if (nextIndex < 0) {
+                    break;
+                }
+                const int row = nextIndex / kCommandCols;
+                const int col = nextIndex % kCommandCols;
+                std::string label = trainedId.ToString();
+                if (const auto* trainedType = unitData_ ? unitData_->GetUnitType(trainedId) : nullptr) {
+                    label = ShortLabel(trainedType->GetName());
+                }
+                SetCommandSlotAt(row, col, static_cast<int>(trainedId.value), CommandClickMode::IMMEDIATE,
+                                 !ability->IsDisabled(), label, nullptr);
+            }
+
+            std::vector<War3ID> researches(queueAbility->GetResearches().begin(), queueAbility->GetResearches().end());
+            std::sort(researches.begin(), researches.end(),
+                      [](const War3ID& lhs, const War3ID& rhs) { return lhs.value < rhs.value; });
+            for (const War3ID& researchId : researches) {
+                const int nextIndex = FindNextOpenCommandSlot();
+                if (nextIndex < 0) {
+                    break;
+                }
+                const int row = nextIndex / kCommandCols;
+                const int col = nextIndex % kCommandCols;
+                SetCommandSlotAt(row, col, static_cast<int>(researchId.value), CommandClickMode::IMMEDIATE,
+                                 !ability->IsDisabled(), researchId.ToString(), nullptr);
+            }
+
+            if (queueAbility->GetQueueCount() > 0 && !commandSlots_[SlotIndex(2, 3)].visible) {
+                addFallbackButton(2, 3, OrderIds::CANCEL_QUEUE, CommandClickMode::IMMEDIATE, true, "Cancel",
+                                  "ReplaceableTextures\\CommandButtons\\BTNCancel.blp");
+            }
+            continue;
+        }
+        if (auto* upgradeAbility = dynamic_cast<CAbilityUpgrade*>(ability)) {
+            std::vector<War3ID> upgrades(upgradeAbility->GetUpgradesTo().begin(), upgradeAbility->GetUpgradesTo().end());
+            std::sort(upgrades.begin(), upgrades.end(),
+                      [](const War3ID& lhs, const War3ID& rhs) { return lhs.value < rhs.value; });
+            for (const War3ID& upgradeId : upgrades) {
+                const int nextIndex = FindNextOpenCommandSlot();
+                if (nextIndex < 0) {
+                    break;
+                }
+                const int row = nextIndex / kCommandCols;
+                const int col = nextIndex % kCommandCols;
+                std::string label = upgradeId.ToString();
+                if (const auto* upgradeType = unitData_ ? unitData_->GetUnitType(upgradeId) : nullptr) {
+                    label = ShortLabel(upgradeType->GetName());
+                }
+                SetCommandSlotAt(row, col, static_cast<int>(upgradeId.value), CommandClickMode::IMMEDIATE,
+                                 !ability->IsDisabled(), label, nullptr);
+            }
+            continue;
+        }
+    }
 }
 
 void MainUI::PopulateCommandCardFromAbilities(const std::vector<War3ID>& abilityIds) {

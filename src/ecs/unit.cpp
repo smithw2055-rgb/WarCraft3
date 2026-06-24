@@ -7,10 +7,85 @@
 #include "behaviors/behavior_follow.h"
 #include "behaviors/behavior_patrol.h"
 #include "behaviors/behavior_attack_move.h"
+#include "debug/move_debug.h"
 #include "pathing/world_collision.h"
 #include <cmath>
-#include <iostream>
 #include <algorithm>
+#include <sstream>
+
+namespace {
+
+constexpr float kPi = 3.14159265358979323846f;
+
+static float NormalizeFacingDegrees(float facing) {
+    while (facing < 0.0f) {
+        facing += 360.0f;
+    }
+    while (facing >= 360.0f) {
+        facing -= 360.0f;
+    }
+    return facing;
+}
+
+static float NormalizeFacingDelta(float delta) {
+    while (delta < -180.0f) {
+        delta += 360.0f;
+    }
+    while (delta > 180.0f) {
+        delta -= 360.0f;
+    }
+    return delta;
+}
+
+static const char* AbilityCategoryName(CAbilityCategory category) {
+    switch (category) {
+        case CAbilityCategory::CORE: return "CORE";
+        case CAbilityCategory::ATTACK: return "ATTACK";
+        case CAbilityCategory::MOVEMENT: return "MOVEMENT";
+        case CAbilityCategory::BUFF: return "BUFF";
+        case CAbilityCategory::ITEM: return "ITEM";
+        case CAbilityCategory::HERO: return "HERO";
+        case CAbilityCategory::BUILD: return "BUILD";
+        case CAbilityCategory::INVENTORY: return "INVENTORY";
+        case CAbilityCategory::HARVEST: return "HARVEST";
+        case CAbilityCategory::CARGO_HOLD: return "CARGO_HOLD";
+        case CAbilityCategory::UPGRADE: return "UPGRADE";
+        case CAbilityCategory::QUEUE: return "QUEUE";
+        case CAbilityCategory::RALLY: return "RALLY";
+        case CAbilityCategory::NEUTRAL_BUILDING: return "NEUTRAL_BUILDING";
+        case CAbilityCategory::GOLD_MINE: return "GOLD_MINE";
+        case CAbilityCategory::SELL_ITEMS: return "SELL_ITEMS";
+        case CAbilityCategory::ROOT: return "ROOT";
+        case CAbilityCategory::MOON_WELL: return "MOON_WELL";
+        case CAbilityCategory::BLIGHT: return "BLIGHT";
+        case CAbilityCategory::SPELL: return "SPELL";
+        default: return "UNKNOWN";
+    }
+}
+
+static const char* BehaviorCategoryName(CBehaviorCategory category) {
+    switch (category) {
+        case CBehaviorCategory::NONE: return "NONE";
+        case CBehaviorCategory::STOP: return "STOP";
+        case CBehaviorCategory::MOVE: return "MOVE";
+        case CBehaviorCategory::ATTACK: return "ATTACK";
+        case CBehaviorCategory::SPELL: return "SPELL";
+        case CBehaviorCategory::ATTACK_MOVE: return "ATTACK_MOVE";
+        case CBehaviorCategory::PATROL: return "PATROL";
+        case CBehaviorCategory::FOLLOW: return "FOLLOW";
+        case CBehaviorCategory::HOLD_POSITION: return "HOLD_POSITION";
+        case CBehaviorCategory::BUILD: return "BUILD";
+        case CBehaviorCategory::HARVEST: return "HARVEST";
+        case CBehaviorCategory::RETURN_RESOURCES: return "RETURN_RESOURCES";
+        case CBehaviorCategory::BOARD_TRANSPORT: return "BOARD_TRANSPORT";
+        case CBehaviorCategory::STUN: return "STUN";
+        case CBehaviorCategory::INVENTORY: return "INVENTORY";
+        case CBehaviorCategory::ROOT: return "ROOT";
+        default: return "UNKNOWN";
+    }
+}
+
+}
 
 CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
              War3ID typeId, float x, float y, float facing)
@@ -41,6 +116,35 @@ void CUnit::SetPositionAndCheckUnstuck(float x, float y, CSimulation& simulation
     x_ = x;
     y_ = y;
     (void)simulation;
+}
+
+bool CUnit::TurnTowardPoint(float targetX, float targetY) {
+    const float dx = targetX - x_;
+    const float dy = targetY - y_;
+    if ((dx * dx + dy * dy) <= 0.01f) {
+        return true;
+    }
+
+    float goalFacing = std::atan2(dy, dx) * 180.0f / kPi;
+    goalFacing = NormalizeFacingDegrees(goalFacing);
+    float currentFacing = NormalizeFacingDegrees(facing_);
+    float delta = NormalizeFacingDelta(goalFacing - currentFacing);
+
+    float propulsionWindow = 1.0f;
+    float turnStepDegrees = 180.0f;
+    if (unitType_) {
+        propulsionWindow = std::max(1.0f, unitType_->GetPropWindow());
+    }
+    turnStepDegrees = std::max(0.1f, turnRate_ * 180.0f / kPi);
+
+    if (std::fabs(delta) <= propulsionWindow) {
+        facing_ = goalFacing;
+        return true;
+    }
+
+    const float appliedStep = std::min(std::fabs(delta), turnStepDegrees) * (delta < 0.0f ? -1.0f : 1.0f);
+    facing_ = NormalizeFacingDegrees(currentFacing + appliedStep);
+    return false;
 }
 
 // ===== Ability System =====
@@ -257,20 +361,63 @@ void CUnit::ApplyRegen(CSimulation& simulation) {
     }
 }
 
+float CUnit::GetEndingDecayTime(const CSimulation& simulation) const {
+    const auto& gameplayConstants = simulation.GetGameplayConstants();
+    if (IsBuilding()) {
+        return gameplayConstants.structureDecayTime;
+    }
+    if (IsHero()) {
+        return gameplayConstants.dissipateTime;
+    }
+    return gameplayConstants.boneDecayTime;
+}
+
 bool CUnit::Update(CSimulation& simulation) {
     if (IsDead()) {
-        int currentTick = simulation.GetGameTurnTick();
+        const int currentTick = simulation.GetGameTurnTick();
         if (deathTurnTick_ == 0) {
             deathTurnTick_ = currentTick;
+            corpse_ = false;
+            boneCorpse_ = false;
             // Notify abilities of death
             for (auto* ab : abilities_) {
                 if (ab) ab->OnDeath(simulation, this);
             }
             return false;
         }
-        float deathTime = unitType_->GetDeathTime();
-        int deathTicks = (int)(deathTime / 0.1f);
-        if (currentTick - deathTurnTick_ > deathTicks) {
+
+        if (!corpse_) {
+            const int deathTicks = std::max(1, (int)std::ceil(unitType_->GetDeathTime() / simulation.GetSimStepTime()));
+            if ((currentTick - deathTurnTick_) > deathTicks) {
+                corpse_ = true;
+                if (!unitType_->CanRaise()) {
+                    boneCorpse_ = true;
+                }
+                if (!IsHero() && !unitType_->CanDecay()) {
+                    return true;
+                }
+                deathTurnTick_ = currentTick;
+            }
+            return false;
+        }
+
+        if (!boneCorpse_) {
+            const int decayTicks = std::max(1, (int)std::ceil(
+                simulation.GetGameplayConstants().decayTime / simulation.GetSimStepTime()));
+            if ((currentTick - deathTurnTick_) > decayTicks) {
+                boneCorpse_ = true;
+                deathTurnTick_ = currentTick;
+            }
+            return false;
+        }
+
+        const int endingDecayTicks = std::max(1, (int)std::ceil(
+            GetEndingDecayTime(simulation) / simulation.GetSimStepTime()));
+        if ((currentTick - deathTurnTick_) > endingDecayTicks) {
+            if (IsHero()) {
+                hidden_ = true;
+                return false;
+            }
             return true;
         }
         return false;
@@ -375,51 +522,78 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
         orderCb(handleId_, orderId, targetHandle, ox, oy);
     }
 
-    // Try each ability to handle this order
-    for (auto* ab : abilities_) {
-        if (!ab || ab->IsDisabled()) continue;
+    auto tryAbilityRange = [&](bool movementPass) -> bool {
+        for (auto* ab : abilities_) {
+            if (!ab || ab->IsDisabled()) continue;
+            if ((ab->GetCategory() == CAbilityCategory::MOVEMENT) != movementPass) continue;
 
-        // Check if ability can handle this order
-        CBehavior* newBehavior = nullptr;
+            CBehavior* newBehavior = nullptr;
 
-        if (auto* widgetOrder = dynamic_cast<COrderTargetWidget*>(order.get())) {
-            if (ab->CheckCanTarget(simulation, this, orderId, widgetOrder->GetTarget())) {
-                // Let ability intercept or queue
-                if (!ab->CheckBeforeQueue(simulation, this, orderId, widgetOrder->GetTarget())) {
-                    return; // order consumed by ability
+            if (auto* widgetOrder = dynamic_cast<COrderTargetWidget*>(order.get())) {
+                if (ab->CheckCanTarget(simulation, this, orderId, widgetOrder->GetTarget())) {
+                    if (!ab->CheckBeforeQueue(simulation, this, orderId, widgetOrder->GetTarget())) {
+                        return true;
+                    }
+                    newBehavior = ab->Begin(simulation, this, orderId, widgetOrder->GetTarget());
                 }
-                newBehavior = ab->Begin(simulation, this, orderId, widgetOrder->GetTarget());
+            } else if (auto* pointOrder = dynamic_cast<COrderTargetPoint*>(order.get())) {
+                if (ab->CheckCanTargetPoint(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY())) {
+                    if (!ab->CheckBeforeQueue(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY())) {
+                        return true;
+                    }
+                    newBehavior = ab->Begin(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY());
+                }
+            } else if (dynamic_cast<COrderNoTarget*>(order.get())) {
+                if (ab->CheckCanTargetNoTarget(simulation, this, orderId)) {
+                    if (!ab->CheckBeforeQueueNoTarget(simulation, this, orderId)) {
+                        return true;
+                    }
+                    newBehavior = ab->BeginNoTarget(simulation, this, orderId);
+                }
             }
-        } else if (auto* pointOrder = dynamic_cast<COrderTargetPoint*>(order.get())) {
-            if (ab->CheckCanTargetPoint(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY())) {
-                if (!ab->CheckBeforeQueue(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY())) {
-                    return;
+
+            if (newBehavior) {
+                std::ostringstream oss;
+                oss << "[MoveDebug] dispatch"
+                    << " unit=" << handleId_
+                    << " type=" << typeId_.ToString()
+                    << " order=" << orderId
+                    << " ability=" << ab->GetAlias().ToString()
+                    << " abilityCat=" << AbilityCategoryName(ab->GetCategory())
+                    << " behavior=" << BehaviorCategoryName(newBehavior->GetCategory());
+                if (auto* widgetOrder = dynamic_cast<COrderTargetWidget*>(order.get())) {
+                    auto* target = widgetOrder->GetTarget();
+                    if (target) {
+                        oss << " targetWidget=" << target->GetHandleId()
+                            << " targetPos=(" << target->GetX() << ", " << target->GetY() << ")";
+                    }
+                } else if (auto* pointOrder = dynamic_cast<COrderTargetPoint*>(order.get())) {
+                    oss << " targetPoint=(" << pointOrder->GetX() << ", " << pointOrder->GetY() << ")";
                 }
-                newBehavior = ab->Begin(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY());
-            }
-        } else if (auto* noTargetOrder = dynamic_cast<COrderNoTarget*>(order.get())) {
-            if (ab->CheckCanTargetNoTarget(simulation, this, orderId)) {
-                if (!ab->CheckBeforeQueueNoTarget(simulation, this, orderId)) {
-                    return;
+                MoveDebugLogLine(oss.str());
+                if (currentBehavior_) {
+                    currentBehavior_->End(simulation);
+                    if (currentBehavior_ == ownedCurrentBehavior_.get()) {
+                        ownedCurrentBehavior_.reset();
+                    }
+                    currentBehavior_ = nullptr;
                 }
-                newBehavior = ab->BeginNoTarget(simulation, this, orderId);
+                newBehavior->SetUnit(this);
+                newBehavior->Begin(simulation);
+                currentBehavior_ = newBehavior;
+                return true;
             }
         }
+        return false;
+    };
 
-        if (newBehavior) {
-            // End current behavior
-            if (currentBehavior_) {
-                currentBehavior_->End(simulation);
-                if (currentBehavior_ == ownedCurrentBehavior_.get()) {
-                    ownedCurrentBehavior_.reset();
-                }
-                currentBehavior_ = nullptr;
-            }
-            newBehavior->SetUnit(this);
-            newBehavior->Begin(simulation);
-            currentBehavior_ = newBehavior;
+    const bool movementLast = orderId == OrderIds::SMART;
+    if (movementLast) {
+        if (tryAbilityRange(false) || tryAbilityRange(true)) {
             return;
         }
+    } else if (tryAbilityRange(false) || tryAbilityRange(true)) {
+        return;
     }
 
     // No ability handled this order - fallback to stop
@@ -428,4 +602,11 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
     behavior->Begin(simulation);
     ownedCurrentBehavior_ = std::move(behavior);
     currentBehavior_ = ownedCurrentBehavior_.get();
+    std::ostringstream oss;
+    oss << "[MoveDebug] dispatch_fallback"
+        << " unit=" << handleId_
+        << " type=" << typeId_.ToString()
+        << " order=" << orderId
+        << " behavior=STOP";
+    MoveDebugLogLine(oss.str());
 }

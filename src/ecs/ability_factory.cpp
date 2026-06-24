@@ -42,7 +42,12 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     // Harvest / Return / Repair
     if (code == War3ID("Ahar")) return std::make_unique<CAbilityHarvest>(handleId);
     if (code == War3ID("Aret")) return std::make_unique<CAbilityReturnResources>(handleId);
-    if (code == War3ID("Arep")) return std::make_unique<CAbilityRepair>(handleId);
+    if (code == War3ID("Arep") || code == War3ID("Ahrp")
+        || code == War3ID("Aren") || code == War3ID("Arst")) {
+        auto ability = std::make_unique<CAbilityRepair>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
 
     // Gold mine
     if (code == War3ID("Agld")) return std::make_unique<CAbilityGoldMine>(handleId);

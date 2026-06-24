@@ -27,6 +27,10 @@ public:
     std::vector<std::string> ListAllFiles(const std::string& pattern = "*") const;
 
     int ArchiveCount() const { return (int)archives_.size(); }
+    HANDLE GetArchiveHandle(int index) const {
+        if (index < 0 || index >= (int)archives_.size()) return nullptr;
+        return archives_[index].handle;
+    }
 
 private:
     const MpqArchive* FindFileInArchives(const std::string& filename) const;

@@ -47,6 +47,9 @@ CBehavior* CAbilitySpellBase::Begin(CSimulation& game, CUnit* caster, int orderI
     behavior->SetTarget(target);
     behavior->SetCastRange(castRange_);
     behavior->SetCastPoint(castPoint_);
+    if (auto* unitType = caster->GetUnitType()) {
+        behavior->SetBackswingDuration(std::max(0.0f, unitType->GetCastBackswingPoint()));
+    }
     return behavior;
 }
 
@@ -59,6 +62,9 @@ CBehavior* CAbilitySpellBase::Begin(CSimulation& game, CUnit* caster, int orderI
     behavior->SetTargetPoint(x, y);
     behavior->SetCastRange(castRange_);
     behavior->SetCastPoint(castPoint_);
+    if (auto* unitType = caster->GetUnitType()) {
+        behavior->SetBackswingDuration(std::max(0.0f, unitType->GetCastBackswingPoint()));
+    }
     return behavior;
 }
 
@@ -70,6 +76,9 @@ CBehavior* CAbilitySpellBase::BeginNoTarget(CSimulation& game, CUnit* caster, in
     behavior->SetSpellAbility(this);
     behavior->SetCastRange(0);
     behavior->SetCastPoint(castPoint_);
+    if (auto* unitType = caster->GetUnitType()) {
+        behavior->SetBackswingDuration(std::max(0.0f, unitType->GetCastBackswingPoint()));
+    }
     return behavior;
 }
 

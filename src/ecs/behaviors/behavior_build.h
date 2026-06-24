@@ -20,6 +20,9 @@ public:
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::BUILD; }
 
     void SetBuildTarget(float x, float y, War3ID buildingTypeId, CBuildRace race);
+    bool IsMovingToSite() const { return movingToSite_; }
+    bool IsActivelyBuilding() const { return building_ && !completed_; }
+    bool IsPropelling() const { return propelling_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;
@@ -45,4 +48,5 @@ private:
     // Pathfinding
     std::deque<std::pair<float,float>> waypoints_;
     int pathRecalcCooldown_ = 0;
+    bool propelling_ = false;
 };

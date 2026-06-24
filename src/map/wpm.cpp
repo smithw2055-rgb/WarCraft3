@@ -13,22 +13,22 @@ static uint32_t ReadLE32(const uint8_t* p) {
 
 bool WpmData::IsWalkable(int x, int y) const {
     if (x < 0 || x >= width || y < 0 || y >= height) return false;
-    return (pathing[y * width + x] & 0x01) == 0;
+    return (pathing[y * width + x] & UNWALKABLE) == 0;
 }
 
 bool WpmData::IsBuildable(int x, int y) const {
     if (x < 0 || x >= width || y < 0 || y >= height) return false;
-    return (pathing[y * width + x] & 0x02) == 0;
+    return (pathing[y * width + x] & UNBUILDABLE) == 0;
 }
 
 bool WpmData::IsBlight(int x, int y) const {
     if (x < 0 || x >= width || y < 0 || y >= height) return false;
-    return (pathing[y * width + x] & 0x04) != 0;
+    return (pathing[y * width + x] & BLIGHTED) != 0;
 }
 
 bool WpmData::IsWater(int x, int y) const {
     if (x < 0 || x >= width || y < 0 || y >= height) return false;
-    return (pathing[y * width + x] & 0x08) != 0;
+    return (pathing[y * width + x] & UNSWIMABLE) == 0;
 }
 
 bool WpmLoad(const uint8_t* data, size_t size, WpmData& out) {

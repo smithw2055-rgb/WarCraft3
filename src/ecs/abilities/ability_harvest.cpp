@@ -1,10 +1,44 @@
 #include "ability_harvest.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
+#include "ecs/destructable.h"
+#include "ecs/abilities/ability_gold_mine.h"
+#include "ecs/abilities/ability_return_resources.h"
 #include "ecs/behaviors/behavior_harvest.h"
 #include "ecs/behaviors/behavior_return_resources.h"
 #include "ecs/player.h"
+#include "data/destructabledata.h"
 #include <iostream>
+
+namespace {
+
+bool CanReturnToTarget(const CAbilityHarvest* harvestAbility, CUnit* worker, CUnit* targetUnit) {
+    if (!harvestAbility || !worker || !targetUnit) {
+        return false;
+    }
+    if (harvestAbility->GetCarriedAmount() <= 0 || harvestAbility->GetCarriedResourceType() == CResourceType::NONE) {
+        return false;
+    }
+    if (targetUnit->GetPlayerIndex() != worker->GetPlayerIndex()) {
+        return false;
+    }
+
+    auto* returnAbility = dynamic_cast<CAbilityReturnResources*>(targetUnit->GetAbility(War3ID("Aret")));
+    if (!returnAbility) {
+        return false;
+    }
+
+    switch (harvestAbility->GetCarriedResourceType()) {
+        case CResourceType::GOLD:
+            return returnAbility->AcceptsGold();
+        case CResourceType::LUMBER:
+            return returnAbility->AcceptsLumber();
+        default:
+            return false;
+    }
+}
+
+}
 
 CAbilityHarvest::CAbilityHarvest(int handleId)
     : CAbility(handleId, War3ID("Ahar"), CAbilityCategory::HARVEST) {
@@ -28,27 +62,39 @@ void CAbilityHarvest::OnTick(CSimulation& game, CUnit* unit) {
 }
 
 bool CAbilityHarvest::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const {
-    (void)orderId;
     if (IsDisabled()) return false;
+    if ((orderId != OrderIds::SMART) && (orderId != OrderIds::HARVEST) &&
+        (orderId != OrderIds::RETURN_RESOURCES)) {
+        return false;
+    }
     if (!target || target->IsDead()) return false;
 
     // Can target units (gold mines, town halls) or destructables (trees)
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {
-        // Check if it's a gold mine (has gold to mine)
-        auto* targetGoldMine = targetUnit->GetAbility(War3ID("Agld"));
+        auto* targetGoldMine = dynamic_cast<CAbilityGoldMine*>(targetUnit->GetAbility(War3ID("Agld")));
         if (targetGoldMine) {
-            return true; // can harvest gold from mine
+            return goldCapacity_ > 0 && targetGoldMine->GetGold() > 0;
         }
 
-        // Check if it's a town hall (can return resources)
-        auto* targetReturn = targetUnit->GetAbility(War3ID("Aret"));
-        if (targetReturn && targetUnit->GetPlayerIndex() == unit->GetPlayerIndex()) {
-            return true; // can return resources
+        if (CanReturnToTarget(this, unit, targetUnit)) {
+            return true;
         }
     }
 
-    // TODO: Check if target is a destructable (tree)
+    auto* targetDestructable = dynamic_cast<CDestructable*>(target);
+    if (targetDestructable) {
+        if (lumberCapacity_ <= 0) {
+            return false;
+        }
+        auto* destructableData = game.GetDestructableData();
+        if (!destructableData) {
+            return false;
+        }
+        const auto* destructableType = destructableData->GetDestructable(targetDestructable->GetTypeId());
+        return destructableType && destructableType->isTree;
+    }
+
     return false;
 }
 
@@ -63,29 +109,59 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
     if (!target) return nullptr;
 
     auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return nullptr;
+    if (targetUnit) {
+        auto* goldMine = dynamic_cast<CAbilityGoldMine*>(targetUnit->GetAbility(War3ID("Agld")));
+        if (goldMine && goldCapacity_ > 0 && goldMine->GetGold() > 0) {
+            if (carriedAmount_ > 0 && carriedType_ == CResourceType::GOLD) {
+                auto* behavior = new CBehaviorReturnResources();
+                behavior->SetUnit(caster);
+                behavior->SetHarvestAbility(this);
+                behavior->FindNearestDropoff(game);
+                return behavior;
+            }
 
-    // Check if target is a gold mine
-    auto* goldMine = targetUnit->GetAbility(War3ID("Agld"));
-    if (goldMine) {
-        // Create harvest behavior for gold mining
-        auto* behavior = new CBehaviorHarvest();
-        behavior->SetUnit(caster);
-        behavior->SetTarget(target);
-        behavior->SetResourceType(CResourceType::GOLD);
-        behavior->SetCapacity(goldCapacity_);
-        return behavior;
+            auto* behavior = new CBehaviorHarvest();
+            behavior->SetUnit(caster);
+            behavior->SetTarget(target);
+            behavior->SetResourceType(CResourceType::GOLD);
+            behavior->SetCapacity(goldCapacity_);
+            lastTargetHandle_ = target->GetHandleId();
+            return behavior;
+        }
+
+        if (CanReturnToTarget(this, caster, targetUnit)) {
+            auto* behavior = new CBehaviorReturnResources();
+            behavior->SetUnit(caster);
+            behavior->SetTarget(target);
+            behavior->SetHarvestAbility(this);
+            return behavior;
+        }
     }
 
-    // Check if target is a town hall (return resources)
-    auto* returnAbility = targetUnit->GetAbility(War3ID("Aret"));
-    if (returnAbility && targetUnit->GetPlayerIndex() == caster->GetPlayerIndex()) {
-        // Create return resources behavior
-        auto* behavior = new CBehaviorReturnResources();
-        behavior->SetUnit(caster);
-        behavior->SetTarget(target);
-        behavior->SetHarvestAbility(this);
-        return behavior;
+    auto* targetDestructable = dynamic_cast<CDestructable*>(target);
+    if (targetDestructable) {
+        auto* destructableData = game.GetDestructableData();
+        if (destructableData) {
+            const auto* destructableType = destructableData->GetDestructable(targetDestructable->GetTypeId());
+            if (destructableType && destructableType->isTree && lumberCapacity_ > 0) {
+                if (carriedAmount_ > 0 && carriedType_ == CResourceType::LUMBER
+                    && carriedAmount_ >= lumberCapacity_) {
+                    auto* behavior = new CBehaviorReturnResources();
+                    behavior->SetUnit(caster);
+                    behavior->SetHarvestAbility(this);
+                    behavior->FindNearestDropoff(game);
+                    return behavior;
+                }
+
+                auto* behavior = new CBehaviorHarvest();
+                behavior->SetUnit(caster);
+                behavior->SetTarget(target);
+                behavior->SetResourceType(CResourceType::LUMBER);
+                behavior->SetCapacity(lumberCapacity_);
+                lastTargetHandle_ = target->GetHandleId();
+                return behavior;
+            }
+        }
     }
 
     return nullptr;

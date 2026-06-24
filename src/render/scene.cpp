@@ -1,5 +1,4 @@
 #include "scene.h"
-// Temporary rebuild anchor for MdxViewer layout debugging.
 #include "resource/slk.h"
 #include <iostream>
 #include <algorithm>
@@ -305,9 +304,12 @@ bool SceneManager::AddDoodad(uint32_t war3ID, const float pos[3], float angle,
 
     auto* inst = new PlacedModel();
     inst->pos[0] = pos[0]; inst->pos[1] = pos[2]; inst->pos[2] = pos[1];
+    inst->renderPos[0] = inst->pos[0]; inst->renderPos[1] = inst->pos[1]; inst->renderPos[2] = inst->pos[2];
     inst->angle = angle;
+    inst->renderAngle = angle;
     inst->scale[0] = scale[0]; inst->scale[1] = scale[2]; inst->scale[2] = scale[1];
     inst->variation = variation;
+    inst->visible = true;
     inst->viewer = viewer;
     instances_.push_back(inst);
     static int doodadDiagCount = 0;
@@ -370,9 +372,13 @@ bool SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
 
     auto* inst = new PlacedModel();
     inst->pos[0] = pos[0]; inst->pos[1] = pos[2]; inst->pos[2] = pos[1];
+    inst->renderPos[0] = inst->pos[0]; inst->renderPos[1] = inst->pos[1]; inst->renderPos[2] = inst->pos[2];
     inst->angle = angle;
+    inst->renderAngle = angle;
     inst->scale[0] = scale[0]; inst->scale[1] = scale[2]; inst->scale[2] = scale[1];
     inst->player = player;
+    inst->visible = true;
+    inst->smoothMotion = true;
     inst->ownedViewer = std::move(uniqueViewer);
     inst->viewer = viewer;
     if (playBirthAnimation) {
@@ -383,31 +389,89 @@ bool SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
     return true;
 }
 
-bool SceneManager::UpdateInstancePosition(int index, const float pos[3], float angle) {
+bool SceneManager::UpdateInstancePosition(int index, const float pos[3], float angle,
+                                          float movementSpeed, float turnRate,
+                                          bool smoothMotion) {
     if (index < 0 || index >= (int)instances_.size()) return false;
     auto* inst = instances_[index];
     inst->pos[0] = pos[0];
     inst->pos[1] = pos[2]; // Y and Z swapped
     inst->pos[2] = pos[1];
     inst->angle = angle;
+    inst->movementSpeed = movementSpeed;
+    inst->turnRate = turnRate;
+    inst->smoothMotion = smoothMotion;
     return true;
 }
 
-void SceneManager::RenderAll(const Mat4& view, const Mat4& proj) {
+bool SceneManager::SetInstanceVisible(int index, bool visible) {
+    if (index < 0 || index >= (int)instances_.size()) return false;
+    instances_[index]->visible = visible;
+    return true;
+}
+
+void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
+    auto normalizeAngleDegrees = [](float angle) {
+        while (angle < 0.0f) angle += 360.0f;
+        while (angle >= 360.0f) angle -= 360.0f;
+        return angle;
+    };
+    auto normalizeAngleDelta = [](float delta) {
+        while (delta < -180.0f) delta += 360.0f;
+        while (delta > 180.0f) delta -= 360.0f;
+        return delta;
+    };
+
     std::unordered_set<MdxViewer*> updatedViewers;
     for (auto* inst : instances_) {
-        if (inst->viewer) {
+        if (inst->smoothMotion) {
+            const float dx = inst->pos[0] - inst->renderPos[0];
+            const float dz = inst->pos[2] - inst->renderPos[2];
+            const float distance = std::sqrt((dx * dx) + (dz * dz));
+            const float speedDelta = std::max(0.0f, inst->movementSpeed) * std::max(0.0f, dt);
+            if ((distance > speedDelta) && (speedDelta > 0.0f) && (dt < 1.0f)) {
+                inst->renderPos[0] += (speedDelta * dx) / distance;
+                inst->renderPos[2] += (speedDelta * dz) / distance;
+            }
+            else {
+                inst->renderPos[0] = inst->pos[0];
+                inst->renderPos[2] = inst->pos[2];
+            }
+            inst->renderPos[1] = inst->pos[1];
+
+            const float targetAngle = normalizeAngleDegrees(inst->angle);
+            const float currentAngle = normalizeAngleDegrees(inst->renderAngle);
+            const float angleDelta = normalizeAngleDelta(targetAngle - currentAngle);
+            const float turnDegreesPerTick = std::max(0.1f, inst->turnRate * 180.0f / 3.1415926535f);
+            const float turnDegreesPerSecond = turnDegreesPerTick / (1.0f / 20.0f);
+            const float maxTurnStep = turnDegreesPerSecond * std::max(0.0f, dt);
+            if (std::fabs(angleDelta) <= maxTurnStep) {
+                inst->renderAngle = targetAngle;
+            }
+            else {
+                inst->renderAngle = normalizeAngleDegrees(
+                    currentAngle + ((angleDelta < 0.0f) ? -maxTurnStep : maxTurnStep));
+            }
+        }
+        else {
+            inst->renderPos[0] = inst->pos[0];
+            inst->renderPos[1] = inst->pos[1];
+            inst->renderPos[2] = inst->pos[2];
+            inst->renderAngle = inst->angle;
+        }
+
+        if (inst->visible && inst->viewer) {
             if (updatedViewers.insert(inst->viewer).second) {
-                inst->viewer->Update(1.0f / 60.0f, view);
+                inst->viewer->Update(dt, view);
             }
         }
     }
 
     for (auto* inst : instances_) {
-        if (inst->viewer) {
-            Vec3 p = {inst->pos[0], inst->pos[1], inst->pos[2]};
+        if (inst->visible && inst->viewer) {
+            Vec3 p = {inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
             float s = (inst->scale[0] + inst->scale[1] + inst->scale[2]) / 3.0f;
-            inst->viewer->RenderAt(p, view, proj, s, inst->player, inst->angle);
+            inst->viewer->RenderAt(p, view, proj, s, inst->player, inst->renderAngle);
         }
     }
 }

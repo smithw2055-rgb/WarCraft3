@@ -4,6 +4,7 @@
 #include "ecs/player.h"
 #include "ecs/abilities/ability_build.h"
 #include "ecs/pathing/pathfinding.h"
+#include "ecs/pathing/world_collision.h"
 #include "data/unitdata.h"
 #include <cmath>
 #include <iostream>
@@ -32,6 +33,7 @@ void CBehaviorBuild::Begin(CSimulation& simulation) {
     constructionProgress_ = 0;
     waypoints_.clear();
     pathRecalcCooldown_ = 0;
+    propelling_ = false;
 
     auto* unitData = simulation.GetUnitData();
     if (unitData) {
@@ -46,6 +48,7 @@ void CBehaviorBuild::Begin(CSimulation& simulation) {
 void CBehaviorBuild::End(CSimulation& simulation) {
     (void)simulation;
     waypoints_.clear();
+    propelling_ = false;
 }
 
 bool CBehaviorBuild::Update(CSimulation& simulation) {
@@ -55,10 +58,14 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
         float dx = buildX_ - unit_->GetX();
         float dy = buildY_ - unit_->GetY();
         float dist = std::sqrt(dx * dx + dy * dy);
+        auto* pathfinding = simulation.GetPathfinding();
+        const bool hasPathingMap = pathfinding && pathfinding->HasPathingMap();
 
         if (dist < 128.0f) {
             movingToSite_ = false;
             building_ = true;
+            propelling_ = false;
+            unit_->TurnTowardPoint(buildX_, buildY_);
             CreateBuilding(simulation);
             return false;
         }
@@ -66,11 +73,12 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
         pathRecalcCooldown_--;
         if (waypoints_.empty() || pathRecalcCooldown_ <= 0) {
             waypoints_.clear();
-            auto* pathfinding = simulation.GetPathfinding();
             if (pathfinding) {
                 std::vector<std::pair<float,float>> worldPath;
                 if (pathfinding->FindPathWorld(unit_->GetX(), unit_->GetY(),
-                                                buildX_, buildY_, worldPath)) {
+                                                buildX_, buildY_,
+                                                std::max(0.0f, unit_->GetCollisionSize()),
+                                                unit_->GetMovementType(), unit_, worldPath)) {
                     for (size_t i = 1; i < worldPath.size(); i++)
                         waypoints_.push_back(worldPath[i]);
                 }
@@ -83,28 +91,64 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
             float wdx = wp.first - unit_->GetX();
             float wdy = wp.second - unit_->GetY();
             float wdist = std::sqrt(wdx * wdx + wdy * wdy);
-            if (wdist < 48.0f) {
+            const float speed = unit_->GetSpeed() * simulation.GetSimStepTime();
+            if (wdist <= std::max(1.0f, speed)) {
                 waypoints_.pop_front();
+                propelling_ = false;
             } else {
-                float speed = unit_->GetSpeed() * simulation.GetSimStepTime() * 10.0f;
+                if (!unit_->TurnTowardPoint(wp.first, wp.second)) {
+                    propelling_ = false;
+                    return false;
+                }
                 float step = std::min(speed, wdist);
-                unit_->SetPosition(unit_->GetX() + (wdx / wdist) * step,
-                                   unit_->GetY() + (wdy / wdist) * step);
-                float facing = std::atan2(wdx, wdy) * 180.0f / 3.14159f;
-                unit_->SetFacing(facing);
+                const float nx = unit_->GetX() + (wdx / wdist) * step;
+                const float ny = unit_->GetY() + (wdy / wdist) * step;
+                const float collisionRadius = std::max(0.0f, unit_->GetCollisionSize());
+                if (pathfinding && !pathfinding->IsWorldPointPathableForUnit(nx, ny, collisionRadius,
+                                                                             unit_->GetMovementType(), unit_)) {
+                    propelling_ = false;
+                    waypoints_.clear();
+                    pathRecalcCooldown_ = 0;
+                    return false;
+                }
+                if (auto* collision = simulation.GetWorldCollision()) {
+                    const float dynamicCollisionRadius = std::max(collisionRadius, 16.0f);
+                    if (collision->CheckCollision(nx, ny, dynamicCollisionRadius, unit_)) {
+                        propelling_ = false;
+                        waypoints_.clear();
+                        pathRecalcCooldown_ = 0;
+                        return false;
+                    }
+                }
+                unit_->SetPosition(nx, ny);
+                propelling_ = true;
             }
-        } else {
-            float speed = unit_->GetSpeed() * simulation.GetSimStepTime() * 10.0f;
+        } else if (!hasPathingMap) {
+            if (!unit_->TurnTowardPoint(buildX_, buildY_)) {
+                propelling_ = false;
+                return false;
+            }
+            float speed = unit_->GetSpeed() * simulation.GetSimStepTime();
             float step = std::min(speed, dist);
-            unit_->SetPosition(unit_->GetX() + (dx / dist) * step,
-                               unit_->GetY() + (dy / dist) * step);
-            float facing = std::atan2(dx, dy) * 180.0f / 3.14159f;
-            unit_->SetFacing(facing);
+            const float nx = unit_->GetX() + (dx / dist) * step;
+            const float ny = unit_->GetY() + (dy / dist) * step;
+            const float collisionRadius = std::max(0.0f, unit_->GetCollisionSize());
+            if (pathfinding && !pathfinding->IsWorldPointPathableForUnit(nx, ny, collisionRadius,
+                                                                         unit_->GetMovementType(), unit_)) {
+                propelling_ = false;
+                return false;
+            }
+            unit_->SetPosition(nx, ny);
+            propelling_ = true;
+        } else {
+            propelling_ = false;
         }
         return false;
     }
 
     if (building_) {
+        propelling_ = false;
+        unit_->TurnTowardPoint(buildX_, buildY_);
         float dt = simulation.GetSimStepTime();
 
         // Race-specific construction progress
@@ -132,6 +176,7 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
         auto* building = simulation.GetUnit(createdUnitHandle_);
         if (building) {
             float progress = constructionProgress_ / buildTime_;
+            building->SetConstructionProgress(constructionProgress_);
             float maxLife = building->GetMaxLife();
             float targetLife = maxLife * (0.1f + progress * 0.9f);
             building->SetLife(simulation, targetLife);
@@ -145,6 +190,7 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
         return false;
     }
 
+    propelling_ = false;
     return true;
 }
 

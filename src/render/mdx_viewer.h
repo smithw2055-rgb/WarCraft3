@@ -32,7 +32,42 @@ public:
     const Vec3& GetBoundsCenter() const { return center_; }
     float GetBoundsRadius() const { return radius_; }
     bool PlayStandSequence();
+    bool PlayStandSequenceWithTags(const std::vector<std::string>& secondaryTags);
+    bool PlayStandSequenceWithTag(const char* secondaryTag);
+    bool PlayWalkSequence();
+    bool PlayWalkSequenceWithTags(const std::vector<std::string>& secondaryTags);
+    bool PlayWalkSequenceWithTag(const char* secondaryTag);
+    bool PlayWalkSequenceAtSpeed(float currentMovementSpeed);
+    bool PlayWalkSequenceWithTagsAtSpeed(const std::vector<std::string>& secondaryTags, float currentMovementSpeed);
+    bool PlayWalkSequenceWithTagAtSpeed(const char* secondaryTag, float currentMovementSpeed);
+    bool PlayWalkSequenceAtSpeedRatio(float speedRatio);
+    bool PlayWalkSequenceWithTagsAtSpeedRatio(const std::vector<std::string>& secondaryTags, float speedRatio);
+    bool PlayWalkSequenceWithTagAtSpeedRatio(const char* secondaryTag, float speedRatio);
+    bool PlayAttackSequence();
+    bool PlayAttackSequenceWithTags(const std::vector<std::string>& secondaryTags);
+    bool PlayAttackSequenceWithDuration(float durationSeconds);
+    bool PlayAttackSequenceWithTagsAndDuration(const std::vector<std::string>& secondaryTags, float durationSeconds);
+    bool PlaySpellSequence(float durationSeconds = 0.0f);
+    bool PlaySpellSequenceWithTags(const std::vector<std::string>& secondaryTags, float durationSeconds = 0.0f);
+    bool PlaySpellSequenceWithTag(const char* secondaryTag, float durationSeconds = 0.0f);
+    bool PlayChannelSequence(float durationSeconds = 0.0f);
+    bool PlayChannelSequenceWithTags(const std::vector<std::string>& secondaryTags, float durationSeconds = 0.0f);
+    bool PlayChannelSequenceWithTag(const char* secondaryTag, float durationSeconds = 0.0f);
     bool PlayBirthThenStandSequence();
+    bool PlayDeathSequence();
+    bool PlayDecaySequenceWithTags(const std::vector<std::string>& secondaryTags, float durationSeconds);
+    bool PlayDecaySequenceWithTag(const char* secondaryTag, float durationSeconds);
+    bool PlayDissipateSequence(float durationSeconds);
+    bool PlaySequenceByName(const char* sequenceName, bool loop, float speed = 1.0f,
+                            bool queueStandAfterCurrent = false);
+    bool PlaySequenceByIndex(int index, bool loop, float speed = 1.0f,
+                             bool queueStandAfterCurrent = false);
+    bool SetCurrentSequenceFrameByRatio(float ratio);
+    bool IsPlayingSequenceWithToken(const char* token) const;
+    bool IsCurrentSequenceFinished() const;
+    bool IsCurrentSequenceLooping() const;
+    bool GetSequenceName(int index, std::string& outName) const;
+    float GetAnimationSpeedScale() const { return animationSpeedScale_; }
     void DebugLogState(const char* tag) const;
 
     // Animation control
@@ -78,6 +113,7 @@ private:
         int materialLayerIndex = -1;
         int filterMode = 0;
         int layerFlags = 0;
+        uint32_t sequenceHintMask = 0;
         float layerAlpha = 1.0f;
         float geosetAlpha = 1.0f;
         float geosetColor[3] = {1.0f, 1.0f, 1.0f};
@@ -92,6 +128,7 @@ private:
     void Release();
     void InitializeAnimatedStates();
     void UpdateAnimatedStates();
+    bool SetSequencePreservingWalk(int sequenceIndex, bool loop, float speed);
 
     // Build skinned vertex buffer from geoset data
     void BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
@@ -102,14 +139,22 @@ private:
     static sg_pipeline sharedPipeline_;
     static sg_pipeline sharedNoDepthWritePipeline_;
     static sg_pipeline sharedBlendPipeline_;
+    static sg_pipeline sharedAdditivePipeline_;
+    static sg_pipeline sharedAddAlphaPipeline_;
     static sg_pipeline sharedOverlayPipeline_;
     static sg_pipeline sharedOverlayBlendPipeline_;
+    static sg_pipeline sharedOverlayAdditivePipeline_;
+    static sg_pipeline sharedOverlayAddAlphaPipeline_;
     static sg_shader sharedSkinnedShader_;
     static sg_pipeline sharedSkinnedPipeline_;
     static sg_pipeline sharedSkinnedNoDepthWritePipeline_;
     static sg_pipeline sharedSkinnedBlendPipeline_;
+    static sg_pipeline sharedSkinnedAdditivePipeline_;
+    static sg_pipeline sharedSkinnedAddAlphaPipeline_;
     static sg_pipeline sharedOverlaySkinnedPipeline_;
     static sg_pipeline sharedOverlaySkinnedBlendPipeline_;
+    static sg_pipeline sharedOverlaySkinnedAdditivePipeline_;
+    static sg_pipeline sharedOverlaySkinnedAddAlphaPipeline_;
     static sg_sampler sharedSampler_;
     static sg_image sharedWhiteTexture_;
     static sg_view sharedWhiteTextureView_;
@@ -143,5 +188,8 @@ private:
     MdxParticleSystem particles_;
     bool hasParticles_ = false;
     bool pendingStandSequenceAfterCurrent_ = false;
+    bool currentSequenceIsWalk_ = false;
+    float lastWalkSequenceProgress_ = -1.0f;
+    float animationSpeedScale_ = 1.0f;
     MdxViewer* sharedSource_ = nullptr;
 };

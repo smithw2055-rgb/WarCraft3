@@ -1,6 +1,7 @@
 #include "csimulation.h"
 #include "player.h"
 #include "unit.h"
+#include "destructable.h"
 #include "handle_id.h"
 #include "ability.h"
 #include "abilities/ability_attack.h"
@@ -16,18 +17,66 @@
 #include "abilities/ability_return_resources.h"
 #include "abilities/ability_sell_items.h"
 #include "abilities/ability_build.h"
+#include "abilities/ability_repair.h"
 #include "pathing/world_collision.h"
 #include "pathing/pathfinding.h"
 #include "data/unitdata.h"
+#include "data/destructabledata.h"
 #include <iostream>
 #include <algorithm>
+#include <cmath>
+#include <optional>
 
 CSimulation::CSimulation() {
     worldCollision_ = std::make_unique<CWorldCollision>();
     pathfindingProcessor_ = std::make_unique<CPathfindingProcessor>();
+    pathfindingProcessor_->SetWorldCollision(worldCollision_.get());
 }
 
 CSimulation::~CSimulation() = default;
+
+namespace {
+
+static bool IsRepairAbilityAlias(War3ID abilityCode) {
+    return (abilityCode == War3ID("Arep")) || (abilityCode == War3ID("Ahrp"))
+        || (abilityCode == War3ID("Aren")) || (abilityCode == War3ID("Arst"));
+}
+
+static std::optional<CBuildRace> BuildRaceFromUnitType(const CUnitType* unitType) {
+    if (!unitType) {
+        return std::nullopt;
+    }
+    const std::string& raceName = unitType->GetUnitRace().name;
+    if (raceName == "human") {
+        return CBuildRace::HUMAN;
+    }
+    if (raceName == "orc") {
+        return CBuildRace::ORC;
+    }
+    if (raceName == "undead") {
+        return CBuildRace::UNDEAD;
+    }
+    if (raceName == "nightelf" || raceName == "night elf") {
+        return CBuildRace::NIGHT_ELF;
+    }
+    return std::nullopt;
+}
+
+static War3ID BuildRaceAbilityCode(CBuildRace race) {
+    switch (race) {
+    case CBuildRace::ORC:
+        return War3ID("AObu");
+    case CBuildRace::UNDEAD:
+        return War3ID("AUbu");
+    case CBuildRace::NIGHT_ELF:
+        return War3ID("AEbu");
+    case CBuildRace::HUMAN:
+    default:
+        return War3ID("AHbu");
+    }
+}
+
+} // namespace
 
 void CSimulation::Update() {
     // Update units (includes regen, behavior processing, death detection)
@@ -40,6 +89,8 @@ void CSimulation::Update() {
 
     ProcessUnitRemovals();
     ProcessNewUnits();
+    ProcessDestructableRemovals();
+    ProcessNewDestructables();
 
     // Advance game time
     AdvanceGameTime(SIM_STEP_TIME);
@@ -65,12 +116,14 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
                                          typeId, x, y, facing);
 
     // Add default abilities based on unit type
-    // All units get attack and move abilities
+    // All units get attack; only movable units get move.
     int abilityHandle = handleIdAlloc_.CreateId();
     unit->AddAbility(*this, std::make_unique<CAbilityAttack>(abilityHandle));
 
-    abilityHandle = handleIdAlloc_.CreateId();
-    unit->AddAbility(*this, std::make_unique<CAbilityMove>(abilityHandle));
+    if (!unitType->IsBuilding()) {
+        abilityHandle = handleIdAlloc_.CreateId();
+        unit->AddAbility(*this, std::make_unique<CAbilityMove>(abilityHandle));
+    }
 
     // Heroes get the hero ability
     if (unitType->IsHero()) {
@@ -98,6 +151,11 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
             }
             for (auto& researchId : unitType->GetResearchesAvailable()) {
                 queueAbility->AddResearch(researchId);
+            }
+        }
+        if (auto* upgradeAbility = dynamic_cast<CAbilityUpgrade*>(unit->GetAbility(War3ID("Aupg")))) {
+            for (auto& upgradeId : unitType->GetUpgradesTo()) {
+                upgradeAbility->AddUpgradeTo(upgradeId);
             }
         }
 
@@ -131,16 +189,26 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
             }
         }
 
-        // Check for build abilities (human, orc, undead, night elf)
-        for (auto& abilityCode : unitType->GetAbilityList()) {
-            if (abilityCode == War3ID("AHbu") || abilityCode == War3ID("AObu") ||
-                abilityCode == War3ID("AUbu") || abilityCode == War3ID("AEbu")) {
-                CBuildRace race = CBuildRace::HUMAN;
-                if (abilityCode == War3ID("AObu")) race = CBuildRace::ORC;
-                else if (abilityCode == War3ID("AUbu")) race = CBuildRace::UNDEAD;
-                else if (abilityCode == War3ID("AEbu")) race = CBuildRace::NIGHT_ELF;
+        if (!unitType->GetStructuresBuilt().empty() && !unit->GetAbility(War3ID("AHbu"))
+            && !unit->GetAbility(War3ID("AObu")) && !unit->GetAbility(War3ID("AUbu"))
+            && !unit->GetAbility(War3ID("AEbu"))) {
+            if (const auto buildRace = BuildRaceFromUnitType(unitType)) {
                 abilityHandle = handleIdAlloc_.CreateId();
-                unit->AddAbility(*this, std::make_unique<CAbilityBuild>(abilityHandle, abilityCode, race));
+                auto buildAbility = std::make_unique<CAbilityBuild>(
+                    abilityHandle, BuildRaceAbilityCode(*buildRace), *buildRace);
+                for (auto& structureId : unitType->GetStructuresBuilt()) {
+                    buildAbility->AddBuildableStructure(structureId);
+                }
+                unit->AddAbility(*this, std::move(buildAbility));
+            }
+        }
+
+        for (auto& abilityCode : unitType->GetAbilityList()) {
+            if (IsRepairAbilityAlias(abilityCode)) {
+                abilityHandle = handleIdAlloc_.CreateId();
+                auto repairAbility = std::make_unique<CAbilityRepair>(abilityHandle);
+                repairAbility->SetAlias(abilityCode);
+                unit->AddAbility(*this, std::move(repairAbility));
                 break;
             }
         }
@@ -156,6 +224,7 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
     }
 
     CUnit* ptr = unit.get();
+
     unitMap_[handleId] = std::move(unit);
     newUnits_.push_back(ptr);
 
@@ -165,6 +234,39 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
 CUnit* CSimulation::GetUnit(int handleId) const {
     auto it = unitMap_.find(handleId);
     return (it != unitMap_.end()) ? it->second.get() : nullptr;
+}
+
+CDestructable* CSimulation::CreateDestructable(War3ID typeId, float x, float y, float life) {
+    int handleId = handleIdAlloc_.CreateId();
+    auto destructable = std::make_unique<CDestructable>(handleId, typeId, x, y, life);
+    if (destructableData_) {
+        if (const auto* type = destructableData_->GetDestructable(typeId)) {
+            destructable->SetMaxLife(static_cast<float>(type->maxLife));
+            destructable->SetLife(*this, std::clamp(life, 0.0f, static_cast<float>(type->maxLife)));
+        }
+    }
+    CDestructable* ptr = destructable.get();
+    destructableMap_[handleId] = std::move(destructable);
+    newDestructables_.push_back(ptr);
+    return ptr;
+}
+
+CDestructable* CSimulation::GetDestructable(int handleId) const {
+    auto it = destructableMap_.find(handleId);
+    return (it != destructableMap_.end()) ? it->second.get() : nullptr;
+}
+
+void CSimulation::RemoveDestructable(CDestructable* destructable) {
+    if (destructable) {
+        removedDestructables_.push_back(destructable);
+    }
+}
+
+CWidget* CSimulation::GetWidget(int handleId) const {
+    if (auto* unit = GetUnit(handleId)) {
+        return unit;
+    }
+    return GetDestructable(handleId);
 }
 
 void CSimulation::RemoveUnit(CUnit* unit) {
@@ -197,6 +299,10 @@ void CSimulation::AddPostUpdateCallback(std::function<void()> cb) {
 
 void CSimulation::ProcessUnitRemovals() {
     for (auto* unit : removedUnits_) {
+        if (worldCollision_) {
+            worldCollision_->RemoveUnit(unit);
+        }
+
         auto it = std::find(units_.begin(), units_.end(), unit);
         if (it != units_.end()) units_.erase(it);
 
@@ -211,9 +317,36 @@ void CSimulation::ProcessUnitRemovals() {
 void CSimulation::ProcessNewUnits() {
     for (auto* unit : newUnits_) {
         units_.push_back(unit);
+        if (worldCollision_) {
+            worldCollision_->AddUnit(unit);
+        }
         // Register with player
         CPlayer* player = GetPlayer(unit->GetPlayerIndex());
         if (player) player->AddUnit(unit);
     }
     newUnits_.clear();
+}
+
+void CSimulation::ProcessDestructableRemovals() {
+    for (auto* destructable : removedDestructables_) {
+        auto it = std::find(destructables_.begin(), destructables_.end(), destructable);
+        if (it != destructables_.end()) {
+            destructables_.erase(it);
+        }
+
+        auto nit = std::find(newDestructables_.begin(), newDestructables_.end(), destructable);
+        if (nit != newDestructables_.end()) {
+            newDestructables_.erase(nit);
+        }
+
+        destructableMap_.erase(destructable->GetHandleId());
+    }
+    removedDestructables_.clear();
+}
+
+void CSimulation::ProcessNewDestructables() {
+    for (auto* destructable : newDestructables_) {
+        destructables_.push_back(destructable);
+    }
+    newDestructables_.clear();
 }

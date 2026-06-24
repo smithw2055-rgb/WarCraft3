@@ -306,6 +306,34 @@ float MdxAnimator::GetSequenceProgress() const {
     return (float)(sequenceState_.currentFrame - seq.startFrame) / (float)range;
 }
 
+bool MdxAnimator::SetFrameByRatio(float ratio) {
+    if (sequenceState_.sequenceIndex < 0 || !sequences_) return false;
+
+    const auto& seq = (*sequences_)[sequenceState_.sequenceIndex];
+    const uint32_t start = seq.startFrame;
+    const uint32_t end = seq.endFrame;
+    const uint32_t range = end - start;
+    if (range == 0) {
+        sequenceState_.currentFrame = start;
+        sequenceState_.frameTime = 0.0f;
+        return true;
+    }
+
+    const float clampedRatio = std::clamp(ratio, 0.0f, 1.0f);
+    sequenceState_.currentFrame = start + (uint32_t)std::lround((float)range * clampedRatio);
+    if (sequenceState_.currentFrame > end) {
+        sequenceState_.currentFrame = end;
+    }
+    sequenceState_.frameTime = 0.0f;
+
+    if (!nodes_.empty()) {
+        SampleAnimations(sequenceState_.currentFrame);
+        UpdateSkeleton();
+        needsBoneUpload_ = true;
+    }
+    return true;
+}
+
 void MdxAnimator::Update(float dt) {
     if (sequenceState_.sequenceIndex < 0) {
         return;

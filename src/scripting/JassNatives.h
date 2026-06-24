@@ -222,7 +222,9 @@ public:
 
     // Animation callback
     std::function<void(int,const std::string&)> unitSetAnimation;
+    std::function<void(int,const std::string&)> unitQueueAnimation;
     std::function<void(int,int)> unitSetAnimationByIndex;
+    std::function<void(int,const std::string&,bool)> unitAddAnimationProperties;
     std::function<void(int)> unitClearAnimations;
 
     // Camera field enum mapping
@@ -234,8 +236,11 @@ public:
     JassNatives(JassVM& vm, CSimulation* sim = nullptr);
     void SetSimulation(CSimulation* sim) { sim_ = sim; }
     void SetJassVM(JassVM* vm) { vmPtr_ = vm; }
+    void SetData(std::shared_ptr<JassNativesData> data) { data_ = data; }
 
     void RegisterAll();
+    void RegisterConfigNatives();
+    void RegisterCommonNatives();
 
     void FireUnitEvent(int unitSimHandle, int eventType);
     void FireDeathEvent(int unitSimHandle, int killerSimHandle, int eventType);
@@ -273,6 +278,8 @@ private:
     void RegisterLightningNatives();
     void RegisterCameraNatives();
     void RegisterGameNatives();
+
+    void RegisterConfigPlayerNatives();
 
     std::shared_ptr<JassNativesData> data_;
     JassVM& vm_;

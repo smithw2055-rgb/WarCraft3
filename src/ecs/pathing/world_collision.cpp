@@ -47,9 +47,12 @@ void CWorldCollision::EnumUnitsInRange(float cx, float cy, float radius,
 
 bool CWorldCollision::CheckCollision(float x, float y, float radius,
                                       CUnit* ignoreUnit) const {
-    float r2 = (radius + 8.0f) * (radius + 8.0f); // minimum collision size
+    const float queryRadius = std::max(radius, 8.0f);
     for (auto* u : allUnits_) {
         if (u == ignoreUnit || u->IsHidden() || u->IsDead()) continue;
+        const float otherRadius = std::max(u->GetCollisionSize(), 8.0f);
+        const float combinedRadius = queryRadius + otherRadius;
+        const float r2 = combinedRadius * combinedRadius;
         float dx = u->GetX() - x;
         float dy = u->GetY() - y;
         if (dx * dx + dy * dy < r2) return true;

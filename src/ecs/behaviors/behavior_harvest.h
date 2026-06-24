@@ -12,6 +12,12 @@ public:
     void SetTarget(CWidget* target);
     void SetResourceType(CResourceType type) { resourceType_ = type; }
     void SetCapacity(int cap) { capacity_ = cap; }
+    bool IsMovingToResource() const { return movingToResource_; }
+    bool IsGathering() const { return gathering_; }
+    bool IsPropelling() const { return propelling_; }
+    int GetGoldCapacity() const { return resourceType_ == CResourceType::GOLD ? capacity_ : 0; }
+    int GetPopoutFromMineTurnTick() const { return popoutFromMineTurnTick_; }
+    void PopoutFromMine(int goldMined);
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;
@@ -28,11 +34,14 @@ private:
     bool movingToResource_ = true;
     bool gathering_ = false;
     bool returning_ = false;
+    bool inMine_ = false;
     float gatherTimer_ = 0;
     float gatherDuration_ = 2.0f; // seconds per gather cycle
     int gatheredAmount_ = 0;
+    int popoutFromMineTurnTick_ = 0;
 
     // Pathfinding
     std::deque<std::pair<float,float>> waypoints_;
     int pathRecalcCooldown_ = 0;
+    bool propelling_ = false;
 };

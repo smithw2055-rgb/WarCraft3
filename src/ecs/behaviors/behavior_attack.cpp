@@ -2,19 +2,45 @@
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"
 #include "ecs/pathing/pathfinding.h"
+#include "ecs/pathing/world_collision.h"
 #include <cmath>
 
 CBehaviorAttack::CBehaviorAttack() {}
+
+const CUnitAttack* CBehaviorAttack::GetPrimaryAttack() const {
+    if (!unit_ || !unit_->GetUnitType()) {
+        return nullptr;
+    }
+    const auto& attacks = unit_->GetUnitType()->GetAttacks();
+    return attacks.empty() ? nullptr : &attacks.front();
+}
+
+void CBehaviorAttack::ResetAttackSwingState() {
+    damagePointTick_ = 0;
+    backswingEndTick_ = 0;
+    attackAnimationDuration_ = 0.0f;
+    damageAppliedThisSwing_ = false;
+}
+
+bool CBehaviorAttack::IsAttackAnimationActive(int currentTick) const {
+    return backswingEndTick_ > 0 && currentTick < backswingEndTick_;
+}
 
 void CBehaviorAttack::Begin(CSimulation& simulation) {
     (void)simulation;
     waypoints_.clear();
     pathRecalcCooldown_ = 0;
+    cooldownEndTick_ = 0;
+    attackAnimationStartTick_ = -1;
+    propelling_ = false;
+    ResetAttackSwingState();
 }
 
 void CBehaviorAttack::End(CSimulation& simulation) {
     (void)simulation;
     waypoints_.clear();
+    propelling_ = false;
+    ResetAttackSwingState();
 }
 
 void CBehaviorAttack::SetTarget(CWidget* target) {
@@ -24,94 +50,171 @@ void CBehaviorAttack::SetTarget(CWidget* target) {
 
 bool CBehaviorAttack::Update(CSimulation& simulation) {
     if (!unit_ || !target_) return true;
+    const CUnitAttack* attack = GetPrimaryAttack();
+    if (!attack) {
+        return true;
+    }
+    attackRange_ = attack->range;
 
     float dx = target_->GetX() - unit_->GetX();
     float dy = target_->GetY() - unit_->GetY();
     float dist = std::sqrt(dx * dx + dy * dy);
 
-    // Face target
-    float facing = std::atan2(dx, dy) * 180.0f / 3.14159f;
-    unit_->SetFacing(facing);
+    const int currentTick = simulation.GetGameTurnTick();
 
     if (dist > attackRange_) {
-        // Use pathfinding for longer distances, direct for short
-        if (dist > 300.0f) {
-            // Recalc path periodically
-            pathRecalcCooldown_--;
-            if (waypoints_.empty() || pathRecalcCooldown_ <= 0) {
+        ResetAttackSwingState();
+        if (unit_->IsBuilding() || !unit_->GetMoveBehavior()) {
+            propelling_ = false;
+            return true;
+        }
+
+        auto* pathfinding = simulation.GetPathfinding();
+
+        pathRecalcCooldown_--;
+        if (waypoints_.empty() || pathRecalcCooldown_ <= 0) {
+            static constexpr float kRecalcDist = 64.0f;
+            bool shouldRecalculate = waypoints_.empty();
+            if (!shouldRecalculate && !waypoints_.empty()) {
+                const auto& lastWp = waypoints_.back();
+                const float ddx = lastWp.first - target_->GetX();
+                const float ddy = lastWp.second - target_->GetY();
+                shouldRecalculate = (ddx * ddx + ddy * ddy) > (kRecalcDist * kRecalcDist);
+            }
+            if (shouldRecalculate) {
                 waypoints_.clear();
-                auto* pathfinding = simulation.GetPathfinding();
                 if (pathfinding) {
                     std::vector<std::pair<float,float>> worldPath;
                     if (pathfinding->FindPathWorld(unit_->GetX(), unit_->GetY(),
-                                                    target_->GetX(), target_->GetY(), worldPath)) {
-                        for (size_t i = 1; i < worldPath.size(); i++)
+                                                    target_->GetX(), target_->GetY(),
+                                                    std::max(0.0f, unit_->GetCollisionSize()),
+                                                    unit_->GetMovementType(), unit_, worldPath)) {
+                        for (size_t i = 1; i < worldPath.size(); i++) {
                             waypoints_.push_back(worldPath[i]);
+                        }
                     }
                 }
-                pathRecalcCooldown_ = 8;
             }
+            pathRecalcCooldown_ = 5;
+        }
 
-            if (!waypoints_.empty()) {
-                auto& wp = waypoints_.front();
-                float wdx = wp.first - unit_->GetX();
-                float wdy = wp.second - unit_->GetY();
-                float wdist = std::sqrt(wdx * wdx + wdy * wdy);
-                if (wdist < 48.0f) {
-                    waypoints_.pop_front();
-                } else {
-                    float speed = unit_->GetSpeed() * simulation.GetSimStepTime() * 10.0f;
-                    float step = std::min(speed, wdist);
-                    unit_->SetPosition(unit_->GetX() + (wdx / wdist) * step,
-                                       unit_->GetY() + (wdy / wdist) * step);
+        if (!waypoints_.empty()) {
+            auto& wp = waypoints_.front();
+            float wdx = wp.first - unit_->GetX();
+            float wdy = wp.second - unit_->GetY();
+            float wdist = std::sqrt(wdx * wdx + wdy * wdy);
+            const float speed = unit_->GetSpeed() * simulation.GetSimStepTime();
+            if (wdist <= std::max(1.0f, speed)) {
+                waypoints_.pop_front();
+                propelling_ = false;
+            } else {
+                if (!unit_->TurnTowardPoint(wp.first, wp.second)) {
+                    propelling_ = false;
                     return false;
                 }
+                float step = std::min(speed, wdist);
+                float nx = unit_->GetX() + (wdx / wdist) * step;
+                float ny = unit_->GetY() + (wdy / wdist) * step;
+                const float collisionRadius = std::max(0.0f, unit_->GetCollisionSize());
+                if (pathfinding && !pathfinding->IsWorldPointPathableForUnit(nx, ny, collisionRadius,
+                                                                             unit_->GetMovementType(), unit_)) {
+                    propelling_ = false;
+                    waypoints_.clear();
+                    pathRecalcCooldown_ = 0;
+                    return false;
+                }
+                if (auto* collision = simulation.GetWorldCollision()) {
+                    const float dynamicCollisionRadius = std::max(collisionRadius, 16.0f);
+                    if (collision->CheckCollision(nx, ny, dynamicCollisionRadius, unit_)) {
+                        propelling_ = false;
+                        waypoints_.clear();
+                        pathRecalcCooldown_ = 0;
+                        return false;
+                    }
+                }
+                unit_->SetPosition(nx, ny);
+                propelling_ = true;
+                return false;
             }
         }
 
-        // Direct movement if no path or short distance
-        float speed = unit_->GetSpeed() * simulation.GetSimStepTime() * 10.0f;
+        if (pathfinding && pathfinding->HasPathingMap()) {
+            propelling_ = false;
+            return false;
+        }
+
+        if (!unit_->TurnTowardPoint(target_->GetX(), target_->GetY())) {
+            propelling_ = false;
+            return false;
+        }
+        float speed = unit_->GetSpeed() * simulation.GetSimStepTime();
         float step = std::min(speed, dist - attackRange_ + 16.0f);
         float nx = unit_->GetX() + (dx / dist) * step;
         float ny = unit_->GetY() + (dy / dist) * step;
+        const float collisionRadius = std::max(0.0f, unit_->GetCollisionSize());
+        if (pathfinding && !pathfinding->IsWorldPointPathableForUnit(nx, ny, collisionRadius,
+                                                                     unit_->GetMovementType(), unit_)) {
+            propelling_ = false;
+            return false;
+        }
+        if (auto* collision = simulation.GetWorldCollision()) {
+            const float dynamicCollisionRadius = std::max(collisionRadius, 16.0f);
+            if (collision->CheckCollision(nx, ny, dynamicCollisionRadius, unit_)) {
+                propelling_ = false;
+                return false;
+            }
+        }
         unit_->SetPosition(nx, ny);
+        propelling_ = true;
         return false;
     }
 
-    // In range - attack
-    int currentTick = simulation.GetGameTurnTick();
-    if (currentTick - lastAttackTick_ >= 10) { // 10 ticks = 1 sec cooldown
-        lastAttackTick_ = currentTick;
+    propelling_ = false;
+    if (!unit_->TurnTowardPoint(target_->GetX(), target_->GetY())) {
+        return false;
+    }
 
-        // Get weapon sound from first attack
-        std::string weaponSound;
+    if (!damageAppliedThisSwing_ && damagePointTick_ > 0 && currentTick >= damagePointTick_) {
+        std::string weaponSound = attack->weaponSound;
         float damageAmount = 10.0f;
-        auto* unitType = unit_->GetUnitType();
-        if (unitType) {
-            auto& attacks = unitType->GetAttacks();
-            if (!attacks.empty()) {
-                weaponSound = attacks[0].weaponSound;
-                // Compute actual damage
-                int dice = attacks[0].damageDice;
-                int sides = attacks[0].damageSidesPerDie;
-                int base = attacks[0].damageBase;
-                if (dice > 0 && sides > 0) {
-                    int roll = 0;
-                    for (int d = 0; d < dice; d++)
-                        roll += (std::rand() % sides) + 1;
-                    damageAmount = (float)(base + roll);
-                } else {
-                    damageAmount = (float)base;
-                }
+        const int dice = attack->damageDice;
+        const int sides = attack->damageSidesPerDie;
+        const int base = attack->damageBase;
+        if (dice > 0 && sides > 0) {
+            int roll = 0;
+            for (int d = 0; d < dice; d++) {
+                roll += (std::rand() % sides) + 1;
             }
+            damageAmount = (float)(base + roll);
+        }
+        else {
+            damageAmount = (float)base;
         }
 
         target_->Damage(simulation, unit_, true, false,
-                        CAttackType::NORMAL, CDamageType::NORMAL,
+                        attack->attackType, CDamageType::NORMAL,
                         weaponSound, damageAmount, 0);
+        damageAppliedThisSwing_ = true;
         if (target_->IsDead()) {
             return true; // target dead, behavior done
         }
+    }
+
+    if (backswingEndTick_ > 0 && currentTick >= backswingEndTick_) {
+        ResetAttackSwingState();
+    }
+
+    if (currentTick >= cooldownEndTick_) {
+        const int cooldownTicks = std::max(1, (int)std::ceil(attack->cooldown / simulation.GetSimStepTime()));
+        const int damagePointTicks = std::max(0, (int)std::ceil(attack->damagePoint / simulation.GetSimStepTime()));
+        const int backswingTicks = std::max(0, (int)std::ceil(attack->backswingPoint / simulation.GetSimStepTime()));
+
+        cooldownEndTick_ = currentTick + cooldownTicks;
+        damagePointTick_ = currentTick + damagePointTicks;
+        backswingEndTick_ = currentTick + damagePointTicks + backswingTicks;
+        attackAnimationStartTick_ = currentTick;
+        attackAnimationDuration_ = std::max(attack->damagePoint + attack->backswingPoint, attack->cooldown);
+        damageAppliedThisSwing_ = false;
     }
 
     return false;

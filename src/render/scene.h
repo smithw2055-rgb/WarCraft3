@@ -9,10 +9,16 @@
 
 struct PlacedModel {
     float pos[3] = {};
+    float renderPos[3] = {};
     float angle = 0;
+    float renderAngle = 0;
     float scale[3] = {1,1,1};
+    float movementSpeed = 0.0f;
+    float turnRate = 0.0f;
     int player = 0;
     int variation = 0;
+    bool visible = true;
+    bool smoothMotion = false;
     std::unique_ptr<MdxViewer> ownedViewer;
     MdxViewer* viewer = nullptr; // shared, not owned
 };
@@ -35,10 +41,13 @@ public:
                  bool playBirthAnimation = false);
 
     // Render all placed models
-    void RenderAll(const Mat4& view, const Mat4& proj);
+    void RenderAll(const Mat4& view, const Mat4& proj, float dt);
 
     // Update position of a placed instance
-    bool UpdateInstancePosition(int index, const float pos[3], float angle);
+    bool UpdateInstancePosition(int index, const float pos[3], float angle,
+                                float movementSpeed = 0.0f, float turnRate = 0.0f,
+                                bool smoothMotion = false);
+    bool SetInstanceVisible(int index, bool visible);
 
     int InstanceCount() const { return (int)instances_.size(); }
 

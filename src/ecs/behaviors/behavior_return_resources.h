@@ -11,6 +11,9 @@ public:
 
     void SetTarget(CWidget* target);
     void SetHarvestAbility(const CAbilityHarvest* ability) { harvestAbility_ = ability; }
+    bool IsMovingToDropoff() const { return movingToDropoff_; }
+    bool IsDepositing() const { return depositing_; }
+    bool IsPropelling() const { return propelling_; }
 
     // Find nearest dropoff point (town hall)
     void FindNearestDropoff(CSimulation& simulation);
@@ -32,4 +35,5 @@ private:
     // Pathfinding
     std::deque<std::pair<float,float>> waypoints_;
     int pathRecalcCooldown_ = 0;
+    bool propelling_ = false;
 };

@@ -52,7 +52,9 @@ public:
     uint32_t GetCurrentFrame() const { return sequenceState_.currentFrame; }
     int GetSequenceCount() const { return sequences_ ? (int)sequences_->size() : 0; }
     float GetSequenceProgress() const;
+    bool SetFrameByRatio(float ratio);
     bool IsSequenceFinished() const { return sequenceState_.finished; }
+    bool IsSequenceLooping() const { return sequenceState_.loop; }
     int GetBoneIndexForObjectId(int objectId) const;
 
     // Bone matrices for skinning

@@ -22,7 +22,10 @@ public:
     // System registration
     void SetUnitData(CUnitData* data) { unitData_ = data; }
     CUnitData* GetUnitData() const { return unitData_; }
+    void SetDestructableData(CDestructableData* data) { destructableData_ = data; }
+    CDestructableData* GetDestructableData() const { return destructableData_; }
     void SetGameplayConstants(const CGameplayConstants& c) { gameplayConstants_ = c; }
+    const CGameplayConstants& GetGameplayConstants() const { return gameplayConstants_; }
 
     // Game loop
     void Update();
@@ -33,6 +36,11 @@ public:
     virtual void RemoveUnit(CUnit* unit);
     const std::vector<CUnit*>& GetUnits() const { return units_; }
     std::vector<CUnit*>& GetUnits() { return units_; }
+    virtual CDestructable* CreateDestructable(War3ID typeId, float x, float y, float life);
+    CDestructable* GetDestructable(int handleId) const;
+    virtual void RemoveDestructable(CDestructable* destructable);
+    const std::vector<CDestructable*>& GetDestructables() const { return destructables_; }
+    CWidget* GetWidget(int handleId) const;
 
     // Player management
     CPlayer* GetPlayer(int index) const;
@@ -42,7 +50,7 @@ public:
     // Timing
     int GetGameTurnTick() const { return gameTurnTick_; }
     float GetSimStepTime() const { return SIM_STEP_TIME; }
-    static constexpr float SIM_STEP_TIME = 0.1f;
+    static constexpr float SIM_STEP_TIME = 1.0f / 20.0f;
 
     // Game time
     float GetGameTimeOfDay() const { return gameTimeOfDay_; }
@@ -60,7 +68,11 @@ public:
     // Pathing
     CWorldCollision* GetWorldCollision() const { return worldCollision_.get(); }
     CPathfindingProcessor* GetPathfinding() const { return pathfindingProcessor_.get(); }
-    void SetPathingMap(const WpmData* wpm) { if (pathfindingProcessor_) pathfindingProcessor_->SetPathingMap(wpm); }
+    void SetPathingMap(const WpmData* wpm, float worldOffsetX = 0.0f, float worldOffsetY = 0.0f) {
+        if (pathfindingProcessor_) {
+            pathfindingProcessor_->SetPathingMap(wpm, worldOffsetX, worldOffsetY);
+        }
+    }
 
     // Combat
     CCombatSystem* GetCombatSystem() { return &combatSystem_; }
@@ -87,6 +99,8 @@ public:
 private:
     void ProcessUnitRemovals();
     void ProcessNewUnits();
+    void ProcessDestructableRemovals();
+    void ProcessNewDestructables();
 
     int gameTurnTick_ = 0;
 
@@ -100,12 +114,17 @@ private:
     std::vector<CUnit*> newUnits_;
     std::vector<CUnit*> removedUnits_;
     std::unordered_map<int, std::unique_ptr<CUnit>> unitMap_;
+    std::vector<CDestructable*> destructables_;
+    std::vector<CDestructable*> newDestructables_;
+    std::vector<CDestructable*> removedDestructables_;
+    std::unordered_map<int, std::unique_ptr<CDestructable>> destructableMap_;
 
     // Players
     std::vector<std::unique_ptr<CPlayer>> players_;
 
     // Systems
     CUnitData* unitData_ = nullptr;
+    CDestructableData* destructableData_ = nullptr;
     CAbilityData* abilityData_ = nullptr;
     CItemData* itemData_ = nullptr;
 

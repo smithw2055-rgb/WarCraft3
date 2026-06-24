@@ -50,6 +50,7 @@ public:
         const std::vector<War3ID>& abilityList,
         bool building, PathingGridMovementType movementType,
         float defaultFlyingHeight, float collisionSize,
+        const std::vector<std::string>& requiredAnimationTags,
         const std::unordered_set<CUnitClassification>& classifications,
         const std::vector<CUnitAttack>& attacks,
         int attacksEnabled, const std::string& armorType,
@@ -112,6 +113,7 @@ public:
     PathingGridMovementType GetMovementType() const { return movementType_; }
     float GetDefaultFlyingHeight() const { return defaultFlyingHeight_; }
     float GetCollisionSize() const { return collisionSize_; }
+    const std::vector<std::string>& GetRequiredAnimationTags() const { return requiredAnimationTags_; }
     const std::unordered_set<CUnitClassification>& GetClassifications() const { return classifications_; }
     const std::vector<CUnitAttack>& GetAttacks() const { return attacks_; }
     int GetAttacksEnabled() const { return attacksEnabled_; }
@@ -127,14 +129,21 @@ public:
     const std::vector<War3ID>& GetStructuresBuilt() const { return structuresBuilt_; }
     const std::vector<War3ID>& GetUnitsTrained() const { return unitsTrained_; }
     const std::vector<War3ID>& GetResearchesAvailable() const { return researchesAvailable_; }
+    const std::vector<War3ID>& GetUpgradesTo() const { return upgradesTo_; }
     const std::vector<War3ID>& GetItemsSold() const { return itemsSold_; }
+    const CUnitRace& GetUnitRace() const { return unitRace_; }
     int GetGoldCost() const { return goldCost_; }
     int GetLumberCost() const { return lumberCost_; }
     int GetFoodUsed() const { return foodUsed_; }
     int GetFoodMade() const { return foodMade_; }
     int GetBuildTime() const { return buildTime_; }
+    int GetGoldRepairCost() const { return goldRepairCost_; }
+    int GetLumberRepairCost() const { return lumberRepairCost_; }
+    int GetRepairTime() const { return repairTime_; }
     float GetPropWindow() const { return propWindow_; }
     float GetTurnRate() const { return turnRate_; }
+    float GetCastBackswingPoint() const { return castBackswingPoint_; }
+    float GetCastPoint() const { return castPoint_; }
     const std::vector<CUnitTypeRequirement>& GetRequirements() const { return requirements_; }
     int GetLevel() const { return level_; }
     bool IsHero() const { return hero_; }
@@ -171,6 +180,7 @@ private:
     PathingGridMovementType movementType_;
     float defaultFlyingHeight_;
     float collisionSize_;
+    std::vector<std::string> requiredAnimationTags_;
     std::unordered_set<CUnitClassification> classifications_;
     std::vector<CUnitAttack> attacks_;
     int attacksEnabled_;

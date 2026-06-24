@@ -42,6 +42,7 @@ public:
                       float cornerHeightTL = 0.0f, float cornerHeightTR = 0.0f);
     void AddMesh(const std::vector<MeshVertex>& vertices, const std::vector<uint32_t>& indices);
     void RemoveSplat(int index);
+    void ClearGeometry();
 
     void Render(sg_shader uberSplatShader, const Mat4& mvp, float centerOffset[2],
                 int mapCols, int mapRows, sg_view heightMapView, sg_view shadowMapView,

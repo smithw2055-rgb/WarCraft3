@@ -24,6 +24,9 @@ void CPlayer::SetTechLevel(War3ID id, int level) {
 }
 
 bool CPlayer::HasAlliance(const CPlayer& other, CAllianceType type) const {
+    if (id_ == other.GetId()) {
+        return true;
+    }
     if (other.GetId() < 0 || other.GetId() >= 24) return false;
     int bit = (int)type + other.GetId() * 16;
     int idx = bit / 32;
