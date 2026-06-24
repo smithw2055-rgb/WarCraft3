@@ -920,7 +920,18 @@ void JassNatives::RegisterGroupNatives() {
         if (simId >= 0) { auto it = data->groups.find(simId); if (it != data->groups.end()) it->second->unitHandles.clear(); }
         return JassValue::Null();
     });
-    vm_.RegisterNative("GroupEnumUnitsOfType", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    auto filterFuncAt = [](const std::vector<JassValue>& args, size_t index) -> std::string {
+        return (args.size() > index && args[index].type == JassValue::STRING) ? args[index].strVal : "";
+    };
+    auto acceptFilteredUnit = [data = data_, vmPtr = vmPtr_](int unitHandle, const std::string& filterFunc) {
+        if (filterFunc.empty() || !vmPtr) return true;
+        const int previousFilterUnit = data->filterUnitHandle;
+        data->filterUnitHandle = unitHandle;
+        const bool accepted = JassValueToBool(vmPtr->CallFunction(filterFunc));
+        data->filterUnitHandle = previousFilterUnit;
+        return accepted;
+    };
+    vm_.RegisterNative("GroupEnumUnitsOfType", [data = data_, sim = sim_, filterFuncAt, acceptFilteredUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
         if (simId < 0) return JassValue::Null();
@@ -928,16 +939,19 @@ void JassNatives::RegisterGroupNatives() {
         if (git == data->groups.end()) return JassValue::Null();
         int typeId = args[1].intVal;
         War3ID w3id((uint32_t)typeId);
+        const std::string filterFunc = filterFuncAt(args, 2);
         git->second->unitHandles.clear();
         if (sim) {
-            for (auto* unit : sim->GetUnits())
-                if (unit->GetTypeId() == w3id)
-                    git->second->unitHandles.push_back(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
+            for (auto* unit : sim->GetUnits()) {
+                const int unitHandle = data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId());
+                if (unit->GetTypeId() == w3id && acceptFilteredUnit(unitHandle, filterFunc))
+                    git->second->unitHandles.push_back(unitHandle);
+            }
         }
         data->filterUnitHandle = -1;
         return JassValue::Null();
     });
-    vm_.RegisterNative("GroupEnumUnitsInRange", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("GroupEnumUnitsInRange", [data = data_, sim = sim_, filterFuncAt, acceptFilteredUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
         if (simId < 0) return JassValue::Null();
@@ -945,34 +959,39 @@ void JassNatives::RegisterGroupNatives() {
         if (git == data->groups.end()) return JassValue::Null();
         float x = args[1].realVal, y = args[2].realVal, radius = args[3].realVal;
         float rSq = radius * radius;
+        const std::string filterFunc = filterFuncAt(args, 4);
         git->second->unitHandles.clear();
         if (sim) {
             for (auto* unit : sim->GetUnits()) {
                 float dx = unit->GetX() - x, dy = unit->GetY() - y;
-                if (dx * dx + dy * dy <= rSq)
-                    git->second->unitHandles.push_back(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
+                const int unitHandle = data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId());
+                if (dx * dx + dy * dy <= rSq && acceptFilteredUnit(unitHandle, filterFunc))
+                    git->second->unitHandles.push_back(unitHandle);
             }
         }
         data->filterUnitHandle = -1;
         return JassValue::Null();
     });
-    vm_.RegisterNative("GroupEnumUnitsOfPlayer", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("GroupEnumUnitsOfPlayer", [data = data_, sim = sim_, filterFuncAt, acceptFilteredUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
         if (simId < 0) return JassValue::Null();
         auto git = data->groups.find(simId);
         if (git == data->groups.end()) return JassValue::Null();
         int playerSimId = data->GetSimHandle(args[1].intVal, JassHandleInfo::PLAYER);
+        const std::string filterFunc = filterFuncAt(args, 2);
         git->second->unitHandles.clear();
         if (sim) {
-            for (auto* unit : sim->GetUnits())
-                if (unit->GetPlayerIndex() == playerSimId)
-                    git->second->unitHandles.push_back(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
+            for (auto* unit : sim->GetUnits()) {
+                const int unitHandle = data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId());
+                if (unit->GetPlayerIndex() == playerSimId && acceptFilteredUnit(unitHandle, filterFunc))
+                    git->second->unitHandles.push_back(unitHandle);
+            }
         }
         data->filterUnitHandle = -1;
         return JassValue::Null();
     });
-    vm_.RegisterNative("GroupEnumUnitsInRect", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("GroupEnumUnitsInRect", [data = data_, sim = sim_, filterFuncAt, acceptFilteredUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         int gid = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
         if (gid < 0) return JassValue::Null();
@@ -984,12 +1003,14 @@ void JassNatives::RegisterGroupNatives() {
         if (rit == data->rects.end()) return JassValue::Null();
         float minX = rit->second->minX, minY = rit->second->minY;
         float maxX = rit->second->maxX, maxY = rit->second->maxY;
+        const std::string filterFunc = filterFuncAt(args, 2);
         git->second->unitHandles.clear();
         if (sim) {
             for (auto* unit : sim->GetUnits()) {
                 float ux = unit->GetX(), uy = unit->GetY();
-                if (ux >= minX && ux <= maxX && uy >= minY && uy <= maxY)
-                    git->second->unitHandles.push_back(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
+                const int unitHandle = data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId());
+                if (ux >= minX && ux <= maxX && uy >= minY && uy <= maxY && acceptFilteredUnit(unitHandle, filterFunc))
+                    git->second->unitHandles.push_back(unitHandle);
             }
         }
         data->filterUnitHandle = -1;
@@ -1062,11 +1083,12 @@ void JassNatives::RegisterGroupNatives() {
         if (git == data->groups.end()) return JassValue::Null();
         const std::string& funcName = args[1].strVal;
         if (funcName.empty()) return JassValue::Null();
+        const int previousEnumUnit = data->enumUnitHandle;
         for (int uh : git->second->unitHandles) {
             data->enumUnitHandle = uh;
             if (vmPtr) vmPtr->Execute(funcName);
         }
-        data->enumUnitHandle = -1;
+        data->enumUnitHandle = previousEnumUnit;
         return JassValue::Null();
     });
     vm_.RegisterNative("FirstOfGroup", [data = data_](const std::vector<JassValue>& args) -> JassValue {
@@ -3636,7 +3658,7 @@ void JassNatives::RegisterGameNatives() {
     });
 
     // ===== Extended Group Natives =====
-    vm_.RegisterNative("GroupEnumUnitsInRangeOfLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("GroupEnumUnitsInRangeOfLoc", [data = data_, sim = sim_, vmPtr = vmPtr_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
         if (simId < 0) return JassValue::Null();
@@ -3648,12 +3670,22 @@ void JassNatives::RegisterGameNatives() {
         if (lit == data->locations.end()) return JassValue::Null();
         float x = lit->second->x, y = lit->second->y, radius = args[2].realVal;
         float rSq = radius * radius;
+        const std::string filterFunc = (args.size() > 3 && args[3].type == JassValue::STRING) ? args[3].strVal : "";
         git->second->unitHandles.clear();
         if (sim) {
             for (auto* unit : sim->GetUnits()) {
                 float dx = unit->GetX() - x, dy = unit->GetY() - y;
-                if (dx * dx + dy * dy <= rSq)
-                    git->second->unitHandles.push_back(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
+                const int unitHandle = data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId());
+                if (dx * dx + dy * dy > rSq) continue;
+                bool accepted = true;
+                if (!filterFunc.empty() && vmPtr) {
+                    const int previousFilterUnit = data->filterUnitHandle;
+                    data->filterUnitHandle = unitHandle;
+                    accepted = JassValueToBool(vmPtr->CallFunction(filterFunc));
+                    data->filterUnitHandle = previousFilterUnit;
+                }
+                if (accepted)
+                    git->second->unitHandles.push_back(unitHandle);
             }
         }
         data->filterUnitHandle = -1;
