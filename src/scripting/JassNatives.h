@@ -186,6 +186,8 @@ public:
 
     int filterUnitHandle = -1;
     int enumUnitHandle = -1;
+    int filterItemHandle = -1;
+    int enumItemHandle = -1;
     float eventDamage = 0;
     int eventDamageSourceHandle = -1;
     int eventAttackingUnitHandle = -1;
@@ -241,6 +243,8 @@ struct JassQueuedContext {
     int currentTriggerUnitHandle = -1;
     int filterUnitHandle = -1;
     int enumUnitHandle = -1;
+    int filterItemHandle = -1;
+    int enumItemHandle = -1;
     float eventDamage = 0.0f;
     int eventDamageSourceHandle = -1;
     int eventAttackingUnitHandle = -1;

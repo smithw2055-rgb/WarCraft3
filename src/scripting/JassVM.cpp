@@ -95,16 +95,20 @@ JassValue JassVM::GetGlobal(const std::string& name) const {
 }
 
 void JassVM::Execute(const std::string& funcName) {
+    (void)CallFunction(funcName);
+}
+
+JassValue JassVM::CallFunction(const std::string& funcName) {
     auto it = functions_.find(funcName);
     if (it == functions_.end()) {
         // Try as a native call (some maps call natives via Execute)
         auto nat = natives_.find(funcName);
         if (nat != natives_.end()) {
-            nat->second({});
+            return nat->second({});
         }
-        return;
+        return JassValue::Null();
     }
-    ExecuteFunction(it->second, {});
+    return ExecuteFunction(it->second, {});
 }
 
 bool JassVM::HasFunction(const std::string& funcName) const {

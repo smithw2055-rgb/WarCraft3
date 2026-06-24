@@ -130,6 +130,22 @@ static CWidget* GetJassWidget(const std::shared_ptr<JassNativesData>& data,
     }
 }
 
+static bool JassValueToBool(const JassValue& value) {
+    switch (value.type) {
+    case JassValue::BOOLEAN:
+        return value.boolVal;
+    case JassValue::INTEGER:
+        return value.intVal != 0;
+    case JassValue::REAL:
+        return value.realVal != 0.0f;
+    case JassValue::STRING:
+        return !value.strVal.empty();
+    case JassValue::NULL_VAL:
+    default:
+        return false;
+    }
+}
+
 // ============================================================
 // JassNativesData
 // ============================================================
@@ -174,6 +190,8 @@ JassQueuedContext JassNatives::CaptureContext() const {
     context.currentTriggerUnitHandle = data_->currentTriggerUnitHandle;
     context.filterUnitHandle = data_->filterUnitHandle;
     context.enumUnitHandle = data_->enumUnitHandle;
+    context.filterItemHandle = data_->filterItemHandle;
+    context.enumItemHandle = data_->enumItemHandle;
     context.eventDamage = data_->eventDamage;
     context.eventDamageSourceHandle = data_->eventDamageSourceHandle;
     context.eventAttackingUnitHandle = data_->eventAttackingUnitHandle;
@@ -204,6 +222,8 @@ void JassNatives::ApplyContext(const JassQueuedContext& context) {
     data_->currentTriggerUnitHandle = context.currentTriggerUnitHandle;
     data_->filterUnitHandle = context.filterUnitHandle;
     data_->enumUnitHandle = context.enumUnitHandle;
+    data_->filterItemHandle = context.filterItemHandle;
+    data_->enumItemHandle = context.enumItemHandle;
     data_->eventDamage = context.eventDamage;
     data_->eventDamageSourceHandle = context.eventDamageSourceHandle;
     data_->eventAttackingUnitHandle = context.eventAttackingUnitHandle;
@@ -1938,6 +1958,47 @@ void JassNatives::RegisterItemNatives() {
         const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
         return JassValue::Bool(type ? type->perishable : false);
     });
+    vm_.RegisterNative("EnumItemsInRect", [data = data_, vmPtr = vmPtr_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        const int rectId = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
+        if (rectId < 0) return JassValue::Null();
+        auto rectIt = data->rects.find(rectId);
+        if (rectIt == data->rects.end()) return JassValue::Null();
+
+        const std::string filterFunc = (args.size() > 1 && args[1].type == JassValue::STRING) ? args[1].strVal : "";
+        const std::string actionFunc = (args.size() > 2 && args[2].type == JassValue::STRING) ? args[2].strVal : "";
+        const int previousFilterItem = data->filterItemHandle;
+        const int previousEnumItem = data->enumItemHandle;
+        const auto rect = rectIt->second;
+
+        std::vector<int> matchingItems;
+        for (const auto& [itemId, item] : data->items) {
+            if (!item || item->IsDead() || item->IsHidden()) continue;
+            const float x = item->GetX();
+            const float y = item->GetY();
+            if (x < rect->minX || x > rect->maxX || y < rect->minY || y > rect->maxY) continue;
+
+            const int itemHandle = data->AllocHandle(JassHandleInfo::ITEM, itemId);
+            bool accepted = true;
+            if (!filterFunc.empty() && vmPtr) {
+                data->filterItemHandle = itemHandle;
+                accepted = JassValueToBool(vmPtr->CallFunction(filterFunc));
+            }
+            if (accepted) {
+                matchingItems.push_back(itemHandle);
+            }
+        }
+
+        data->filterItemHandle = previousFilterItem;
+        if (!actionFunc.empty() && vmPtr) {
+            for (int itemHandle : matchingItems) {
+                data->enumItemHandle = itemHandle;
+                vmPtr->CallFunction(actionFunc);
+            }
+        }
+        data->enumItemHandle = previousEnumItem;
+        return JassValue::Null();
+    });
     vm_.RegisterNative("GetItemPlayer", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         auto* item = GetJassItem(data, args[0].intVal);
@@ -2380,12 +2441,12 @@ void JassNatives::RegisterTriggerNatives() {
         return JassValue::Bool(!args[0].boolVal);
     });
     vm_.RegisterNative("Condition", [](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        return JassValue::Int(args[0].intVal);
+        if (args.empty()) return JassValue::Null();
+        return args[0];
     });
     vm_.RegisterNative("Filter", [](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        return JassValue::Int(args[0].intVal);
+        if (args.empty()) return JassValue::Null();
+        return args[0];
     });
     vm_.RegisterNative("ExecuteFunc", [this](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
@@ -2403,6 +2464,12 @@ void JassNatives::RegisterEventNatives() {
     });
     vm_.RegisterNative("GetEnumUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->enumUnitHandle >= 0 ? JassValue::Int(data->enumUnitHandle) : JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetFilterItem", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return data->filterItemHandle >= 0 ? JassValue::Int(data->filterItemHandle) : JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetEnumItem", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return data->enumItemHandle >= 0 ? JassValue::Int(data->enumItemHandle) : JassValue::Int(0);
     });
     vm_.RegisterNative("GetEventDamage", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return JassValue::Real(data->eventDamage);

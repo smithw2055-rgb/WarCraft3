@@ -33,6 +33,7 @@ public:
     bool LoadScript(const std::string& source);
     bool LoadScriptFromMemory(const std::string& name, const uint8_t* data, size_t size);
     void Execute(const std::string& funcName = "main");
+    JassValue CallFunction(const std::string& funcName);
     bool HasFunction(const std::string& funcName) const;
 
     // Native function registration
