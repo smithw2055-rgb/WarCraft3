@@ -1477,14 +1477,17 @@ void JassNatives::RegisterRegionNatives() {
 // ============================================================
 void JassNatives::RegisterUnitNatives() {
     auto createUnitByTypeId = [data = data_, sim = sim_](int playerArg, War3ID typeId,
-                                                          float x, float y, float facing) -> JassValue {
+                                                          float x, float y, float facing,
+                                                          bool addTechUnlocked = true) -> JassValue {
         if (!sim) return JassValue::Null();
         const int playerId = ResolvePlayerId(data, playerArg);
         if (playerId < 0) return JassValue::Null();
         CUnit* unit = sim->CreateUnit(typeId, playerId, x, y, facing);
         if (!unit) return JassValue::Null();
-        if (CPlayer* player = sim->GetPlayer(playerId)) {
-            player->AddTechUnlocked(*sim, typeId);
+        if (addTechUnlocked) {
+            if (CPlayer* player = sim->GetPlayer(playerId)) {
+                player->AddTechUnlocked(*sim, typeId);
+            }
         }
         return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
     };
@@ -1541,6 +1544,24 @@ void JassNatives::RegisterUnitNatives() {
             }
         }
         return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)typeId), x, y, args[3].realVal);
+    });
+    vm_.RegisterNative("CreateCorpse", [data = data_, sim = sim_, createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue {
+        if (!sim || args.size() < 5) return JassValue::Null();
+        JassValue handle = createUnitByTypeId(args[0].intVal, War3ID((uint32_t)args[1].intVal),
+                                             args[2].realVal, args[3].realVal, args[4].realVal,
+                                             false);
+        int simId = data->GetSimHandle(handle.intVal, JassHandleInfo::UNIT);
+        if (simId >= 0) {
+            CUnit* unit = sim->GetUnit(simId);
+            if (unit) unit->SetLife(*sim, 0.0f);
+        }
+        return handle;
+    });
+    vm_.RegisterNative("BlzCreateUnitWithSkin", [createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 6) return JassValue::Null();
+        return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)args[1].intVal),
+                                  args[2].realVal, args[3].realVal, args[4].realVal,
+                                  false);
     });
     vm_.RegisterNative("RemoveUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (!sim || args.empty()) return JassValue::Null();
