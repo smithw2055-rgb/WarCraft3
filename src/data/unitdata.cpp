@@ -240,7 +240,93 @@ static bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModificat
     return true;
 }
 
+static int CopyObjectDataSection(TxtTable& txt, const SlkAccessor& slk,
+                                 const std::string& oldSection,
+                                 const std::string& newSection) {
+    if (oldSection.empty() || newSection.empty()) return 0;
+
+    int copied = 0;
+    const auto rowIt = slk.rowsById.find(oldSection);
+    if (slk.table && rowIt != slk.rowsById.end()) {
+        const int row = rowIt->second;
+        for (int col = 0; col < slk.table->Cols(); ++col) {
+            if (col >= (int)slk.table->colNames_.size()) continue;
+            const std::string& key = slk.table->colNames_[col];
+            if (key.empty()) continue;
+            const std::string value = slk.table->GetString(row, col);
+            if (value.empty()) continue;
+            txt.SetString(newSection, key, value);
+            copied++;
+        }
+    }
+
+    const auto oldTxtValues = txt.GetSection(oldSection);
+    for (const auto& [key, value] : oldTxtValues) {
+        txt.SetString(newSection, key, value);
+        copied++;
+    }
+    return copied;
+}
+
+static int CloneUnitObjectSection(const std::string& oldSection,
+                                  const std::string& newSection,
+                                  const SlkAccessor& unitData,
+                                  const SlkAccessor& unitAbilities,
+                                  const SlkAccessor& unitBalance,
+                                  const SlkAccessor& unitWeapons,
+                                  const SlkAccessor& unitUI,
+                                  TxtTable& unitDataTxt,
+                                  TxtTable& unitAbilitiesTxt,
+                                  TxtTable& unitBalanceTxt,
+                                  TxtTable& unitWeaponsTxt,
+                                  TxtTable& unitUITxt) {
+    int copied = 0;
+    copied += CopyObjectDataSection(unitDataTxt, unitData, oldSection, newSection);
+    copied += CopyObjectDataSection(unitAbilitiesTxt, unitAbilities, oldSection, newSection);
+    copied += CopyObjectDataSection(unitBalanceTxt, unitBalance, oldSection, newSection);
+    copied += CopyObjectDataSection(unitWeaponsTxt, unitWeapons, oldSection, newSection);
+    copied += CopyObjectDataSection(unitUITxt, unitUI, oldSection, newSection);
+    return copied;
+}
+
+static bool ApplyObjectModificationEntry(const ObjectModificationEntry& entry,
+                                         const std::string& section,
+                                         const SlkAccessor& meta,
+                                         TxtTable& unitDataTxt,
+                                         TxtTable& unitAbilitiesTxt,
+                                         TxtTable& unitBalanceTxt,
+                                         TxtTable& unitWeaponsTxt,
+                                         TxtTable& unitUITxt,
+                                         int& applied,
+                                         int& unknown) {
+    if (section.size() != 4) return false;
+    bool touched = false;
+    for (const auto& mod : entry.modifications) {
+        std::string slkName;
+        std::string fieldName;
+        if (!ResolveObjectModField(meta, mod, slkName, fieldName)) {
+            unknown++;
+            continue;
+        }
+        TxtTable* target = SelectUnitOverlayTable(
+            slkName, unitDataTxt, unitAbilitiesTxt, unitBalanceTxt, unitWeaponsTxt, unitUITxt);
+        if (!target) {
+            unknown++;
+            continue;
+        }
+        target->SetString(section, fieldName, FormatObjectModificationValue(mod));
+        applied++;
+        touched = true;
+    }
+    return touched;
+}
+
 static void ApplyMapUnitObjectMods(const MpqManager& mpq, const std::string& mapPath,
+                                   const SlkTable& unitDataSlk,
+                                   const SlkTable& unitAbilitiesSlk,
+                                   const SlkTable& unitBalanceSlk,
+                                   const SlkTable& unitWeaponsSlk,
+                                   const SlkTable& unitUISlk,
                                    TxtTable& unitDataTxt,
                                    TxtTable& unitAbilitiesTxt,
                                    TxtTable& unitBalanceTxt,
@@ -263,37 +349,49 @@ static void ApplyMapUnitObjectMods(const MpqManager& mpq, const std::string& map
     }
 
     const SlkAccessor meta(unitMetaSlk, {"ID"});
+    const SlkAccessor unitData(unitDataSlk, {"unitID", "unitDataID"});
+    const SlkAccessor unitAbilities(unitAbilitiesSlk, {"unitAbilID", "unitAbilitiesID", "unitID"});
+    const SlkAccessor unitBalance(unitBalanceSlk, {"unitBalanceID", "unitID"});
+    const SlkAccessor unitWeapons(unitWeaponsSlk, {"unitWeapID", "unitWeaponsID", "unitID"});
+    const SlkAccessor unitUI(unitUISlk, {"unitUIID", "unitID"});
+
     int applied = 0;
     int unknown = 0;
+    int customCloned = 0;
+    int customSkipped = 0;
+
+    for (const auto& entry : mods.custom) {
+        const std::string oldSection = entry.oldId.ToString();
+        const std::string newSection = entry.newId.ToString();
+        if (oldSection.size() != 4 || newSection.size() != 4) {
+            customSkipped++;
+            continue;
+        }
+        if (CloneUnitObjectSection(oldSection, newSection,
+                                   unitData, unitAbilities, unitBalance, unitWeapons, unitUI,
+                                   unitDataTxt, unitAbilitiesTxt, unitBalanceTxt, unitWeaponsTxt, unitUITxt) == 0) {
+            customSkipped++;
+            continue;
+        }
+        customCloned++;
+        ApplyObjectModificationEntry(entry, newSection, meta,
+                                     unitDataTxt, unitAbilitiesTxt, unitBalanceTxt,
+                                     unitWeaponsTxt, unitUITxt, applied, unknown);
+    }
+
     for (const auto& entry : mods.original) {
         const std::string section = entry.oldId.ToString();
-        if (section.size() != 4) continue;
-        for (const auto& mod : entry.modifications) {
-            std::string slkName;
-            std::string fieldName;
-            if (!ResolveObjectModField(meta, mod, slkName, fieldName)) {
-                unknown++;
-                continue;
-            }
-            TxtTable* target = SelectUnitOverlayTable(
-                slkName, unitDataTxt, unitAbilitiesTxt, unitBalanceTxt, unitWeaponsTxt, unitUITxt);
-            if (!target) {
-                unknown++;
-                continue;
-            }
-            target->SetString(section, fieldName, FormatObjectModificationValue(mod));
-            applied++;
-        }
+        ApplyObjectModificationEntry(entry, section, meta,
+                                     unitDataTxt, unitAbilitiesTxt, unitBalanceTxt,
+                                     unitWeaponsTxt, unitUITxt, applied, unknown);
     }
 
     std::cout << "ObjectMods: war3map.w3u original=" << mods.original.size()
               << " custom=" << mods.custom.size()
               << " applied=" << applied
-              << " unknown=" << unknown;
-    if (!mods.custom.empty()) {
-        std::cout << " customSkipped=" << mods.custom.size();
-    }
-    std::cout << std::endl;
+              << " unknown=" << unknown
+              << " customCloned=" << customCloned
+              << " customSkipped=" << customSkipped << std::endl;
 }
 
 static void ParseWar3IdList(const std::string& str, std::vector<War3ID>& out) {
@@ -668,6 +766,7 @@ CUnitData CUnitData::LoadFromMpq(const MpqManager& mpq,
         loadOverlayEverywhere(file);
     }
     ApplyMapUnitObjectMods(mpq, mapPath,
+                           unitDataSlk, unitAbilitiesSlk, unitBalanceSlk, unitWeaponsSlk, unitUISlk,
                            unitDataTxt, unitAbilitiesTxt, unitBalanceTxt,
                            unitWeaponsTxt, unitUITxt);
 
