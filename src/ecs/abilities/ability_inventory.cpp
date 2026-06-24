@@ -72,7 +72,12 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item) 
 }
 
 bool CAbilityInventory::DropItem(CSimulation& game, CUnit* unit, int slot) {
+    return DropItemAt(game, unit, slot, unit ? unit->GetX() : 0.0f, unit ? unit->GetY() : 0.0f);
+}
+
+bool CAbilityInventory::DropItemAt(CSimulation& game, CUnit* unit, int slot, float x, float y) {
     (void)game;
+    if (!unit) return false;
     if (!canDrop_ || slot < 0 || slot >= itemCapacity_) return false;
     if (!items_[slot]) return false;
 
@@ -85,14 +90,23 @@ bool CAbilityInventory::DropItem(CSimulation& game, CUnit* unit, int slot) {
         std::cout << "Removed item ability: " << abilityId.ToString() << std::endl;
     }
 
-    // Place item at unit's position
-    item->SetPosition(unit->GetX(), unit->GetY());
+    item->SetPosition(x, y);
     item->SetInInventory(false);
     item->SetInventorySlot(-1);
     item->SetOwner(nullptr);
 
     std::cout << "Dropped item from slot " << slot << std::endl;
     return true;
+}
+
+bool CAbilityInventory::DropItem(CSimulation& game, CUnit* unit, CItem* item) {
+    return DropItemAt(game, unit, item, unit ? unit->GetX() : 0.0f, unit ? unit->GetY() : 0.0f);
+}
+
+bool CAbilityInventory::DropItemAt(CSimulation& game, CUnit* unit, CItem* item, float x, float y) {
+    const int slot = FindItemSlot(item);
+    if (slot < 0) return false;
+    return DropItemAt(game, unit, slot, x, y);
 }
 
 bool CAbilityInventory::UseItem(CSimulation& game, CUnit* unit, int slot) {
@@ -112,11 +126,36 @@ bool CAbilityInventory::UseItem(CSimulation& game, CUnit* unit, int slot) {
         if (item->GetCharges() <= 0) {
             // Item consumed, remove from inventory
             items_[slot] = nullptr;
+            item->SetInInventory(false);
+            item->SetInventorySlot(-1);
+            item->SetOwner(nullptr);
             item->SetLife(game, 0); // destroy the item
             std::cout << "Item consumed (no charges left)" << std::endl;
         }
     }
 
+    return true;
+}
+
+bool CAbilityInventory::UseItem(CSimulation& game, CUnit* unit, CItem* item) {
+    const int slot = FindItemSlot(item);
+    if (slot < 0) return false;
+    return UseItem(game, unit, slot);
+}
+
+bool CAbilityInventory::MoveItemToSlot(CItem* item, int slot) {
+    if (slot < 0 || slot >= itemCapacity_ || !item) return false;
+    const int sourceSlot = FindItemSlot(item);
+    if (sourceSlot < 0) return false;
+    if (sourceSlot == slot) return true;
+
+    CItem* displaced = items_[slot];
+    items_[slot] = item;
+    items_[sourceSlot] = displaced;
+    item->SetInventorySlot(slot);
+    if (displaced) {
+        displaced->SetInventorySlot(sourceSlot);
+    }
     return true;
 }
 
@@ -140,11 +179,16 @@ int CAbilityInventory::FindEmptySlot() const {
     return -1;
 }
 
-bool CAbilityInventory::HasItem(CItem* item) const {
+int CAbilityInventory::FindItemSlot(CItem* item) const {
+    if (!item) return -1;
     for (int i = 0; i < itemCapacity_; i++) {
-        if (items_[i] == item) return true;
+        if (items_[i] == item) return i;
     }
-    return false;
+    return -1;
+}
+
+bool CAbilityInventory::HasItem(CItem* item) const {
+    return FindItemSlot(item) >= 0;
 }
 
 bool CAbilityInventory::CheckBeforeQueue(CSimulation& game, CUnit* caster, int orderId, CWidget* target) {

@@ -20,12 +20,18 @@ public:
     bool CanPickUpItem(CSimulation& game, CUnit* unit, CItem* item) const;
     bool PickUpItem(CSimulation& game, CUnit* unit, CItem* item);
     bool DropItem(CSimulation& game, CUnit* unit, int slot);
+    bool DropItemAt(CSimulation& game, CUnit* unit, int slot, float x, float y);
+    bool DropItem(CSimulation& game, CUnit* unit, CItem* item);
+    bool DropItemAt(CSimulation& game, CUnit* unit, CItem* item, float x, float y);
     bool UseItem(CSimulation& game, CUnit* unit, int slot);
+    bool UseItem(CSimulation& game, CUnit* unit, CItem* item);
+    bool MoveItemToSlot(CItem* item, int slot);
 
     // Slot access
     CItem* GetItem(int slot) const;
     int GetItemCount() const;
     int FindEmptySlot() const;
+    int FindItemSlot(CItem* item) const;
     bool HasItem(CItem* item) const;
 
     // Configuration
