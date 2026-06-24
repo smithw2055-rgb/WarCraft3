@@ -151,6 +151,7 @@ public:
     int nextTriggerId = 0x02000000;
     int currentTriggerId = -1;
     int currentTriggerUnitHandle = -1;
+    int currentTriggerEventId = 0;
 
     std::unordered_map<int, std::shared_ptr<JassTimer>> timers;
     int nextTimerId = 0x03000000;
@@ -246,6 +247,7 @@ public:
 struct JassQueuedContext {
     int currentTriggerId = -1;
     int currentTriggerUnitHandle = -1;
+    int currentTriggerEventId = 0;
     int filterUnitHandle = -1;
     int enumUnitHandle = -1;
     int filterItemHandle = -1;

@@ -170,6 +170,7 @@ JassQueuedContext JassNatives::CaptureContext() const {
     if (!data_) return context;
     context.currentTriggerId = data_->currentTriggerId;
     context.currentTriggerUnitHandle = data_->currentTriggerUnitHandle;
+    context.currentTriggerEventId = data_->currentTriggerEventId;
     context.filterUnitHandle = data_->filterUnitHandle;
     context.enumUnitHandle = data_->enumUnitHandle;
     context.filterItemHandle = data_->filterItemHandle;
@@ -203,6 +204,7 @@ void JassNatives::ApplyContext(const JassQueuedContext& context) {
     if (!data_) return;
     data_->currentTriggerId = context.currentTriggerId;
     data_->currentTriggerUnitHandle = context.currentTriggerUnitHandle;
+    data_->currentTriggerEventId = context.currentTriggerEventId;
     data_->filterUnitHandle = context.filterUnitHandle;
     data_->enumUnitHandle = context.enumUnitHandle;
     data_->filterItemHandle = context.filterItemHandle;
@@ -321,6 +323,7 @@ void JassNatives::FireUnitEvent(int unitSimHandle, int eventType) {
                 JassQueuedContext context = CaptureContext();
                 context.currentTriggerId = id;
                 context.currentTriggerUnitHandle = data_->AllocHandle(JassHandleInfo::UNIT, unitSimHandle);
+                context.currentTriggerEventId = eventType;
                 if (sim_) {
                     if (CUnit* unit = sim_->GetUnit(unitSimHandle)) {
                         context.eventTriggerPlayerHandle =
@@ -430,6 +433,14 @@ int JassNatives::UpdateTimers(float dt) {
 
                 JassQueuedContext triggerContext = context;
                 triggerContext.currentTriggerId = triggerId;
+                triggerContext.currentTriggerEventId = 0;
+                for (const auto& event : trigger->registeredEvents) {
+                    if ((event.first == id && event.second == 1001) ||
+                        (event.first == -1 && event.second == 1000 + id)) {
+                        triggerContext.currentTriggerEventId = event.second;
+                        break;
+                    }
+                }
                 const size_t before = queuedThreads_.size();
                 QueueTriggerActions(*trigger, triggerContext);
                 firedCount += static_cast<int>(queuedThreads_.size() - before);
@@ -2559,6 +2570,9 @@ void JassNatives::RegisterTriggerNatives() {
     vm_.RegisterNative("GetTriggeringTrigger", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->currentTriggerId >= 0 ? JassValue::Int(data->currentTriggerId) : JassValue::Null();
     });
+    vm_.RegisterNative("GetTriggerEventId", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(data->currentTriggerEventId);
+    });
     vm_.RegisterNative("GetTriggerUnit", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return data->currentTriggerUnitHandle >= 0 ? JassValue::Int(data->currentTriggerUnitHandle) : JassValue::Null();
     });
@@ -2568,6 +2582,7 @@ void JassNatives::RegisterTriggerNatives() {
         if (it == data_->triggers.end()) return JassValue::Bool(false);
         JassQueuedContext context = CaptureContext();
         context.currentTriggerId = args[0].intVal;
+        context.currentTriggerEventId = 0;
         return JassValue::Bool(EvaluateTriggerConditions(*it->second, context, false));
     });
     vm_.RegisterNative("TriggerExecute", [this](const std::vector<JassValue>& args) -> JassValue {
@@ -2576,6 +2591,7 @@ void JassNatives::RegisterTriggerNatives() {
         if (it == data_->triggers.end()) return JassValue::Null();
         JassQueuedContext context = CaptureContext();
         context.currentTriggerId = args[0].intVal;
+        context.currentTriggerEventId = 0;
         for (const auto& funcName : it->second->actionFuncNames) {
             QueueFunctionWithContext(funcName, context);
         }
@@ -2587,6 +2603,7 @@ void JassNatives::RegisterTriggerNatives() {
         if (it == data_->triggers.end()) return JassValue::Null();
         JassQueuedContext context = CaptureContext();
         context.currentTriggerId = args[0].intVal;
+        context.currentTriggerEventId = 0;
         for (const auto& funcName : it->second->actionFuncNames) {
             QueueFunctionWithContext(funcName, context);
         }
