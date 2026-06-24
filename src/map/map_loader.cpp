@@ -19,6 +19,9 @@ MapLoader::MapLoader(MpqManager& mpq, CSimulation& sim, CUnitData& unitData,
 void MapLoader::CreateTasks(const std::string& mapPath, int localPlayerIndex) {
     mapPath_ = mapPath;
     tasks_.clear();
+    unitsDoo_ = UnitsDooData{};
+    unitVisualSeeds_.clear();
+    unitLoadResult_ = UnitLoadResult{};
 
     tasks_.push_back([this]() { DetermineTileset(mapPath_); });
     tasks_.push_back([this]() { LoadWorldEditStrings(mapPath_); });
@@ -134,13 +137,31 @@ void MapLoader::LoadObjectModifications(const std::string& mapPath) {
 
 void MapLoader::CreateSimulation(int localPlayerIndex) {
     if (mpq_.ArchiveCount() == 0) return;
+    (void)localPlayerIndex;
 
-    // Create players (12 default; JASS config() can adjust slots later)
+    // Create players after config() so map-defined slots and start locations are available.
     for (int i = 0; i < 12; i++) {
-        auto player = std::make_unique<CPlayer>(i, "Player " + std::to_string(i + 1), CMapControl::USER);
+        CMapControl controller = CMapControl::USER;
+        if (configData_) {
+            const auto& playerConfig = configData_->playerMapConfig[i];
+            const bool active = playerConfig.slotActive
+                || (configData_->configuredPlayerCount > 0 && i < configData_->configuredPlayerCount);
+            controller = active ? CMapControl::USER : CMapControl::NONE;
+        }
+        auto player = std::make_unique<CPlayer>(i, "Player " + std::to_string(i + 1), controller);
         player->SetGold(500);
         player->SetLumber(200);
         player->SetFoodCap(10);
+        if (configData_) {
+            int startIndex = configData_->playerMapConfig[i].startLocationIndex;
+            if (startIndex < 0) startIndex = i;
+            if (startIndex >= 0 && startIndex < (int)configData_->startLocations.size()) {
+                const auto& start = configData_->startLocations[startIndex];
+                if (start.defined) {
+                    player->SetStartLocation(start.x, start.y);
+                }
+            }
+        }
         sim_.AddPlayer(std::move(player));
     }
     std::cout << "  Simulation: 12 players created" << std::endl;
@@ -176,7 +197,34 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
         std::cout << "  Units: failed to load units.doo" << std::endl;
         return;
     }
-    std::cout << "  Units: " << unitsDoo_.units.size() << " from map" << std::endl;
+    unitLoadResult_.mapUnitCount = unitsDoo_.units.size();
+    for (const auto& u : unitsDoo_.units) {
+        War3ID id(u.id);
+        CUnit* simUnit = nullptr;
+        if (unitData_.HasUnitType(id)) {
+            simUnit = sim_.CreateUnit(id, u.player, u.pos[0], u.pos[1], u.angle);
+            if (simUnit) {
+                unitLoadResult_.simCreated++;
+                UnitVisualSeed seed;
+                seed.handleId = simUnit->GetHandleId();
+                seed.scale[0] = u.scale[0];
+                seed.scale[1] = u.scale[1];
+                seed.scale[2] = u.scale[2];
+                seed.skinId = u.skinId;
+                seed.hitpoints = u.hitpoints;
+                seed.flags = u.flags;
+                unitVisualSeeds_.push_back(seed);
+                if (u.hitpoints > 0) simUnit->SetLife(sim_, (float)u.hitpoints);
+                if (u.mana > 0) simUnit->SetMana((float)u.mana);
+            }
+        }
+        if (!simUnit) {
+            if (scene_.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId))
+                unitLoadResult_.visualCreated++;
+        }
+    }
+    std::cout << "  Units: " << unitsDoo_.units.size() << " from map, "
+              << unitLoadResult_.simCreated << " simulation units" << std::endl;
 }
 
 void MapLoader::LoadSounds() {

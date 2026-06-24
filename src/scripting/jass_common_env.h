@@ -12,9 +12,10 @@ public:
     JassCommonEnv();
     ~JassCommonEnv();
 
-    bool Init(MpqManager& mpq, CSimulation* sim, const std::vector<std::string>& fileList,
+    bool Init(MpqManager& mpq, const std::string& mapPath, CSimulation* sim, const std::vector<std::string>& fileList,
               const std::shared_ptr<JassNativesData>& configData = nullptr);
     void Main();
+    int PumpQueuedThreads(int maxCount = 1024);
     void WireCallbacks(CSimulation& sim);
 
     JassVM& GetVM() { return vm_; }
@@ -23,8 +24,9 @@ public:
     std::shared_ptr<JassNativesData> GetData() const { return data_; }
 
 private:
-    void LoadJassFiles(MpqManager& mpq, const std::vector<std::string>& fileList);
+    void LoadJassFiles(MpqManager& mpq, const std::string& mapPath, const std::vector<std::string>& fileList);
     bool ReadFileFromMpq(MpqManager& mpq, const std::string& fileName, std::vector<uint8_t>& out);
+    bool ReadJassFile(MpqManager& mpq, const std::string& mapPath, const std::string& fileName, std::vector<uint8_t>& out);
 
     JassVM vm_;
     std::shared_ptr<JassNativesData> data_;

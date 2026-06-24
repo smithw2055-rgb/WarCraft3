@@ -85,6 +85,9 @@ std::unique_ptr<AstNode> JassParser::ParseProgram() {
                 SkipNewlines();
                 continue;
             }
+            if (Match(JassTokenType::KW_ARRAY)) {
+                decl->isArray = true;
+            }
             if (Peek().type == JassTokenType::IDENTIFIER) {
                 decl->text = Advance().text;
                 // Check for array keyword
@@ -125,6 +128,15 @@ std::unique_ptr<AstNode> JassParser::ParseGlobalBlock() {
         auto decl = std::make_unique<AstNode>(AstNodeType::GLOBAL_DECL);
         decl->isConstant = Match(JassTokenType::KW_CONSTANT);
         decl->returnType = ParseType();
+        if (decl->returnType == "nothing") {
+            errors_.push_back("Unexpected token '" + Peek().text + "' in globals at line " + std::to_string(Peek().line));
+            Advance();
+            SkipNewlines();
+            continue;
+        }
+        if (Match(JassTokenType::KW_ARRAY)) {
+            decl->isArray = true;
+        }
         if (Peek().type == JassTokenType::IDENTIFIER) {
             decl->text = Advance().text;
             // Check for array keyword
@@ -265,6 +277,9 @@ std::unique_ptr<AstNode> JassParser::ParseStatement() {
         auto stmt = std::make_unique<AstNode>(AstNodeType::SET_STMT);
         stmt->line = tok.line;
         stmt->returnType = ParseType();
+        if (Match(JassTokenType::KW_ARRAY)) {
+            stmt->isArray = true;
+        }
         stmt->text = Expect(JassTokenType::IDENTIFIER).text;
         // Check for array keyword
         if (Match(JassTokenType::KW_ARRAY)) {

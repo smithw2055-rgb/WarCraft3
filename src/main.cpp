@@ -134,7 +134,6 @@ static struct {
 
     std::string screenshotPath;
     int screenshotFrame = -1;
-    bool enableJass = false;
 
     float mouseDX = 0, mouseDY = 0, mouseScroll = 0;
     bool mouseDown[3] = {};
@@ -1998,10 +1997,11 @@ static void FlushStartupSimulationState() {
     for (int i = 0; i < maxStartupWarmupTicks; ++i) {
         const size_t unitCountBefore = g.simulation.GetUnits().size();
         const int firedTimers = g.jassNatives->UpdateTimers(CSimulation::SIM_STEP_TIME);
+        const int pumpedThreads = g.jassNatives->PumpQueuedThreads(1024);
         g.simulation.Update();
         SyncAllSimulationUnitVisuals();
         ReconcileSimulationUnitVisuals();
-        if (firedTimers == 0 && g.simulation.GetUnits().size() == unitCountBefore) {
+        if (firedTimers == 0 && pumpedThreads == 0 && g.simulation.GetUnits().size() == unitCountBefore) {
             break;
         }
     }
@@ -2853,6 +2853,7 @@ static void frame_cb() {
         while (g.simulationAccumulator >= simStep) {
             if (g.jassNatives) {
                 g.jassNatives->UpdateTimers(simStep);
+                g.jassNatives->PumpQueuedThreads(1024);
             }
             g.simulation.Update();
             g.simulationAccumulator -= simStep;
@@ -3042,23 +3043,26 @@ static void init_cb() {
     std::cout << "\nLoading: " << fs::path(g.mapPath).filename() << std::endl;
     g.scene.ResetLoadStats();
 
-    // --- Phase 1: map metadata, with optional JASS config() ---
+    // --- Phase 1: JASS config() ---
     W3ILoadFromMpq(g.mapPath, g.w3i);
     W3IPrint(g.w3i);
 
     JassConfigEnv configEnv;
-    if (g.enableJass && configEnv.Init(g.mpq, warsmashCfg.jassFileList)) {
+    std::shared_ptr<JassNativesData> configData;
+    if (g.mpq.ArchiveCount() > 0 && configEnv.Init(g.mpq, g.mapPath, warsmashCfg.jassFileList)) {
         configEnv.Config();
+        configData = configEnv.GetData();
         int playerCount = configEnv.GetConfiguredPlayerCount();
         if (playerCount > 0)
             std::cout << "JASS Config: " << playerCount << " players configured" << std::endl;
-    } else if (!g.enableJass) {
-        std::cout << "JASS: disabled for startup; pass --jass to run map scripts" << std::endl;
+    } else {
+        std::cerr << "JASS Config: unavailable; continuing with map data" << std::endl;
     }
 
     // --- Phase 2: Staged map loading [align with Java MapLoader] ---
     MapLoader mapLoader(g.mpq, g.simulation, g.unitData, g.destructableData,
                         g.scene, g.texturedTerrain, g.tileset, g.map, g.w3i, g.wpm);
+    mapLoader.SetConfigData(configData);
     mapLoader.CreateTasks(g.mapPath, 0);
 
     int stage = 0;
@@ -3073,79 +3077,44 @@ static void init_cb() {
     g.terrainLoaded = g.texturedTerrain.IsValid();
     g.scene.PrintLoadStats();
 
-    // Process units from units.doo into simulation
-    UnitsDooData unitsDoo;
-    if (UnitsDooLoadFromMpq(g.mapPath, unitsDoo, &g.w3i)) {
-        int simUnitCreated = 0, visualUnitCreated = 0, visualMissForSimUnits = 0;
-        for (auto& u : unitsDoo.units) {
-            War3ID id(u.id);
-            CUnit* simUnit = nullptr;
-            if (g.unitData.HasUnitType(id)) {
-                simUnit = g.simulation.CreateUnit(id, u.player, u.pos[0], u.pos[1], u.angle);
-                if (simUnit) {
-                    simUnitCreated++;
-                    g.simUnitVisualSeeds[simUnit->GetHandleId()] = {
-                        {u.scale[0], u.scale[1], u.scale[2]}, u.skinId, u.hitpoints, u.flags
-                    };
-                    if (u.hitpoints > 0) simUnit->SetLife(g.simulation, (float)u.hitpoints);
-                    if (u.mana > 0) simUnit->SetMana((float)u.mana);
-                }
-            }
-            if (!simUnit) {
-                if (g.scene.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId))
-                    visualUnitCreated++;
-            }
-        }
-        g.simulation.Update();
-        g.simulationInitialized = true;
-        g.ui.SetSimulation(&g.simulation);
-        for (auto* unit : g.simulation.GetUnits()) {
-            if (EnsureSimulationUnitVisual(unit)) visualUnitCreated++;
-            else visualMissForSimUnits++;
-        }
-        g.ui.SetUnitData(&g.unitData);
-        if (!g.simulation.GetUnits().empty()) {
-            g.ui.PopulateCommandCardForUnitType(g.simulation.GetUnits()[0]->GetTypeId());
-        }
-        std::cout << "Simulation: " << g.simulation.GetUnits().size() << " units" << std::endl;
-        std::cout << "SceneUnitSync: simCreated=" << simUnitCreated
-                  << " visualCreated=" << visualUnitCreated
-                  << " visualMissForSimUnits=" << visualMissForSimUnits << std::endl;
+    if (g.map.tileWidth == 0 || g.map.tileHeight == 0) {
+        std::cerr << "Initialization failed: terrain W3E did not load" << std::endl;
+        return;
     }
 
-    // --- Phase 3: optional JASS main() [align with Java loadCommon] ---
-    auto ReadMapFile = [](const std::string& mp, const std::string& fn, std::vector<uint8_t>& out) -> bool {
-        #ifndef WITHOUT_STORMLIB
-        HANDLE hMpq = nullptr;
-        if (!SFileOpenArchive(mp.c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) return false;
-        HANDLE hFile = nullptr;
-        if (!SFileOpenFileEx(hMpq, fn.c_str(), SFILE_OPEN_BASE_FILE, &hFile)) {
-            SFileCloseArchive(hMpq); return false;
-        }
-        DWORD sz = SFileGetFileSize(hFile, nullptr);
-        out.resize(sz);
-        DWORD read = 0;
-        SFileReadFile(hFile, out.data(), sz, &read, nullptr);
-        SFileCloseFile(hFile);
-        SFileCloseArchive(hMpq);
-        return true;
-        #else
-        (void)mp; (void)fn; (void)out; return false;
-        #endif
-    };
+    const auto& unitLoadResult = mapLoader.GetUnitLoadResult();
+    for (const auto& seed : mapLoader.GetUnitVisualSeeds()) {
+        g.simUnitVisualSeeds[seed.handleId] = {
+            {seed.scale[0], seed.scale[1], seed.scale[2]},
+            seed.skinId,
+            seed.hitpoints,
+            seed.flags
+        };
+    }
 
-    if (g.enableJass && g.mpq.ArchiveCount() > 0) {
-        std::vector<uint8_t> jassData;
-        if (ReadMapFile(g.mapPath, "war3map.j", jassData)) {
-            std::string jassSource((const char*)jassData.data(), jassData.size());
-            std::cout << "JASS: loaded war3map.j (" << jassSource.size() << " bytes)" << std::endl;
+    int visualUnitCreated = unitLoadResult.visualCreated;
+    int visualMissForSimUnits = unitLoadResult.visualMissForSimUnits;
+    g.simulation.Update();
+    g.simulationInitialized = true;
+    g.ui.SetSimulation(&g.simulation);
+    for (auto* unit : g.simulation.GetUnits()) {
+        if (EnsureSimulationUnitVisual(unit)) visualUnitCreated++;
+        else visualMissForSimUnits++;
+    }
+    g.ui.SetUnitData(&g.unitData);
+    if (!g.simulation.GetUnits().empty()) {
+        g.ui.PopulateCommandCardForUnitType(g.simulation.GetUnits()[0]->GetTypeId());
+    }
+    std::cout << "Simulation: " << g.simulation.GetUnits().size() << " units" << std::endl;
+    std::cout << "SceneUnitSync: simCreated=" << unitLoadResult.simCreated
+              << " visualCreated=" << visualUnitCreated
+              << " visualMissForSimUnits=" << visualMissForSimUnits << std::endl;
 
-            JassCommonEnv commonEnv;
-            if (commonEnv.Init(g.mpq, &g.simulation, warsmashCfg.jassFileList,
-                               configEnv.GetData())) {
-                // Wire callbacks
-                commonEnv.WireCallbacks(g.simulation);
-
+    // --- Phase 3: JASS common/main() [align with Java loadCommon] ---
+    if (g.mpq.ArchiveCount() > 0) {
+        JassCommonEnv commonEnv;
+        if (commonEnv.Init(g.mpq, g.mapPath, &g.simulation, warsmashCfg.jassFileList,
+                           configData)) {
                 auto* jassDataPtr = commonEnv.GetData().get();
                 jassDataPtr->camSetPosition = [](float x, float y, float z) {
                     g.camera.SetTarget(x, y, z); g.camera.ResetToHome(); };
@@ -3230,17 +3199,17 @@ static void init_cb() {
                     if (g.jassNatives) g.jassNatives->FireOrderEvent(uh, oi, th, x, y);
                 });
 
-                // Transfer natives ownership to global for timer updates in frame_cb
-                g.jassNatives = commonEnv.ReleaseNatives();
-
                 commonEnv.Main();
+                g.jassNatives = commonEnv.ReleaseNatives();
+                if (g.jassNatives) g.jassNatives->PumpQueuedThreads(4096);
                 g.simulation.Update();
                 EnsureHumanMeleeStartsFromMapConfig();
                 FlushStartupSimulationState();
-            }
+        } else {
+            std::cerr << "JASS Common: unavailable; terrain/static scene remains ready" << std::endl;
         }
-    } else if (!g.enableJass) {
-        std::cout << "JASS: main() skipped; terrain and static scene loaded" << std::endl;
+    } else {
+        std::cout << "JASS Common: skipped because no resource MPQs are open" << std::endl;
     }
 
     // Generate minimap
@@ -3277,10 +3246,6 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         if (std::strcmp(arg, "--screenshot") == 0 && i + 1 < argc) {
             g.screenshotPath = argv[++i];
             g.screenshotFrame = 1;
-        } else if (std::strcmp(arg, "--jass") == 0) {
-            g.enableJass = true;
-        } else if (std::strcmp(arg, "--no-jass") == 0) {
-            g.enableJass = false;
         } else if (std::strncmp(arg, "--run=", 6) == 0) {
             g.mapPath = arg + 6;
         } else if (std::strcmp(arg, "--run") == 0 && i + 1 < argc) {

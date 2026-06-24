@@ -1,26 +1,31 @@
 #include "JassVM.h"
 #include <cmath>
+#include <chrono>
 #include <sstream>
 
 JassVM::JassVM() {}
 
 bool JassVM::LoadScript(const std::string& source) {
-    errors_.clear();
+    auto started = std::chrono::steady_clock::now();
     JassLexer lexer(source);
     auto tokens = lexer.Tokenize();
+    auto lexed = std::chrono::steady_clock::now();
     if (!lexer.GetErrors().empty()) {
         for (auto& e : lexer.GetErrors()) errors_.push_back("Lexer: " + e);
     }
 
     JassParser parser(tokens);
-    program_ = parser.Parse();
+    auto program = parser.Parse();
+    auto parsed = std::chrono::steady_clock::now();
     if (!parser.GetErrors().empty()) {
         for (auto& e : parser.GetErrors()) errors_.push_back("Parser: " + e);
     }
 
     // Index functions, natives, and execute global initializers
-    if (program_) {
-        for (auto& child : program_->children) {
+    if (program) {
+        programs_.push_back(std::move(program));
+        auto* loadedProgram = programs_.back().get();
+        for (auto& child : loadedProgram->children) {
             if (child->type == AstNodeType::FUNCTION_DECL) {
                 functions_[child->text] = child.get();
             } else if (child->type == AstNodeType::GLOBAL_DECL) {
@@ -58,8 +63,16 @@ bool JassVM::LoadScript(const std::string& source) {
             }
         }
     }
+    auto initialized = std::chrono::steady_clock::now();
+    const auto lexMs = std::chrono::duration_cast<std::chrono::milliseconds>(lexed - started).count();
+    const auto parseMs = std::chrono::duration_cast<std::chrono::milliseconds>(parsed - lexed).count();
+    const auto initMs = std::chrono::duration_cast<std::chrono::milliseconds>(initialized - parsed).count();
+    std::cout << "JASS VM: load complete tokens=" << tokens.size()
+              << " lexMs=" << lexMs
+              << " parseMs=" << parseMs
+              << " initMs=" << initMs << std::endl;
 
-    return program_ != nullptr;
+    return !programs_.empty();
 }
 
 bool JassVM::LoadScriptFromMemory(const std::string& name, const uint8_t* data, size_t size) {
@@ -92,6 +105,10 @@ void JassVM::Execute(const std::string& funcName) {
         return;
     }
     ExecuteFunction(it->second, {});
+}
+
+bool JassVM::HasFunction(const std::string& funcName) const {
+    return functions_.find(funcName) != functions_.end();
 }
 
 JassValue JassVM::ExecuteFunction(const AstNode* func, const std::vector<JassValue>& args) {

@@ -78,6 +78,98 @@ JassNatives::JassNatives(JassVM& vm, CSimulation* sim)
 {
 }
 
+JassQueuedContext JassNatives::CaptureContext() const {
+    JassQueuedContext context;
+    if (!data_) return context;
+    context.currentTriggerId = data_->currentTriggerId;
+    context.currentTriggerUnitHandle = data_->currentTriggerUnitHandle;
+    context.filterUnitHandle = data_->filterUnitHandle;
+    context.enumUnitHandle = data_->enumUnitHandle;
+    context.eventDamage = data_->eventDamage;
+    context.eventDamageSourceHandle = data_->eventDamageSourceHandle;
+    context.eventAttackingUnitHandle = data_->eventAttackingUnitHandle;
+    context.eventSpellAbilityId = data_->eventSpellAbilityId;
+    context.eventSpellAbilityUnitHandle = data_->eventSpellAbilityUnitHandle;
+    context.eventSpellTargetX = data_->eventSpellTargetX;
+    context.eventSpellTargetY = data_->eventSpellTargetY;
+    context.eventSpellTargetUnitHandle = data_->eventSpellTargetUnitHandle;
+    context.eventTriggerPlayerHandle = data_->eventTriggerPlayerHandle;
+    context.eventTriggerWidgetHandle = data_->eventTriggerWidgetHandle;
+    context.eventEnteringUnitHandle = data_->eventEnteringUnitHandle;
+    context.eventLeavingUnitHandle = data_->eventLeavingUnitHandle;
+    context.eventManipulatingUnitHandle = data_->eventManipulatingUnitHandle;
+    context.eventManipulatedItemHandle = data_->eventManipulatedItemHandle;
+    context.eventOrderedUnitHandle = data_->eventOrderedUnitHandle;
+    context.eventIssuedOrderId = data_->eventIssuedOrderId;
+    context.eventKillingUnitHandle = data_->eventKillingUnitHandle;
+    context.eventDyingUnitHandle = data_->eventDyingUnitHandle;
+    context.eventRevivingUnitHandle = data_->eventRevivingUnitHandle;
+    context.eventTransportUnitHandle = data_->eventTransportUnitHandle;
+    context.eventLoadedUnitHandle = data_->eventLoadedUnitHandle;
+    return context;
+}
+
+void JassNatives::ApplyContext(const JassQueuedContext& context) {
+    if (!data_) return;
+    data_->currentTriggerId = context.currentTriggerId;
+    data_->currentTriggerUnitHandle = context.currentTriggerUnitHandle;
+    data_->filterUnitHandle = context.filterUnitHandle;
+    data_->enumUnitHandle = context.enumUnitHandle;
+    data_->eventDamage = context.eventDamage;
+    data_->eventDamageSourceHandle = context.eventDamageSourceHandle;
+    data_->eventAttackingUnitHandle = context.eventAttackingUnitHandle;
+    data_->eventSpellAbilityId = context.eventSpellAbilityId;
+    data_->eventSpellAbilityUnitHandle = context.eventSpellAbilityUnitHandle;
+    data_->eventSpellTargetX = context.eventSpellTargetX;
+    data_->eventSpellTargetY = context.eventSpellTargetY;
+    data_->eventSpellTargetUnitHandle = context.eventSpellTargetUnitHandle;
+    data_->eventTriggerPlayerHandle = context.eventTriggerPlayerHandle;
+    data_->eventTriggerWidgetHandle = context.eventTriggerWidgetHandle;
+    data_->eventEnteringUnitHandle = context.eventEnteringUnitHandle;
+    data_->eventLeavingUnitHandle = context.eventLeavingUnitHandle;
+    data_->eventManipulatingUnitHandle = context.eventManipulatingUnitHandle;
+    data_->eventManipulatedItemHandle = context.eventManipulatedItemHandle;
+    data_->eventOrderedUnitHandle = context.eventOrderedUnitHandle;
+    data_->eventIssuedOrderId = context.eventIssuedOrderId;
+    data_->eventKillingUnitHandle = context.eventKillingUnitHandle;
+    data_->eventDyingUnitHandle = context.eventDyingUnitHandle;
+    data_->eventRevivingUnitHandle = context.eventRevivingUnitHandle;
+    data_->eventTransportUnitHandle = context.eventTransportUnitHandle;
+    data_->eventLoadedUnitHandle = context.eventLoadedUnitHandle;
+}
+
+void JassNatives::QueueFunction(const std::string& functionName) {
+    QueueFunctionWithContext(functionName, CaptureContext());
+}
+
+void JassNatives::QueueFunctionWithContext(const std::string& functionName, const JassQueuedContext& context) {
+    if (functionName.empty()) return;
+    if (!vm_.HasFunction(functionName)) {
+        std::cerr << "JASS queue: missing function " << functionName << std::endl;
+        return;
+    }
+    queuedThreads_.push_back({functionName, context});
+}
+
+int JassNatives::PumpQueuedThreads(int maxCount) {
+    int pumped = 0;
+    while (!queuedThreads_.empty() && pumped < maxCount) {
+        auto thread = std::move(queuedThreads_.front());
+        queuedThreads_.pop_front();
+
+        JassQueuedContext previous = CaptureContext();
+        ApplyContext(thread.context);
+        vm_.Execute(thread.functionName);
+        ApplyContext(previous);
+        pumped++;
+    }
+    if (!queuedThreads_.empty()) {
+        std::cout << "JASS queue: pump limit reached, " << queuedThreads_.size()
+                  << " threads remain" << std::endl;
+    }
+    return pumped;
+}
+
 void JassNatives::FireUnitEvent(int unitSimHandle, int eventType) {
     for (auto& [id, trigger] : data_->triggers) {
         for (size_t i = 0; i < trigger->registeredUnitHandles.size(); i++) {
@@ -87,20 +179,16 @@ void JassNatives::FireUnitEvent(int unitSimHandle, int eventType) {
 
             int simHandle = data_->GetSimHandle(regUnitHandle, JassHandleInfo::UNIT);
             if (simHandle == unitSimHandle || regUnitHandle == 0) {
-                data_->currentTriggerId = id;
-                data_->currentTriggerUnitHandle = regUnitHandle;
-
+                JassQueuedContext context = CaptureContext();
+                context.currentTriggerId = id;
+                context.currentTriggerUnitHandle = regUnitHandle;
                 for (const auto& funcName : trigger->actionFuncNames) {
-                    if (!funcName.empty()) {
-                        vm_.Execute(funcName);
-                    }
+                    QueueFunctionWithContext(funcName, context);
                 }
                 break;
             }
         }
     }
-    data_->currentTriggerId = -1;
-    data_->currentTriggerUnitHandle = -1;
 }
 
 void JassNatives::FireDamageEvent(int unitSimHandle, int sourceSimHandle, float damage, int eventType) {
@@ -155,7 +243,7 @@ int JassNatives::UpdateTimers(float dt) {
         if (timer->remaining <= 0) {
             timer->remaining = 0;
             if (!timer->callbackFunc.empty()) {
-                vm_.Execute(timer->callbackFunc);
+                QueueFunction(timer->callbackFunc);
                 firedCount++;
             }
             if (timer->periodic) {
@@ -1932,9 +2020,9 @@ void JassNatives::RegisterTriggerNatives() {
         if (args.empty()) return JassValue::Int(0);
         return JassValue::Int(args[0].intVal);
     });
-    vm_.RegisterNative("ExecuteFunc", [vmPtr = vmPtr_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !vmPtr) return JassValue::Null();
-        vmPtr->Execute(args[0].strVal);
+    vm_.RegisterNative("ExecuteFunc", [this](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        QueueFunction(args[0].strVal);
         return JassValue::Null();
     });
 }

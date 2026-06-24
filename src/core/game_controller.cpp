@@ -225,7 +225,7 @@ void GameController::InitMapConfig() {
 
     // Phase 1 JASS: config environment
     configEnv_ = std::make_unique<JassConfigEnv>();
-    if (configEnv_->Init(mpq_, config_.jassFileList)) {
+    if (configEnv_->Init(mpq_, mapPath_, config_.jassFileList)) {
         configEnv_->Config();
 
         // Apply start locations from JASS config to player data
@@ -244,6 +244,7 @@ void GameController::InitLoading() {
     mapLoader_ = std::make_unique<MapLoader>(
         mpq_, simulation_, unitData_, destructableData_,
         scene_, texturedTerrain_, tileset_, map_, w3i_, wpm_);
+    mapLoader_->SetConfigData(configEnv_ ? configEnv_->GetData() : nullptr);
     mapLoader_->CreateTasks(mapPath_, 0);
     loadingProgress_ = 0.0f;
 
@@ -251,32 +252,16 @@ void GameController::InitLoading() {
 }
 
 void GameController::InitInGame() {
-    // Process units from units.doo into simulation
-    UnitsDooData unitsDoo;
-    if (UnitsDooLoadFromMpq(mapPath_, unitsDoo, &w3i_)) {
-        int simUnitCreated = 0;
-        int visualUnitCreated = 0;
-        int visualMissForSimUnits = 0;
-        for (auto& u : unitsDoo.units) {
-            War3ID id(u.id);
-            CUnit* simUnit = nullptr;
-            if (unitData_.HasUnitType(id)) {
-                simUnit = simulation_.CreateUnit(id, u.player, u.pos[0], u.pos[1], u.angle);
-                if (simUnit) {
-                    simUnitCreated++;
-                    simUnitVisualSeeds[simUnit->GetHandleId()] = {
-                        {u.scale[0], u.scale[1], u.scale[2]},
-                        u.skinId, u.hitpoints, u.flags
-                    };
-                    if (u.hitpoints > 0) simUnit->SetLife(simulation_, (float)u.hitpoints);
-                    if (u.mana > 0) simUnit->SetMana((float)u.mana);
-                }
-            }
-            if (!simUnit) {
-                if (scene_.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId))
-                    visualUnitCreated++;
-            }
+    if (mapLoader_) {
+        for (const auto& seed : mapLoader_->GetUnitVisualSeeds()) {
+            simUnitVisualSeeds[seed.handleId] = {
+                {seed.scale[0], seed.scale[1], seed.scale[2]},
+                seed.skinId, seed.hitpoints, seed.flags
+            };
         }
+        const auto& unitLoadResult = mapLoader_->GetUnitLoadResult();
+        int visualUnitCreated = unitLoadResult.visualCreated;
+        int visualMissForSimUnits = unitLoadResult.visualMissForSimUnits;
         simulation_.Update();
         simulationInitialized_ = true;
         ui_.SetSimulation(&simulation_);
@@ -287,7 +272,7 @@ void GameController::InitInGame() {
                 visualMissForSimUnits++;
         }
         std::cout << "Simulation: " << simulation_.GetUnits().size() << " units" << std::endl;
-        std::cout << "SceneUnitSync: simCreated=" << simUnitCreated
+        std::cout << "SceneUnitSync: simCreated=" << unitLoadResult.simCreated
                   << " visualCreated=" << visualUnitCreated
                   << " visualMissForSimUnits=" << visualMissForSimUnits << std::endl;
 
@@ -298,26 +283,18 @@ void GameController::InitInGame() {
         }
     }
 
-    // Load JASS war3map.j (from map MPQ, not resource MPQs)
     if (mpq_.ArchiveCount() > 0) {
-        std::vector<uint8_t> jassData;
-        ReadMapFile(mapPath_, "war3map.j", jassData);
-        if (!jassData.empty()) {
-            std::string jassSource((const char*)jassData.data(), jassData.size());
-            std::cout << "JASS: loaded war3map.j (" << jassSource.size() << " bytes)" << std::endl;
-
-            // Phase 2 JASS: common environment
-            commonEnv_ = std::make_unique<JassCommonEnv>();
-            if (commonEnv_->Init(mpq_, &simulation_, config_.jassFileList,
-                                 configEnv_ ? configEnv_->GetData() : nullptr)) {
-                WireJassCallbacks();
-                commonEnv_->Main();
-
-                // Flush any CreateUnit() calls from JASS
-                simulation_.Update();
-                EnsureHumanMeleeStartsFromMapConfig();
-                FlushStartupSimulationState();
-            }
+        commonEnv_ = std::make_unique<JassCommonEnv>();
+        if (commonEnv_->Init(mpq_, mapPath_, &simulation_, config_.jassFileList,
+                             configEnv_ ? configEnv_->GetData() : nullptr)) {
+            WireJassCallbacks();
+            commonEnv_->Main();
+            commonEnv_->PumpQueuedThreads(4096);
+            simulation_.Update();
+            EnsureHumanMeleeStartsFromMapConfig();
+            FlushStartupSimulationState();
+        } else {
+            std::cerr << "JASS Common: unavailable; terrain/static scene remains ready" << std::endl;
         }
     }
 

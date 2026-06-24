@@ -33,6 +33,7 @@ public:
     bool LoadScript(const std::string& source);
     bool LoadScriptFromMemory(const std::string& name, const uint8_t* data, size_t size);
     void Execute(const std::string& funcName = "main");
+    bool HasFunction(const std::string& funcName) const;
 
     // Native function registration
     using NativeFunc = std::function<JassValue(const std::vector<JassValue>&)>;
@@ -42,7 +43,7 @@ public:
     void SetGlobal(const std::string& name, const JassValue& val);
     JassValue GetGlobal(const std::string& name) const;
 
-    bool IsValid() const { return program_ != nullptr; }
+    bool IsValid() const { return !programs_.empty(); }
     const std::vector<std::string>& GetErrors() const { return errors_; }
 
 private:
@@ -54,7 +55,7 @@ private:
         std::unordered_map<std::string, JassValue> locals;
     };
 
-    std::unique_ptr<AstNode> program_;
+    std::vector<std::unique_ptr<AstNode>> programs_;
     std::unordered_map<std::string, JassValue> globals_;
     std::unordered_map<std::string, NativeFunc> natives_;
     std::unordered_map<std::string, const AstNode*> functions_;

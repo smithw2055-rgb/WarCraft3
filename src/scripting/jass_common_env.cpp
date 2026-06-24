@@ -1,10 +1,49 @@
 #include "jass_common_env.h"
 #include <iostream>
 #include <algorithm>
+#include <cctype>
 
 #ifndef WITHOUT_STORMLIB
 #include <StormLib.h>
 #endif
+
+namespace {
+
+std::string ToLowerCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    return value;
+}
+
+std::string BaseName(const std::string& path) {
+    size_t pos = path.find_last_of("\\/");
+    return pos == std::string::npos ? path : path.substr(pos + 1);
+}
+
+bool ReadFileFromMapArchive(const std::string& mapPath, const std::string& fileName,
+                            std::vector<uint8_t>& out) {
+#ifndef WITHOUT_STORMLIB
+    HANDLE hMpq = nullptr;
+    if (!SFileOpenArchive(mapPath.c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) return false;
+    HANDLE hFile = nullptr;
+    if (!SFileOpenFileEx(hMpq, fileName.c_str(), SFILE_OPEN_BASE_FILE, &hFile)) {
+        SFileCloseArchive(hMpq);
+        return false;
+    }
+    DWORD sz = SFileGetFileSize(hFile, nullptr);
+    out.resize(sz);
+    DWORD read = 0;
+    const bool ok = SFileReadFile(hFile, out.data(), sz, &read, nullptr) && read == sz;
+    SFileCloseFile(hFile);
+    SFileCloseArchive(hMpq);
+    return ok;
+#else
+    (void)mapPath; (void)fileName; (void)out;
+    return false;
+#endif
+}
+
+}
 
 JassCommonEnv::JassCommonEnv()
     : data_(std::make_shared<JassNativesData>())
@@ -35,10 +74,32 @@ bool JassCommonEnv::ReadFileFromMpq(MpqManager& mpq, const std::string& fileName
     return false;
 }
 
-void JassCommonEnv::LoadJassFiles(MpqManager& mpq, const std::vector<std::string>& fileList) {
+bool JassCommonEnv::ReadJassFile(MpqManager& mpq, const std::string& mapPath,
+                                 const std::string& fileName, std::vector<uint8_t>& out) {
+    out.clear();
+    const std::string base = BaseName(fileName);
+    const bool isMapScript = ToLowerCopy(base) == "war3map.j";
+
+    if (isMapScript) {
+        if (ReadFileFromMapArchive(mapPath, base, out)) return true;
+        if (base != fileName && ReadFileFromMapArchive(mapPath, fileName, out)) return true;
+    }
+
+    if (ReadFileFromMpq(mpq, fileName, out)) return true;
+    if (base != fileName && ReadFileFromMpq(mpq, base, out)) return true;
+
+    if (!isMapScript) {
+        if (ReadFileFromMapArchive(mapPath, fileName, out)) return true;
+        if (base != fileName && ReadFileFromMapArchive(mapPath, base, out)) return true;
+    }
+
+    return false;
+}
+
+void JassCommonEnv::LoadJassFiles(MpqManager& mpq, const std::string& mapPath, const std::vector<std::string>& fileList) {
     for (const auto& file : fileList) {
         std::vector<uint8_t> data;
-        if (ReadFileFromMpq(mpq, file, data) && !data.empty()) {
+        if (ReadJassFile(mpq, mapPath, file, data) && !data.empty()) {
             std::string source((const char*)data.data(), data.size());
             std::cout << "JASS Common: loading " << file << " (" << source.size() << " bytes)" << std::endl;
             vm_.LoadScript(source);
@@ -48,17 +109,9 @@ void JassCommonEnv::LoadJassFiles(MpqManager& mpq, const std::vector<std::string
     }
 }
 
-bool JassCommonEnv::Init(MpqManager& mpq, CSimulation* sim,
+bool JassCommonEnv::Init(MpqManager& mpq, const std::string& mapPath, CSimulation* sim,
                          const std::vector<std::string>& fileList,
                          const std::shared_ptr<JassNativesData>& configData) {
-    LoadJassFiles(mpq, fileList);
-
-    if (!vm_.IsValid()) {
-        for (auto& e : vm_.GetErrors())
-            std::cerr << "JASS Common parse error: " << e << std::endl;
-        return false;
-    }
-
     // If config phase ran before, carry over player/slot data
     if (configData) {
         data_->configuredPlayerCount = configData->configuredPlayerCount;
@@ -71,13 +124,35 @@ bool JassCommonEnv::Init(MpqManager& mpq, CSimulation* sim,
     natives_->SetData(data_);
     natives_->RegisterCommonNatives();
 
+    LoadJassFiles(mpq, mapPath, fileList);
+
+    if (!vm_.IsValid()) {
+        for (auto& e : vm_.GetErrors())
+            std::cerr << "JASS Common parse error: " << e << std::endl;
+        return false;
+    }
+
     return true;
 }
 
 void JassCommonEnv::Main() {
     if (!vm_.IsValid()) return;
-    std::cout << "JASS Common: executing main()" << std::endl;
-    vm_.Execute("main");
+    if (natives_ && vm_.HasFunction("abilities_main")) {
+        std::cout << "JASS Common: queue abilities_main" << std::endl;
+        natives_->QueueFunction("abilities_main");
+    } else {
+        std::cout << "JASS Common: abilities_main not found" << std::endl;
+    }
+    if (natives_ && vm_.HasFunction("main")) {
+        std::cout << "JASS Common: queue main" << std::endl;
+        natives_->QueueFunction("main");
+    } else {
+        std::cerr << "JASS Common: main() not found" << std::endl;
+    }
+}
+
+int JassCommonEnv::PumpQueuedThreads(int maxCount) {
+    return natives_ ? natives_->PumpQueuedThreads(maxCount) : 0;
 }
 
 void JassCommonEnv::WireCallbacks(CSimulation& sim) {

@@ -14,14 +14,31 @@
 #include "../render/textured_terrain.h"
 #include "../render/scene.h"
 #include "../asset/TileSet.h"
+#include "../scripting/JassNatives.h"
 #include <string>
 #include <deque>
 #include <functional>
 #include <memory>
+#include <cstdint>
 
 class MapLoader {
 public:
     using LoadTask = std::function<void()>;
+
+    struct UnitVisualSeed {
+        int handleId = -1;
+        float scale[3] = {1.0f, 1.0f, 1.0f};
+        uint32_t skinId = 0;
+        int hitpoints = 0;
+        int flags = 0;
+    };
+
+    struct UnitLoadResult {
+        int simCreated = 0;
+        int visualCreated = 0;
+        int visualMissForSimUnits = 0;
+        size_t mapUnitCount = 0;
+    };
 
     MapLoader(MpqManager& mpq, CSimulation& sim, CUnitData& unitData,
               CDestructableData& destructableData, SceneManager& scene,
@@ -29,11 +46,14 @@ public:
               W3EMap& mapData, W3iInfo& w3i, WpmData& wpm);
 
     void CreateTasks(const std::string& mapPath, int localPlayerIndex);
+    void SetConfigData(std::shared_ptr<JassNativesData> configData) { configData_ = std::move(configData); }
 
     bool Process();
     float GetCompletionRatio() const;
 
     const std::string& GetMapPath() const { return mapPath_; }
+    const std::vector<UnitVisualSeed>& GetUnitVisualSeeds() const { return unitVisualSeeds_; }
+    const UnitLoadResult& GetUnitLoadResult() const { return unitLoadResult_; }
 
 private:
     void LoadUnitDataTables();
@@ -65,4 +85,7 @@ private:
 
     UnitsDooData unitsDoo_;
     CGameplayConstants gameplayConstants_;
+    std::shared_ptr<JassNativesData> configData_;
+    std::vector<UnitVisualSeed> unitVisualSeeds_;
+    UnitLoadResult unitLoadResult_;
 };

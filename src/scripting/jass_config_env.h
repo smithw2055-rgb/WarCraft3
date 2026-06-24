@@ -13,7 +13,7 @@ public:
     JassConfigEnv();
     ~JassConfigEnv();
 
-    bool Init(MpqManager& mpq, const std::vector<std::string>& fileList);
+    bool Init(MpqManager& mpq, const std::string& mapPath, const std::vector<std::string>& fileList);
     void Config();
 
     JassVM& GetVM() { return vm_; }
@@ -24,8 +24,9 @@ public:
     const std::array<JassPlayerMapConfig, 24>& GetPlayerMapConfig() const { return data_->playerMapConfig; }
 
 private:
-    void LoadJassFiles(MpqManager& mpq, const std::vector<std::string>& fileList);
+    void LoadJassFiles(MpqManager& mpq, const std::string& mapPath, const std::vector<std::string>& fileList);
     bool ReadFileFromMpq(MpqManager& mpq, const std::string& fileName, std::vector<uint8_t>& out);
+    bool ReadJassFile(MpqManager& mpq, const std::string& mapPath, const std::string& fileName, std::vector<uint8_t>& out);
 
     JassVM vm_;
     std::shared_ptr<JassNativesData> data_;

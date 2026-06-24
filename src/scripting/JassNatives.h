@@ -6,6 +6,7 @@
 #include <vector>
 #include <functional>
 #include <array>
+#include <deque>
 
 // Forward declaration (avoid circular include)
 class CSimulation;
@@ -231,6 +232,39 @@ public:
     int GetCameraFieldId(const std::string& name) const;
 };
 
+struct JassQueuedContext {
+    int currentTriggerId = -1;
+    int currentTriggerUnitHandle = -1;
+    int filterUnitHandle = -1;
+    int enumUnitHandle = -1;
+    float eventDamage = 0.0f;
+    int eventDamageSourceHandle = -1;
+    int eventAttackingUnitHandle = -1;
+    int eventSpellAbilityId = 0;
+    int eventSpellAbilityUnitHandle = -1;
+    float eventSpellTargetX = 0.0f;
+    float eventSpellTargetY = 0.0f;
+    int eventSpellTargetUnitHandle = -1;
+    int eventTriggerPlayerHandle = -1;
+    int eventTriggerWidgetHandle = -1;
+    int eventEnteringUnitHandle = -1;
+    int eventLeavingUnitHandle = -1;
+    int eventManipulatingUnitHandle = -1;
+    int eventManipulatedItemHandle = -1;
+    int eventOrderedUnitHandle = -1;
+    int eventIssuedOrderId = 0;
+    int eventKillingUnitHandle = -1;
+    int eventDyingUnitHandle = -1;
+    int eventRevivingUnitHandle = -1;
+    int eventTransportUnitHandle = -1;
+    int eventLoadedUnitHandle = -1;
+};
+
+struct JassQueuedThread {
+    std::string functionName;
+    JassQueuedContext context;
+};
+
 class JassNatives {
 public:
     JassNatives(JassVM& vm, CSimulation* sim = nullptr);
@@ -248,10 +282,17 @@ public:
     void FireOrderEvent(int unitSimHandle, int orderId, int targetSimHandle, float x, float y);
 
     int UpdateTimers(float dt);
+    void QueueFunction(const std::string& functionName);
+    void QueueFunctionWithContext(const std::string& functionName, const JassQueuedContext& context);
+    int PumpQueuedThreads(int maxCount = 1024);
+    bool HasQueuedThreads() const { return !queuedThreads_.empty(); }
+    bool HasFunction(const std::string& functionName) const { return vm_.HasFunction(functionName); }
 
     std::shared_ptr<JassNativesData> GetData() const { return data_; }
 
 private:
+    JassQueuedContext CaptureContext() const;
+    void ApplyContext(const JassQueuedContext& context);
     void RegisterHandleNatives();
     void RegisterMathNatives();
     void RegisterConversionNatives();
@@ -285,4 +326,5 @@ private:
     JassVM& vm_;
     JassVM* vmPtr_ = nullptr;
     CSimulation* sim_ = nullptr;
+    std::deque<JassQueuedThread> queuedThreads_;
 };
