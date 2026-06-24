@@ -400,6 +400,11 @@ void GameController::InitLoading() {
 }
 
 void GameController::InitInGame() {
+    if (simulationInitialized_) {
+        std::cout << "InitInGame: already initialized; skipping duplicate entry" << std::endl;
+        return;
+    }
+
     if (mapLoader_) {
         for (const auto& seed : mapLoader_->GetUnitVisualSeeds()) {
             simUnitVisualSeeds[seed.handleId] = {
@@ -481,6 +486,10 @@ void GameController::RunSyncInit() {
     terrainLoaded_ = texturedTerrain_.IsValid();
     scene_.PrintLoadStats();
     InitInGame();
+
+    state_ = GameState::IN_GAME;
+    pendingState_ = GameState::IN_GAME;
+    stateTransition_ = false;
 }
 
 // --- Wire JASS callbacks ---
