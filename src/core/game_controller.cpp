@@ -517,10 +517,10 @@ void GameController::InitInGame() {
         commonEnv_ = std::make_unique<JassCommonEnv>();
         if (commonEnv_->Init(mpq_, mapPath_, &simulation_, config_.jassFileList,
                              configEnv_ ? configEnv_->GetData() : nullptr)) {
-            WireJassCallbacks();
             commonEnv_->Main();
             commonEnv_->PumpQueuedThreads(4096);
             jassNatives_ = commonEnv_->ReleaseNatives();
+            WireJassCallbacks();
             if (jassNatives_) jassNatives_->PumpQueuedThreads(4096);
             simulation_.Update();
             EnsureHumanMeleeStartsFromMapConfig();
@@ -596,10 +596,10 @@ void GameController::RunSyncInit() {
 // --- Wire JASS callbacks ---
 
 void GameController::WireJassCallbacks() {
-    if (!commonEnv_ || !commonEnv_->GetNatives()) return;
+    if (!jassNatives_) return;
 
-    auto* jassData = commonEnv_->GetData().get();
-    JassNatives* natives = commonEnv_->GetNatives();
+    auto* jassData = jassNatives_->GetData().get();
+    if (!jassData) return;
 
     jassData->camSetPosition = [this](float x, float y, float z) {
         camera_.SetTarget(x, y, z); camera_.ResetToHome();
@@ -683,8 +683,45 @@ void GameController::WireJassCallbacks() {
         simUnitVisualAnimationModes.erase(simHandle);
     };
 
-    // Wire commonEnv callbacks through simulation
-    commonEnv_->WireCallbacks(simulation_);
+    simulation_.SetUnitDeathCallback(
+        [this](int unitHandle, int killerHandle, int) {
+            if (jassNatives_) {
+                jassNatives_->FireDeathEvent(unitHandle, killerHandle, JASS_EVENT_UNIT_DEATH);
+            }
+        }
+    );
+
+    simulation_.SetUnitDamageCallback(
+        [this](int unitHandle, int sourceHandle, float damage) {
+            if (jassNatives_) {
+                jassNatives_->FireDamageEvent(unitHandle, sourceHandle, damage, JASS_EVENT_UNIT_DAMAGED);
+            }
+        }
+    );
+
+    simulation_.SetUnitOrderCallback(
+        [this](int unitHandle, int orderId, int targetHandle, float x, float y) {
+            if (jassNatives_) {
+                jassNatives_->FireOrderEvent(unitHandle, orderId, targetHandle, x, y);
+            }
+        }
+    );
+
+    simulation_.SetItemEventCallback(
+        [this](int unitHandle, int itemHandle, int eventType) {
+            if (jassNatives_) {
+                jassNatives_->FireItemEvent(unitHandle, itemHandle, eventType);
+            }
+        }
+    );
+
+    simulation_.SetItemRemovedCallback(
+        [this](int itemHandle) {
+            if (jassNatives_) {
+                jassNatives_->ForgetItem(itemHandle);
+            }
+        }
+    );
 }
 
 // --- Update ---

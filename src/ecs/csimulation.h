@@ -106,6 +106,10 @@ public:
         itemEventCallback_ = std::move(cb);
     }
     const std::function<void(int, int, int)>& GetItemEventCallback() const { return itemEventCallback_; }
+    void SetItemRemovedCallback(std::function<void(int itemHandle)> cb) {
+        itemRemovedCallback_ = std::move(cb);
+    }
+    const std::function<void(int)>& GetItemRemovedCallback() const { return itemRemovedCallback_; }
 
 private:
     void ProcessUnitRemovals();
@@ -155,4 +159,5 @@ private:
     std::function<void(int, int, float)> unitDamageCallback_;
     std::function<void(int, int, int, float, float)> unitOrderCallback_;
     std::function<void(int, int, int)> itemEventCallback_;
+    std::function<void(int)> itemRemovedCallback_;
 };

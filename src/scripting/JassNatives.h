@@ -291,6 +291,7 @@ public:
     void FireDamageEvent(int unitSimHandle, int sourceSimHandle, float damage, int eventType);
     void FireOrderEvent(int unitSimHandle, int orderId, int targetSimHandle, float x, float y);
     void FireItemEvent(int unitSimHandle, int itemSimHandle, int eventType);
+    void ForgetItem(int itemSimHandle);
 
     int UpdateTimers(float dt);
     void QueueFunction(const std::string& functionName);

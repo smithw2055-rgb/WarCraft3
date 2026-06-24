@@ -418,6 +418,11 @@ void CSimulation::ProcessNewDestructables() {
 
 void CSimulation::ProcessItemRemovals() {
     for (auto* item : removedItems_) {
+        const int handleId = item->GetHandleId();
+        if (itemRemovedCallback_) {
+            itemRemovedCallback_(handleId);
+        }
+
         if (worldCollision_) {
             worldCollision_->RemoveItem(item);
         }
@@ -427,7 +432,7 @@ void CSimulation::ProcessItemRemovals() {
             items_.erase(it);
         }
 
-        itemMap_.erase(item->GetHandleId());
+        itemMap_.erase(handleId);
     }
     removedItems_.clear();
 }

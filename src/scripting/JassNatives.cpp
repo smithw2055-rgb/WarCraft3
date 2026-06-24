@@ -362,6 +362,13 @@ void JassNatives::FireItemEvent(int unitSimHandle, int itemSimHandle, int eventT
     data_->eventManipulatedItemHandle = -1;
 }
 
+void JassNatives::ForgetItem(int itemSimHandle) {
+    if (itemSimHandle < 0) {
+        return;
+    }
+    data_->items.erase(itemSimHandle);
+}
+
 int JassNatives::UpdateTimers(float dt) {
     int firedCount = 0;
     for (auto& [id, timer] : data_->timers) {
