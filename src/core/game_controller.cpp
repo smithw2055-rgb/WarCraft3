@@ -523,6 +523,10 @@ void GameController::InitInGame() {
             WireJassCallbacks();
             if (jassNatives_) jassNatives_->PumpQueuedThreads(4096);
             simulation_.Update();
+            if (jassNatives_) {
+                jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
+                jassNatives_->PumpQueuedThreads(1024);
+            }
             EnsureHumanMeleeStartsFromMapConfig();
             FlushStartupSimulationState();
         } else {
@@ -835,11 +839,11 @@ void GameController::StepSimulation(float dt) {
     simulationAccumulator_ = std::min(simulationAccumulator_ + dt, simStep * 3.0f);
     bool ranSimulationStep = false;
     while (simulationAccumulator_ >= simStep) {
+        simulation_.Update();
         if (jassNatives_) {
             jassNatives_->UpdateTimers(simStep);
             jassNatives_->PumpQueuedThreads(1024);
         }
-        simulation_.Update();
         simulationAccumulator_ -= simStep;
         ranSimulationStep = true;
     }
@@ -1385,9 +1389,9 @@ void GameController::FlushStartupSimulationState() {
     constexpr int maxWarmup = 4;
     for (int i = 0; i < maxWarmup; ++i) {
         size_t before = simulation_.GetUnits().size();
+        simulation_.Update();
         int timers = jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
         int pumped = jassNatives_->PumpQueuedThreads(1024);
-        simulation_.Update();
         SyncAndReconcileVisuals();
         if (timers == 0 && pumped == 0 && simulation_.GetUnits().size() == before) break;
     }
