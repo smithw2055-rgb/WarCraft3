@@ -215,3 +215,9 @@ bool LoadWar3MapDestructableMods(const std::string& mapPath,
                                   WtsTable* wts) {
     return LoadWar3MapObjectMods(mapPath, "war3map.w3b", false, out, wts);
 }
+
+bool LoadWar3MapItemMods(const std::string& mapPath,
+                         ObjectModificationSet& out,
+                         WtsTable* wts) {
+    return LoadWar3MapObjectMods(mapPath, "war3map.w3t", false, out, wts);
+}

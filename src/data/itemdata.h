@@ -32,6 +32,7 @@ public:
     const CItemType* GetItem(War3ID id) const;
 
     static CItemData LoadFromMpq(const class MpqManager& mpq);
+    static CItemData LoadFromMpq(const class MpqManager& mpq, const std::string& mapPath);
 
 private:
     std::unordered_map<War3ID, std::unique_ptr<CItemType>> items_;

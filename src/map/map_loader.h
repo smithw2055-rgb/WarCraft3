@@ -4,6 +4,7 @@
 #include "../ecs/player.h"
 #include "../data/unitdata.h"
 #include "../data/destructabledata.h"
+#include "../data/itemdata.h"
 #include "../data/gameplay_constants.h"
 #include "../map/w3i.h"
 #include "../map/wpm.h"
@@ -41,7 +42,7 @@ public:
     };
 
     MapLoader(MpqManager& mpq, CSimulation& sim, CUnitData& unitData,
-              CDestructableData& destructableData, SceneManager& scene,
+              CDestructableData& destructableData, CItemData& itemData, SceneManager& scene,
               TexturedTerrain& terrain, TileSet& tileset,
               W3EMap& mapData, W3iInfo& w3i, WpmData& wpm);
 
@@ -74,6 +75,7 @@ private:
     CSimulation& sim_;
     CUnitData& unitData_;
     CDestructableData& destructableData_;
+    CItemData& itemData_;
     SceneManager& scene_;
     TexturedTerrain& terrain_;
     TileSet& tileset_;

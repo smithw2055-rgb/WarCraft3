@@ -24,6 +24,8 @@ public:
     CUnitData* GetUnitData() const { return unitData_; }
     void SetDestructableData(CDestructableData* data) { destructableData_ = data; }
     CDestructableData* GetDestructableData() const { return destructableData_; }
+    void SetItemData(CItemData* data) { itemData_ = data; }
+    CItemData* GetItemData() const { return itemData_; }
     void SetGameplayConstants(const CGameplayConstants& c) { gameplayConstants_ = c; }
     const CGameplayConstants& GetGameplayConstants() const { return gameplayConstants_; }
 

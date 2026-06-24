@@ -6,11 +6,11 @@
 #include <iostream>
 
 MapLoader::MapLoader(MpqManager& mpq, CSimulation& sim, CUnitData& unitData,
-                     CDestructableData& destructableData, SceneManager& scene,
+                     CDestructableData& destructableData, CItemData& itemData, SceneManager& scene,
                      TexturedTerrain& terrain, TileSet& tileset,
                      W3EMap& mapData, W3iInfo& w3i, WpmData& wpm)
     : mpq_(mpq), sim_(sim), unitData_(unitData),
-      destructableData_(destructableData), scene_(scene),
+      destructableData_(destructableData), itemData_(itemData), scene_(scene),
       terrain_(terrain), tileset_(tileset),
       mapData_(mapData), w3i_(w3i), wpm_(wpm)
 {
@@ -77,8 +77,10 @@ void MapLoader::LoadUnitDataTables() {
     if (mpq_.ArchiveCount() > 0) {
         unitData_ = CUnitData::LoadFromMpq(mpq_, gameplayConstants_);
         destructableData_ = CDestructableData::LoadFromMpq(mpq_);
+        itemData_ = CItemData::LoadFromMpq(mpq_);
         sim_.SetUnitData(&unitData_);
         sim_.SetDestructableData(&destructableData_);
+        sim_.SetItemData(&itemData_);
         sim_.SetGameplayConstants(gameplayConstants_);
         std::cout << "  UnitData: " << unitData_.GetAllTypes().size() << " types loaded" << std::endl;
     }
@@ -144,8 +146,10 @@ void MapLoader::LoadObjectModifications(const std::string& mapPath) {
     if (mpq_.ArchiveCount() > 0) {
         unitData_ = CUnitData::LoadFromMpq(mpq_, gameplayConstants_, mapPath);
         destructableData_ = CDestructableData::LoadFromMpq(mpq_, mapPath);
+        itemData_ = CItemData::LoadFromMpq(mpq_, mapPath);
         sim_.SetUnitData(&unitData_);
         sim_.SetDestructableData(&destructableData_);
+        sim_.SetItemData(&itemData_);
         scene_.ApplyMapObjectModifications(mapPath);
     }
     std::cout << "  Object modifications applied" << std::endl;

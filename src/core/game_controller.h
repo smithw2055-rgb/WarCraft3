@@ -22,6 +22,7 @@
 #include "../ecs/abilities/ability_harvest.h"
 #include "../data/unitdata.h"
 #include "../data/destructabledata.h"
+#include "../data/itemdata.h"
 #include "../data/gameplay_constants.h"
 #include "../ui/MainUI.h"
 #include "../audio/AudioSystem.h"
@@ -73,6 +74,7 @@ public:
     MpqManager& GetMpq() { return mpq_; }
     CUnitData& GetUnitData() { return unitData_; }
     CDestructableData& GetDestructableData() { return destructableData_; }
+    CItemData& GetItemData() { return itemData_; }
     const W3EMap& GetMapData() const { return map_; }
     const W3iInfo& GetW3i() const { return w3i_; }
     const WpmData& GetWpm() const { return wpm_; }
@@ -218,6 +220,7 @@ private:
     CSimulation simulation_;
     CUnitData unitData_;
     CDestructableData destructableData_;
+    CItemData itemData_;
     WpmData wpm_;
     bool simulationInitialized_ = false;
 

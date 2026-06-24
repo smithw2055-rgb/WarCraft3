@@ -45,6 +45,10 @@ bool LoadWar3MapDestructableMods(const std::string& mapPath,
                                   ObjectModificationSet& out,
                                   WtsTable* wts = nullptr);
 
+bool LoadWar3MapItemMods(const std::string& mapPath,
+                         ObjectModificationSet& out,
+                         WtsTable* wts = nullptr);
+
 bool LoadWar3MapObjectMods(const std::string& mapPath,
                            const char* fileName,
                            bool extended,
