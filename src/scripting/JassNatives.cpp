@@ -52,12 +52,18 @@ static void ApplyItemTypeData(CItem& item, CSimulation* sim) {
     }
     item.SetName(type->name);
     item.SetIcon(type->iconPath);
+    item.SetAbilityList(type->abilityList);
+    item.SetMaxLife((float)type->maxLife);
+    item.SetLife(*sim, (float)type->maxLife);
     item.SetGoldValue(type->goldCost);
     item.SetLumberValue(type->lumberCost);
     item.SetCharges(type->charges);
     item.SetPerishable(type->perishable);
     item.SetPowerup(type->powerup);
     item.SetUseAutomatically(type->useOnly);
+    item.SetDroppable(type->droppable);
+    item.SetPawnable(type->pawnable);
+    item.SetDroppedOnDeath(type->dropOnDeath);
     if (type->charges > 0) {
         item.SetCharged(true);
     }
@@ -1798,6 +1804,39 @@ void JassNatives::RegisterItemNatives() {
         }
         return JassValue::Null();
     });
+    vm_.RegisterNative("SetItemDropOnDeath", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetDroppedOnDeath(args[1].boolVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetItemDroppable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetDroppable(args[1].boolVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetItemPawnable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetPawnable(args[1].boolVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetItemInvulnerable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetInvulnerable(args[1].boolVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("IsItemInvulnerable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Bool(item ? item->IsInvulnerable() : false);
+    });
     vm_.RegisterNative("GetItemPlayer", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         auto* item = GetJassItem(data, args[0].intVal);
@@ -1823,6 +1862,18 @@ void JassNatives::RegisterItemNatives() {
         if (args.empty()) return JassValue::Str("");
         auto* item = GetJassItem(data, args[0].intVal);
         return JassValue::Str(item ? item->GetName() : "");
+    });
+    vm_.RegisterNative("GetItemUserData", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        auto* item = GetJassItem(data, args[0].intVal);
+        return JassValue::Int(item ? item->GetUserData() : 0);
+    });
+    vm_.RegisterNative("SetItemUserData", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* item = GetJassItem(data, args[0].intVal)) {
+            item->SetUserData(args[1].intVal);
+        }
+        return JassValue::Null();
     });
     vm_.RegisterNative("UnitAddItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Bool(false);

@@ -74,12 +74,18 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
     if (itemType) {
         item->SetName(itemType->name);
         item->SetIcon(itemType->iconPath);
+        item->SetAbilityList(itemType->abilityList);
+        item->SetMaxLife((float)itemType->maxLife);
+        item->SetLife(game, (float)itemType->maxLife);
         item->SetGoldValue(itemType->goldCost);
         item->SetLumberValue(itemType->lumberCost);
         item->SetCharges(itemType->charges);
         item->SetPerishable(itemType->perishable);
         item->SetPowerup(itemType->powerup);
         item->SetUseAutomatically(itemType->useOnly);
+        item->SetDroppable(itemType->droppable);
+        item->SetPawnable(itemType->pawnable);
+        item->SetDroppedOnDeath(itemType->dropOnDeath);
         if (itemType->charges > 0) {
             item->SetCharged(true);
         }

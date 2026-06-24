@@ -303,6 +303,22 @@ void CollectItemIds(const SlkAccessor& slk, const TxtTable& txt, std::set<std::s
     }
 }
 
+void ParseWar3IdList(const std::string& str, std::vector<War3ID>& out) {
+    size_t start = 0;
+    while (start < str.size()) {
+        size_t end = str.find(',', start);
+        if (end == std::string::npos) {
+            end = str.size();
+        }
+        std::string token = str.substr(start, end - start);
+        token = TrimCopy(token);
+        if (token.size() == 4) {
+            out.push_back(War3ID::FromString(token));
+        }
+        start = end + 1;
+    }
+}
+
 }
 
 CItemData CItemData::LoadFromMpq(const MpqManager& mpq) {
@@ -341,13 +357,20 @@ CItemData CItemData::LoadFromMpq(const MpqManager& mpq, const std::string& mapPa
     const int nameColumn = FindFirstColumn(itemSlk, {"Name"});
     const int fileColumn = FindFirstColumn(itemSlk, {"file"});
     const int artColumn = FindFirstColumn(itemSlk, {"Art"});
+    const int abilityListColumn = FindFirstColumn(itemSlk, {"abilList"});
     const int goldColumn = FindFirstColumn(itemSlk, {"goldcost", "goldCost"});
     const int lumberColumn = FindFirstColumn(itemSlk, {"lumbercost", "lumberCost"});
+    const int maxLifeColumn = FindFirstColumn(itemSlk, {"HP"});
     const int levelColumn = FindFirstColumn(itemSlk, {"Level", "level"});
     const int chargesColumn = FindFirstColumn(itemSlk, {"uses", "charges"});
     const int perishableColumn = FindFirstColumn(itemSlk, {"perishable"});
     const int powerupColumn = FindFirstColumn(itemSlk, {"powerup"});
     const int useOnlyColumn = FindFirstColumn(itemSlk, {"usable", "useOnly"});
+    const int ignoreCooldownColumn = FindFirstColumn(itemSlk, {"ignoreCD"});
+    const int droppableColumn = FindFirstColumn(itemSlk, {"droppable"});
+    const int pawnableColumn = FindFirstColumn(itemSlk, {"pawnable"});
+    const int dropOnDeathColumn = FindFirstColumn(itemSlk, {"drop"});
+    const int sellableColumn = FindFirstColumn(itemSlk, {"sellable"});
     const int stockColumn = FindFirstColumn(itemSlk, {"stock"});
     const int stockRegenColumn = FindFirstColumn(itemSlk, {"stockRegen"});
     const int stockMaxColumn = FindFirstColumn(itemSlk, {"stockMax"});
@@ -370,13 +393,21 @@ CItemData CItemData::LoadFromMpq(const MpqManager& mpq, const std::string& mapPa
         if (item->legacyName.empty()) item->legacyName = item->name;
         item->modelPath = GetMergedString(itemSlk, row, fileColumn, skinTbl, sid, "file");
         item->iconPath = GetMergedString(itemSlk, row, artColumn, skinTbl, sid, "Art");
+        ParseWar3IdList(GetMergedString(itemSlk, row, abilityListColumn, skinTbl, sid, "abilList"),
+                        item->abilityList);
         item->goldCost = GetMergedInt(itemSlk, row, goldColumn, skinTbl, sid, "goldCost", 0);
         item->lumberCost = GetMergedInt(itemSlk, row, lumberColumn, skinTbl, sid, "lumberCost", 0);
+        item->maxLife = GetMergedInt(itemSlk, row, maxLifeColumn, skinTbl, sid, "HP", 50);
         item->level = GetMergedInt(itemSlk, row, levelColumn, skinTbl, sid, "level", 0);
         item->charges = GetMergedInt(itemSlk, row, chargesColumn, skinTbl, sid, "charges", 0);
         item->perishable = GetMergedInt(itemSlk, row, perishableColumn, skinTbl, sid, "perishable", 0) != 0;
         item->powerup = GetMergedInt(itemSlk, row, powerupColumn, skinTbl, sid, "powerup", 0) != 0;
         item->useOnly = GetMergedInt(itemSlk, row, useOnlyColumn, skinTbl, sid, "useOnly", 0) != 0;
+        item->ignoreCooldown = GetMergedInt(itemSlk, row, ignoreCooldownColumn, skinTbl, sid, "ignoreCD", 0) != 0;
+        item->droppable = GetMergedInt(itemSlk, row, droppableColumn, skinTbl, sid, "droppable", 0) != 0;
+        item->pawnable = GetMergedInt(itemSlk, row, pawnableColumn, skinTbl, sid, "pawnable", 0) != 0;
+        item->dropOnDeath = GetMergedInt(itemSlk, row, dropOnDeathColumn, skinTbl, sid, "drop", 0) != 0;
+        item->sellable = GetMergedInt(itemSlk, row, sellableColumn, skinTbl, sid, "sellable", 0) != 0;
         item->stockable = GetMergedInt(itemSlk, row, stockColumn, skinTbl, sid, "stock", 0) != 0;
         item->stockRegen = GetMergedInt(itemSlk, row, stockRegenColumn, skinTbl, sid, "stockRegen", 0);
         item->stockMax = GetMergedInt(itemSlk, row, stockMaxColumn, skinTbl, sid, "stockMax", 0);

@@ -60,6 +60,7 @@ public:
 
     // Abilities granted by this item
     const std::vector<War3ID>& GetAbilityList() const { return abilityList_; }
+    void SetAbilityList(const std::vector<War3ID>& ids) { abilityList_ = ids; }
     void AddAbility(War3ID id) { abilityList_.push_back(id); }
 
     // Owner
@@ -93,6 +94,9 @@ public:
     const std::string& GetTooltip() const { return tooltip_; }
     void SetTooltip(const std::string& v) { tooltip_ = v; }
 
+    int GetUserData() const { return userData_; }
+    void SetUserData(int v) { userData_ = v; }
+
 private:
     War3ID typeId_;
     CItemClass itemClass_ = CItemClass::PERMANENT;
@@ -124,4 +128,5 @@ private:
     std::string description_;
     std::string icon_;
     std::string tooltip_;
+    int userData_ = 0;
 };
