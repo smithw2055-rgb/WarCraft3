@@ -101,41 +101,58 @@ static int TimelineElemSize(uint32_t tag) {
     }
 }
 
+static bool IsIntegerTimeline(uint32_t tag) {
+    switch (tag) {
+        case MAKE_TAG('K','M','T','F'): // material texture id
+        case MAKE_TAG('K','E','V','T'): // event trigger
+            return true;
+        default:
+            return false;
+    }
+}
+
 static bool IsTangential(MdxInterpolation interp) {
     return interp == MdxInterpolation::Hermite || interp == MdxInterpolation::Bezier;
 }
 
 // ---- Read a single timeline from current offset ----
 static void ReadTimeline(MdxReader& r, MdxTimeline& tl) {
-    tl.tag = r.u32();
+    tl.tag = r.tag();
+    uint32_t kfCount = r.u32();
     tl.interpolationType = (MdxInterpolation)r.u32();
     tl.globalSequenceId = r.s32();
-    uint32_t kfCount = r.u32();
 
     if (kfCount == 0) return;
     if (kfCount > 100000) { r.skip((size_t)kfCount * 4 * 4); return; }
 
-    int elemSize = TimelineElemSize(tl.tag);
-    int valSize = elemSize * 4; // bytes per value
+    const int elemSize = TimelineElemSize(tl.tag);
+    const bool integerTimeline = IsIntegerTimeline(tl.tag);
+    const bool hasTangents = IsTangential(tl.interpolationType);
 
-    // Frames
     tl.frames.resize(kfCount);
-    for (uint32_t i = 0; i < kfCount; i++)
-        tl.frames[i] = r.u32();
-
-    // Values
     tl.values.resize(kfCount * elemSize);
-    for (size_t i = 0; i < tl.values.size(); i++)
-        tl.values[i] = r.f32();
-
-    // Tangents
-    if (IsTangential(tl.interpolationType)) {
+    if (hasTangents) {
         tl.inTans.resize(kfCount * elemSize);
-        for (size_t i = 0; i < tl.inTans.size(); i++)
-            tl.inTans[i] = r.f32();
         tl.outTans.resize(kfCount * elemSize);
-        for (size_t i = 0; i < tl.outTans.size(); i++)
-            tl.outTans[i] = r.f32();
+    }
+
+    auto readValue = [&]() -> float {
+        return integerTimeline ? (float)r.u32() : r.f32();
+    };
+
+    for (uint32_t i = 0; i < kfCount; i++) {
+        tl.frames[i] = r.u32();
+        for (int elem = 0; elem < elemSize; ++elem) {
+            tl.values[(size_t)i * elemSize + elem] = readValue();
+        }
+        if (hasTangents) {
+            for (int elem = 0; elem < elemSize; ++elem) {
+                tl.inTans[(size_t)i * elemSize + elem] = readValue();
+            }
+            for (int elem = 0; elem < elemSize; ++elem) {
+                tl.outTans[(size_t)i * elemSize + elem] = readValue();
+            }
+        }
     }
 }
 
@@ -153,7 +170,7 @@ static void ReadNodeGeneric(MdxReader& r, MdxNode& node) {
 static void ReadTimelines(MdxReader& r, size_t entryEnd, std::vector<MdxTimeline>& out) {
     while (r.off + 16 <= entryEnd) {
         // Peek at the next tag - timeline tags start with 'K'
-        uint32_t peek = R32(r.d + r.off);
+        uint32_t peek = r.peekTag();
         uint8_t firstByte = (uint8_t)(peek >> 24);
         if (firstByte != 'K') break;
         int es = TimelineElemSize(peek);
@@ -468,21 +485,10 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 size_t entryEndLocal = entryStart + entrySize;
 
                 MdxGeosetAnim ga;
-                ga.geosetId = r.s32();
-                ga.flags = r.u32();
-                // Note: alpha and color are only present if the corresponding flags are set
-                // But we read them always for simplicity (they default if not present)
-                // Actually the format is: we read alpha+color+timelines sequentially
-                // When flags have bit 0x1: alpha is animated (via timeline)
-                // When flags have bit 0x2: color is animated
-                // The alpha and color values are stored only if NOT animated
-                // Wait, actually in MDX, alpha and color are always stored as
-                // static values, and if animated, the timelines override them.
-
-                // Read static alpha (always present as float)
                 ga.alpha = r.f32();
-                // Read static color (3 floats, always present)
+                ga.flags = r.u32();
                 r.readFloatArray(ga.color.data(), 3);
+                ga.geosetId = r.s32();
 
                 // Remaining bytes are timelines (KGAL, KGAC)
                 ReadTimelines(r, entryEndLocal, ga.timelines);
@@ -607,12 +613,10 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 MdxCamera cam;
                 cam.name = r.readStr(80);
                 r.readFloatArray(cam.pos, 3);
-                r.readFloatArray(cam.target, 3);
-                r.skip(12); // extent min+max+boundsRadius for target
                 cam.fov = r.f32();
                 cam.farClip = r.f32();
                 cam.nearClip = r.f32();
-                r.skip(12); // extent min+max+boundsRadius for position
+                r.readFloatArray(cam.target, 3);
                 ReadTimelines(r, entryEndLocal, cam.timelines);
                 out.cameras.push_back(std::move(cam));
             }

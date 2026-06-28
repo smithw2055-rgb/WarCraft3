@@ -30,6 +30,8 @@ public:
     CDestructableData* GetDestructableData() const { return destructableData_; }
     void SetItemData(CItemData* data) { itemData_ = data; }
     CItemData* GetItemData() const { return itemData_; }
+    void SetUpgradeData(CUpgradeData* data) { upgradeData_ = data; }
+    CUpgradeData* GetUpgradeData() const { return upgradeData_; }
     void SetGameplayConstants(const CGameplayConstants& c) { gameplayConstants_ = c; }
     const CGameplayConstants& GetGameplayConstants() const { return gameplayConstants_; }
 
@@ -146,6 +148,7 @@ private:
     CDestructableData* destructableData_ = nullptr;
     CAbilityData* abilityData_ = nullptr;
     CItemData* itemData_ = nullptr;
+    CUpgradeData* upgradeData_ = nullptr;
 
     CCombatSystem combatSystem_;
     std::unique_ptr<CWorldCollision> worldCollision_;

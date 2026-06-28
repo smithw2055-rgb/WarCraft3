@@ -1,4 +1,5 @@
 #include "ability_queue.h"
+#include "ability_rally.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
@@ -6,6 +7,31 @@
 #include "data/upgradedata.h"
 #include <iostream>
 #include <algorithm>
+
+namespace {
+
+int GetUpgradeGoldCost(const CUpgradeType& upgrade, int currentLevel) {
+    if (currentLevel >= 0 && currentLevel < (int)upgrade.goldPerLevel.size()) {
+        return upgrade.goldPerLevel[currentLevel];
+    }
+    return upgrade.goldCost;
+}
+
+int GetUpgradeLumberCost(const CUpgradeType& upgrade, int currentLevel) {
+    if (currentLevel >= 0 && currentLevel < (int)upgrade.lumberPerLevel.size()) {
+        return upgrade.lumberPerLevel[currentLevel];
+    }
+    return upgrade.lumberCost;
+}
+
+int GetUpgradeResearchTime(const CUpgradeType& upgrade, int currentLevel) {
+    if (currentLevel >= 0 && currentLevel < (int)upgrade.timePerLevel.size()) {
+        return upgrade.timePerLevel[currentLevel];
+    }
+    return upgrade.researchTime;
+}
+
+}
 
 CAbilityQueue::CAbilityQueue(int handleId)
     : CAbility(handleId, War3ID("Aque"), CAbilityCategory::QUEUE) {
@@ -36,6 +62,17 @@ void CAbilityQueue::OnTick(CSimulation& game, CUnit* unit) {
 
 void CAbilityQueue::OnDeath(CSimulation& game, CUnit* unit) {
     CancelAll(game, unit);
+}
+
+bool CAbilityQueue::CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const {
+    (void)game;
+    (void)unit;
+    if (IsDisabled()) return false;
+
+    War3ID rawcode(static_cast<uint32_t>(orderId));
+    return unitsTrained_.count(rawcode) > 0
+        || researchesAvailable_.count(rawcode) > 0
+        || orderId == OrderIds::CANCEL_QUEUE;
 }
 
 bool CAbilityQueue::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, int orderId) {
@@ -92,6 +129,11 @@ bool CAbilityQueue::QueueUnit(CSimulation& game, CUnit* building, War3ID unitTyp
         std::cout << "Not enough lumber to train!" << std::endl;
         return false;
     }
+    if (trainType->GetFoodUsed() > 0 &&
+        player->GetFoodUsed() + trainType->GetFoodUsed() > player->GetFoodCap()) {
+        std::cout << "Not enough food to train!" << std::endl;
+        return false;
+    }
 
     // Deduct resources
     player->AddGold(-trainType->GetGoldCost());
@@ -104,7 +146,7 @@ bool CAbilityQueue::QueueUnit(CSimulation& game, CUnit* building, War3ID unitTyp
     // If this is the first item, start progress
     if (slot == 0) {
         progress_ = 0;
-        buildTime_ = CalculateBuildTime(game, unitTypeId, CQueueItemType::UNIT);
+        buildTime_ = CalculateBuildTime(game, building, unitTypeId, CQueueItemType::UNIT);
     }
 
     std::cout << "Queued unit: " << unitTypeId.ToString() << " in slot " << slot << std::endl;
@@ -112,6 +154,13 @@ bool CAbilityQueue::QueueUnit(CSimulation& game, CUnit* building, War3ID unitTyp
 }
 
 bool CAbilityQueue::QueueResearch(CSimulation& game, CUnit* building, War3ID upgradeId) {
+    for (int i = 0; i < MAX_QUEUE; i++) {
+        if (queueTypes_[i] == CQueueItemType::RESEARCH && queue_[i] == upgradeId) {
+            std::cout << "Research already queued: " << upgradeId.ToString() << std::endl;
+            return false;
+        }
+    }
+
     // Find empty slot
     int slot = -1;
     for (int i = 0; i < MAX_QUEUE; i++) {
@@ -124,16 +173,37 @@ bool CAbilityQueue::QueueResearch(CSimulation& game, CUnit* building, War3ID upg
 
     // Check if player can afford it
     auto* player = game.GetPlayer(building->GetPlayerIndex());
-    if (!player) return false;
+    auto* upgradeData = game.GetUpgradeData();
+    if (!player || !upgradeData) return false;
 
-    // TODO: Get upgrade data and check costs
-    // For now, just queue it
+    const CUpgradeType* upgrade = upgradeData->GetUpgrade(upgradeId);
+    if (!upgrade) return false;
+
+    const int currentLevel = player->GetTechLevel(upgradeId);
+    if (currentLevel >= upgrade->maxLevel) {
+        std::cout << "Research max level reached: " << upgradeId.ToString() << std::endl;
+        return false;
+    }
+
+    const int goldCost = GetUpgradeGoldCost(*upgrade, currentLevel);
+    const int lumberCost = GetUpgradeLumberCost(*upgrade, currentLevel);
+    if (player->GetGold() < goldCost) {
+        std::cout << "Not enough gold to research!" << std::endl;
+        return false;
+    }
+    if (player->GetLumber() < lumberCost) {
+        std::cout << "Not enough lumber to research!" << std::endl;
+        return false;
+    }
+
+    player->AddGold(-goldCost);
+    player->AddLumber(-lumberCost);
     queue_[slot] = upgradeId;
     queueTypes_[slot] = CQueueItemType::RESEARCH;
 
     if (slot == 0) {
         progress_ = 0;
-        buildTime_ = CalculateBuildTime(game, upgradeId, CQueueItemType::RESEARCH);
+        buildTime_ = CalculateBuildTime(game, building, upgradeId, CQueueItemType::RESEARCH);
     }
 
     std::cout << "Queued research: " << upgradeId.ToString() << std::endl;
@@ -199,6 +269,7 @@ void CAbilityQueue::CancelQueueItem(CSimulation& game, CUnit* building, int slot
     // Refund resources
     auto* player = game.GetPlayer(building->GetPlayerIndex());
     auto* unitData = game.GetUnitData();
+    auto* upgradeData = game.GetUpgradeData();
     if (player && unitData) {
         War3ID typeId = queue_[slot];
         if (queueTypes_[slot] == CQueueItemType::UNIT) {
@@ -207,8 +278,15 @@ void CAbilityQueue::CancelQueueItem(CSimulation& game, CUnit* building, int slot
                 player->AddGold(trainType->GetGoldCost());
                 player->AddLumber(trainType->GetLumberCost());
             }
+        } else if (queueTypes_[slot] == CQueueItemType::RESEARCH && upgradeData) {
+            const CUpgradeType* upgrade = upgradeData->GetUpgrade(typeId);
+            if (upgrade) {
+                const int currentLevel = player->GetTechLevel(typeId);
+                player->AddGold(GetUpgradeGoldCost(*upgrade, currentLevel));
+                player->AddLumber(GetUpgradeLumberCost(*upgrade, currentLevel));
+            }
         }
-        // TODO: refund research and hero revive
+        // TODO: refund hero revive
     }
 
     // Shift queue left
@@ -223,7 +301,7 @@ void CAbilityQueue::CancelQueueItem(CSimulation& game, CUnit* building, int slot
     if (slot == 0) {
         progress_ = 0;
         if (queueTypes_[0] != CQueueItemType::NONE) {
-            buildTime_ = CalculateBuildTime(game, queue_[0], queueTypes_[0]);
+            buildTime_ = CalculateBuildTime(game, building, queue_[0], queueTypes_[0]);
         } else {
             buildTime_ = 0;
         }
@@ -277,10 +355,9 @@ void CAbilityQueue::ProcessCompletion(CSimulation& game, CUnit* building) {
                     auto* newUnit = game.CreateUnit(completedId, building->GetPlayerIndex(),
                                                      spawnX, spawnY, 0);
                     if (newUnit) {
-                        // Set rally point
-                        auto* rallyAbility = building->GetAbility(War3ID("ARal"));
+                        auto* rallyAbility = dynamic_cast<CAbilityRally*>(building->GetAbility(War3ID("ARal")));
                         if (rallyAbility) {
-                            // TODO: move new unit to rally point
+                            rallyAbility->ApplyToTrainedUnit(game, building, newUnit);
                         }
                         std::cout << "Trained unit: " << completedId.ToString() << std::endl;
                     }
@@ -316,10 +393,10 @@ void CAbilityQueue::ProcessCompletion(CSimulation& game, CUnit* building) {
     }
 
     // Shift queue
-    ShiftQueue();
+    ShiftQueue(game, building);
 }
 
-void CAbilityQueue::ShiftQueue() {
+void CAbilityQueue::ShiftQueue(CSimulation& game, CUnit* building) {
     for (int i = 0; i < MAX_QUEUE - 1; i++) {
         queue_[i] = queue_[i + 1];
         queueTypes_[i] = queueTypes_[i + 1];
@@ -329,17 +406,43 @@ void CAbilityQueue::ShiftQueue() {
 
     progress_ = 0;
     if (queueTypes_[0] != CQueueItemType::NONE) {
-        // TODO: recalculate build time for new front item
-        buildTime_ = 10.0f; // placeholder
+        buildTime_ = CalculateBuildTime(game, building, queue_[0], queueTypes_[0]);
     } else {
         buildTime_ = 0;
     }
 }
 
-float CAbilityQueue::CalculateBuildTime(CSimulation& game, War3ID typeId, CQueueItemType type) const {
-    (void)game;
-    (void)typeId;
-    (void)type;
-    // TODO: look up actual build time from data
-    return 10.0f; // placeholder
+float CAbilityQueue::CalculateBuildTime(CSimulation& game, CUnit* building, War3ID typeId, CQueueItemType type) const {
+    if (type == CQueueItemType::UNIT) {
+        auto* unitData = game.GetUnitData();
+        if (unitData) {
+            if (auto* unitType = unitData->GetUnitType(typeId)) {
+                return std::max(0.0f, (float)unitType->GetBuildTime());
+            }
+        }
+    } else if (type == CQueueItemType::RESEARCH) {
+        auto* upgradeData = game.GetUpgradeData();
+        if (upgradeData) {
+            if (const CUpgradeType* upgrade = upgradeData->GetUpgrade(typeId)) {
+                int currentLevel = 0;
+                if (building) {
+                    if (auto* player = game.GetPlayer(building->GetPlayerIndex())) {
+                        currentLevel = player->GetTechLevel(typeId);
+                    }
+                }
+                return std::max(0.0f, (float)GetUpgradeResearchTime(*upgrade, currentLevel));
+            }
+        }
+    } else if (type == CQueueItemType::HERO_REVIVE) {
+        int heroHandle = static_cast<int>(typeId.value);
+        if (auto* hero = game.GetUnit(heroHandle)) {
+            if (auto* unitData = game.GetUnitData()) {
+                if (auto* heroType = unitData->GetUnitType(hero->GetTypeId())) {
+                    float reviveTime = (float)heroType->GetBuildTime() * hero->GetHeroLevel() * 0.5f;
+                    return std::max(5.0f, reviveTime);
+                }
+            }
+        }
+    }
+    return 0.0f;
 }

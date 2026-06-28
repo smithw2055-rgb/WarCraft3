@@ -1,0 +1,73 @@
+#include "GluePanels.h"
+
+#include <NsCore/ReflectionImplement.h>
+#include <NsGui/IntegrationAPI.h>
+#include <NsGui/Uri.h>
+
+namespace War3UI {
+
+MainMenuBackdropControl::MainMenuBackdropControl() {
+    InitializeComponent();
+}
+
+void MainMenuBackdropControl::InitializeComponent() {
+    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/MainMenuBackdrop.xaml"));
+}
+
+MainMenuPanelControl::MainMenuPanelControl() {
+    InitializeComponent();
+}
+
+void MainMenuPanelControl::InitializeComponent() {
+    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/MainMenuPanel.xaml"));
+}
+
+SinglePlayerPanelControl::SinglePlayerPanelControl() {
+    InitializeComponent();
+}
+
+void SinglePlayerPanelControl::InitializeComponent() {
+    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/SinglePlayerPanel.xaml"));
+}
+
+CampaignPanelControl::CampaignPanelControl() {
+    InitializeComponent();
+}
+
+void CampaignPanelControl::InitializeComponent() {
+    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/CampaignPanel.xaml"));
+}
+
+CustomGamePanelControl::CustomGamePanelControl() {
+    InitializeComponent();
+}
+
+void CustomGamePanelControl::InitializeComponent() {
+    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/CustomGamePanel.xaml"));
+}
+
+NS_BEGIN_COLD_REGION
+
+NS_IMPLEMENT_REFLECTION(MainMenuPanelControl, "War3UI.MainMenuPanelControl")
+{
+}
+
+NS_IMPLEMENT_REFLECTION(MainMenuBackdropControl, "War3UI.MainMenuBackdropControl")
+{
+}
+
+NS_IMPLEMENT_REFLECTION(SinglePlayerPanelControl, "War3UI.SinglePlayerPanelControl")
+{
+}
+
+NS_IMPLEMENT_REFLECTION(CampaignPanelControl, "War3UI.CampaignPanelControl")
+{
+}
+
+NS_IMPLEMENT_REFLECTION(CustomGamePanelControl, "War3UI.CustomGamePanelControl")
+{
+}
+
+NS_END_COLD_REGION
+
+} // namespace War3UI

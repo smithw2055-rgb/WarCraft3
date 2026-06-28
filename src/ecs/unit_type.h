@@ -43,6 +43,7 @@ public:
     CUnitType(
         const std::string& name,
         const std::string& legacyName,
+        const std::string& iconPath,
         War3ID typeId,
         int maxLife, float lifeRegen, float manaRegen, CRegenType lifeRegenType,
         int manaInitial, int manaMaximum, int speed, int defense,
@@ -94,6 +95,7 @@ public:
 
     const std::string& GetName() const { return name_; }
     const std::string& GetLegacyName() const { return legacyName_; }
+    const std::string& GetIconPath() const { return iconPath_; }
     War3ID GetTypeId() const { return typeId_; }
 
     int GetMaxLife() const { return maxLife_; }
@@ -129,6 +131,9 @@ public:
     const std::vector<War3ID>& GetStructuresBuilt() const { return structuresBuilt_; }
     const std::vector<War3ID>& GetUnitsTrained() const { return unitsTrained_; }
     const std::vector<War3ID>& GetResearchesAvailable() const { return researchesAvailable_; }
+    bool HasUpgradeClass(CUpgradeClass upgradeClass) const {
+        return upgradeClassToType_.find(upgradeClass) != upgradeClassToType_.end();
+    }
     const std::vector<War3ID>& GetUpgradesTo() const { return upgradesTo_; }
     const std::vector<War3ID>& GetItemsSold() const { return itemsSold_; }
     const CUnitRace& GetUnitRace() const { return unitRace_; }
@@ -165,6 +170,7 @@ public:
 private:
     std::string name_;
     std::string legacyName_;
+    std::string iconPath_;
     War3ID typeId_;
     int maxLife_;
     float lifeRegen_;

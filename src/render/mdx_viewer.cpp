@@ -61,8 +61,136 @@ static constexpr uint32_t MakeTag(char a, char b, char c, char d) {
 static const uint32_t TAG_KGAO = MakeTag('K','G','A','O');
 static const uint32_t TAG_KGAC = MakeTag('K','G','A','C');
 static const uint32_t TAG_KMTA = MakeTag('K','M','T','A');
+static const uint32_t TAG_KMTF = MakeTag('K','M','T','F');
+static const uint32_t TAG_KTAT = MakeTag('K','T','A','T');
+static const uint32_t TAG_KTAR = MakeTag('K','T','A','R');
+static const uint32_t TAG_KTAS = MakeTag('K','T','A','S');
+
+static const MdxTimeline* FindTimeline(const std::vector<MdxTimeline>& timelines, uint32_t tag) {
+    for (const auto& timeline : timelines) {
+        if (timeline.tag == tag) {
+            return &timeline;
+        }
+    }
+    return nullptr;
+}
+
+static uint32_t TimelineFrameForModel(const MdxTimeline& timeline, const MdxModel* model,
+                                      uint32_t sequenceFrame, float elapsedMs) {
+    if (timeline.globalSequenceId >= 0 && model
+        && timeline.globalSequenceId < (int)model->globalSequences.size()) {
+        const uint32_t duration = model->globalSequences[(size_t)timeline.globalSequenceId];
+        if (duration > 0) {
+            const uint32_t elapsed = (uint32_t)std::max(0.0f, elapsedMs);
+            return elapsed % duration;
+        }
+    }
+    return sequenceFrame;
+}
+
+static float InterpolateTimelineValue(const MdxTimeline& timeline, int elem, int elemCount,
+                                      int keyA, int keyB, float t) {
+    const float a = timeline.values[(size_t)keyA * elemCount + elem];
+    const float b = timeline.values[(size_t)keyB * elemCount + elem];
+    switch (timeline.interpolationType) {
+    case MdxInterpolation::None:
+        return a;
+    case MdxInterpolation::Linear:
+        return a + (b - a) * t;
+    case MdxInterpolation::Hermite: {
+        if (timeline.inTans.empty() || timeline.outTans.empty()) {
+            return a + (b - a) * t;
+        }
+        const float outTan = timeline.outTans[(size_t)keyA * elemCount + elem];
+        const float inTan = timeline.inTans[(size_t)keyB * elemCount + elem];
+        const float t2 = t * t;
+        const float t3 = t2 * t;
+        return (2.0f * t3 - 3.0f * t2 + 1.0f) * a
+            + (-2.0f * t3 + 3.0f * t2) * b
+            + (t3 - 2.0f * t2 + t) * outTan
+            + (t3 - t2) * inTan;
+    }
+    case MdxInterpolation::Bezier: {
+        if (timeline.inTans.empty() || timeline.outTans.empty()) {
+            return a + (b - a) * t;
+        }
+        const float outTan = timeline.outTans[(size_t)keyA * elemCount + elem];
+        const float inTan = timeline.inTans[(size_t)keyB * elemCount + elem];
+        const float mt = 1.0f - t;
+        return mt * mt * mt * a
+            + 3.0f * mt * mt * t * outTan
+            + 3.0f * mt * t * t * inTan
+            + t * t * t * b;
+    }
+    default:
+        return a;
+    }
+}
+
+static bool SampleGlobalTimelineLooped(const MdxTimeline& timeline, uint32_t frame,
+                                       uint32_t duration, float* out, int elemCount) {
+    if (timeline.frames.empty() || elemCount < 1 || duration == 0) {
+        return false;
+    }
+    if (timeline.frames.size() == 1) {
+        for (int elem = 0; elem < elemCount; ++elem) {
+            out[elem] = timeline.values[elem];
+        }
+        return true;
+    }
+
+    const int lastIndex = (int)timeline.frames.size() - 1;
+    int keyA = lastIndex;
+    int keyB = 0;
+    if (frame >= timeline.frames[0] && frame < timeline.frames[(size_t)lastIndex]) {
+        for (int i = 1; i <= lastIndex; ++i) {
+            if (timeline.frames[(size_t)i] > frame) {
+                keyA = i - 1;
+                keyB = i;
+                break;
+            }
+        }
+    }
+
+    uint32_t startFrame = timeline.frames[(size_t)keyA];
+    const uint32_t endFrame = timeline.frames[(size_t)keyB];
+    int64_t timeBetweenFrames = (int64_t)endFrame - (int64_t)startFrame;
+    if (timeBetweenFrames < 0) {
+        timeBetweenFrames += duration;
+        if (frame < startFrame) {
+            startFrame = endFrame;
+        }
+    }
+    const float t = timeBetweenFrames == 0
+        ? 0.0f
+        : ((float)((int64_t)frame - (int64_t)startFrame) / (float)timeBetweenFrames);
+
+    for (int elem = 0; elem < elemCount; ++elem) {
+        out[elem] = InterpolateTimelineValue(timeline, elem, elemCount, keyA, keyB, t);
+    }
+    return true;
+}
+
+static bool SampleTimelineForModel(const MdxTimeline& timeline, const MdxModel* model,
+                                   uint32_t sequenceFrame, float elapsedMs,
+                                   float* out, int elemCount, float defaultVal = 0.0f) {
+    if (timeline.globalSequenceId >= 0 && model
+        && timeline.globalSequenceId < (int)model->globalSequences.size()) {
+        const uint32_t duration = model->globalSequences[(size_t)timeline.globalSequenceId];
+        if (duration > 0) {
+            const uint32_t elapsed = (uint32_t)std::max(0.0f, elapsedMs);
+            return SampleGlobalTimelineLooped(timeline, elapsed % duration, duration, out, elemCount);
+        }
+    }
+    return MdxSampleTimeline(timeline,
+        TimelineFrameForModel(timeline, model, sequenceFrame, elapsedMs),
+        out, elemCount, defaultVal);
+}
 
 static bool ModelHasAnimatedMaterials(const MdxModel& model) {
+    if (!model.texAnims.empty()) {
+        return true;
+    }
     if (!model.geosetAnims.empty()) {
         return true;
     }
@@ -608,6 +736,19 @@ void MdxViewer::DebugLogState(const char* tag) const {
     std::fflush(stderr);
 }
 
+void MdxViewer::SetFog(const float color[3], float start, float end) {
+    fogEnabled_ = true;
+    fogColor_[0] = color ? color[0] : 0.0f;
+    fogColor_[1] = color ? color[1] : 0.0f;
+    fogColor_[2] = color ? color[2] : 0.0f;
+    fogStart_ = start;
+    fogEnd_ = std::max(start + 0.001f, end);
+}
+
+void MdxViewer::DisableFog() {
+    fogEnabled_ = false;
+}
+
 void MdxViewer::InitSharedShader() {
     if (sharedShader_.id) return;
 
@@ -660,17 +801,32 @@ void MdxViewer::InitSharedShader() {
             in vec3 vNorm;
             out vec4 FragColor;
             uniform sampler2D uTexture;
-            uniform float uHasTex;
-            uniform float uFilterMode;
             uniform vec4 uDebugColor;
+            uniform vec4 uUvTransRot;
+            uniform vec4 uTexFlags;
+            uniform vec4 uFogColor;
+            uniform vec4 uFogParams;
+            vec2 quat_transform(vec2 q, vec2 v) {
+                vec2 uv = vec2(-q.x * v.y, q.x * v.x);
+                vec2 uuv = vec2(-q.x * uv.y, q.x * uv.x);
+                return v + 2.0 * (uv * q.y + uuv);
+            }
             void main() {
                 vec3 light = normalize(vec3(0.5, 1.0, 0.3));
                 float diff = max(abs(dot(normalize(vNorm), light)), 0.35);
                 vec4 color = uDebugColor;
-                if (uHasTex > 0.5) color = texture(uTexture, vUV) * uDebugColor;
-                if (uFilterMode == 1.0 && color.a < 0.75) discard;
-                if (uFilterMode >= 5.0 && color.a < 0.02) discard;
+                vec2 uv = vUV;
+                uv += uUvTransRot.xy;
+                uv = quat_transform(uUvTransRot.zw, uv - 0.5) + 0.5;
+                uv = uTexFlags.z * (uv - 0.5) + 0.5;
+                if (uTexFlags.x > 0.5) color = texture(uTexture, uv) * uDebugColor;
+                if (uTexFlags.y == 1.0 && color.a < 0.75) discard;
+                if (uTexFlags.y >= 5.0 && color.a < 0.02) discard;
                 FragColor = vec4(color.rgb * diff, color.a);
+                if (uFogParams.x > 0.5) {
+                    float fogAmount = clamp(((1.0 / gl_FragCoord.w) - uFogParams.y) / (uFogParams.z - uFogParams.y), 0.0, 1.0);
+                    FragColor.rgb = FragColor.rgb * (1.0 - fogAmount) + uFogColor.rgb * fogAmount;
+                }
                 if (FragColor.a < 0.01) discard;
             }
         )";
@@ -688,17 +844,23 @@ void MdxViewer::InitSharedShader() {
         sd.uniform_blocks[0].glsl_uniforms[1].array_count = 1;
         sd.uniform_blocks[0].glsl_uniforms[1].glsl_name = "uModel";
         sd.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
-        sd.uniform_blocks[1].size = 24;
+        sd.uniform_blocks[1].size = 80;
         sd.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_NATIVE;
         sd.uniform_blocks[1].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[0].array_count = 1;
         sd.uniform_blocks[1].glsl_uniforms[0].glsl_name = "uDebugColor";
-        sd.uniform_blocks[1].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT;
+        sd.uniform_blocks[1].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[1].array_count = 1;
-        sd.uniform_blocks[1].glsl_uniforms[1].glsl_name = "uHasTex";
-        sd.uniform_blocks[1].glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT;
+        sd.uniform_blocks[1].glsl_uniforms[1].glsl_name = "uUvTransRot";
+        sd.uniform_blocks[1].glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[2].array_count = 1;
-        sd.uniform_blocks[1].glsl_uniforms[2].glsl_name = "uFilterMode";
+        sd.uniform_blocks[1].glsl_uniforms[2].glsl_name = "uTexFlags";
+        sd.uniform_blocks[1].glsl_uniforms[3].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[3].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[3].glsl_name = "uFogColor";
+        sd.uniform_blocks[1].glsl_uniforms[4].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[4].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[4].glsl_name = "uFogParams";
         sd.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
         sd.views[0].texture.image_type = SG_IMAGETYPE_2D;
         sd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
@@ -763,17 +925,32 @@ void MdxViewer::InitSharedShader() {
             in vec3 vNorm;
             out vec4 FragColor;
             uniform sampler2D uTexture;
-            uniform float uHasTex;
-            uniform float uFilterMode;
             uniform vec4 uDebugColor;
+            uniform vec4 uUvTransRot;
+            uniform vec4 uTexFlags;
+            uniform vec4 uFogColor;
+            uniform vec4 uFogParams;
+            vec2 quat_transform(vec2 q, vec2 v) {
+                vec2 uv = vec2(-q.x * v.y, q.x * v.x);
+                vec2 uuv = vec2(-q.x * uv.y, q.x * uv.x);
+                return v + 2.0 * (uv * q.y + uuv);
+            }
             void main() {
                 vec3 light = normalize(vec3(0.5, 1.0, 0.3));
                 float diff = max(abs(dot(normalize(vNorm), light)), 0.35);
                 vec4 color = uDebugColor;
-                if (uHasTex > 0.5) color = texture(uTexture, vUV) * uDebugColor;
-                if (uFilterMode == 1.0 && color.a < 0.75) discard;
-                if (uFilterMode >= 5.0 && color.a < 0.02) discard;
+                vec2 uv = vUV;
+                uv += uUvTransRot.xy;
+                uv = quat_transform(uUvTransRot.zw, uv - 0.5) + 0.5;
+                uv = uTexFlags.z * (uv - 0.5) + 0.5;
+                if (uTexFlags.x > 0.5) color = texture(uTexture, uv) * uDebugColor;
+                if (uTexFlags.y == 1.0 && color.a < 0.75) discard;
+                if (uTexFlags.y >= 5.0 && color.a < 0.02) discard;
                 FragColor = vec4(color.rgb * diff, color.a);
+                if (uFogParams.x > 0.5) {
+                    float fogAmount = clamp(((1.0 / gl_FragCoord.w) - uFogParams.y) / (uFogParams.z - uFogParams.y), 0.0, 1.0);
+                    FragColor.rgb = FragColor.rgb * (1.0 - fogAmount) + uFogColor.rgb * fogAmount;
+                }
                 if (FragColor.a < 0.01) discard;
             }
         )";
@@ -797,17 +974,23 @@ void MdxViewer::InitSharedShader() {
         sd.uniform_blocks[0].glsl_uniforms[2].glsl_name = "uBoneCount";
 
         sd.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
-        sd.uniform_blocks[1].size = 24;
+        sd.uniform_blocks[1].size = 80;
         sd.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_NATIVE;
         sd.uniform_blocks[1].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[0].array_count = 1;
         sd.uniform_blocks[1].glsl_uniforms[0].glsl_name = "uDebugColor";
-        sd.uniform_blocks[1].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT;
+        sd.uniform_blocks[1].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[1].array_count = 1;
-        sd.uniform_blocks[1].glsl_uniforms[1].glsl_name = "uHasTex";
-        sd.uniform_blocks[1].glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT;
+        sd.uniform_blocks[1].glsl_uniforms[1].glsl_name = "uUvTransRot";
+        sd.uniform_blocks[1].glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[2].array_count = 1;
-        sd.uniform_blocks[1].glsl_uniforms[2].glsl_name = "uFilterMode";
+        sd.uniform_blocks[1].glsl_uniforms[2].glsl_name = "uTexFlags";
+        sd.uniform_blocks[1].glsl_uniforms[3].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[3].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[3].glsl_name = "uFogColor";
+        sd.uniform_blocks[1].glsl_uniforms[4].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[4].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[4].glsl_name = "uFogParams";
 
         // Bone texture (VS, slot 1)
         sd.views[0].texture.stage = SG_SHADERSTAGE_VERTEX;
@@ -1000,6 +1183,8 @@ void MdxViewer::Release() {
         initializedAnimator_ = false;
         animatedGeosetStates_.clear();
         animatedLayerAlphas_.clear();
+        modelTextures_.clear();
+        elapsedMs_ = 0.0f;
         ownsBatchGpuResources_ = true;
         pendingStandSequenceAfterCurrent_ = false;
         std::fprintf(stderr, "MdxViewer::Release end empty\n");
@@ -1019,6 +1204,8 @@ void MdxViewer::Release() {
         initializedAnimator_ = false;
         animatedGeosetStates_.clear();
         animatedLayerAlphas_.clear();
+        modelTextures_.clear();
+        elapsedMs_ = 0.0f;
         std::fprintf(stderr, "MdxViewer::Release end inactive name=%s\n", name_.c_str());
         std::fflush(stderr);
         return;
@@ -1027,13 +1214,21 @@ void MdxViewer::Release() {
         if (ownsBatchGpuResources_) {
             if (b.vbo.id) sg_destroy_buffer(b.vbo);
             if (b.ebo.id) sg_destroy_buffer(b.ebo);
-            if (b.textureHandle.id) sg_destroy_image(b.textureHandle);
-            SafeDestroyViewHandle(b.textureView, "batch.textureView");
             if (b.sampler.id) sg_destroy_sampler(b.sampler);
         }
         if (b.playerTexHandle.id) sg_destroy_image(b.playerTexHandle);
         SafeDestroyViewHandle(b.playerTexView, "batch.playerTexView");
     }
+    if (ownsBatchGpuResources_) {
+        for (auto& texture : modelTextures_) {
+            SafeDestroyViewHandle(texture.view, "modelTexture.view");
+            if (texture.handle.id) {
+                sg_destroy_image(texture.handle);
+                texture.handle = {0};
+            }
+        }
+    }
+    modelTextures_.clear();
     std::fprintf(stderr, "MdxViewer::Release before bone-view id=0x%08x texId=%u\n",
         cachedBoneView_.id, cachedBoneTexId_);
     std::fflush(stderr);
@@ -1061,6 +1256,7 @@ void MdxViewer::Release() {
     initializedAnimator_ = false;
     animatedGeosetStates_.clear();
     animatedLayerAlphas_.clear();
+    elapsedMs_ = 0.0f;
     pendingStandSequenceAfterCurrent_ = false;
     std::fprintf(stderr, "MdxViewer::Release end active name=%s\n", name_.c_str());
     std::fflush(stderr);
@@ -1073,6 +1269,7 @@ bool MdxViewer::ShareModelResourcesFrom(const MdxViewer& other) {
     }
 
     batches_ = other.batches_;
+    modelTextures_ = other.modelTextures_;
     for (auto& batch : batches_) {
         batch.playerTexHandle = {0};
         batch.playerTexView = {0};
@@ -1086,6 +1283,7 @@ bool MdxViewer::ShareModelResourcesFrom(const MdxViewer& other) {
     radius_ = other.radius_;
     hasAnimations_ = other.hasAnimations_;
     hasAnimatedMaterials_ = other.hasAnimatedMaterials_;
+    elapsedMs_ = 0.0f;
     modelSource_ = other.modelSource_ ? other.modelSource_ : &other.modelData_;
     if (!modelSource_) {
         return false;
@@ -1147,7 +1345,7 @@ static sg_image LoadTextureFromMpq(MpqManager* mpq, const std::string& path) {
     return {0};
 }
 
-bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
+bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, bool enableParticles) {
     DebugLogState("load-pre-release");
     std::fprintf(stderr, "MdxViewer::Load pre-release incoming=%s\n", model.name.c_str());
     std::fflush(stderr);
@@ -1160,6 +1358,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
     modelSource_ = &modelData_;
     sharedSource_ = nullptr;
     const MdxModel& sourceModel = *modelSource_;
+    elapsedMs_ = 0.0f;
 
     name_ = sourceModel.name;
     const bool logModelDebug = ShouldLogModelDebug(name_);
@@ -1306,20 +1505,16 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
         }
     }
 
-    // Resolve textures for all materials
-    struct TexResolve {
-        sg_image handle = {0};
-        int replaceableId = 0;
-        std::string replaceablePath;
-    };
-    std::vector<TexResolve> texCache(sourceModel.textures.size());
+    // Resolve textures for all materials. Batches reference these slots so KMTF
+    // material animation can switch to any texture in the model.
+    modelTextures_.assign(sourceModel.textures.size(), ModelTextureSlot{});
     if (traceLoad) {
         std::fprintf(stderr, "MdxViewer::Load resolving textures name=%s count=%zu\n",
             name_.c_str(), sourceModel.textures.size());
     }
     for (size_t ti = 0; ti < sourceModel.textures.size(); ti++) {
         auto& texRef = sourceModel.textures[ti];
-        auto& cache = texCache[ti];
+        auto& cache = modelTextures_[ti];
         if (!texRef.path.empty()) {
             std::string path = texRef.path;
             for (auto& c : path) if (c == '/') c = '\\';
@@ -1338,6 +1533,11 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
                     cache.handle = LoadTextureFromMpq(mpq, fp);
                 }
             }
+        }
+        if (cache.handle.id) {
+            sg_view_desc vd = {};
+            vd.texture.image = cache.handle;
+            cache.view = sg_make_view(&vd);
         }
     }
     if (traceLoad) {
@@ -1423,17 +1623,24 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
             const MdxLayer* layer = (material && !material->layers.empty()) ? &material->layers[pass] : nullptr;
 
             sg_image texHandle = {0};
+            sg_view texView = {0};
             int replaceableId = 0;
             std::string replaceablePath;
+            int textureId = -1;
+            int textureAnimationId = -1;
+            const MdxTimeline* textureIdTimeline = nullptr;
             int coordId = layer ? std::max(0, layer->coordId) : 0;
             if (layer) {
-                int texId = layer->textureId;
-                if (texId >= 0 && texId < (int)texCache.size()) {
-                    texHandle = texCache[texId].handle;
-                    replaceableId = texCache[texId].replaceableId;
-                    replaceablePath = texCache[texId].replaceablePath;
-                    if (texId >= 0 && texId < (int)sourceModel.textures.size()
-                        && IsEmbeddedSplatTexturePath(sourceModel.textures[texId].path)) {
+                textureId = layer->textureId;
+                textureAnimationId = layer->textureAnimationId;
+                textureIdTimeline = FindTimeline(layer->timelines, TAG_KMTF);
+                if (textureId >= 0 && textureId < (int)modelTextures_.size()) {
+                    texHandle = modelTextures_[textureId].handle;
+                    texView = modelTextures_[textureId].view;
+                    replaceableId = modelTextures_[textureId].replaceableId;
+                    replaceablePath = modelTextures_[textureId].replaceablePath;
+                    if (textureId >= 0 && textureId < (int)sourceModel.textures.size()
+                        && IsEmbeddedSplatTexturePath(sourceModel.textures[textureId].path)) {
                         continue;
                     }
                 }
@@ -1458,10 +1665,13 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
                 if (!batches_.empty()) {
                     auto& batch = batches_.back();
                     batch.textureHandle = texHandle;
+                    batch.textureView = texView;
                     batch.hasTexture = (texHandle.id != 0);
-                    if (texHandle.id) {
-                        sg_view_desc vd = {}; vd.texture.image = texHandle;
-                        batch.textureView = sg_make_view(&vd);
+                    batch.textureId = textureId;
+                    batch.textureAnimationId = textureAnimationId;
+                    if (textureIdTimeline) {
+                        batch.textureIdTimeline = *textureIdTimeline;
+                        batch.hasTextureIdTimeline = true;
                     }
                     batch.replaceableId = replaceableId;
                     batch.replaceablePath = replaceablePath;
@@ -1512,10 +1722,13 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
                 Batch batch;
                 batch.indexCount = (int)geo.indices.size();
                 batch.textureHandle = texHandle;
+                batch.textureView = texView;
                 batch.hasTexture = (texHandle.id != 0);
-                if (texHandle.id) {
-                    sg_view_desc vd = {}; vd.texture.image = texHandle;
-                    batch.textureView = sg_make_view(&vd);
+                batch.textureId = textureId;
+                batch.textureAnimationId = textureAnimationId;
+                if (textureIdTimeline) {
+                    batch.textureIdTimeline = *textureIdTimeline;
+                    batch.hasTextureIdTimeline = true;
                 }
                 batch.replaceableId = replaceableId;
                 batch.replaceablePath = replaceablePath;
@@ -1564,8 +1777,13 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode) {
     };
     radius_ = sourceModel.boundsRadius > 0 ? sourceModel.boundsRadius : 100.0f;
 
-    // Particle systems are temporarily disabled while stabilizing scene rendering.
-    hasParticles_ = false;
+    if (enableParticles && !sourceModel.particleEmitters2.empty()) {
+        particles_.Init(sourceModel, mpq);
+        particles_.SetWorldOffset(Vec3{0.0f, 0.0f, 0.0f});
+        hasParticles_ = true;
+    } else {
+        hasParticles_ = false;
+    }
 
     std::cout << "MdxViewer: " << name_ << " loaded (batches=" << batches_.size()
               << ", animated=" << hasAnimations_ << ", particles=" << hasParticles_ << ")" << std::endl;
@@ -2079,6 +2297,7 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
 }
 
 void MdxViewer::Update(float dt) {
+    elapsedMs_ += std::max(0.0f, dt) * 1000.0f;
     if (initializedAnimator_) {
         animator_.Update(dt);
         if (pendingStandSequenceAfterCurrent_ && animator_.IsSequenceFinished()) {
@@ -2093,6 +2312,7 @@ void MdxViewer::Update(float dt) {
 }
 
 void MdxViewer::Update(float dt, const Mat4& view) {
+    elapsedMs_ += std::max(0.0f, dt) * 1000.0f;
     if (hasAnimations_) {
         Vec3 cameraForward = {-view.m[2], -view.m[6], -view.m[10]};
         animator_.SetCameraForward(cameraForward);
@@ -2153,6 +2373,20 @@ void MdxViewer::UpdateAnimatedStates() {
     }
 
     const uint32_t frame = animator_.GetCurrentFrame();
+    const int currentSequence = initializedAnimator_ ? animator_.GetCurrentSequence() : -1;
+    auto timelineAppliesToCurrentSequence = [&](const MdxTimeline& timeline) {
+        if (timeline.globalSequenceId >= 0 || !modelSource_
+            || currentSequence < 0 || currentSequence >= (int)modelSource_->sequences.size()) {
+            return true;
+        }
+        const auto& sequence = modelSource_->sequences[(size_t)currentSequence];
+        for (uint32_t keyFrame : timeline.frames) {
+            if (keyFrame >= sequence.startFrame && keyFrame <= sequence.endFrame) {
+                return true;
+            }
+        }
+        return false;
+    };
 
     for (size_t gi = 0; gi < modelSource_->geosets.size(); ++gi) {
         auto& state = animatedGeosetStates_[gi];
@@ -2172,10 +2406,15 @@ void MdxViewer::UpdateAnimatedStates() {
 
             float sampled[4] = {};
             for (const auto& timeline : geosetAnim.timelines) {
-                if (timeline.tag == TAG_KGAO && MdxSampleTimeline(timeline, frame, sampled, 1, geosetAnim.alpha)) {
+                if (!timelineAppliesToCurrentSequence(timeline)) {
+                    continue;
+                }
+                if (timeline.tag == TAG_KGAO
+                    && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, sampled, 1, geosetAnim.alpha)) {
                     state.alpha = sampled[0];
                 }
-                else if (timeline.tag == TAG_KGAC && MdxSampleTimeline(timeline, frame, sampled, 3, 1.0f)) {
+                else if (timeline.tag == TAG_KGAC
+                    && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, sampled, 3, 1.0f)) {
                     state.color[0] = sampled[0];
                     state.color[1] = sampled[1];
                     state.color[2] = sampled[2];
@@ -2196,7 +2435,11 @@ void MdxViewer::UpdateAnimatedStates() {
             materialLayers[li] = layer.alpha;
             float sampled = layer.alpha;
             for (const auto& timeline : layer.timelines) {
-                if (timeline.tag == TAG_KMTA && MdxSampleTimeline(timeline, frame, &sampled, 1, layer.alpha)) {
+                if (!timelineAppliesToCurrentSequence(timeline)) {
+                    continue;
+                }
+                if (timeline.tag == TAG_KMTA
+                    && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, &sampled, 1, layer.alpha)) {
                     materialLayers[li] = sampled;
                     break;
                 }
@@ -2243,8 +2486,27 @@ sg_image MdxViewer::GetPlayerTexture(Batch& batch, int player) {
 
 void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, float scale,
                          int player, float yawRadians, float alpha, bool depthTest) {
+    RenderAtScale(pos, view, proj, Vec3(scale, scale, scale), player, yawRadians, alpha, depthTest);
+}
+
+void MdxViewer::RenderAtScale(const Vec3& pos, const Mat4& view, const Mat4& proj, const Vec3& scale,
+                              int player, float yawRadians, float alpha, bool depthTest) {
+    Mat4 model = Mat4::Identity();
+    float c = std::cos(yawRadians), s = std::sin(yawRadians);
+    model.m[0] = c * scale.x;  model.m[2] = -s * scale.x;
+    model.m[5] = scale.y;
+    model.m[8] = s * scale.z;  model.m[10] = c * scale.z;
+    model.m[12] = pos.x; model.m[13] = pos.y; model.m[14] = pos.z;
+    RenderWithModelMatrix(model, view, proj, player, alpha, depthTest);
+}
+
+void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const Mat4& proj,
+                                      int player, float alpha, bool depthTest) {
     if (batches_.empty() || (!sharedShader_.id && !sharedSkinnedShader_.id)) return;
-    animationSpeedScale_ = std::max(0.001f, std::fabs(scale));
+    const float sx = std::sqrt(model.m[0] * model.m[0] + model.m[1] * model.m[1] + model.m[2] * model.m[2]);
+    const float sy = std::sqrt(model.m[4] * model.m[4] + model.m[5] * model.m[5] + model.m[6] * model.m[6]);
+    const float sz = std::sqrt(model.m[8] * model.m[8] + model.m[9] * model.m[9] + model.m[10] * model.m[10]);
+    animationSpeedScale_ = std::max(0.001f, std::max(sx, std::max(sy, sz)));
     auto isValidBuffer = [](sg_buffer buffer) {
         return buffer.id && sg_query_buffer_state(buffer) == SG_RESOURCESTATE_VALID;
     };
@@ -2282,30 +2544,17 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
         }
         return true;
     };
-    static bool s_loggedFirstOverlayRender = false;
-    if (!s_loggedFirstOverlayRender && !depthTest) {
-        int skinnedBatches = 0;
-        for (const auto& batch : batches_) {
-            if (batch.skinned) ++skinnedBatches;
-        }
-        std::fprintf(stderr,
-            "MdxViewer::RenderAt probe name=%s batches=%zu skinned=%d pos=(%.2f,%.2f,%.2f) scale=%.2f alpha=%.2f\n",
-            name_.c_str(), batches_.size(), skinnedBatches, pos.x, pos.y, pos.z, scale, alpha);
-        s_loggedFirstOverlayRender = true;
-    }
-
-    Mat4 model = Mat4::Identity();
-    float c = std::cos(yawRadians), s = std::sin(yawRadians);
-    model.m[0] = c * scale;  model.m[2] = -s * scale;
-    model.m[5] = scale;
-    model.m[8] = s * scale;  model.m[10] = c * scale;
-    model.m[12] = pos.x; model.m[13] = pos.y; model.m[14] = pos.z;
-
     Mat4 mvp = proj * view * model;
 
     struct VSBlock { float MVP[16]; float Model[16]; };
     struct VSBlockSkinned { float MVP[16]; float Model[16]; int boneCount; };
-    struct FSBlock { float color[4]; float hasTex; float filterMode; };
+    struct FSBlock {
+        float color[4];
+        float uvTransRot[4];
+        float texFlags[4];
+        float fogColor[4];
+        float fogParams[4];
+    };
 
     VSBlock vsU; std::memcpy(vsU.MVP, mvp.Data(), 64); std::memcpy(vsU.Model, model.Data(), 64);
     VSBlockSkinned vsUS;
@@ -2314,6 +2563,23 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
     vsUS.boneCount = animator_.GetBoneCount();
     FSBlock fsU = {};
     fsU.color[0] = 1.0f; fsU.color[1] = 1.0f; fsU.color[2] = 1.0f; fsU.color[3] = alpha;
+    fsU.uvTransRot[0] = 0.0f;
+    fsU.uvTransRot[1] = 0.0f;
+    fsU.uvTransRot[2] = 0.0f;
+    fsU.uvTransRot[3] = 1.0f;
+    fsU.texFlags[0] = 0.0f;
+    fsU.texFlags[1] = 0.0f;
+    fsU.texFlags[2] = 1.0f;
+    fsU.texFlags[3] = 0.0f;
+    fsU.fogColor[0] = fogColor_[0];
+    fsU.fogColor[1] = fogColor_[1];
+    fsU.fogColor[2] = fogColor_[2];
+    fsU.fogColor[3] = 1.0f;
+    fsU.fogParams[0] = fogEnabled_ ? 1.0f : 0.0f;
+    fsU.fogParams[1] = fogStart_;
+    fsU.fogParams[2] = fogEnd_;
+    fsU.fogParams[3] = 0.0f;
+    const uint32_t currentFrame = initializedAnimator_ ? animator_.GetCurrentFrame() : 0;
 
     sg_sampler linearSmp = {0};
     sg_sampler_desc smpDesc = {};
@@ -2322,17 +2588,43 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
     const sg_view fallbackTexView = isValidView(sharedWhiteTextureView_) ? sharedWhiteTextureView_ : sg_view{0};
     const sg_sampler fallbackSampler = isValidSampler(sharedSampler_) ? sharedSampler_ : sg_sampler{0};
 
+    int skippedBySequenceHint = 0;
+    int skippedInvalidTexture = 0;
+    int submittedBatches = 0;
     for (auto& batch : batches_) {
         if (!isValidBuffer(batch.vbo) || !isValidBuffer(batch.ebo)) {
             continue;
         }
         if (!shouldRenderBatchForCurrentSequence(batch)) {
+            ++skippedBySequenceHint;
             continue;
         }
+        int activeTextureId = batch.textureId;
+        if (batch.hasTextureIdTimeline && !batch.textureIdTimeline.frames.empty()) {
+            float sampledTextureId = (float)activeTextureId;
+            if (SampleTimelineForModel(batch.textureIdTimeline, modelSource_, currentFrame, elapsedMs_,
+                    &sampledTextureId, 1, (float)activeTextureId)) {
+                activeTextureId = (int)std::lround(sampledTextureId);
+            }
+        }
+
         sg_image tex = batch.textureHandle;
         sg_view texView = batch.textureView;
+        int activeReplaceableId = batch.replaceableId;
+        std::string activeReplaceablePath = batch.replaceablePath;
+        if (activeTextureId >= 0 && activeTextureId < (int)modelTextures_.size()) {
+            const auto& textureSlot = modelTextures_[activeTextureId];
+            tex = textureSlot.handle;
+            texView = textureSlot.view;
+            activeReplaceableId = textureSlot.replaceableId;
+            activeReplaceablePath = textureSlot.replaceablePath;
+        }
         bool hasBoundTexture = isValidImage(tex) && isValidView(texView);
-        if (batch.replaceableId == 1 || batch.replaceableId == 2) {
+        const int originalReplaceableId = batch.replaceableId;
+        const std::string originalReplaceablePath = batch.replaceablePath;
+        batch.replaceableId = activeReplaceableId;
+        batch.replaceablePath = activeReplaceablePath;
+        if (activeReplaceableId == 1 || activeReplaceableId == 2) {
             sg_image pt = GetPlayerTexture(batch, player);
             if (isValidImage(pt)) {
                 tex = pt;
@@ -2342,6 +2634,8 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
                 }
             }
         }
+        batch.replaceableId = originalReplaceableId;
+        batch.replaceablePath = originalReplaceablePath;
 
         if (!isValidImage(tex)) {
             tex = sharedWhiteTexture_;
@@ -2351,8 +2645,39 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
         }
         sg_sampler diffuseSampler = isValidSampler(batch.sampler) ? batch.sampler : fallbackSampler;
 
-        fsU.hasTex = hasBoundTexture ? 1.0f : 0.0f;
-        fsU.filterMode = (float)batch.filterMode;
+        fsU.uvTransRot[0] = 0.0f;
+        fsU.uvTransRot[1] = 0.0f;
+        fsU.uvTransRot[2] = 0.0f;
+        fsU.uvTransRot[3] = 1.0f;
+        fsU.texFlags[2] = 1.0f;
+        if (modelSource_
+            && batch.textureAnimationId >= 0
+            && batch.textureAnimationId < (int)modelSource_->texAnims.size()) {
+            const auto& texAnim = modelSource_->texAnims[(size_t)batch.textureAnimationId];
+            if (const MdxTimeline* tl = FindTimeline(texAnim.timelines, TAG_KTAT)) {
+                float sampled[3] = {0.0f, 0.0f, 0.0f};
+                if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 3, 0.0f)) {
+                    fsU.uvTransRot[0] = sampled[0];
+                    fsU.uvTransRot[1] = sampled[1];
+                }
+            }
+            if (const MdxTimeline* tl = FindTimeline(texAnim.timelines, TAG_KTAR)) {
+                float sampled[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 4, 0.0f)) {
+                    fsU.uvTransRot[2] = sampled[2];
+                    fsU.uvTransRot[3] = sampled[3];
+                }
+            }
+            if (const MdxTimeline* tl = FindTimeline(texAnim.timelines, TAG_KTAS)) {
+                float sampled[3] = {1.0f, 1.0f, 1.0f};
+                if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 3, 1.0f)) {
+                    fsU.texFlags[2] = sampled[0];
+                }
+            }
+        }
+
+        fsU.texFlags[0] = hasBoundTexture ? 1.0f : 0.0f;
+        fsU.texFlags[1] = (float)batch.filterMode;
         float geosetColorR = batch.geosetColor[0];
         float geosetColorG = batch.geosetColor[1];
         float geosetColorB = batch.geosetColor[2];
@@ -2432,6 +2757,7 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
             bind.samplers[1] = diffuseSampler.id ? diffuseSampler : linearSmp;
             sg_apply_bindings(&bind);
             sg_draw(0, batch.indexCount, 1);
+            ++submittedBatches;
         } else if (sharedShader_.id && sharedPipeline_.id) {
             sg_pipeline selectedPipeline = {0};
             if (depthEnabled) {
@@ -2465,14 +2791,18 @@ void MdxViewer::RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, fl
             bind.views[0] = texView;
             bind.samplers[0] = diffuseSampler;
             if (!isValidView(bind.views[0]) || !isValidSampler(bind.samplers[0])) {
+                ++skippedInvalidTexture;
                 continue;
             }
             sg_apply_bindings(&bind);
             sg_draw(0, batch.indexCount, 1);
+            ++submittedBatches;
         }
     }
-
     if (linearSmp.id) sg_destroy_sampler(linearSmp);
 
-    // Particle systems are temporarily disabled while stabilizing scene rendering.
+    if (hasParticles_) {
+        particles_.SetWorldOffset(Vec3{model.m[12], model.m[13], model.m[14]});
+        particles_.Render(view, proj);
+    }
 }

@@ -1,6 +1,7 @@
 #include "MainUI.h"
 #include "NoesisHudHost.h"
 #include "../data/unitdata.h"
+#include "../data/upgradedata.h"
 #include "../ecs/unit_type.h"
 #include "../ecs/orders/order.h"
 #include "../ecs/unit.h"
@@ -9,15 +10,23 @@
 #include "../ecs/abilities/ability_attack.h"
 #include "../ecs/abilities/ability_build.h"
 #include "../ecs/abilities/ability_harvest.h"
+#include "../ecs/abilities/ability_inventory.h"
 #include "../ecs/abilities/ability_move.h"
 #include "../ecs/abilities/ability_queue.h"
 #include "../ecs/abilities/ability_rally.h"
 #include "../ecs/abilities/ability_repair.h"
+#include "../ecs/abilities/ability_spell_base.h"
 #include "../ecs/abilities/ability_upgrade.h"
+#include "../ecs/item.h"
+#include "../asset/BLP.h"
+#include "../asset/stb_image.h"
+#include "../asset/stb_image_write.h"
 #include "third_party/sokol/sokol_app.h"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <unordered_set>
@@ -27,6 +36,8 @@ namespace {
 constexpr int kCommandCols = 4;
 constexpr int kCommandRows = 3;
 constexpr int kCommandCount = kCommandCols * kCommandRows;
+constexpr int kHudBuffCount = 8;
+constexpr const char* kDefaultNoesisCommandIconUri = "assets/ui/widgets/console/human/DefaultButton.png";
 
 std::string TrimCopy(const std::string& value) {
     size_t first = value.find_first_not_of(" \t\r\n");
@@ -47,6 +58,164 @@ std::string ShortLabel(const std::string& value) {
         trimmed.resize(10);
     }
     return trimmed;
+}
+
+std::string CleanWar3TooltipText(const std::string& value) {
+    std::string out;
+    out.reserve(value.size());
+    for (size_t i = 0; i < value.size();) {
+        if (value[i] == '|' && i + 1 < value.size()) {
+            const char code = (char)std::tolower((unsigned char)value[i + 1]);
+            if (code == 'n') {
+                out.push_back('\n');
+                i += 2;
+                continue;
+            }
+            if (code == 'r') {
+                i += 2;
+                continue;
+            }
+            if (code == 'c' && i + 9 < value.size()) {
+                i += 10;
+                continue;
+            }
+        }
+        out.push_back(value[i++]);
+    }
+    return TrimCopy(out);
+}
+
+std::string BuildCommandTooltipText(const std::string& title, const std::string& detail) {
+    std::string result = CleanWar3TooltipText(title);
+    std::string cleanedDetail = CleanWar3TooltipText(detail);
+    if (!cleanedDetail.empty()) {
+        if (!result.empty()) result += "\n";
+        result += cleanedDetail;
+    }
+    return result;
+}
+
+HudResourceCosts UnitTypeCosts(const CUnitType* unitType) {
+    HudResourceCosts costs;
+    if (unitType) {
+        costs.gold = unitType->GetGoldCost();
+        costs.lumber = unitType->GetLumberCost();
+        costs.food = unitType->GetFoodUsed();
+    }
+    return costs;
+}
+
+HudResourceCosts UpgradeCosts(const CUpgradeType* upgrade) {
+    HudResourceCosts costs;
+    if (upgrade) {
+        costs.gold = upgrade->goldCost;
+        costs.lumber = upgrade->lumberCost;
+    }
+    return costs;
+}
+
+std::string AttackDamageText(const CUnitType* unitType) {
+    if (!unitType) return {};
+    const auto& attacks = unitType->GetAttacks();
+    if (attacks.empty() || unitType->GetAttacksEnabled() <= 0) return {};
+
+    const CUnitAttack& attack = attacks.front();
+    int minDamage = attack.damageBase;
+    int maxDamage = attack.damageBase;
+    if (attack.damageDice > 0 && attack.damageSidesPerDie > 0) {
+        minDamage += attack.damageDice;
+        maxDamage += attack.damageDice * attack.damageSidesPerDie;
+    }
+    if (minDamage == maxDamage) {
+        return std::to_string(minDamage);
+    }
+    return std::to_string(minDamage) + "-" + std::to_string(maxDamage);
+}
+
+std::string InfoAttackIconKey(const CUnitType* unitType) {
+    if (!unitType) return "DamageNormal";
+    const auto& attacks = unitType->GetAttacks();
+    if (attacks.empty() || unitType->GetAttacksEnabled() <= 0) return "DamageNormal";
+
+    const bool hasWeaponUpgrade = unitType->HasUpgradeClass(CUpgradeClass::ATTACK) ||
+        unitType->HasUpgradeClass(CUpgradeClass::RANGED) ||
+        unitType->HasUpgradeClass(CUpgradeClass::ARTILLERY);
+    const char* suffix = hasWeaponUpgrade ? "" : "Neutral";
+    std::string key;
+    switch (attacks.front().attackType) {
+        case CAttackType::PIERCE: key = "DamagePierce"; break;
+        case CAttackType::SIEGE: key = "DamageSiege"; break;
+        case CAttackType::MAGIC:
+        case CAttackType::SPELLS: key = "DamageMagic"; break;
+        case CAttackType::CHAOS: key = "DamageChaos"; break;
+        case CAttackType::HERO: key = "DamageHero"; break;
+        case CAttackType::NORMAL: key = "DamageNormal"; break;
+        default: key = "DamageUnknown"; break;
+    }
+    return key + suffix;
+}
+
+std::string InfoArmorIconKey(const CUnitType* unitType) {
+    if (!unitType) return "ArmorSmall";
+    const bool hasArmorUpgrade = unitType->HasUpgradeClass(CUpgradeClass::ARMOR);
+    const char* suffix = hasArmorUpgrade ? "" : "Neutral";
+    std::string key;
+    switch (unitType->GetDefenseType()) {
+        case CDefenseType::LIGHT: key = "ArmorSmall"; break;
+        case CDefenseType::MEDIUM: key = "ArmorMedium"; break;
+        case CDefenseType::HEAVY: key = "ArmorLarge"; break;
+        case CDefenseType::FORTIFIED: key = "ArmorFort"; break;
+        case CDefenseType::HERO: key = "ArmorHero"; break;
+        case CDefenseType::DIVINE: key = "ArmorDivine"; break;
+        case CDefenseType::UNARMORED: key = "ArmorNone"; break;
+        default: key = "ArmorUnknown"; break;
+    }
+    return key + suffix;
+}
+
+HudInfoStats BuildInfoStats(const CUnitType* unitType, const CUnit* unit) {
+    HudInfoStats stats;
+    if (!unitType) return stats;
+    stats.attackText = AttackDamageText(unitType);
+    stats.armorText = std::to_string(unit ? unit->GetDefense() : unitType->GetDefense());
+    stats.goldText = std::to_string(unitType->GetGoldCost());
+    stats.foodText = std::to_string(unitType->GetFoodUsed());
+    stats.attackIconKey = InfoAttackIconKey(unitType);
+    stats.armorIconKey = InfoArmorIconKey(unitType);
+    stats.visible = !stats.attackText.empty() || !stats.armorText.empty() ||
+        unitType->GetGoldCost() > 0 || unitType->GetFoodUsed() > 0;
+    return stats;
+}
+
+std::string War3IdToRawString(War3ID id) {
+    char s[5] = {
+        (char)((id.value >> 24) & 0xFF),
+        (char)((id.value >> 16) & 0xFF),
+        (char)((id.value >> 8) & 0xFF),
+        (char)(id.value & 0xFF),
+        0
+    };
+    return std::string(s);
+}
+
+HudBuffItem BuildBuffItem(const CBuff& buff, const CBuffDefFull* def, const std::string& iconUri) {
+    HudBuffItem item;
+    item.name = def && !def->tooltip.empty() ? def->tooltip : War3IdToRawString(buff.GetId());
+    item.iconUri = iconUri;
+    item.remaining = buff.GetRemaining();
+    item.duration = buff.GetDuration();
+    item.stackCount = buff.GetStackCount();
+    item.positive = buff.IsPositive();
+    item.visible = true;
+    return item;
+}
+
+bool SameCosts(const HudResourceCosts& lhs, const HudResourceCosts& rhs) {
+    return lhs.gold == rhs.gold
+        && lhs.lumber == rhs.lumber
+        && lhs.stone == rhs.stone
+        && lhs.mana == rhs.mana
+        && lhs.food == rhs.food;
 }
 
 std::string NormalizeAssetPath(const std::string& value) {
@@ -73,6 +242,22 @@ std::string NormalizeAssetPath(const std::string& value) {
     return path;
 }
 
+std::string SanitizeCacheFileStem(const std::string& path) {
+    std::string result;
+    result.reserve(path.size());
+    for (unsigned char c : path) {
+        if (std::isalnum(c)) {
+            result.push_back((char)std::tolower(c));
+        } else {
+            result.push_back('_');
+        }
+    }
+    if (result.empty()) {
+        result = "icon";
+    }
+    return result;
+}
+
 int SlotIndex(int row, int col) {
     return row * kCommandCols + col;
 }
@@ -91,7 +276,8 @@ void MainUI::LoadFont() {
     }
 }
 
-bool MainUI::Init(MpqManager* mpq, int screenW, int screenH) {
+bool MainUI::Init(MpqManager* mpq, int screenW, int screenH,
+                  const std::string& hudXamlPath, int gameVersion) {
     mpq_ = mpq;
     if (!gameUI_.Init(screenW, screenH)) {
         std::fprintf(stderr, "MainUI: GameUI init failed\n");
@@ -118,7 +304,7 @@ bool MainUI::Init(MpqManager* mpq, int screenW, int screenH) {
     gameUI_.frameRegistry["Root"] = rootFrame_;
 
     hudHost_ = std::make_unique<NoesisHudHost>();
-    if (!hudHost_->Initialize(PROJECT_SOURCE_DIR, screenW, screenH)) {
+    if (!hudHost_->Initialize(PROJECT_SOURCE_DIR, screenW, screenH, hudXamlPath, mpq_, gameVersion)) {
         std::fprintf(stderr, "MainUI: Noesis HUD host init failed\n");
         return false;
     }
@@ -170,16 +356,33 @@ void MainUI::SetCommandSlotAt(int row, int col,
                               CommandClickMode clickMode,
                               bool enabled,
                               const std::string& label,
-                              const std::shared_ptr<Texture>& icon) {
+                              const std::shared_ptr<Texture>& icon,
+                              const std::string& noesisIconUri,
+                              int numberOverlay,
+                              const std::string& tooltip,
+                              const HudResourceCosts& resourceCosts,
+                              float cooldownRemaining,
+                              float cooldownMax,
+                              int autocastOrderId,
+                              bool autocastActive) {
     if (row < 0 || row >= kCommandRows || col < 0 || col >= kCommandCols) {
         return;
     }
     CommandSlot& slot = commandSlots_[SlotIndex(row, col)];
     slot.label = label;
+    slot.tooltip = tooltip;
     slot.orderId = orderId;
     slot.visible = true;
     slot.enabled = enabled;
     slot.icon = icon;
+    slot.noesisIconUri = noesisIconUri;
+    slot.resourceCosts = resourceCosts;
+    slot.cooldownRemaining = std::max(0.0f, cooldownRemaining);
+    slot.cooldownMax = std::max(0.0f, cooldownMax);
+    slot.autocastOrderId = autocastOrderId;
+    slot.numberOverlay = numberOverlay;
+    slot.active = false;
+    slot.autocastActive = autocastActive;
     slot.clickMode = clickMode;
 }
 
@@ -207,8 +410,13 @@ void MainUI::Update(int screenW, int screenH) {
         }
     }
 
+    double frameDt = sapp_frame_duration();
+    if (frameDt <= 0.0 || frameDt > 0.25) {
+        frameDt = 1.0 / 60.0;
+    }
+
     if (!pendingTooltipText_.empty() && !tooltipActive_) {
-        tooltipTimer_ += 0.016f;
+        tooltipTimer_ += (float)frameDt;
         if (tooltipTimer_ >= kTooltipDelay) {
             tooltipActive_ = true;
         }
@@ -216,43 +424,73 @@ void MainUI::Update(int screenW, int screenH) {
 
     if (!hudHost_) return;
 
+    UpdateQueueState();
+    UpdateInventoryState();
+    UpdatePortraitIconState();
+    UpdateBuffState();
+
     hudHost_->Resize(screenW, screenH);
-    hudHost_->SetResources(playerGold_, playerLumber_, playerFoodUsed_, playerFoodCap_, "12:00");
+    hudHost_->SetResources(playerGold_, playerLumber_, playerFoodUsed_, playerFoodCap_, resourceTimeText_);
     hudHost_->SetSelection(selectedName_, selectedLevel_, selectedHp_, selectedMaxHp_,
                            selectedMp_, selectedMaxMp_, heroVisible_,
                            heroXp_, heroMaxXp_,
                            heroStrBase_, heroStrBonus_,
                            heroAgiBase_, heroAgiBonus_,
-                           heroIntBase_, heroIntBonus_);
-    hudHost_->SetTooltip(pendingTooltipText_, pendingTooltipX_, pendingTooltipY_, tooltipActive_);
+                           heroIntBase_, heroIntBonus_,
+                           selectedInfoStats_);
+    hudHost_->SetTooltip(pendingTooltipText_, pendingTooltipX_, pendingTooltipY_,
+                         tooltipActive_, pendingTooltipCosts_);
     hudHost_->SetChatOpen(chatOpen_);
     hudHost_->SetChatMessages(chatMessages_);
 
     for (int i = 0; i < kCommandCount; ++i) {
-        hudHost_->SetCommandSlot(i, commandSlots_[i].label, commandSlots_[i].enabled, commandSlots_[i].visible);
+        HudCommandSlot hudSlot;
+        hudSlot.label = commandSlots_[i].label;
+        hudSlot.tooltip = commandSlots_[i].tooltip;
+        hudSlot.iconUri = commandSlots_[i].noesisIconUri;
+        hudSlot.resourceCosts = commandSlots_[i].resourceCosts;
+        hudSlot.cooldownRemaining = commandSlots_[i].cooldownRemaining;
+        hudSlot.cooldownMax = commandSlots_[i].cooldownMax;
+        hudSlot.autocastOrderId = commandSlots_[i].autocastOrderId;
+        hudSlot.numberOverlay = commandSlots_[i].numberOverlay;
+        hudSlot.enabled = commandSlots_[i].enabled;
+        hudSlot.visible = commandSlots_[i].visible;
+        hudSlot.active = commandSlots_[i].active
+            || (pendingCommandOrderId_ >= 0 && commandSlots_[i].orderId == pendingCommandOrderId_);
+        hudSlot.autocastActive = commandSlots_[i].autocastActive;
+        hudHost_->SetCommandSlot(i, hudSlot);
     }
+    hudHost_->SetMultiSelection(multiSelectionUnits_, selectedUnitHandle_);
+    hudHost_->SetQueue(queueItems_, queueProgressRatio_);
+    hudHost_->SetInventory(inventoryItems_, inventoryCapacity_, inventoryAvailable_);
+    hudHost_->SetPortraitIcon(selectedPortraitIconUri_);
+    hudHost_->SetBuffs(selectedBuffs_);
 
-    uiTime_ += 0.016;
+    uiTime_ += frameDt;
     hudHost_->Update(uiTime_);
+}
+
+void MainUI::RenderNoesisOffscreen() {
+    if (hudHost_) {
+        hudHost_->RenderOffscreen();
+        sg_reset_state_cache();
+    }
+}
+
+void MainUI::RenderNoesisOnly() {
+    if (!hudHost_) return;
+    hudHost_->Render();
+    sg_reset_state_cache();
 }
 
 void MainUI::Render() {
     gameUI_.renderer.BeginFrame(gameUI_.screenW, gameUI_.screenH);
     RenderOverlays(gameUI_.renderer);
     gameUI_.renderer.EndFrame();
-
-    if (hudHost_) {
-        hudHost_->Render();
-        sg_reset_state_cache();
-    }
-
-    gameUI_.renderer.BeginFrame(gameUI_.screenW, gameUI_.screenH);
-    multiSelectionPanel_.Render(gameUI_.renderer, gameUI_.screenW, gameUI_.screenH);
-    RenderCommandIcons(gameUI_.renderer);
-    gameUI_.renderer.EndFrame();
 }
 
 void MainUI::SetMultiSelection(const std::vector<MultiSelectUnitInfo>& units) {
+    multiSelectionUnits_ = units;
     multiSelectionPanel_.SetSelection(units);
 }
 
@@ -266,26 +504,160 @@ void MainUI::ClearSelectionBox() {
     selectionBoxRect_ = {};
 }
 
-void MainUI::RenderCommandIcons(UiRenderer& r) {
-    if (!hudHost_) return;
+void MainUI::UpdateQueueState() {
+    queueItems_.clear();
+    queueProgressRatio_ = 0.0f;
+    if (!simulation_ || selectedUnitHandle_ < 0) return;
 
-    for (int i = 0; i < kCommandCount; ++i) {
-        const CommandSlot& slot = commandSlots_[i];
-        if (!slot.visible || !slot.icon || !slot.icon->IsValid()) continue;
+    CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
+    if (!unit) return;
+    auto* queueAbility = dynamic_cast<CAbilityQueue*>(unit->GetAbility(War3ID("Aque")));
+    if (!queueAbility) return;
 
-        ScreenRect rect = hudHost_->GetCommandRect(i);
-        if (!rect.IsValid()) continue;
+    for (int i = 0; i < CAbilityQueue::MAX_QUEUE; ++i) {
+        const CQueueItemType type = queueAbility->GetQueuedItemType(i);
+        if (type == CQueueItemType::NONE) continue;
 
-        float inset = 7.0f;
-        float drawX = rect.x + inset;
-        float drawY = rect.y + inset;
-        float drawW = std::max(0.0f, rect.w - inset * 2.0f);
-        float drawH = std::max(0.0f, rect.h - inset * 2.0f);
-        if (drawW <= 0.0f || drawH <= 0.0f) continue;
+        const War3ID itemId = queueAbility->GetQueuedItem(i);
+        std::string label = itemId.ToString();
+        std::string iconPath;
+        if (type == CQueueItemType::UNIT || type == CQueueItemType::HERO_REVIVE) {
+            if (const auto* unitType = unitData_ ? unitData_->GetUnitType(itemId) : nullptr) {
+                label = ShortLabel(unitType->GetName());
+                iconPath = unitType->GetIconPath();
+            }
+        }
+        if (type == CQueueItemType::RESEARCH) {
+            label = ShortLabel(itemId.ToString());
+            const auto* upgradeData = simulation_ ? simulation_->GetUpgradeData() : nullptr;
+            if (const auto* upgrade = upgradeData ? upgradeData->GetUpgrade(itemId) : nullptr) {
+                label = ShortLabel(upgrade->name.empty() ? itemId.ToString() : upgrade->name);
+                iconPath = upgrade->iconPath;
+            }
+        }
+        std::string iconUri;
+        if (!iconPath.empty()) {
+            std::shared_ptr<Texture> icon = LoadTextureFromMpq(iconPath);
+            iconUri = icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri;
+        }
+        queueItems_.push_back(HudQueueItem{i, label, iconUri, true});
+    }
 
-        uint32_t tint = slot.enabled ? 0xFFFFFFFF : 0x88A0A0A0;
-        r.DrawTexturedQuad(drawX, drawY, drawW, drawH, slot.icon->GetImage(),
-                           0.0f, 0.0f, 1.0f, 1.0f, tint);
+    const float buildTime = queueAbility->GetBuildTime();
+    if (buildTime > 0.0f && queueAbility->GetQueuedItemType(0) != CQueueItemType::NONE) {
+        queueProgressRatio_ = std::clamp(queueAbility->GetProgress() / buildTime, 0.0f, 1.0f);
+    }
+}
+
+bool MainUI::HandleQueueSlotClick(int slot) {
+    if (!simulation_ || selectedUnitHandle_ < 0 || slot < 0) return false;
+    CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
+    if (!unit) return false;
+    auto* queueAbility = dynamic_cast<CAbilityQueue*>(unit->GetAbility(War3ID("Aque")));
+    if (!queueAbility || queueAbility->GetQueuedItemType(slot) == CQueueItemType::NONE) return false;
+
+    queueAbility->CancelQueueItem(*simulation_, unit, slot);
+    UpdateQueueState();
+    PopulateCommandCardForUnit(unit);
+    std::cout << "QueueIcon: canceled slot=" << slot << " unit=" << selectedUnitHandle_ << std::endl;
+    return true;
+}
+
+void MainUI::UpdateInventoryState() {
+    inventoryItems_.clear();
+    inventoryAvailable_ = false;
+    inventoryCapacity_ = 0;
+    if (!simulation_ || selectedUnitHandle_ < 0) return;
+
+    CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
+    if (!unit) return;
+    auto* inventory = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")));
+    if (!inventory) return;
+
+    inventoryAvailable_ = true;
+    inventoryCapacity_ = std::clamp(inventory->GetItemCapacity(), 0, CAbilityInventory::MAX_SLOTS);
+    for (int i = 0; i < CAbilityInventory::MAX_SLOTS; ++i) {
+        CItem* item = inventory->GetItem(i);
+
+        HudInventoryItem hudItem;
+        hudItem.slot = i;
+        hudItem.visible = true;
+        hudItem.enabled = i < inventoryCapacity_;
+        hudItem.occupied = hudItem.enabled && item != nullptr;
+        if (!hudItem.occupied) {
+            inventoryItems_.push_back(hudItem);
+            continue;
+        }
+
+        hudItem.charges = item->GetCharges();
+
+        std::string iconPath = item->GetIcon();
+        if (!iconPath.empty()) {
+            std::shared_ptr<Texture> icon = LoadTextureFromMpq(iconPath);
+            hudItem.iconUri = icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri;
+        }
+
+        if (hudItem.iconUri.empty()) {
+            hudItem.label = ShortLabel(item->GetName().empty() ? item->GetTypeId().ToString() : item->GetName());
+        }
+
+        inventoryItems_.push_back(hudItem);
+    }
+}
+
+bool MainUI::HandleInventorySlotClick(int slot) {
+    if (!simulation_ || selectedUnitHandle_ < 0 || slot < 0) return false;
+    CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
+    if (!unit) return false;
+    auto* inventory = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")));
+    if (!inventory || !inventory->GetItem(slot)) return false;
+
+    const bool used = inventory->UseItem(*simulation_, unit, slot);
+    if (used) {
+        UpdateInventoryState();
+        std::cout << "InventoryIcon: used slot=" << slot << " unit=" << selectedUnitHandle_ << std::endl;
+    }
+    return used;
+}
+
+void MainUI::UpdatePortraitIconState() {
+    selectedPortraitIconUri_.clear();
+    if (!simulation_ || selectedUnitHandle_ < 0) return;
+
+    CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
+    if (!unit) return;
+    const CUnitType* unitType = unit->GetUnitType();
+    if (!unitType) return;
+
+    const std::string& iconPath = unitType->GetIconPath();
+    if (iconPath.empty()) return;
+    std::shared_ptr<Texture> icon = LoadTextureFromMpq(iconPath);
+    selectedPortraitIconUri_ = icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri;
+}
+
+void MainUI::UpdateBuffState() {
+    selectedBuffs_.clear();
+    if (!simulation_ || selectedUnitHandle_ < 0) return;
+
+    CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
+    if (!unit) return;
+
+    const auto& buffs = unit->GetBuffs();
+    selectedBuffs_.reserve(std::min(kHudBuffCount, (int)buffs.size()));
+    for (const auto& buff : buffs) {
+        if (!buff || buff->IsExpired()) {
+            continue;
+        }
+        const CBuffDefFull* def = abilityData_.GetBuff(buff->GetId());
+        std::string iconUri;
+        if (def && !def->iconArt.empty()) {
+            std::shared_ptr<Texture> icon = LoadTextureFromMpq(def->iconArt);
+            iconUri = icon ? GetNoesisTextureUri(def->iconArt) : kDefaultNoesisCommandIconUri;
+        }
+        selectedBuffs_.push_back(BuildBuffItem(*buff, def, iconUri));
+        if ((int)selectedBuffs_.size() >= kHudBuffCount) {
+            break;
+        }
     }
 }
 
@@ -293,15 +665,117 @@ bool MainUI::HandleEvent(const sapp_event* ev) {
     if (!ev) return false;
 
     if (ev->type == SAPP_EVENTTYPE_MOUSE_DOWN && ev->mouse_button == SAPP_MOUSEBUTTON_LEFT && hudHost_) {
+        if (hudHost_->IsGlueMenuActive()) {
+            int glueAction = hudHost_->HitGlueMenuButton(ev->mouse_x, ev->mouse_y);
+            hudHost_->SetPressedGlueMenuButton(glueAction);
+            if (glueAction >= 0) {
+                hudHost_->HandleGlueMenuAction(glueAction);
+            }
+            return glueAction >= 0;
+        }
+
+        if (hudHost_->IsGameMenuOpen()) {
+            int gameMenuAction = hudHost_->HitGameMenuButton(ev->mouse_x, ev->mouse_y);
+            hudHost_->SetPressedGameMenuButton(gameMenuAction);
+            if (gameMenuAction >= 0) {
+                hudHost_->HandleGameMenuAction(gameMenuAction);
+            }
+            return true;
+        }
+
+        int upperButton = hudHost_->HitUpperButton(ev->mouse_x, ev->mouse_y);
+        if (upperButton >= 0) {
+            hudHost_->SetPressedUpperButton(upperButton);
+            hudHost_->SetPressedCommand(-1);
+            hudHost_->SetPressedMinimapButton(-1);
+            if (upperButton == 1) {
+                hudHost_->OpenGameMenu();
+            }
+            return true;
+        }
+
+        int minimapButton = hudHost_->HitMinimapButton(ev->mouse_x, ev->mouse_y);
+        if (minimapButton >= 0) {
+            hudHost_->SetPressedMinimapButton(minimapButton);
+            hudHost_->ActivateMinimapButton(minimapButton);
+            hudHost_->SetPressedUpperButton(-1);
+            hudHost_->SetPressedCommand(-1);
+            return true;
+        }
+
+        int inventorySlot = hudHost_->HitInventorySlot(ev->mouse_x, ev->mouse_y);
+        if (inventorySlot >= 0 && HandleInventorySlotClick(inventorySlot)) {
+            hudHost_->SetPressedCommand(-1);
+            hudHost_->SetPressedUpperButton(-1);
+            hudHost_->SetPressedMinimapButton(-1);
+            return true;
+        }
+
+        int queueSlot = hudHost_->HitQueueSlot(ev->mouse_x, ev->mouse_y);
+        if (queueSlot >= 0 && HandleQueueSlotClick(queueSlot)) {
+            hudHost_->SetPressedCommand(-1);
+            hudHost_->SetPressedUpperButton(-1);
+            hudHost_->SetPressedMinimapButton(-1);
+            return true;
+        }
+
         int commandIndex = hudHost_->HitCommandButton(ev->mouse_x, ev->mouse_y);
         if (commandIndex >= 0) {
+            hudHost_->SetPressedCommand(commandIndex);
+            hudHost_->SetPressedUpperButton(-1);
+            hudHost_->SetPressedMinimapButton(-1);
             HandleCommandButtonClick(commandIndex);
             return true;
+        }
+        hudHost_->SetPressedCommand(-1);
+        hudHost_->SetPressedUpperButton(-1);
+        hudHost_->SetPressedMinimapButton(-1);
+    }
+
+    if (ev->type == SAPP_EVENTTYPE_MOUSE_UP && ev->mouse_button == SAPP_MOUSEBUTTON_LEFT && hudHost_) {
+        hudHost_->SetPressedCommand(-1);
+        hudHost_->SetPressedUpperButton(-1);
+        hudHost_->SetPressedMinimapButton(-1);
+        hudHost_->SetPressedGameMenuButton(-1);
+        hudHost_->SetPressedGlueMenuButton(-1);
+    }
+
+    if (ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && hudHost_) {
+        if (hudHost_->IsGlueMenuActive()) {
+            hudHost_->SetHoveredGlueMenuButton(hudHost_->HitGlueMenuButton(ev->mouse_x, ev->mouse_y));
+            return true;
+        }
+
+        if (hudHost_->IsGameMenuOpen()) {
+            hudHost_->SetHoveredGameMenuButton(hudHost_->HitGameMenuButton(ev->mouse_x, ev->mouse_y));
+            return true;
+        }
+
+        hudHost_->SetHoveredUpperButton(hudHost_->HitUpperButton(ev->mouse_x, ev->mouse_y));
+        int hoveredCommand = -1;
+        for (int i = 0; i < kCommandCount; ++i) {
+            if (commandSlots_[i].visible && hudHost_->GetCommandRect(i).Contains(ev->mouse_x, ev->mouse_y)) {
+                hoveredCommand = i;
+                break;
+            }
+        }
+        hudHost_->SetHoveredCommand(hoveredCommand);
+
+        if (hoveredCommand >= 0 && !commandSlots_[hoveredCommand].tooltip.empty()) {
+            const CommandSlot& slot = commandSlots_[hoveredCommand];
+            ShowTooltip(slot.tooltip, ev->mouse_x, ev->mouse_y, slot.resourceCosts);
+        } else if (tooltipActive_ || !pendingTooltipText_.empty()) {
+            HideTooltip();
         }
     }
 
     switch (ev->type) {
     case SAPP_EVENTTYPE_KEY_DOWN:
+        if (!chatOpen_ && (ev->key_code == SAPP_KEYCODE_ESCAPE || ev->key_code == SAPP_KEYCODE_F10)) {
+            if (hudHost_) hudHost_->ToggleGameMenu();
+            return true;
+        }
+
         if (ev->key_code == SAPP_KEYCODE_ENTER && !chatOpen_) {
             chatOpen_ = true;
             chatDraft_.clear();
@@ -343,11 +817,71 @@ bool MainUI::HandleEvent(const sapp_event* ev) {
 
 bool MainUI::OnMouseDown(float x, float y, int btn) {
     if (btn == 0 && hudHost_) {
+        if (hudHost_->IsGlueMenuActive()) {
+            int glueAction = hudHost_->HitGlueMenuButton(x, y);
+            hudHost_->SetPressedGlueMenuButton(glueAction);
+            if (glueAction >= 0) {
+                hudHost_->HandleGlueMenuAction(glueAction);
+            }
+            return glueAction >= 0;
+        }
+
+        if (hudHost_->IsGameMenuOpen()) {
+            int gameMenuAction = hudHost_->HitGameMenuButton(x, y);
+            hudHost_->SetPressedGameMenuButton(gameMenuAction);
+            if (gameMenuAction >= 0) {
+                hudHost_->HandleGameMenuAction(gameMenuAction);
+            }
+            return true;
+        }
+
+        int upperButton = hudHost_->HitUpperButton(x, y);
+        if (upperButton >= 0) {
+            hudHost_->SetPressedUpperButton(upperButton);
+            hudHost_->SetPressedCommand(-1);
+            hudHost_->SetPressedMinimapButton(-1);
+            if (upperButton == 1) {
+                hudHost_->OpenGameMenu();
+            }
+            return true;
+        }
+
+        int minimapButton = hudHost_->HitMinimapButton(x, y);
+        if (minimapButton >= 0) {
+            hudHost_->SetPressedMinimapButton(minimapButton);
+            hudHost_->ActivateMinimapButton(minimapButton);
+            hudHost_->SetPressedUpperButton(-1);
+            hudHost_->SetPressedCommand(-1);
+            return true;
+        }
+
+        int inventorySlot = hudHost_->HitInventorySlot(x, y);
+        if (inventorySlot >= 0 && HandleInventorySlotClick(inventorySlot)) {
+            hudHost_->SetPressedCommand(-1);
+            hudHost_->SetPressedUpperButton(-1);
+            hudHost_->SetPressedMinimapButton(-1);
+            return true;
+        }
+
+        int queueSlot = hudHost_->HitQueueSlot(x, y);
+        if (queueSlot >= 0 && HandleQueueSlotClick(queueSlot)) {
+            hudHost_->SetPressedCommand(-1);
+            hudHost_->SetPressedUpperButton(-1);
+            hudHost_->SetPressedMinimapButton(-1);
+            return true;
+        }
+
         int commandIndex = hudHost_->HitCommandButton(x, y);
         if (commandIndex >= 0) {
+            hudHost_->SetPressedCommand(commandIndex);
+            hudHost_->SetPressedUpperButton(-1);
+            hudHost_->SetPressedMinimapButton(-1);
             HandleCommandButtonClick(commandIndex);
             return true;
         }
+        hudHost_->SetPressedCommand(-1);
+        hudHost_->SetPressedUpperButton(-1);
+        hudHost_->SetPressedMinimapButton(-1);
     }
     return false;
 }
@@ -355,11 +889,21 @@ bool MainUI::OnMouseDown(float x, float y, int btn) {
 bool MainUI::OnMouseUp(float x, float y, int btn) {
     (void)x;
     (void)y;
-    (void)btn;
+    if (btn == 0 && hudHost_) {
+        hudHost_->SetPressedCommand(-1);
+        hudHost_->SetPressedUpperButton(-1);
+        hudHost_->SetPressedMinimapButton(-1);
+        hudHost_->SetPressedGameMenuButton(-1);
+        hudHost_->SetPressedGlueMenuButton(-1);
+    }
     return false;
 }
 
-void MainUI::OnKeyDown(int /*key*/) {}
+void MainUI::OnKeyDown(int key) {
+    if (hudHost_ && !chatOpen_ && (key == SAPP_KEYCODE_ESCAPE || key == SAPP_KEYCODE_F10)) {
+        hudHost_->ToggleGameMenu();
+    }
+}
 
 void MainUI::WireCommandCardCallbacks() {}
 
@@ -398,18 +942,23 @@ void MainUI::HandleCommandButtonClick(int index) {
     }
 }
 
-void MainUI::ShowTooltip(const std::string& text, float screenX, float screenY) {
+void MainUI::ShowTooltip(const std::string& text, float screenX, float screenY, const HudResourceCosts& costs) {
+    const bool changed = pendingTooltipText_ != text || !SameCosts(pendingTooltipCosts_, costs);
     pendingTooltipText_ = text;
+    pendingTooltipCosts_ = costs;
     pendingTooltipX_ = screenX;
     pendingTooltipY_ = screenY;
-    tooltipTimer_ = 0;
-    tooltipActive_ = false;
+    if (changed) {
+        tooltipTimer_ = 0;
+        tooltipActive_ = false;
+    }
 }
 
 void MainUI::HideTooltip() {
     tooltipActive_ = false;
     tooltipTimer_ = 0;
     pendingTooltipText_.clear();
+    pendingTooltipCosts_ = HudResourceCosts{};
 }
 
 void MainUI::UpdateTooltip(float mouseX, float mouseY) {
@@ -551,7 +1100,7 @@ void MainUI::RenderOverlays(UiRenderer& r) {
     }
 }
 
-void MainUI::UpdateInfoPanel(War3ID /*unitTypeId*/, const std::string& name, int level,
+void MainUI::UpdateInfoPanel(War3ID unitTypeId, const std::string& name, int level,
                              float hp, float maxHp, float mp, float maxMp) {
     selectedName_ = name;
     selectedLevel_ = level;
@@ -559,6 +1108,9 @@ void MainUI::UpdateInfoPanel(War3ID /*unitTypeId*/, const std::string& name, int
     selectedMaxHp_ = maxHp;
     selectedMp_ = mp;
     selectedMaxMp_ = maxMp;
+    const CUnitType* unitType = unitData_ ? unitData_->GetUnitType(unitTypeId) : nullptr;
+    const CUnit* unit = (simulation_ && selectedUnitHandle_ >= 0) ? simulation_->GetUnit(selectedUnitHandle_) : nullptr;
+    selectedInfoStats_ = BuildInfoStats(unitType, unit);
 }
 
 void MainUI::ClearInfoPanel() {
@@ -569,6 +1121,8 @@ void MainUI::ClearInfoPanel() {
     selectedMp_ = 0.0f;
     selectedMaxMp_ = 0.0f;
     heroVisible_ = false;
+    selectedInfoStats_ = HudInfoStats{};
+    selectedBuffs_.clear();
 }
 
 void MainUI::PopulateCommandCardForUnitType(War3ID unitTypeId) {
@@ -632,7 +1186,21 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
 
         std::shared_ptr<Texture> icon = LoadTextureFromMpq(def->iconArt);
         std::string label = icon ? std::string() : ShortLabel(def->name.empty() ? def->tooltip : def->name);
-        SetCommandSlotAt(row, col, orderId, clickMode, !ability->IsDisabled() && enabledOverride, label, icon);
+        HudResourceCosts costs;
+        costs.mana = def->manaCost;
+        float cooldownRemaining = 0.0f;
+        float cooldownMax = 0.0f;
+        if (const auto* spell = dynamic_cast<const CAbilitySpellBase*>(ability)) {
+            cooldownRemaining = spell->GetCooldownRemaining();
+            cooldownMax = spell->GetCooldown();
+        }
+        const War3ID defaultAutocast = unit->GetUnitType() ? unit->GetUnitType()->GetDefaultAutocastAbility() : War3ID{};
+        const bool defaultAutocastActive = defaultAutocast.value != 0 && defaultAutocast == ability->GetAlias();
+        const int autocastOrderId = defaultAutocastActive ? orderId : 0;
+        SetCommandSlotAt(row, col, orderId, clickMode, !ability->IsDisabled() && enabledOverride,
+                         label, icon, icon ? GetNoesisTextureUri(def->iconArt) : kDefaultNoesisCommandIconUri, -1,
+                         BuildCommandTooltipText(def->tooltip.empty() ? def->name : def->tooltip, def->uberTip),
+                         costs, cooldownRemaining, cooldownMax, autocastOrderId, defaultAutocastActive);
         return true;
     };
 
@@ -643,8 +1211,11 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                                        bool enabled,
                                        const char* label,
                                        const char* iconPath) {
+        std::shared_ptr<Texture> icon = iconPath ? LoadTextureFromMpq(iconPath) : nullptr;
         SetCommandSlotAt(row, col, orderId, clickMode, enabled, {},
-                         iconPath ? LoadTextureFromMpq(iconPath) : nullptr);
+                         icon, icon ? GetNoesisTextureUri(iconPath)
+                                    : (iconPath ? kDefaultNoesisCommandIconUri : std::string()), -1,
+                         label ? label : std::string());
         if (!commandSlots_[SlotIndex(row, col)].icon) {
             commandSlots_[SlotIndex(row, col)].label = label ? label : std::string();
         }
@@ -677,11 +1248,19 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 const int row = nextIndex / kCommandCols;
                 const int col = nextIndex % kCommandCols;
                 std::string label = structureId.ToString();
-                if (const auto* structureType = unitData_ ? unitData_->GetUnitType(structureId) : nullptr) {
+                std::string iconPath;
+                const auto* structureType = unitData_ ? unitData_->GetUnitType(structureId) : nullptr;
+                if (structureType) {
                     label = ShortLabel(structureType->GetName());
+                    iconPath = structureType->GetIconPath();
                 }
+                std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(structureId.value), CommandClickMode::POINT_ONLY,
-                                 !ability->IsDisabled(), label, nullptr);
+                                 !ability->IsDisabled(), icon ? std::string() : label,
+                                 icon, iconPath.empty() ? std::string()
+                                                        : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
+                                 structureType ? structureType->GetName() : structureId.ToString(),
+                                 UnitTypeCosts(structureType));
             }
             return;
         }
@@ -739,11 +1318,19 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 const int row = nextIndex / kCommandCols;
                 const int col = nextIndex % kCommandCols;
                 std::string label = trainedId.ToString();
-                if (const auto* trainedType = unitData_ ? unitData_->GetUnitType(trainedId) : nullptr) {
+                std::string iconPath;
+                const auto* trainedType = unitData_ ? unitData_->GetUnitType(trainedId) : nullptr;
+                if (trainedType) {
                     label = ShortLabel(trainedType->GetName());
+                    iconPath = trainedType->GetIconPath();
                 }
+                std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(trainedId.value), CommandClickMode::IMMEDIATE,
-                                 !ability->IsDisabled(), label, nullptr);
+                                 !ability->IsDisabled(), icon ? std::string() : label,
+                                 icon, iconPath.empty() ? std::string()
+                                                        : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
+                                 trainedType ? trainedType->GetName() : trainedId.ToString(),
+                                 UnitTypeCosts(trainedType));
             }
 
             std::vector<War3ID> researches(queueAbility->GetResearches().begin(), queueAbility->GetResearches().end());
@@ -756,8 +1343,21 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 }
                 const int row = nextIndex / kCommandCols;
                 const int col = nextIndex % kCommandCols;
+                std::string label = researchId.ToString();
+                std::string iconPath;
+                const auto* upgradeData = simulation_ ? simulation_->GetUpgradeData() : nullptr;
+                const auto* upgrade = upgradeData ? upgradeData->GetUpgrade(researchId) : nullptr;
+                if (upgrade) {
+                    label = ShortLabel(upgrade->name);
+                    iconPath = upgrade->iconPath;
+                }
+                std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(researchId.value), CommandClickMode::IMMEDIATE,
-                                 !ability->IsDisabled(), researchId.ToString(), nullptr);
+                                 !ability->IsDisabled(), icon ? std::string() : label,
+                                 icon, iconPath.empty() ? std::string()
+                                                        : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
+                                 upgrade ? upgrade->name : researchId.ToString(),
+                                 UpgradeCosts(upgrade));
             }
 
             if (queueAbility->GetQueueCount() > 0 && !commandSlots_[SlotIndex(2, 3)].visible) {
@@ -778,11 +1378,19 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 const int row = nextIndex / kCommandCols;
                 const int col = nextIndex % kCommandCols;
                 std::string label = upgradeId.ToString();
-                if (const auto* upgradeType = unitData_ ? unitData_->GetUnitType(upgradeId) : nullptr) {
+                std::string iconPath;
+                const auto* upgradeType = unitData_ ? unitData_->GetUnitType(upgradeId) : nullptr;
+                if (upgradeType) {
                     label = ShortLabel(upgradeType->GetName());
+                    iconPath = upgradeType->GetIconPath();
                 }
+                std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(upgradeId.value), CommandClickMode::IMMEDIATE,
-                                 !ability->IsDisabled(), label, nullptr);
+                                 !ability->IsDisabled(), icon ? std::string() : label,
+                                 icon, iconPath.empty() ? std::string()
+                                                        : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
+                                 upgradeType ? upgradeType->GetName() : upgradeId.ToString(),
+                                 UnitTypeCosts(upgradeType));
             }
             continue;
         }
@@ -815,15 +1423,26 @@ void MainUI::PopulateCommandCardFromAbilities(const std::vector<War3ID>& ability
         slot.visible = true;
         slot.enabled = true;
         auto* def = abilityData_.GetAbility(fo.abilityId);
+        HudResourceCosts costs;
+        std::string tooltip = fo.label;
         if (def && !def->iconArt.empty()) {
             slot.icon = LoadTextureFromMpq(def->iconArt);
+            slot.noesisIconUri = slot.icon ? GetNoesisTextureUri(def->iconArt) : kDefaultNoesisCommandIconUri;
+            costs.mana = def->manaCost;
+            tooltip = BuildCommandTooltipText(def->tooltip.empty() ? def->name : def->tooltip, def->uberTip);
         }
         if (!slot.icon) {
             std::string fallbackPath = "ReplaceableTextures\\CommandButtons\\BTN";
             fallbackPath += fo.label;
             fallbackPath += ".blp";
             slot.icon = LoadTextureFromMpq(fallbackPath);
+            slot.noesisIconUri = slot.icon ? GetNoesisTextureUri(fallbackPath) : kDefaultNoesisCommandIconUri;
         }
+        slot.tooltip = tooltip;
+        slot.resourceCosts = costs;
+        slot.autocastOrderId = 0;
+        slot.active = false;
+        slot.autocastActive = false;
     }
 
     for (const auto& abilId : abilityIds) {
@@ -836,11 +1455,116 @@ void MainUI::PopulateCommandCardFromAbilities(const std::vector<War3ID>& ability
         if (!slot.label.empty()) continue;
 
         slot.icon = LoadTextureFromMpq(def->iconArt);
+        slot.noesisIconUri = slot.icon ? GetNoesisTextureUri(def->iconArt) : kDefaultNoesisCommandIconUri;
         slot.label = slot.icon ? std::string() : ShortLabel(def->name);
+        slot.tooltip = BuildCommandTooltipText(def->tooltip.empty() ? def->name : def->tooltip, def->uberTip);
+        slot.resourceCosts = HudResourceCosts{};
+        slot.resourceCosts.mana = def->manaCost;
+        slot.autocastOrderId = 0;
+        slot.active = false;
+        slot.autocastActive = false;
         slot.orderId = -1;
         slot.visible = true;
         slot.enabled = false;
     }
+}
+
+void MainUI::PopulateDebugCommandCardForUiOnly() {
+    ClearCommandSlots();
+    playerGold_ = 735;
+    playerLumber_ = 420;
+    playerFoodUsed_ = 3;
+    playerFoodCap_ = 12;
+    ShowHeroPanel("UI Debug Hero", 5, 280, 600, 18, 2, 14, 0, 21, 3);
+    UpdateInfoPanel(War3ID("hfoo"), "UI Debug Hero", 5, 385.0f, 725.0f, 120.0f, 220.0f);
+
+    SetCommandSlotAt(0, 0, 851986, CommandClickMode::POINT_ONLY, true, "Move", nullptr,
+                     kDefaultNoesisCommandIconUri, -1, "Move", HudResourceCosts{});
+    SetCommandSlotAt(0, 1, 851983, CommandClickMode::POINT_ONLY, true, "Patrol", nullptr,
+                     kDefaultNoesisCommandIconUri, 1, "Patrol", HudResourceCosts{});
+    commandSlots_[SlotIndex(0, 1)].active = true;
+    SetCommandSlotAt(0, 2, 851983, CommandClickMode::POINT_ONLY, false, "Attack", nullptr,
+                     kDefaultNoesisCommandIconUri, -1, "Attack", HudResourceCosts{});
+    SetCommandSlotAt(1, 0, 852095, CommandClickMode::IMMEDIATE, true, "Auto", nullptr,
+                     kDefaultNoesisCommandIconUri, -1, "Autocast", HudResourceCosts{},
+                     0.0f, 0.0f, 852096, true);
+    SetCommandSlotAt(1, 1, 852066, CommandClickMode::IMMEDIATE, true, "Cooldown", nullptr,
+                     kDefaultNoesisCommandIconUri, -1, "Cooldown", HudResourceCosts{},
+                     8.0f, 15.0f);
+
+    multiSelectionUnits_.clear();
+    MultiSelectUnitInfo hero;
+    hero.handleId = 1;
+    hero.name = "UI Debug Hero";
+    hero.hpRatio = 0.62f;
+    hero.mpRatio = 0.55f;
+    hero.playerColor = 0xFF006CFF;
+    hero.level = 5;
+    hero.isHero = true;
+    multiSelectionUnits_.push_back(hero);
+
+    MultiSelectUnitInfo unit;
+    unit.handleId = 2;
+    unit.name = "UI Debug Unit";
+    unit.hpRatio = 0.86f;
+    unit.mpRatio = 0.0f;
+    unit.playerColor = 0xFF2FA046;
+    unit.isHero = false;
+    multiSelectionUnits_.push_back(unit);
+}
+
+void MainUI::OpenGameMenuForUiOnly() {
+    if (hudHost_) {
+        hudHost_->OpenGameMenu();
+    }
+}
+
+void MainUI::OpenGameMenuPanelForUiOnly(const std::string& panel) {
+    if (hudHost_) {
+        hudHost_->OpenGameMenuDebugPanel(panel);
+    }
+}
+
+bool MainUI::InvokeGameMenuActionForUiOnly(const std::string& actionName) {
+    return hudHost_ && hudHost_->InvokeGameMenuActionForDebug(actionName);
+}
+
+bool MainUI::InvokeUpperButtonForUiOnly(const std::string& buttonName) {
+    return hudHost_ && hudHost_->InvokeUpperButtonForDebug(buttonName);
+}
+
+void MainUI::OpenGlueMenuForUiOnly(const std::string& pageName) {
+    if (hudHost_) {
+        hudHost_->OpenGlueMenuDebugPage(pageName);
+    }
+}
+
+bool MainUI::InvokeGlueMenuActionForUiOnly(const std::string& actionName) {
+    return hudHost_ && hudHost_->InvokeGlueMenuActionForDebug(actionName);
+}
+
+void MainUI::SetGlueMenuMapsForUiOnly(const std::vector<War3UI::GlueMapListItem>& maps) {
+    if (hudHost_) {
+        hudHost_->SetGlueMenuMaps(maps);
+    }
+}
+
+void MainUI::SetGlueMenuCampaignsForUiOnly(const std::vector<War3UI::GlueCampaignListItem>& campaigns) {
+    if (hudHost_) {
+        hudHost_->SetGlueMenuCampaigns(campaigns);
+    }
+}
+
+void MainUI::SetResourcesForUiOnly(int gold, int lumber, int foodUsed, int foodCap, const std::string& timeText) {
+    playerGold_ = gold;
+    playerLumber_ = lumber;
+    playerFoodUsed_ = foodUsed;
+    playerFoodCap_ = foodCap;
+    resourceTimeText_ = timeText.empty() ? "12:00" : timeText;
+    std::cout << "UI-only mode: debug resources gold=" << playerGold_
+              << " lumber=" << playerLumber_
+              << " food=" << playerFoodUsed_ << "/" << playerFoodCap_
+              << " time=" << resourceTimeText_ << std::endl;
 }
 
 std::vector<War3ID> MainUI::GetUnitAbilities(War3ID unitTypeId) {
@@ -886,6 +1610,77 @@ ScreenRect MainUI::GetPortraitRect() const {
     return hudHost_ ? hudHost_->GetPortraitRect() : ScreenRect{};
 }
 
+int MainUI::HitMultiSelection(float x, float y) const {
+    return hudHost_ ? hudHost_->HitMultiSelection(x, y) : -1;
+}
+
+int MainUI::HitQueueSlot(float x, float y) const {
+    return hudHost_ ? hudHost_->HitQueueSlot(x, y) : -1;
+}
+
+int MainUI::HitInventorySlot(float x, float y) const {
+    return hudHost_ ? hudHost_->HitInventorySlot(x, y) : -1;
+}
+
+std::string MainUI::GetNoesisTextureUri(const std::string& path) const {
+    std::string normalized = NormalizeAssetPath(path);
+    if (normalized.empty()) return {};
+
+    auto it = noesisTextureUris_.find(normalized);
+    return it != noesisTextureUris_.end() ? it->second : std::string();
+}
+
+std::string MainUI::ExportNoesisTexture(const std::string& normalizedPath, const std::vector<uint8_t>& data) {
+    if (normalizedPath.empty() || data.empty()) return {};
+
+    std::filesystem::path relativePath = std::filesystem::path("assets") / "ui" / "cache" / "icons"
+        / (SanitizeCacheFileStem(normalizedPath) + ".png");
+    std::filesystem::path absolutePath = std::filesystem::path(PROJECT_SOURCE_DIR) / relativePath;
+
+    std::error_code ec;
+    std::filesystem::create_directories(absolutePath.parent_path(), ec);
+    if (ec) {
+        std::cerr << "MainUI: failed to create Noesis icon cache directory: " << ec.message() << std::endl;
+        return {};
+    }
+
+    std::string uri = relativePath.generic_string();
+    if (std::filesystem::exists(absolutePath, ec) && !ec) {
+        return uri;
+    }
+
+    std::vector<uint8_t> rgba;
+    int width = 0;
+    int height = 0;
+
+    if (data.size() >= 4 && (std::memcmp(data.data(), "BLP1", 4) == 0 || std::memcmp(data.data(), "BLP2", 4) == 0)) {
+        BLPImage image;
+        if (!DecodeBLP(data.data(), data.size(), image)) {
+            return {};
+        }
+        width = image.width;
+        height = image.height;
+        rgba = std::move(image.pixels);
+    } else {
+        int channels = 0;
+        stbi_uc* pixels = stbi_load_from_memory(data.data(), (int)data.size(), &width, &height, &channels, STBI_rgb_alpha);
+        if (!pixels) {
+            return {};
+        }
+        rgba.assign(pixels, pixels + ((size_t)width * (size_t)height * 4));
+        stbi_image_free(pixels);
+    }
+
+    if (width <= 0 || height <= 0 || rgba.empty()) return {};
+
+    if (!stbi_write_png(absolutePath.string().c_str(), width, height, 4, rgba.data(), width * 4)) {
+        std::cerr << "MainUI: failed to write Noesis icon cache: " << absolutePath.string() << std::endl;
+        return {};
+    }
+
+    return uri;
+}
+
 std::shared_ptr<Texture> MainUI::LoadTextureFromMpq(const std::string& path) {
     if (!mpq_ || path.empty()) return nullptr;
 
@@ -901,6 +1696,7 @@ std::shared_ptr<Texture> MainUI::LoadTextureFromMpq(const std::string& path) {
     auto tex = std::make_shared<Texture>();
     if (!tex->LoadFromMemory(buf.data(), buf.size())) return nullptr;
 
+    noesisTextureUris_[normalized] = ExportNoesisTexture(normalized, buf);
     textures_[normalized] = tex;
     return tex;
 }

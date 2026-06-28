@@ -2,6 +2,7 @@
 #include "renderer.h"
 #include <iostream>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <unordered_set>
 
@@ -14,6 +15,20 @@ static const uint32_t NODE_DONT_INHERIT_SCALING = 0x2;
 static const uint32_t NODE_DONT_INHERIT_ROTATION = 0x4;
 static const uint32_t NODE_BILLBOARDED = 0x8;
 static const uint32_t NODE_BILLBOARDED_LOCK_Z = 0x40;
+static constexpr bool kMdxAnimatorVerboseLog = false;
+
+template <typename... Args>
+static void MdxAnimatorLog(const char* format, Args... args) {
+    if constexpr (kMdxAnimatorVerboseLog) {
+        std::fprintf(stderr, format, args...);
+    }
+}
+
+static void MdxAnimatorFlush() {
+    if constexpr (kMdxAnimatorVerboseLog) {
+        std::fflush(stderr);
+    }
+}
 
 static Mat4 RotateY(float radians) {
     Mat4 r = Mat4::Identity();
@@ -89,30 +104,31 @@ void MdxAnimator::Init(const MdxModel& model) {
     sequences_ = &model.sequences;
     pivotPoints_ = &model.pivotPoints;
     BuildSkeleton(model);
-    std::fprintf(stderr, "MdxAnimator::Init skeleton nodes=%zu boneCount=%d\n", nodes_.size(), boneCount_);
+    MdxAnimatorLog( "MdxAnimator::Init skeleton nodes=%zu boneCount=%d\n", nodes_.size(), boneCount_);
     if (!nodes_.empty()) {
-        std::fprintf(stderr, "MdxAnimator::Init sample frame 0\n");
+        MdxAnimatorLog( "MdxAnimator::Init sample frame 0\n");
         SampleAnimations(0);
-        std::fprintf(stderr, "MdxAnimator::Init update skeleton\n");
+        MdxAnimatorLog( "MdxAnimator::Init update skeleton\n");
+        needsBoneUpload_ = true;
         UpdateSkeleton();
     }
-    std::fprintf(stderr, "MdxAnimator::Init end\n");
-    std::fflush(stderr);
+    MdxAnimatorLog( "MdxAnimator::Init end\n");
+    MdxAnimatorFlush();
 }
 
 void MdxAnimator::BuildSkeleton(const MdxModel& model) {
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton begin bones=%zu helpers=%zu attachments=%zu lights=%zu emit1=%zu emit2=%zu ribbons=%zu events=%zu\n",
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton begin bones=%zu helpers=%zu attachments=%zu lights=%zu emit1=%zu emit2=%zu ribbons=%zu events=%zu\n",
         model.bones.size(), model.helpers.size(), model.attachments.size(), model.lights.size(),
         model.particleEmitters1.size(), model.particleEmitters2.size(),
         model.ribbonEmitters.size(), model.eventObjects.size());
     nodes_.clear();
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after nodes clear\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton after nodes clear\n");
     nodeOrder_.clear();
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after order clear\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton after order clear\n");
     objectIdToBoneIndex_.clear();
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after bone map clear\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton after bone map clear\n");
     boneCount_ = 0;
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after bone count reset\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton after bone count reset\n");
     struct Entry {
         int objectId;
         int parentId;
@@ -121,12 +137,12 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         const std::vector<MdxTimeline>* timelines;
     };
     std::vector<Entry> entries;
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after entries ctor\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton after entries ctor\n");
     entries.reserve(model.bones.size() + model.helpers.size() + model.attachments.size()
         + model.lights.size() + model.particleEmitters1.size() + model.particleEmitters2.size()
         + model.ribbonEmitters.size() + model.eventObjects.size());
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after entries reserve\n");
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after entry map ctor\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton after entries reserve\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton after entry map ctor\n");
     auto hasEntryObjectId = [&](int objectId) -> bool {
         for (const auto& entry : entries) {
             if (entry.objectId == objectId) {
@@ -152,14 +168,14 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         }
         entries.push_back({objectId, parentId, pivotIndex, flags, timelines});
     };
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton before add loops\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton before add loops\n");
 
     for (const auto& b : model.bones) {
-        std::fprintf(stderr, "MdxAnimator::BuildSkeleton bone objectId=%d parentId=%d name=%s\n",
+        MdxAnimatorLog( "MdxAnimator::BuildSkeleton bone objectId=%d parentId=%d name=%s\n",
             b.objectId, b.parentId, b.name.c_str());
         addEntry(b.objectId, b.parentId, b.flags, &b.timelines);
     }
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton after bones\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton after bones\n");
     for (const auto& h : model.helpers) {
         addEntry(h.objectId, h.parentId, h.flags, &h.timelines);
     }
@@ -181,14 +197,14 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
     for (const auto& eventObject : model.eventObjects) {
         addEntry(eventObject.objectId, eventObject.parentId, eventObject.flags, &eventObject.timelines);
     }
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton entries=%zu\n", entries.size());
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton entries=%zu\n", entries.size());
 
     if (entries.empty()) return;
 
     std::vector<size_t> sortedEntries;
     sortedEntries.reserve(entries.size());
     std::vector<uint8_t> visitState(entries.size(), 0);
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton sort setup ready\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton sort setup ready\n");
     auto appendSubtree = [&](auto&& self, size_t entryIndex) -> void {
         if (visitState[entryIndex] == 2) {
             return;
@@ -218,11 +234,11 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
             appendSubtree(appendSubtree, i);
         }
     }
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton root walk complete sorted=%zu\n", sortedEntries.size());
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton root walk complete sorted=%zu\n", sortedEntries.size());
     for (size_t i = 0; i < entries.size(); ++i) {
         appendSubtree(appendSubtree, i);
     }
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton full walk complete sorted=%zu\n", sortedEntries.size());
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton full walk complete sorted=%zu\n", sortedEntries.size());
 
     std::vector<MdxAnimNode> builtNodes(sortedEntries.size());
     std::vector<int> builtNodeOrder(sortedEntries.size(), 0);
@@ -240,7 +256,7 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         objectIdToNodeIndex.push_back({e.objectId, (int)i});
         builtNodeOrder[i] = (int)i;
     }
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton node table ready count=%zu\n", builtNodes.size());
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton node table ready count=%zu\n", builtNodes.size());
     for (size_t i = 0; i < sortedEntries.size(); ++i) {
         const Entry& e = entries[sortedEntries[i]];
         auto& n = builtNodes[i];
@@ -252,7 +268,7 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
             }
         }
     }
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton parent links ready\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton parent links ready\n");
 
     int denseBoneIndex = 0;
     for (int idx : builtNodeOrder) {
@@ -260,16 +276,16 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         n.boneIndex = denseBoneIndex++;
         builtObjectIdToBoneIndex.push_back({n.objectId, n.boneIndex});
     }
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton bone indices ready count=%d\n", denseBoneIndex);
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton bone indices ready count=%d\n", denseBoneIndex);
     nodes_.swap(builtNodes);
     nodeOrder_.swap(builtNodeOrder);
     objectIdToBoneIndex_.swap(builtObjectIdToBoneIndex);
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton member swaps complete\n");
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton member swaps complete\n");
     boneCount_ = denseBoneIndex;
     std::vector<Mat4> builtBoneMatrices(boneCount_, Mat4::Identity());
     boneMatrices_.swap(builtBoneMatrices);
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton bone matrices ready count=%zu\n", boneMatrices_.size());
-    std::fprintf(stderr, "MdxAnimator::BuildSkeleton end nodes=%zu boneCount=%d\n", nodes_.size(), boneCount_);
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton bone matrices ready count=%zu\n", boneMatrices_.size());
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton end nodes=%zu boneCount=%d\n", nodes_.size(), boneCount_);
 }
 
 bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
@@ -281,6 +297,11 @@ bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
     sequenceState_.speed = speed;
     sequenceState_.loop = loop;
     sequenceState_.finished = false;
+    if (!nodes_.empty()) {
+        SampleAnimations(sequenceState_.currentFrame);
+        needsBoneUpload_ = true;
+        UpdateSkeleton();
+    }
     return true;
 }
 
@@ -328,8 +349,8 @@ bool MdxAnimator::SetFrameByRatio(float ratio) {
 
     if (!nodes_.empty()) {
         SampleAnimations(sequenceState_.currentFrame);
-        UpdateSkeleton();
         needsBoneUpload_ = true;
+        UpdateSkeleton();
     }
     return true;
 }
@@ -364,8 +385,8 @@ void MdxAnimator::Update(float dt) {
 
     if (!nodes_.empty()) {
         SampleAnimations(sequenceState_.currentFrame);
-        UpdateSkeleton();
         needsBoneUpload_ = true;
+        UpdateSkeleton();
     }
 }
 
@@ -391,7 +412,7 @@ void MdxAnimator::SampleAnimations(uint32_t frame) {
 }
 
 void MdxAnimator::UpdateSkeleton() {
-    std::fprintf(stderr, "MdxAnimator::UpdateSkeleton begin nodes=%zu order=%zu boneMatrices=%zu\n",
+    MdxAnimatorLog( "MdxAnimator::UpdateSkeleton begin nodes=%zu order=%zu boneMatrices=%zu\n",
         nodes_.size(), nodeOrder_.size(), boneMatrices_.size());
     for (int idx : nodeOrder_) {
         auto& node = nodes_[idx];
@@ -479,10 +500,10 @@ void MdxAnimator::UpdateSkeleton() {
             boneMatrices_[node.boneIndex] = yup;
         }
     }
-    std::fprintf(stderr, "MdxAnimator::UpdateSkeleton matrices ready\n");
+    MdxAnimatorLog( "MdxAnimator::UpdateSkeleton matrices ready\n");
     UploadBoneTexture();
-    std::fprintf(stderr, "MdxAnimator::UpdateSkeleton end\n");
-    std::fflush(stderr);
+    MdxAnimatorLog( "MdxAnimator::UpdateSkeleton end\n");
+    MdxAnimatorFlush();
 }
 
 void MdxAnimator::UploadBoneTexture() {

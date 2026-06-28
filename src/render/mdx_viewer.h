@@ -13,7 +13,7 @@ public:
     MdxViewer();
     ~MdxViewer();
 
-    bool Load(const MdxModel& model, MpqManager* mpq, bool cliffMode = false);
+    bool Load(const MdxModel& model, MpqManager* mpq, bool cliffMode = false, bool enableParticles = false);
     bool ShareModelResourcesFrom(const MdxViewer& other);
 
     // Per-frame update (animation, particles, etc.)
@@ -26,6 +26,10 @@ public:
                   float yawRadians, float alpha);
     void RenderAt(const Vec3& pos, const Mat4& view, const Mat4& proj, float scale = 1.0f, int player = 0,
                   float yawRadians = 0.0f, float alpha = 1.0f, bool depthTest = true);
+    void RenderAtScale(const Vec3& pos, const Mat4& view, const Mat4& proj, const Vec3& scale, int player = 0,
+                       float yawRadians = 0.0f, float alpha = 1.0f, bool depthTest = true);
+    void RenderWithModelMatrix(const Mat4& model, const Mat4& view, const Mat4& proj, int player = 0,
+                               float alpha = 1.0f, bool depthTest = true);
 
     const std::string& GetName() const { return name_; }
     bool IsValid() const { return !batches_.empty(); }
@@ -69,6 +73,8 @@ public:
     bool GetSequenceName(int index, std::string& outName) const;
     float GetAnimationSpeedScale() const { return animationSpeedScale_; }
     void DebugLogState(const char* tag) const;
+    void SetFog(const float color[3], float start, float end);
+    void DisableFog();
 
     // Animation control
     MdxAnimator* GetAnimator() { return hasAnimations_ ? &animator_ : nullptr; }
@@ -101,6 +107,10 @@ private:
         sg_view textureView = {0};
         sg_sampler sampler = {0};
         bool hasTexture = false;
+        int textureId = -1;
+        int textureAnimationId = -1;
+        bool hasTextureIdTimeline = false;
+        MdxTimeline textureIdTimeline;
         bool skinned = false; // uses bone skinning
         int replaceableId = 0;
         std::string replaceablePath;
@@ -122,6 +132,13 @@ private:
     struct AnimatedGeosetState {
         float alpha = 1.0f;
         float color[3] = {1.0f, 1.0f, 1.0f};
+    };
+
+    struct ModelTextureSlot {
+        sg_image handle = {0};
+        sg_view view = {0};
+        int replaceableId = 0;
+        std::string replaceablePath;
     };
 
     sg_image GetPlayerTexture(Batch& batch, int player);
@@ -179,6 +196,7 @@ private:
     bool initializedAnimator_ = false;
     std::vector<AnimatedGeosetState> animatedGeosetStates_;
     std::vector<std::vector<float>> animatedLayerAlphas_;
+    std::vector<ModelTextureSlot> modelTextures_;
 
     // Cached bone texture view (recreated when bone texture changes)
     sg_view cachedBoneView_ = {0};
@@ -191,5 +209,10 @@ private:
     bool currentSequenceIsWalk_ = false;
     float lastWalkSequenceProgress_ = -1.0f;
     float animationSpeedScale_ = 1.0f;
+    float elapsedMs_ = 0.0f;
+    bool fogEnabled_ = false;
+    float fogColor_[3] = {0.78f, 0.84f, 0.94f};
+    float fogStart_ = 12000.0f;
+    float fogEnd_ = 65000.0f;
     MdxViewer* sharedSource_ = nullptr;
 };

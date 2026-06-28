@@ -36,8 +36,10 @@ sapp_desc sokol_main(int argc, char* argv[]) {
     desc.event_cb = event_cb;
     desc.width = 1280;
     desc.height = 720;
-    desc.sample_count = 4;
-    desc.window_title = "Warsmash C++ Recreation (sokol)";
+    // Noesis renders the final UI directly on the default framebuffer. Keep the
+    // swapchain single-sampled so a later MSAA resolve cannot overwrite it.
+    desc.sample_count = 1;
+    desc.window_title = "Warcraft III C++ Recreation (sokol)";
     desc.icon.sokol_default = true;
     desc.logger.func = slog_func;
     return desc;

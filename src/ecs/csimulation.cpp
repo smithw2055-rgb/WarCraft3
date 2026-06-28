@@ -369,10 +369,20 @@ void CSimulation::ProcessUnitRemovals() {
         }
 
         auto it = std::find(units_.begin(), units_.end(), unit);
-        if (it != units_.end()) units_.erase(it);
+        const bool wasActiveUnit = it != units_.end();
+        if (wasActiveUnit) units_.erase(it);
 
         auto mit = std::find(newUnits_.begin(), newUnits_.end(), unit);
         if (mit != newUnits_.end()) newUnits_.erase(mit);
+
+        if (wasActiveUnit) {
+            if (CPlayer* player = GetPlayer(unit->GetPlayerIndex())) {
+                player->RemoveUnit(unit);
+                if (unit->GetFoodUsed() > 0) {
+                    player->SetFoodUsed(std::max(0, player->GetFoodUsed() - unit->GetFoodUsed()));
+                }
+            }
+        }
 
         unitMap_.erase(unit->GetHandleId());
     }
@@ -387,7 +397,12 @@ void CSimulation::ProcessNewUnits() {
         }
         // Register with player
         CPlayer* player = GetPlayer(unit->GetPlayerIndex());
-        if (player) player->AddUnit(unit);
+        if (player) {
+            player->AddUnit(unit);
+            if (unit->GetFoodUsed() > 0) {
+                player->SetFoodUsed(player->GetFoodUsed() + unit->GetFoodUsed());
+            }
+        }
     }
     newUnits_.clear();
 }

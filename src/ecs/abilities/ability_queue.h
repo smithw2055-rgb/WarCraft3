@@ -22,6 +22,7 @@ public:
     void OnDeath(CSimulation& game, CUnit* unit) override;
 
     // Order handling
+    bool CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const override;
     bool CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, int orderId) override;
     CBehavior* BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) override;
 
@@ -47,8 +48,8 @@ public:
 
 private:
     void ProcessCompletion(CSimulation& game, CUnit* building);
-    void ShiftQueue();
-    float CalculateBuildTime(CSimulation& game, War3ID typeId, CQueueItemType type) const;
+    void ShiftQueue(CSimulation& game, CUnit* building);
+    float CalculateBuildTime(CSimulation& game, CUnit* building, War3ID typeId, CQueueItemType type) const;
 
     // Queue arrays
     War3ID queue_[MAX_QUEUE] = {};

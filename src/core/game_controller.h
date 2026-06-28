@@ -23,6 +23,7 @@
 #include "../data/unitdata.h"
 #include "../data/destructabledata.h"
 #include "../data/itemdata.h"
+#include "../data/upgradedata.h"
 #include "../data/gameplay_constants.h"
 #include "../ui/MainUI.h"
 #include "../audio/AudioSystem.h"
@@ -142,9 +143,17 @@ private:
     void UpdateInGame(int screenW, int screenH, float dt);
 
     // --- Per-frame helpers ---
+    void RenderUiOnly(int screenW, int screenH);
+    bool LoadUiOnlyGlueBackgroundModel();
+    bool LoadUiOnlyGlueSpriteLayers();
+    void RenderUiOnlyGlueBackground(int screenW, int screenH);
+    void RenderUiOnlyGlueSpriteLayers(int screenW, int screenH);
     void StepSimulation(float dt);
     void SyncAndReconcileVisuals();
     void CollectUnitOverlays(int screenW, int screenH);
+    void CaptureScreenshotIfNeeded(int screenW, int screenH);
+    bool WriteFramebufferPng(const std::string& path, int screenW, int screenH);
+    void MaybeExitAfterFrame();
 
     // --- Input helpers ---
     void OnMouseDown(const sapp_event* ev);
@@ -182,6 +191,7 @@ private:
     void FlushStartupSimulationState();
     void FocusCameraAndMinimapOnInitialSpawn();
     void RefreshRuntimeUnitSplats();
+    void DebugSelectFirstUnitForHud();
 
     // --- Core state ---
     GameState state_ = GameState::BOOTSTRAP;
@@ -190,6 +200,23 @@ private:
     bool initialized_ = false;
     bool running_ = true;
     int frameCount_ = 0;
+    int exitAfterFrame_ = -1;
+    bool uiOnlyMode_ = false;
+    bool debugUiCommandCard_ = false;
+    bool debugUiGameMenu_ = false;
+    bool debugUiResources_ = false;
+    int debugUiGold_ = 0;
+    int debugUiLumber_ = 0;
+    int debugUiFoodUsed_ = 0;
+    int debugUiFoodCap_ = 0;
+    std::string debugUiTimeText_ = "12:00";
+    std::string debugUiUpperButton_;
+    std::string debugUiGameMenuPanel_;
+    std::vector<std::string> debugUiGameMenuActions_;
+    bool debugUiGlueMenu_ = false;
+    std::string debugUiGlueMenuPage_;
+    std::vector<std::string> debugUiGlueMenuActions_;
+    std::string hudXamlPath_ = "assets/ui/Hud.xaml";
     float simulationAccumulator_ = 0.0f;
     float lastTime_ = 0.0f;
 
@@ -210,6 +237,26 @@ private:
     OrbitCamera camera_;
     Minimap minimap_;
     MdxViewer mdxViewer_;
+    MdxModel glueBackgroundModel_;
+    MdxViewer glueBackgroundViewer_;
+    bool glueBackgroundLoaded_ = false;
+    std::string glueBackgroundPath_;
+    struct GlueSpriteLayer {
+        MdxModel model;
+        MdxViewer viewer;
+        bool loaded = false;
+        bool waitingForStand = false;
+        Vec3 position = Vec3(0.0f, 0.0f, 0.0f);
+        Vec3 scale = Vec3(1.0f, 1.0f, 1.0f);
+        bool billboardPlane = false;
+        std::string birthSequence;
+        std::string standSequence;
+        std::string path;
+    };
+    GlueSpriteLayer glueSpriteTopLeft_;
+    GlueSpriteLayer glueSpriteTopRight_;
+    GlueSpriteLayer glueMainMenuLogo_;
+    bool glueSpriteLayersLoaded_ = false;
     DayNightCycle dayNight_;
 
     // Splat metadata
@@ -224,8 +271,10 @@ private:
     CUnitData unitData_;
     CDestructableData destructableData_;
     CItemData itemData_;
+    CUpgradeData upgradeData_;
     WpmData wpm_;
     bool simulationInitialized_ = false;
+    bool debugSelectFirstUnitForHud_ = false;
 
     // Audio
     AudioSystem audio_;

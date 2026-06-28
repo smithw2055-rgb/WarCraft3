@@ -11,13 +11,22 @@
 #include "../core/path_utils.h"
 #include "../platform/platform.h"
 #include "../debug/move_debug.h"
+#include "../asset/stb_image_write.h"
+#include "../map/w3i.h"
+#include "../map/wts.h"
+#include "../resource/slk.h"
 #include "../third_party/sokol/sokol_app.h"
 #include "../third_party/sokol/sokol_gfx.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 #ifndef WITHOUT_STORMLIB
 #include <StormLib.h>
@@ -26,6 +35,393 @@
 namespace fs = std::filesystem;
 
 static const char* DEFAULT_MAP = "Maps/FrozenThrone/(4)Avalanche.w3x";
+
+static std::string LowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    return value;
+}
+
+static std::string TrimUiOnlyMapString(std::string value) {
+    auto isSpace = [](unsigned char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+    };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), [&](unsigned char c) {
+        return !isSpace(c);
+    }));
+    value.erase(std::find_if(value.rbegin(), value.rend(), [&](unsigned char c) {
+        return !isSpace(c);
+    }).base(), value.end());
+    return value;
+}
+
+static int UiOnlyPlayerSlotsFromFileName(const std::string& fileName) {
+    if (fileName.size() <= 3 || fileName[0] != '(') return 0;
+    const size_t close = fileName.find(')');
+    if (close == std::string::npos || close <= 1) return 0;
+    return std::max(0, std::atoi(fileName.substr(1, close - 1).c_str()));
+}
+
+static const char* UiOnlyTilesetName(char tileset) {
+    switch (tileset) {
+    case 'A': return "Ashenvale";
+    case 'B': return "Barrens";
+    case 'C': return "Felwood";
+    case 'D': return "Dungeon";
+    case 'F': return "Lordaeron Fall";
+    case 'G': return "Underground";
+    case 'I': return "Icecrown";
+    case 'J': return "Dalaran Ruins";
+    case 'K': return "Black Citadel";
+    case 'L': return "Lordaeron Summer";
+    case 'N': return "Northrend";
+    case 'O': return "Outland";
+    case 'Q': return "Village Fall";
+    case 'V': return "Village";
+    case 'W': return "Lordaeron Winter";
+    case 'X': return "Dalaran";
+    case 'Y': return "Cityscape";
+    case 'Z': return "Sunken Ruins";
+    default: return "Unknown";
+    }
+}
+
+static std::string UiOnlyMapSizeLabel(int width, int height) {
+    if (width <= 0 || height <= 0) return {};
+    return std::to_string(width) + " x " + std::to_string(height);
+}
+
+static std::string UiOnlySuggestedPlayersLabel(const std::string& value) {
+    std::string cleaned = TrimUiOnlyMapString(value);
+    if (cleaned.empty()) return {};
+    const std::string lower = LowerAscii(cleaned);
+    if (lower.rfind("suggested", 0) == 0 || lower.rfind("players", 0) == 0) {
+        return cleaned;
+    }
+    return "Suggested Players: " + cleaned;
+}
+
+static bool ReadUiOnlyMapArchiveFile(const fs::path& mapPath, const char* fileName, std::vector<uint8_t>& out) {
+#ifndef WITHOUT_STORMLIB
+    HANDLE hMpq = nullptr;
+    if (!SFileOpenArchive(mapPath.string().c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) return false;
+
+    HANDLE hFile = nullptr;
+    if (!SFileOpenFileEx(hMpq, fileName, SFILE_OPEN_BASE_FILE, &hFile)) {
+        SFileCloseArchive(hMpq);
+        return false;
+    }
+
+    DWORD sz = SFileGetFileSize(hFile, nullptr);
+    out.resize(sz);
+    DWORD rd = 0;
+    const bool ok = SFileReadFile(hFile, out.data(), sz, &rd, nullptr) && rd == sz;
+    SFileCloseFile(hFile);
+    SFileCloseArchive(hMpq);
+    return ok;
+#else
+    (void)mapPath;
+    (void)fileName;
+    (void)out;
+    return false;
+#endif
+}
+
+static std::string ResolveUiOnlyTrigString(const WtsTable* wts, const std::string& value) {
+    if (!wts || value.empty()) return TrimUiOnlyMapString(value);
+    return TrimUiOnlyMapString(wts->Resolve(value));
+}
+
+static bool IsUiOnlyTrigStringRef(const std::string& value) {
+    if (value.size() <= 8) return false;
+    std::string prefix = value.substr(0, 8);
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    if (prefix != "trigstr_") return false;
+    return std::all_of(value.begin() + 8, value.end(), [](unsigned char c) {
+        return std::isdigit(c) != 0;
+    });
+}
+
+static std::string CleanUiOnlyResolvedMapString(const std::string& value) {
+    std::string cleaned = TrimUiOnlyMapString(value);
+    return IsUiOnlyTrigStringRef(cleaned) ? std::string() : cleaned;
+}
+
+static void PopulateUiOnlyGlueMapInfo(const fs::path& mapPath, War3UI::GlueMapListItem& item) {
+    W3iInfo info;
+    if (!W3ILoadFromMpq(mapPath.string(), info)) {
+        return;
+    }
+
+    WtsTable wts;
+    WtsTable* wtsPtr = nullptr;
+    std::vector<uint8_t> wtsBytes;
+    if (ReadUiOnlyMapArchiveFile(mapPath, "war3map.wts", wtsBytes) && wts.Load(wtsBytes.data(), wtsBytes.size())) {
+        wtsPtr = &wts;
+    }
+
+    item.displayName = CleanUiOnlyResolvedMapString(ResolveUiOnlyTrigString(wtsPtr, info.name));
+    item.description = CleanUiOnlyResolvedMapString(ResolveUiOnlyTrigString(wtsPtr, info.description));
+    item.author = CleanUiOnlyResolvedMapString(ResolveUiOnlyTrigString(wtsPtr, info.author));
+    item.recommendedPlayers = UiOnlySuggestedPlayersLabel(
+        CleanUiOnlyResolvedMapString(ResolveUiOnlyTrigString(wtsPtr, info.recommendedPlayers)));
+    item.mapSize = UiOnlyMapSizeLabel(info.playableWidth, info.playableHeight);
+    item.tileset = UiOnlyTilesetName(info.tileset);
+    item.playerSlots = info.playableWidth > 0 ? std::max(item.playerSlots, UiOnlyPlayerSlotsFromFileName(item.fileName))
+                                               : UiOnlyPlayerSlotsFromFileName(item.fileName);
+}
+
+static std::vector<War3UI::GlueMapListItem> DiscoverUiOnlyGlueMaps(const fs::path& projectRoot) {
+    std::vector<War3UI::GlueMapListItem> preferred;
+    std::vector<War3UI::GlueMapListItem> fallback;
+    const fs::path mapsRoot = projectRoot / "resources" / "Maps";
+    if (!fs::exists(mapsRoot)) {
+        return {};
+    }
+
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(mapsRoot, fs::directory_options::skip_permission_denied, ec), end;
+         !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        const fs::path path = it->path();
+        const std::string ext = LowerAscii(path.extension().string());
+        if (ext != ".w3x" && ext != ".w3m") continue;
+
+        fs::path relative = fs::relative(path, mapsRoot, ec);
+        if (ec) {
+            ec.clear();
+            relative = path.filename();
+        }
+        War3UI::GlueMapListItem item;
+        item.path = (fs::path("Maps") / relative).generic_string();
+        item.fileName = path.filename().string();
+        item.playerSlots = UiOnlyPlayerSlotsFromFileName(item.fileName);
+        PopulateUiOnlyGlueMapInfo(path, item);
+        fallback.push_back(item);
+
+        const std::string relLower = LowerAscii(relative.generic_string());
+        if (relLower.rfind("frozenthrone/", 0) == 0 && relLower.find("/scenario/") == std::string::npos) {
+            preferred.push_back(item);
+        }
+    }
+
+    auto byDisplayName = [](const War3UI::GlueMapListItem& a, const War3UI::GlueMapListItem& b) {
+        return LowerAscii(a.fileName) < LowerAscii(b.fileName);
+    };
+    std::sort(preferred.begin(), preferred.end(), byDisplayName);
+    std::sort(fallback.begin(), fallback.end(), byDisplayName);
+    return preferred.empty() ? fallback : preferred;
+}
+
+static std::string StripUiOnlyCampaignToken(std::string value) {
+    value = TrimUiOnlyMapString(value);
+    if (value.size() >= 2) {
+        const char first = value.front();
+        const char last = value.back();
+        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+            value = value.substr(1, value.size() - 2);
+        }
+    }
+    return TrimUiOnlyMapString(value);
+}
+
+static std::vector<std::string> SplitUiOnlyCampaignCsv(const std::string& value) {
+    std::vector<std::string> fields;
+    std::string field;
+    bool quoted = false;
+    char quoteChar = 0;
+    for (char c : value) {
+        if ((c == '"' || c == '\'') && (!quoted || c == quoteChar)) {
+            quoted = !quoted;
+            quoteChar = quoted ? c : 0;
+            field.push_back(c);
+            continue;
+        }
+        if (c == ',' && !quoted) {
+            fields.push_back(StripUiOnlyCampaignToken(field));
+            field.clear();
+            continue;
+        }
+        field.push_back(c);
+    }
+    fields.push_back(StripUiOnlyCampaignToken(field));
+    return fields;
+}
+
+static std::string StripUiOnlySkinValue(std::string value) {
+    const size_t comment = value.find("//");
+    if (comment != std::string::npos) {
+        value.resize(comment);
+    }
+    return StripUiOnlyCampaignToken(value);
+}
+
+static std::string ResolveUiOnlySkinField(const MpqManager& mpq,
+                                          const std::string& fieldName,
+                                          int gameVersion) {
+    std::vector<uint8_t> bytes;
+    if (!mpq.ReadFile("UI\\war3skins.txt", bytes)) {
+        return {};
+    }
+
+    const std::string versionedField = fieldName + "_V" + std::to_string(std::max(0, gameVersion));
+    const std::string betaField = versionedField + "Beta";
+    std::string betaValue;
+    std::string baseValue;
+
+    std::istringstream stream(std::string(bytes.begin(), bytes.end()));
+    std::string line;
+    while (std::getline(stream, line)) {
+        line = TrimUiOnlyMapString(line);
+        if (line.empty() || line.rfind("//", 0) == 0 || line.front() == '[') {
+            continue;
+        }
+
+        const size_t equals = line.find('=');
+        if (equals == std::string::npos) {
+            continue;
+        }
+
+        const std::string key = TrimUiOnlyMapString(line.substr(0, equals));
+        const std::string value = StripUiOnlySkinValue(line.substr(equals + 1));
+        if (key == versionedField) {
+            return value;
+        }
+        if (key == betaField && betaValue.empty()) {
+            betaValue = value;
+        } else if (key == fieldName && baseValue.empty()) {
+            baseValue = value;
+        }
+    }
+
+    return !betaValue.empty() ? betaValue : baseValue;
+}
+
+static void AddUiOnlyCandidatePath(std::vector<std::string>& paths, const std::string& path) {
+    if (path.empty()) {
+        return;
+    }
+    if (std::find(paths.begin(), paths.end(), path) == paths.end()) {
+        paths.push_back(path);
+    }
+}
+
+static std::string UiOnlyMdxPathFromModelField(std::string path) {
+    path = StripUiOnlySkinValue(path);
+    const std::string lower = LowerAscii(path);
+    if (lower.size() >= 4 && lower.substr(lower.size() - 4) == ".mdl") {
+        path.resize(path.size() - 4);
+        path += ".mdx";
+    }
+    return path;
+}
+
+static Vec3 UiOnlyMdxPointToYUp(const float value[3]) {
+    return Vec3(value[0], value[2], -value[1]);
+}
+
+static std::vector<War3UI::GlueCampaignListItem> LoadUiOnlyGlueCampaigns(const MpqManager& mpq,
+                                                                         int gameVersion) {
+    std::vector<uint8_t> bytes;
+    std::string loadedPath;
+    std::vector<std::string> candidatePaths;
+    const std::string skinCampaignFile = ResolveUiOnlySkinField(mpq, "CampaignFile", gameVersion);
+    AddUiOnlyCandidatePath(candidatePaths, skinCampaignFile);
+    if (gameVersion >= 1) {
+        AddUiOnlyCandidatePath(candidatePaths, "UI\\CampaignStrings_exp.txt");
+    }
+    AddUiOnlyCandidatePath(candidatePaths, "UI\\CampaignStrings.txt");
+    AddUiOnlyCandidatePath(candidatePaths, "UI\\CampaignInfoClassic.txt");
+    AddUiOnlyCandidatePath(candidatePaths, "UI\\CampaignInfo.txt");
+
+    if (!skinCampaignFile.empty()) {
+        std::cout << "UI-only mode: skin CampaignFile resolved to " << skinCampaignFile
+                  << " for gameVersion=" << gameVersion << std::endl;
+    }
+
+    for (const std::string& path : candidatePaths) {
+        if (mpq.ReadFile(path, bytes)) {
+            loadedPath = path;
+            break;
+        }
+    }
+    if (bytes.empty()) {
+        return {};
+    }
+
+    TxtTable table;
+    if (!table.Load(bytes.data(), bytes.size())) {
+        return {};
+    }
+
+    std::vector<War3UI::GlueCampaignListItem> campaigns;
+    const std::vector<std::string> ids = SplitUiOnlyCampaignCsv(table.GetString("Index", "CampaignList"));
+    for (const std::string& id : ids) {
+        if (id.empty() || !table.HasSection(id)) continue;
+
+        War3UI::GlueCampaignListItem campaign;
+        campaign.id = id;
+        campaign.header = StripUiOnlyCampaignToken(table.GetString(id, "Header"));
+        campaign.name = StripUiOnlyCampaignToken(table.GetString(id, "Name"));
+
+        for (int missionIndex = 0;; ++missionIndex) {
+            const std::string raw = table.GetString(id, "Mission" + std::to_string(missionIndex));
+            std::vector<std::string> fields = SplitUiOnlyCampaignCsv(raw);
+            if (fields.empty() || fields[0].empty()) break;
+
+            War3UI::GlueCampaignMission mission;
+            mission.header = fields.size() > 0 ? fields[0] : "";
+            mission.name = fields.size() > 1 ? fields[1] : "";
+            mission.mapPath = fields.size() > 2 ? fields[2] : "";
+            campaign.missions.push_back(mission);
+        }
+
+        if (!campaign.header.empty() || !campaign.name.empty() || !campaign.missions.empty()) {
+            campaigns.push_back(campaign);
+        }
+    }
+
+    if (!loadedPath.empty()) {
+        std::cout << "UI-only mode: loaded " << campaigns.size()
+                  << " campaign entries from " << loadedPath << std::endl;
+    }
+    return campaigns;
+}
+
+#ifndef GL_RGBA
+#define GL_RGBA 0x1908
+#endif
+#ifndef GL_UNSIGNED_BYTE
+#define GL_UNSIGNED_BYTE 0x1401
+#endif
+#ifndef GL_PACK_ALIGNMENT
+#define GL_PACK_ALIGNMENT 0x0D05
+#endif
+#ifndef APIENTRY
+#ifdef _WIN32
+#define APIENTRY __stdcall
+#else
+#define APIENTRY
+#endif
+#endif
+
+#ifdef _WIN32
+extern "C" __declspec(dllimport) void APIENTRY glReadPixels(int x, int y, int width, int height, unsigned int format, unsigned int type, void* data);
+extern "C" __declspec(dllimport) void APIENTRY glPixelStorei(unsigned int pname, int param);
+#else
+extern "C" void glReadPixels(int x, int y, int width, int height, unsigned int format, unsigned int type, void* data);
+extern "C" void glPixelStorei(unsigned int pname, int param);
+#endif
+
+static ScreenRect FallbackMinimapRect(int screenW, int screenH) {
+    if (screenW <= 0 || screenH <= 0) return {};
+    const float w = std::clamp((float)screenW * 0.105f, 190.0f, 360.0f);
+    const float h = std::clamp((float)screenH * 0.38f, 118.0f, 220.0f);
+    return ScreenRect{20.0f, (float)screenH - h - 24.0f, w, h};
+}
 
 // --- Helpers (animation / visual) ---
 
@@ -64,6 +460,41 @@ static void ApplyPendingUnitAnimation(int handleId, MdxViewer* viewer, GameContr
 }
 
 namespace {
+
+void AppendCommaSeparatedArgs(std::vector<std::string>& out, const char* value) {
+    if (!value) return;
+
+    std::stringstream ss(value);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        item.erase(item.begin(), std::find_if(item.begin(), item.end(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }));
+        item.erase(std::find_if(item.rbegin(), item.rend(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }).base(), item.end());
+        if (!item.empty()) {
+            out.push_back(item);
+        }
+    }
+}
+
+bool ParseDebugUiResources(const char* value, int& gold, int& lumber, int& foodUsed, int& foodCap, std::string& timeText) {
+    std::vector<std::string> parts;
+    AppendCommaSeparatedArgs(parts, value);
+    if (parts.size() < 4) {
+        return false;
+    }
+
+    gold = std::atoi(parts[0].c_str());
+    lumber = std::atoi(parts[1].c_str());
+    foodUsed = std::atoi(parts[2].c_str());
+    foodCap = std::atoi(parts[3].c_str());
+    if (parts.size() >= 5) {
+        timeText = parts[4];
+    }
+    return true;
+}
 
 void PlayResolvedUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController* g) {
     if (!unit || !viewer) return;
@@ -238,6 +669,88 @@ void GameController::ParseArgs(int argc, char* argv[]) {
         if (std::strcmp(arg, "--screenshot") == 0 && i + 1 < argc) {
             screenshotPath = argv[++i];
             screenshotFrame = 1;
+        } else if (std::strncmp(arg, "--screenshot=", 13) == 0) {
+            screenshotPath = arg + 13;
+            screenshotFrame = 1;
+        } else if (std::strcmp(arg, "--screenshot-frame") == 0 && i + 1 < argc) {
+            screenshotFrame = std::max(0, std::atoi(argv[++i]));
+        } else if (std::strncmp(arg, "--screenshot-frame=", 19) == 0) {
+            screenshotFrame = std::max(0, std::atoi(arg + 19));
+        } else if (std::strcmp(arg, "--exit-after-frame") == 0 && i + 1 < argc) {
+            exitAfterFrame_ = std::max(0, std::atoi(argv[++i]));
+        } else if (std::strncmp(arg, "--exit-after-frame=", 19) == 0) {
+            exitAfterFrame_ = std::max(0, std::atoi(arg + 19));
+        } else if (std::strcmp(arg, "--ui-only") == 0) {
+            uiOnlyMode_ = true;
+        } else if (std::strcmp(arg, "--debug-ui-command-card") == 0) {
+            debugUiCommandCard_ = true;
+        } else if (std::strcmp(arg, "--debug-ui-game-menu") == 0) {
+            debugUiGameMenu_ = true;
+        } else if (std::strcmp(arg, "--debug-ui-game-menu-panel") == 0 && i + 1 < argc) {
+            debugUiGameMenuPanel_ = argv[++i];
+            debugUiGameMenu_ = true;
+        } else if (std::strncmp(arg, "--debug-ui-game-menu-panel=", 27) == 0) {
+            debugUiGameMenuPanel_ = arg + 27;
+            debugUiGameMenu_ = true;
+        } else if (std::strcmp(arg, "--debug-ui-game-menu-actions") == 0 && i + 1 < argc) {
+            AppendCommaSeparatedArgs(debugUiGameMenuActions_, argv[++i]);
+            debugUiGameMenu_ = true;
+        } else if (std::strncmp(arg, "--debug-ui-game-menu-actions=", 29) == 0) {
+            AppendCommaSeparatedArgs(debugUiGameMenuActions_, arg + 29);
+            debugUiGameMenu_ = true;
+        } else if (std::strcmp(arg, "--debug-ui-glue-menu") == 0) {
+            debugUiGlueMenu_ = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                debugUiGlueMenuPage_ = argv[++i];
+            }
+            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
+                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            }
+        } else if (std::strncmp(arg, "--debug-ui-glue-menu=", 21) == 0) {
+            debugUiGlueMenu_ = true;
+            debugUiGlueMenuPage_ = arg + 21;
+            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
+                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            }
+        } else if ((std::strcmp(arg, "--debug-ui-glue-action") == 0 ||
+                    std::strcmp(arg, "--debug-ui-glue-actions") == 0) && i + 1 < argc) {
+            AppendCommaSeparatedArgs(debugUiGlueMenuActions_, argv[++i]);
+            debugUiGlueMenu_ = true;
+            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
+                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            }
+        } else if (std::strncmp(arg, "--debug-ui-glue-action=", 23) == 0) {
+            AppendCommaSeparatedArgs(debugUiGlueMenuActions_, arg + 23);
+            debugUiGlueMenu_ = true;
+            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
+                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            }
+        } else if (std::strncmp(arg, "--debug-ui-glue-actions=", 24) == 0) {
+            AppendCommaSeparatedArgs(debugUiGlueMenuActions_, arg + 24);
+            debugUiGlueMenu_ = true;
+            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
+                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            }
+        } else if (std::strcmp(arg, "--debug-ui-upper-button") == 0 && i + 1 < argc) {
+            debugUiUpperButton_ = argv[++i];
+        } else if (std::strncmp(arg, "--debug-ui-upper-button=", 24) == 0) {
+            debugUiUpperButton_ = arg + 24;
+        } else if (std::strcmp(arg, "--debug-ui-resources") == 0 && i + 1 < argc) {
+            if (ParseDebugUiResources(argv[++i], debugUiGold_, debugUiLumber_, debugUiFoodUsed_, debugUiFoodCap_, debugUiTimeText_)) {
+                debugUiResources_ = true;
+            } else {
+                std::cerr << "Invalid --debug-ui-resources value. Expected gold,lumber,foodUsed,foodCap[,time]" << std::endl;
+            }
+        } else if (std::strncmp(arg, "--debug-ui-resources=", 21) == 0) {
+            if (ParseDebugUiResources(arg + 21, debugUiGold_, debugUiLumber_, debugUiFoodUsed_, debugUiFoodCap_, debugUiTimeText_)) {
+                debugUiResources_ = true;
+            } else {
+                std::cerr << "Invalid --debug-ui-resources value. Expected gold,lumber,foodUsed,foodCap[,time]" << std::endl;
+            }
+        } else if (std::strcmp(arg, "--hud-xaml") == 0 && i + 1 < argc) {
+            hudXamlPath_ = argv[++i];
+        } else if (std::strncmp(arg, "--hud-xaml=", 11) == 0) {
+            hudXamlPath_ = arg + 11;
         } else if (std::strncmp(arg, "--run=", 6) == 0) {
             mapPath_ = arg + 6;
         } else if (std::strcmp(arg, "--run") == 0 && i + 1 < argc) {
@@ -246,6 +759,8 @@ void GameController::ParseArgs(int argc, char* argv[]) {
             mapPath_ = arg + 6;
         } else if (std::strcmp(arg, "--map") == 0 && i + 1 < argc) {
             mapPath_ = argv[++i];
+        } else if (std::strcmp(arg, "--debug-select-first-unit") == 0) {
+            debugSelectFirstUnitForHud_ = true;
         } else if (arg[0] != '-') {
             mapPath_ = arg;
         }
@@ -253,7 +768,7 @@ void GameController::ParseArgs(int argc, char* argv[]) {
 }
 
 bool GameController::Initialize() {
-    std::cout << "Warsmash C++ Recreation - Initializing..." << std::endl;
+    std::cout << "Warcraft III C++ Recreation - Initializing..." << std::endl;
     {
         std::ofstream(MoveDebugLogPath(), std::ios::trunc).close();
         MoveDebugLogLine("[MoveDebug] session_begin");
@@ -262,6 +777,65 @@ bool GameController::Initialize() {
     if (!Renderer::Initialize()) return false;
 
     fs::path project_root = PROJECT_SOURCE_DIR;
+    if (uiOnlyMode_) {
+        fs::path iniPath = project_root / "resources" / "warsmash.ini";
+        config_.Load(iniPath.string());
+        std::cout << "UI-only mode: skipping map loading and scene simulation" << std::endl;
+        if (debugUiGlueMenu_) {
+            OpenDataSources();
+        }
+        if (!ui_.Init(debugUiGlueMenu_ ? &mpq_ : nullptr, 1280, 720, hudXamlPath_, config_.gameVersion)) {
+            std::cerr << "UI-only mode: MainUI init failed" << std::endl;
+            return false;
+        }
+        if (debugUiGlueMenu_) {
+            std::vector<War3UI::GlueCampaignListItem> campaigns = LoadUiOnlyGlueCampaigns(mpq_, config_.gameVersion);
+            ui_.SetGlueMenuCampaignsForUiOnly(campaigns);
+            std::vector<War3UI::GlueMapListItem> maps = DiscoverUiOnlyGlueMaps(project_root);
+            ui_.SetGlueMenuMapsForUiOnly(maps);
+            std::cout << "UI-only mode: discovered " << maps.size()
+                      << " custom game maps for glue menu" << std::endl;
+        }
+        if (debugUiCommandCard_) {
+            ui_.PopulateDebugCommandCardForUiOnly();
+        }
+        if (debugUiResources_) {
+            ui_.SetResourcesForUiOnly(debugUiGold_, debugUiLumber_, debugUiFoodUsed_, debugUiFoodCap_, debugUiTimeText_);
+        }
+        if (debugUiGlueMenu_) {
+            ui_.OpenGlueMenuForUiOnly(debugUiGlueMenuPage_);
+            for (const std::string& action : debugUiGlueMenuActions_) {
+                if (!ui_.InvokeGlueMenuActionForUiOnly(action)) {
+                    std::cerr << "UI-only mode: failed to invoke glue menu action '" << action << "'" << std::endl;
+                    return false;
+                }
+            }
+        }
+        if (!debugUiUpperButton_.empty()) {
+            if (!ui_.InvokeUpperButtonForUiOnly(debugUiUpperButton_)) {
+                std::cerr << "UI-only mode: failed to invoke upper button '" << debugUiUpperButton_ << "'" << std::endl;
+            }
+        }
+        if (debugUiGameMenu_) {
+            if (!debugUiGameMenuPanel_.empty()) {
+                ui_.OpenGameMenuPanelForUiOnly(debugUiGameMenuPanel_);
+            } else {
+                ui_.OpenGameMenuForUiOnly();
+            }
+            for (const std::string& action : debugUiGameMenuActions_) {
+                if (!ui_.InvokeGameMenuActionForUiOnly(action)) {
+                    std::cerr << "UI-only mode: failed to invoke game menu action '" << action << "'" << std::endl;
+                    return false;
+                }
+            }
+        }
+        state_ = GameState::IN_GAME;
+        pendingState_ = GameState::IN_GAME;
+        stateTransition_ = false;
+        initialized_ = true;
+        return true;
+    }
+
     fs::path iniPath = project_root / "resources" / "warsmash.ini";
     config_.Load(iniPath.string());
 
@@ -308,7 +882,10 @@ bool GameController::Initialize() {
         audio_.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &mpq_);
     }
 
-    ui_.Init(&mpq_, 1280, 720);
+    if (!ui_.Init(&mpq_, 1280, 720, hudXamlPath_, config_.gameVersion)) {
+        std::cerr << "GameController: MainUI init failed" << std::endl;
+        return false;
+    }
     initialized_ = true;
     return true;
 }
@@ -427,7 +1004,7 @@ void GameController::InitLoading() {
 
     mapLoader_ = std::make_unique<MapLoader>(
         mpq_, simulation_, unitData_, destructableData_,
-        itemData_, scene_, texturedTerrain_, tileset_, map_, w3i_, wpm_);
+        itemData_, upgradeData_, scene_, texturedTerrain_, tileset_, map_, w3i_, wpm_);
     mapLoader_->SetConfigData(configEnv_ ? configEnv_->GetData() : nullptr);
     mapLoader_->CreateTasks(mapPath_, 0);
     loadingProgress_ = 0.0f;
@@ -536,10 +1113,18 @@ void GameController::InitInGame() {
         std::cout << "JASS Common: skipped because no resource MPQs are open" << std::endl;
     }
 
+    if (debugSelectFirstUnitForHud_) {
+        DebugSelectFirstUnitForHud();
+    }
+
     std::cout << "Initialization complete. Starting render loop..." << std::endl;
 }
 
 void GameController::RunSyncInit() {
+    if (uiOnlyMode_) {
+        return;
+    }
+
     InitMapConfig();
     if (loadingFailed_) {
         pendingState_ = state_;
@@ -731,6 +1316,11 @@ void GameController::WireJassCallbacks() {
 // --- Update ---
 
 void GameController::Update(int screenW, int screenH, float dt) {
+    if (uiOnlyMode_) {
+        frameCount_++;
+        return;
+    }
+
     if (stateTransition_) {
         OnLeaveState(state_);
         state_ = pendingState_;
@@ -965,12 +1555,32 @@ void GameController::CollectUnitOverlays(int screenW, int screenH) {
 
 void GameController::Render(int screenW, int screenH) {
     if (!initialized_) return;
-    if (state_ != GameState::IN_GAME) return;
+    if (uiOnlyMode_) {
+        RenderUiOnly(screenW, screenH);
+        return;
+    }
+    if (state_ != GameState::IN_GAME) {
+        if (screenshotFrame >= 0 || exitAfterFrame_ >= 0) {
+            ui_.Update(screenW, screenH);
+
+            Renderer::BeginFrame();
+            sg_reset_state_cache();
+            sg_apply_viewport(0, 0, screenW, screenH, true);
+            sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+            ui_.RenderNoesisOnly();
+            CaptureScreenshotIfNeeded(screenW, screenH);
+            Renderer::EndFrame();
+            MaybeExitAfterFrame();
+        }
+        return;
+    }
 
     float dt = 0.016f;
     float aspect = (screenH > 0) ? (float)screenW / screenH : 1.0f;
     Mat4 view = camera_.GetViewMatrix();
     Mat4 proj = camera_.GetProjectionMatrix(aspect);
+
+    ui_.Update(screenW, screenH);
 
     Renderer::BeginFrame();
     Renderer::SetWireframe(wireframe);
@@ -985,26 +1595,323 @@ void GameController::Render(int screenW, int screenH) {
     sg_apply_scissor_rect(0, 0, screenW, screenH, true);
     scene_.RenderAll(view, proj, dt);
 
-    ui_.Update(screenW, screenH);
     ScreenRect minimapRect = ui_.GetMinimapRect();
+    if (!minimapRect.IsValid()) {
+        minimapRect = FallbackMinimapRect(screenW, screenH);
+    }
     if (minimapRect.IsValid()) {
         minimap_.SetScreenRect(minimapRect.x, minimapRect.y, minimapRect.w, minimapRect.h);
     }
 
-    CollectUnitOverlays(screenW, screenH);
-    ui_.Render();
-
     if (showMinimap && minimap_.IsValid()) {
+        sg_reset_state_cache();
+        sg_apply_viewport(0, 0, screenW, screenH, true);
+        sg_apply_scissor_rect(0, 0, screenW, screenH, true);
         Vec3 cp = camera_.GetPosition();
         minimap_.Render(screenW, screenH, cp.x, cp.z, camera_.GetYaw(), 0, 0, 45.0f, aspect);
+        sg_reset_state_cache();
     }
 
+    CollectUnitOverlays(screenW, screenH);
+    sg_reset_state_cache();
+    sg_apply_viewport(0, 0, screenW, screenH, true);
+    sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+    ui_.Render();
+
+    ui_.RenderNoesisOnly();
+    CaptureScreenshotIfNeeded(screenW, screenH);
     Renderer::EndFrame();
     Platform::ProcessInput();
+    MaybeExitAfterFrame();
+}
 
-    if (screenshotFrame >= 0 && frameCount_ >= screenshotFrame) {
-        std::cout << "Screenshot triggered but not implemented with sokol_gfx" << std::endl;
-        screenshotFrame = -1;
+void GameController::RenderUiOnly(int screenW, int screenH) {
+    if (state_ != GameState::IN_GAME) return;
+
+    ui_.Update(screenW, screenH);
+
+    const float glueClearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    Renderer::SetClearColor(glueClearColor);
+    Renderer::BeginFrame();
+    sg_reset_state_cache();
+    sg_apply_viewport(0, 0, screenW, screenH, true);
+    sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+
+    sg_reset_state_cache();
+    sg_apply_viewport(0, 0, screenW, screenH, true);
+    sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+
+    ui_.RenderNoesisOnly();
+
+    CaptureScreenshotIfNeeded(screenW, screenH);
+    Renderer::EndFrame();
+    Platform::ProcessInput();
+    MaybeExitAfterFrame();
+}
+
+bool GameController::LoadUiOnlyGlueBackgroundModel() {
+    if (glueBackgroundLoaded_ || mpq_.ArchiveCount() == 0) {
+        return glueBackgroundLoaded_;
+    }
+
+    std::vector<std::string> candidates;
+    const std::string skinModel = ResolveUiOnlySkinField(mpq_, "GlueSpriteLayerBackground", config_.gameVersion);
+    AddUiOnlyCandidatePath(candidates, skinModel);
+    AddUiOnlyCandidatePath(candidates, UiOnlyMdxPathFromModelField(skinModel));
+    AddUiOnlyCandidatePath(candidates, "UI\\Glues\\MainMenu\\MainMenu3D_exp\\MainMenu3D_exp.mdx");
+    AddUiOnlyCandidatePath(candidates, "UI\\Glues\\MainMenu\\MainMenu3D\\MainMenu3D.mdx");
+
+    for (const std::string& path : candidates) {
+        if (path.empty()) {
+            continue;
+        }
+
+        std::vector<uint8_t> data;
+        if (!mpq_.ReadFile(path, data)) {
+            continue;
+        }
+
+        MdxModel model;
+        if (!MdxLoad(data.data(), data.size(), model)) {
+            continue;
+        }
+
+        if (!glueBackgroundViewer_.Load(model, &mpq_)) {
+            continue;
+        }
+
+        glueBackgroundModel_ = std::move(model);
+        glueBackgroundLoaded_ = true;
+        glueBackgroundPath_ = path;
+        glueBackgroundViewer_.PlayStandSequence();
+        std::cout << "UI-only mode: loaded glue background model " << glueBackgroundPath_
+                  << " cameras=" << glueBackgroundModel_.cameras.size()
+                  << " sequences=" << glueBackgroundModel_.sequences.size() << std::endl;
+        return true;
+    }
+
+    std::cerr << "UI-only mode: failed to load glue background model" << std::endl;
+    return false;
+}
+
+bool GameController::LoadUiOnlyGlueSpriteLayers() {
+    if (glueSpriteLayersLoaded_ || mpq_.ArchiveCount() == 0) {
+        return glueSpriteLayersLoaded_;
+    }
+
+    auto loadLayer = [&](GlueSpriteLayer& layer,
+                         const char* skinField,
+                         const char* fallbackMdxPath,
+                         const Vec3& position,
+                         const Vec3& scale,
+                         bool billboardPlane,
+                         const char* birthSequence,
+                         const char* standSequence) -> bool {
+        std::vector<std::string> candidates;
+        const std::string skinModel = ResolveUiOnlySkinField(mpq_, skinField, config_.gameVersion);
+        AddUiOnlyCandidatePath(candidates, skinModel);
+        AddUiOnlyCandidatePath(candidates, UiOnlyMdxPathFromModelField(skinModel));
+        AddUiOnlyCandidatePath(candidates, fallbackMdxPath);
+
+        for (const std::string& path : candidates) {
+            if (path.empty()) {
+                continue;
+            }
+
+            std::vector<uint8_t> data;
+            if (!mpq_.ReadFile(path, data)) {
+                continue;
+            }
+
+            MdxModel model;
+            if (!MdxLoad(data.data(), data.size(), model)) {
+                continue;
+            }
+
+            if (!layer.viewer.Load(model, &mpq_)) {
+                continue;
+            }
+
+            layer.model = std::move(model);
+            layer.loaded = true;
+            layer.position = position;
+            layer.scale = scale;
+            layer.billboardPlane = billboardPlane;
+            layer.birthSequence = birthSequence ? birthSequence : "";
+            layer.standSequence = standSequence ? standSequence : "";
+            layer.waitingForStand = !layer.birthSequence.empty()
+                && layer.viewer.PlaySequenceByName(layer.birthSequence.c_str(), false, 1.0f, false);
+            if (!layer.waitingForStand) {
+                if (!layer.standSequence.empty()) {
+                    const bool playedStand = layer.viewer.PlaySequenceByName(layer.standSequence.c_str(), true);
+                    if (playedStand) {
+                        layer.viewer.SetCurrentSequenceFrameByRatio(0.5f);
+                    }
+                } else {
+                    layer.viewer.PlayStandSequence();
+                }
+            }
+            layer.path = path;
+            std::cout << "UI-only mode: loaded glue sprite layer " << skinField
+                      << " path=" << layer.path
+                      << " sequences=" << layer.model.sequences.size()
+                      << " geosets=" << layer.model.geosets.size()
+                      << " pos=(" << layer.position.x << "," << layer.position.y << "," << layer.position.z << ")"
+                      << " scale=(" << layer.scale.x << "," << layer.scale.y << "," << layer.scale.z << ")" << std::endl;
+            return true;
+        }
+
+        std::cerr << "UI-only mode: failed to load glue sprite layer " << skinField << std::endl;
+        return false;
+    };
+
+    const bool loadedLeft = loadLayer(glueSpriteTopLeft_,
+        "GlueSpriteLayerTopLeft",
+        "UI\\Glues\\SpriteLayers\\Expansion\\TopLeftPanel-Expansion.mdx",
+        Vec3(0.0f, 0.0f, 0.0f),
+        Vec3(1.0f, 1.0f, 1.0f),
+        false,
+        "",
+        "MainMenu Stand");
+    const bool loadedRight = loadLayer(glueSpriteTopRight_,
+        "GlueSpriteLayerTopRight",
+        "UI\\Glues\\SpriteLayers\\Expansion\\TopRightPanel-Expansion.mdx",
+        Vec3(0.0f, 0.0f, 0.0f),
+        Vec3(1.0f, 1.0f, 1.0f),
+        false,
+        "",
+        "MainMenu Stand");
+    const bool loadedLogo = loadLayer(glueMainMenuLogo_,
+        "MainMenuLogo",
+        "UI\\Glues\\MainMenu\\WarCraftIIILogo_exp\\WarCraftIIILogo_exp.mdx",
+        Vec3(0.0f, 0.49f, -0.586f),
+        Vec3(1.0f, 1.0f, 1.0f),
+        true,
+        "",
+        "Stand");
+    glueSpriteLayersLoaded_ = loadedLeft || loadedRight || loadedLogo;
+    return glueSpriteLayersLoaded_;
+}
+
+void GameController::RenderUiOnlyGlueBackground(int screenW, int screenH) {
+    if (!glueBackgroundLoaded_ || screenW <= 0 || screenH <= 0) {
+        return;
+    }
+
+    Mat4 view;
+    Mat4 proj;
+    if (!glueBackgroundModel_.cameras.empty()) {
+        const MdxCamera& camera = glueBackgroundModel_.cameras[0];
+        view = LookAt(UiOnlyMdxPointToYUp(camera.pos),
+                      UiOnlyMdxPointToYUp(camera.target),
+                      Vec3(0.0f, 1.0f, 0.0f));
+        const float fovDeg = camera.fov * 0.6f * 57.2957795f;
+        const float nearClip = std::max(1.0f, camera.nearClip);
+        const float farClip = std::max(nearClip + 1.0f, camera.farClip);
+        proj = Perspective(fovDeg, (float)screenW / (float)screenH, nearClip, farClip);
+    } else {
+        view = LookAt(Vec3(0.0f, 900.0f, 1800.0f), Vec3(0.0f, 400.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
+        proj = Perspective(60.0f, (float)screenW / (float)screenH, 8.0f, 70000.0f);
+    }
+
+    glueBackgroundViewer_.Update(1.0f / 60.0f, view);
+    glueBackgroundViewer_.RenderAt(Vec3(0.0f, 0.0f, 0.0f), view, proj, 1.0f, 0, 0.0f, 1.0f, true);
+}
+
+void GameController::RenderUiOnlyGlueSpriteLayers(int screenW, int screenH) {
+    if (!glueSpriteLayersLoaded_ || screenW <= 0 || screenH <= 0) {
+        return;
+    }
+
+    Mat4 proj;
+    const float aspect = (float)screenW / (float)screenH;
+    const float uiWidth = aspect > (4.0f / 3.0f) ? 0.8f * aspect / (4.0f / 3.0f) : 0.8f;
+    const float uiHeight = aspect < (4.0f / 3.0f) ? 0.6f * (4.0f / 3.0f) / aspect : 0.6f;
+    const float uiX = (0.8f - uiWidth) * 0.5f;
+    const float uiY = (0.6f - uiHeight) * 0.5f;
+    proj.SetOrtho(uiX, uiX + uiWidth, uiY, uiY + uiHeight, -1024.0f, 1024.0f);
+    Mat4 view = Mat4::Identity();
+
+    auto renderLayer = [&](GlueSpriteLayer& layer) {
+        if (!layer.loaded) {
+            return;
+        }
+        layer.viewer.Update(1.0f / 60.0f, view);
+        if (layer.waitingForStand && layer.viewer.IsCurrentSequenceFinished()) {
+            layer.waitingForStand = false;
+            if (!layer.standSequence.empty() && !layer.viewer.PlaySequenceByName(layer.standSequence.c_str(), true)) {
+                layer.viewer.PlayStandSequence();
+            }
+        }
+        Mat4 model = Mat4::Identity();
+        if (layer.billboardPlane) {
+            const float logoScale = 1.35f;
+            model.m[0] = 0.0f;
+            model.m[5] = logoScale;
+            model.m[8] = -logoScale;
+            model.m[12] = 0.585f;
+            model.m[13] = 0.47f;
+        } else {
+            model.m[0] = 0.8f / 497.896f;
+            model.m[5] = 0.0f;
+            model.m[6] = 1.0f;
+            model.m[9] = -1.0f;
+        }
+        layer.viewer.RenderWithModelMatrix(model, view, proj, 0, 1.0f, false);
+    };
+
+    renderLayer(glueSpriteTopLeft_);
+    renderLayer(glueSpriteTopRight_);
+    renderLayer(glueMainMenuLogo_);
+}
+
+void GameController::CaptureScreenshotIfNeeded(int screenW, int screenH) {
+    if (screenshotFrame < 0 || frameCount_ < screenshotFrame) return;
+
+    if (screenshotPath.empty()) {
+        std::cerr << "Screenshot requested without a path" << std::endl;
+    } else if (WriteFramebufferPng(screenshotPath, screenW, screenH)) {
+        std::cout << "Screenshot saved: " << screenshotPath << std::endl;
+    } else {
+        std::cerr << "Screenshot failed: " << screenshotPath << std::endl;
+    }
+    screenshotFrame = -1;
+}
+
+bool GameController::WriteFramebufferPng(const std::string& path, int screenW, int screenH) {
+    if (path.empty() || screenW <= 0 || screenH <= 0) return false;
+
+    fs::path screenshotFile(path);
+    if (screenshotFile.has_parent_path()) {
+        std::error_code ec;
+        fs::create_directories(screenshotFile.parent_path(), ec);
+        if (ec) {
+            std::cerr << "Screenshot: failed to create directory '"
+                      << screenshotFile.parent_path().string() << "': " << ec.message() << std::endl;
+            return false;
+        }
+    }
+
+    std::vector<unsigned char> pixels((size_t)screenW * (size_t)screenH * 4u);
+    std::vector<unsigned char> flipped(pixels.size());
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, screenW, screenH, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+    const size_t stride = (size_t)screenW * 4u;
+    for (int y = 0; y < screenH; ++y) {
+        const size_t src = (size_t)(screenH - 1 - y) * stride;
+        const size_t dst = (size_t)y * stride;
+        std::memcpy(flipped.data() + dst, pixels.data() + src, stride);
+    }
+
+    return stbi_write_png(screenshotFile.string().c_str(), screenW, screenH, 4, flipped.data(), (int)stride) != 0;
+}
+
+void GameController::MaybeExitAfterFrame() {
+    if (exitAfterFrame_ >= 0 && frameCount_ >= exitAfterFrame_) {
+        std::cout << "Exit-after-frame reached: " << frameCount_ << std::endl;
+        sapp_request_quit();
+        exitAfterFrame_ = -1;
     }
 }
 
@@ -1026,6 +1933,17 @@ void GameController::OnEvent(const sapp_event* ev) {
 }
 
 void GameController::OnMouseDown(const sapp_event* ev) {
+    if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
+        const int multiSelectHandle = ui_.HitMultiSelection(ev->mouse_x, ev->mouse_y);
+        if (multiSelectHandle >= 0 && selectedUnitHandlesSet_.find(multiSelectHandle) != selectedUnitHandlesSet_.end()) {
+            if (audio_.IsValid() && frameCount_ > 10) audio_.Play2D("ui_click", 0.5f);
+            SetSelectedUnits(GetSelectedSimulationUnits(), multiSelectHandle, true);
+            std::cout << "MultiSelectIcon: primary handle=" << multiSelectHandle
+                      << " count=" << selectedUnitHandles_.size() << std::endl;
+            return;
+        }
+    }
+
     if (ui_.HandleEvent(ev)) return;
 
     int btn = (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) ? 0 :
@@ -1541,6 +2459,35 @@ void GameController::SelectUnitsInRect(const ScreenRect& rect, bool additive) {
     } else {
         SetSelectedUnits(units);
     }
+}
+
+void GameController::DebugSelectFirstUnitForHud() {
+    if (!simulationInitialized_) return;
+
+    CUnit* fallback = nullptr;
+    CUnit* localPlayerUnit = nullptr;
+    const int localPlayer = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+
+    for (auto* unit : simulation_.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->IsHidden()) continue;
+        if (!fallback) fallback = unit;
+        if (unit->GetPlayerIndex() == localPlayer) {
+            localPlayerUnit = unit;
+            break;
+        }
+    }
+
+    CUnit* selected = localPlayerUnit ? localPlayerUnit : fallback;
+    if (!selected) {
+        std::cout << "DebugSelectFirstUnitForHud: no selectable unit found" << std::endl;
+        return;
+    }
+
+    SetSelectedUnits({selected}, selected->GetHandleId(), true);
+    std::cout << "DebugSelectFirstUnitForHud: selected "
+              << unit_text_utils::DescribeUnitType(selected->GetTypeId(), unitData_)
+              << " handle=" << selected->GetHandleId()
+              << " player=" << selected->GetPlayerIndex() << std::endl;
 }
 
 static std::vector<MultiSelectUnitInfo> BuildMultiSelectionInfo(const std::vector<CUnit*>& units) {

@@ -477,6 +477,8 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
         if (legacyName.empty()) {
             legacyName = name;
         }
+        const std::string iconPath = GetMergedString(unitUITxt, unitUI, sid, "Art",
+            GetMergedString(unitDataTxt, unitData, sid, "Art"));
 
         const int maxLife = GetMergedInt(unitBalanceTxt, unitBalance, sid, "HP", 100);
         const float lifeRegen = GetMergedFloat(unitBalanceTxt, unitBalance, sid, "regenHP", 0.0f);
@@ -667,7 +669,7 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
         std::vector<std::vector<CUnitTypeRequirement>> emptyTiers;
 
         auto type = std::make_unique<CUnitType>(
-            name, legacyName, id, maxLife, lifeRegen, manaRegen, lifeRegenType,
+            name, legacyName, iconPath, id, maxLife, lifeRegen, manaRegen, lifeRegenType,
             manaInitial, manaMaximum, speed, defense, defaultAutocast,
             abilityIDs, isBldg, movementType, defaultFlyingHeight, collisionSize,
             requiredAnimationTags,

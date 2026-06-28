@@ -56,9 +56,9 @@ bool Initialize() {
     }
     g_passAction = {};
     g_passAction.colors[0].load_action = SG_LOADACTION_CLEAR;
-    g_passAction.colors[0].clear_value.r = 0.1f;
-    g_passAction.colors[0].clear_value.g = 0.1f;
-    g_passAction.colors[0].clear_value.b = 0.1f;
+    g_passAction.colors[0].clear_value.r = 0.35f;
+    g_passAction.colors[0].clear_value.g = 0.05f;
+    g_passAction.colors[0].clear_value.b = 0.45f;
     g_passAction.colors[0].clear_value.a = 1.0f;
     g_active = true;
     std::cout << "Renderer: sokol_gfx initialized (backend="
@@ -81,9 +81,17 @@ void BeginFrame() {
     sg_begin_pass(&pass);
 }
 
-void EndFrame() {
+void EndPass() {
     sg_end_pass();
+}
+
+void CommitFrame() {
     sg_commit();
+}
+
+void EndFrame() {
+    EndPass();
+    CommitFrame();
 }
 
 void SetClearColor(const float color[4]) {

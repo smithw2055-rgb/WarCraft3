@@ -24,6 +24,14 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq) {
             "Units\\AbilitySkin.txt",
             "Units\\AbilityFunc.txt",
             "Units\\AbilityStrings.txt",
+            "Units\\CommonAbilityFunc.txt",
+            "Units\\HumanAbilityFunc.txt",
+            "Units\\OrcAbilityFunc.txt",
+            "Units\\NightElfAbilityFunc.txt",
+            "Units\\UndeadAbilityFunc.txt",
+            "Units\\NeutralAbilityFunc.txt",
+            "Units\\CampaignAbilityFunc.txt",
+            "Units\\ItemAbilityFunc.txt",
         };
         for (auto& f : skinFiles) {
             std::vector<uint8_t> sbuf;
@@ -150,7 +158,51 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq) {
         data.abilities_[id] = std::move(def);
     }
 
+    SlkTable buffSlk;
+    {
+        std::vector<uint8_t> buf;
+        if (mpq.ReadFile("Units\\AbilityBuffData.slk", buf)) {
+            buffSlk.Load(buf.data(), buf.size());
+        }
+    }
+    if (buffSlk.Rows() > 0) {
+        auto buffCol = [&](const std::string& name) -> int { return buffSlk.FindColumn(name); };
+        const int colAliasBuff = buffCol("alias");
+        const int colCodeBuff = buffCol("code");
+        const int colBuffArt = buffCol("Buffart");
+        const int colBuffTip = buffCol("Bufftip");
+        const int colBuffUberTip = buffCol("Buffubertip");
+
+        for (int r = 0; r < buffSlk.Rows(); ++r) {
+            std::string alias = (colAliasBuff >= 0) ? buffSlk.GetString(r, colAliasBuff, "") : "";
+            if (alias.empty()) continue;
+
+            std::string code = (colCodeBuff >= 0) ? buffSlk.GetString(r, colCodeBuff, alias) : alias;
+            if (code.empty()) code = alias;
+
+            auto def = std::make_unique<CBuffDefFull>();
+            def->id = War3ID::FromString(alias);
+            def->name = alias;
+            def->tooltip = (colBuffTip >= 0) ? buffSlk.GetString(r, colBuffTip, "") : "";
+            def->uberTip = (colBuffUberTip >= 0) ? buffSlk.GetString(r, colBuffUberTip, "") : "";
+            def->iconArt = (colBuffArt >= 0) ? buffSlk.GetString(r, colBuffArt, "") : "";
+
+            if (def->iconArt.empty()) {
+                def->iconArt = skinTbl.GetString(code, "Buffart", "");
+            }
+            if (def->tooltip.empty()) {
+                def->tooltip = skinTbl.GetString(code, "Bufftip", "");
+            }
+            if (def->uberTip.empty()) {
+                def->uberTip = skinTbl.GetString(code, "Buffubertip", "");
+            }
+
+            data.buffs_[def->id] = std::move(def);
+        }
+    }
+
     std::cout << "CAbilityData: loaded " << data.abilities_.size() << " abilities" << std::endl;
+    std::cout << "CAbilityData: loaded " << data.buffs_.size() << " buff UI defs" << std::endl;
     return data;
 }
 
@@ -161,4 +213,9 @@ bool CAbilityData::HasAbility(War3ID id) const {
 const CAbilityDefFull* CAbilityData::GetAbility(War3ID id) const {
     auto it = abilities_.find(id);
     return (it != abilities_.end()) ? it->second.get() : nullptr;
+}
+
+const CBuffDefFull* CAbilityData::GetBuff(War3ID id) const {
+    auto it = buffs_.find(id);
+    return (it != buffs_.end()) ? it->second.get() : nullptr;
 }

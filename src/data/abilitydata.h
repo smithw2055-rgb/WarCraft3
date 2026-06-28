@@ -34,6 +34,14 @@ struct CAbilityDefFull {
     std::vector<std::string> dataFields; // raw data fields A-I
 };
 
+struct CBuffDefFull {
+    War3ID id;
+    std::string name;
+    std::string tooltip;
+    std::string uberTip;
+    std::string iconArt;
+};
+
 // Ability-to-unit mappings from UnitAbilities.slk
 struct CUnitAbilityEntry {
     War3ID unitId;
@@ -49,12 +57,16 @@ public:
 
     bool HasAbility(War3ID id) const;
     const CAbilityDefFull* GetAbility(War3ID id) const;
+    const CBuffDefFull* GetBuff(War3ID id) const;
 
     using AbilityMap = std::unordered_map<War3ID, std::unique_ptr<CAbilityDefFull>>;
+    using BuffMap = std::unordered_map<War3ID, std::unique_ptr<CBuffDefFull>>;
     const AbilityMap& GetAll() const { return abilities_; }
+    const BuffMap& GetAllBuffs() const { return buffs_; }
 
     static CAbilityData LoadFromMpq(const class MpqManager& mpq);
 
 private:
     AbilityMap abilities_;
+    BuffMap buffs_;
 };

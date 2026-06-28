@@ -9,6 +9,8 @@ namespace Renderer {
     void Shutdown();
     bool IsActive();
     void BeginFrame();
+    void EndPass();
+    void CommitFrame();
     void EndFrame();
     void SetWireframe(bool enabled);
     void SetClearColor(const float color[4]);

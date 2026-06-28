@@ -105,6 +105,8 @@ CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
     maxLife_ = (float)unitType->GetMaxLife();
     mana_ = (float)unitType->GetManaInitial();
     flyHeight_ = unitType->GetDefaultFlyingHeight();
+    foodUsed_ = unitType->GetFoodUsed();
+    foodMade_ = unitType->GetFoodMade();
 }
 
 void CUnit::SetPosition(float x, float y) {

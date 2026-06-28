@@ -5,6 +5,7 @@
 #include "../data/unitdata.h"
 #include "../data/destructabledata.h"
 #include "../data/itemdata.h"
+#include "../data/upgradedata.h"
 #include "../data/gameplay_constants.h"
 #include "../map/w3i.h"
 #include "../map/wpm.h"
@@ -51,7 +52,8 @@ public:
     };
 
     MapLoader(MpqManager& mpq, CSimulation& sim, CUnitData& unitData,
-              CDestructableData& destructableData, CItemData& itemData, SceneManager& scene,
+              CDestructableData& destructableData, CItemData& itemData,
+              CUpgradeData& upgradeData, SceneManager& scene,
               TexturedTerrain& terrain, TileSet& tileset,
               W3EMap& mapData, W3iInfo& w3i, WpmData& wpm);
 
@@ -86,6 +88,7 @@ private:
     CUnitData& unitData_;
     CDestructableData& destructableData_;
     CItemData& itemData_;
+    CUpgradeData& upgradeData_;
     SceneManager& scene_;
     TexturedTerrain& terrain_;
     TileSet& tileset_;

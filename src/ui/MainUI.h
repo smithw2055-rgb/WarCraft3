@@ -7,6 +7,7 @@
 #include "TextRenderer.h"
 #include "UiRenderer.h"
 #include "MultiSelectionPanel.h"
+#include "GlueMenuTypes.h"
 #include "../asset/Texture.h"
 #include "../resource/mpq_storm.h"
 #include "../data/abilitydata.h"
@@ -49,14 +50,77 @@ struct ScreenRect {
     }
 };
 
+struct HudQueueItem {
+    int slot = -1;
+    std::string label;
+    std::string iconUri;
+    bool visible = false;
+};
+
+struct HudResourceCosts {
+    int gold = 0;
+    int lumber = 0;
+    int stone = 0;
+    int mana = 0;
+    int food = 0;
+};
+
+struct HudCommandSlot {
+    std::string label;
+    std::string tooltip;
+    std::string iconUri;
+    HudResourceCosts resourceCosts;
+    float cooldownRemaining = 0.0f;
+    float cooldownMax = 0.0f;
+    int autocastOrderId = 0;
+    int numberOverlay = -1;
+    bool enabled = false;
+    bool visible = false;
+    bool active = false;
+    bool autocastActive = false;
+};
+
+struct HudInventoryItem {
+    int slot = -1;
+    std::string label;
+    std::string iconUri;
+    int charges = 0;
+    bool occupied = false;
+    bool enabled = false;
+    bool visible = false;
+};
+
+struct HudInfoStats {
+    std::string attackText;
+    std::string armorText;
+    std::string goldText;
+    std::string foodText;
+    std::string attackIconKey;
+    std::string armorIconKey;
+    bool visible = false;
+};
+
+struct HudBuffItem {
+    std::string name;
+    std::string iconUri;
+    float remaining = 0.0f;
+    float duration = 0.0f;
+    int stackCount = 1;
+    bool positive = true;
+    bool visible = false;
+};
+
 class MainUI {
 public:
     MainUI();
     ~MainUI();
 
-    bool Init(MpqManager* mpq, int screenW, int screenH);
+    bool Init(MpqManager* mpq, int screenW, int screenH,
+              const std::string& hudXamlPath = "assets/ui/Hud.xaml", int gameVersion = 0);
     void Shutdown();
     void Update(int screenW, int screenH);
+    void RenderNoesisOffscreen();
+    void RenderNoesisOnly();
     void Render();
     void SetUnitData(const CUnitData* ud) { unitData_ = ud; }
     bool HandleEvent(const sapp_event* ev);
@@ -71,6 +135,16 @@ public:
     void PopulateCommandCardForUnitType(War3ID unitTypeId);
     void PopulateCommandCardForUnit(CUnit* unit);
     void PopulateCommandCardFromAbilities(const std::vector<War3ID>& abilityIds);
+    void PopulateDebugCommandCardForUiOnly();
+    void OpenGameMenuForUiOnly();
+    void OpenGameMenuPanelForUiOnly(const std::string& panel);
+    bool InvokeGameMenuActionForUiOnly(const std::string& actionName);
+    bool InvokeUpperButtonForUiOnly(const std::string& buttonName);
+    void OpenGlueMenuForUiOnly(const std::string& pageName);
+    bool InvokeGlueMenuActionForUiOnly(const std::string& actionName);
+    void SetGlueMenuMapsForUiOnly(const std::vector<War3UI::GlueMapListItem>& maps);
+    void SetGlueMenuCampaignsForUiOnly(const std::vector<War3UI::GlueCampaignListItem>& campaigns);
+    void SetResourcesForUiOnly(int gold, int lumber, int foodUsed, int foodCap, const std::string& timeText);
     void SetSimulation(CSimulation* sim) { simulation_ = sim; }
     void SetSelectedUnit(int handleId);
     void WireCommandCardCallbacks();
@@ -80,7 +154,8 @@ public:
     void ClearInfoPanel();
 
     // Tooltip
-    void ShowTooltip(const std::string& text, float screenX, float screenY);
+    void ShowTooltip(const std::string& text, float screenX, float screenY,
+                     const HudResourceCosts& costs = HudResourceCosts{});
     void HideTooltip();
     void UpdateTooltip(float mouseX, float mouseY);
 
@@ -103,6 +178,7 @@ public:
     void SetSelectionBox(const ScreenRect& rect);
     void ClearSelectionBox();
     void RenderOverlays(UiRenderer& r);
+    int HitQueueSlot(float x, float y) const;
 
     // Resource bar access for game state updates
     ResourceBarFrame* GetResourceBar() { return resourceBar_; }
@@ -128,6 +204,8 @@ public:
     }
     ScreenRect GetMinimapRect() const;
     ScreenRect GetPortraitRect() const;
+    int HitMultiSelection(float x, float y) const;
+    int HitInventorySlot(float x, float y) const;
 
 private:
     enum class CommandClickMode : uint8_t {
@@ -141,10 +219,19 @@ private:
 
     struct CommandSlot {
         std::string label;
+        std::string tooltip;
         int orderId = -1;
         bool visible = false;
         bool enabled = false;
         std::shared_ptr<Texture> icon;
+        std::string noesisIconUri;
+        HudResourceCosts resourceCosts;
+        float cooldownRemaining = 0.0f;
+        float cooldownMax = 0.0f;
+        int autocastOrderId = 0;
+        int numberOverlay = -1;
+        bool active = false;
+        bool autocastActive = false;
         CommandClickMode clickMode = CommandClickMode::NONE;
     };
 
@@ -155,12 +242,27 @@ private:
                           CommandClickMode clickMode,
                           bool enabled,
                           const std::string& label,
-                          const std::shared_ptr<Texture>& icon);
+                          const std::shared_ptr<Texture>& icon,
+                          const std::string& noesisIconUri,
+                          int numberOverlay = -1,
+                          const std::string& tooltip = std::string(),
+                          const HudResourceCosts& resourceCosts = HudResourceCosts{},
+                          float cooldownRemaining = 0.0f,
+                          float cooldownMax = 0.0f,
+                          int autocastOrderId = 0,
+                          bool autocastActive = false);
     int FindNextOpenCommandSlot() const;
     void SubmitChatMessage();
     void BrowseChatHistory(int delta);
-    void RenderCommandIcons(UiRenderer& r);
+    void UpdateQueueState();
+    bool HandleQueueSlotClick(int slot);
+    void UpdateInventoryState();
+    bool HandleInventorySlotClick(int slot);
+    void UpdatePortraitIconState();
+    void UpdateBuffState();
     std::shared_ptr<Texture> LoadTextureFromMpq(const std::string& path);
+    std::string GetNoesisTextureUri(const std::string& path) const;
+    std::string ExportNoesisTexture(const std::string& normalizedPath, const std::vector<uint8_t>& data);
     void LoadFont();
 
     GameUI gameUI_;
@@ -174,6 +276,7 @@ private:
     CommandCard* commandCard_ = nullptr;
     ResourceBarFrame* resourceBar_ = nullptr;
     std::unordered_map<std::string, std::shared_ptr<Texture>> textures_;
+    std::unordered_map<std::string, std::string> noesisTextureUris_;
 
     // Data
     CAbilityData abilityData_;
@@ -186,6 +289,7 @@ private:
 
     const std::vector<UnitOverlayInfo>* overlayData_ = nullptr;
     MultiSelectionPanel multiSelectionPanel_;
+    std::vector<MultiSelectUnitInfo> multiSelectionUnits_;
     bool selectionBoxVisible_ = false;
     ScreenRect selectionBoxRect_;
 
@@ -195,6 +299,7 @@ private:
     float tooltipTimer_ = 0;
     bool tooltipActive_ = false;
     std::string pendingTooltipText_;
+    HudResourceCosts pendingTooltipCosts_;
     float pendingTooltipX_ = 0, pendingTooltipY_ = 0;
     static constexpr float kTooltipDelay = 0.4f;
 
@@ -224,8 +329,17 @@ private:
     int playerLumber_ = 0;
     int playerFoodUsed_ = 0;
     int playerFoodCap_ = 0;
+    std::string resourceTimeText_ = "12:00";
 
     std::array<CommandSlot, 12> commandSlots_{};
+    std::vector<HudQueueItem> queueItems_;
+    float queueProgressRatio_ = 0.0f;
+    std::vector<HudInventoryItem> inventoryItems_;
+    bool inventoryAvailable_ = false;
+    int inventoryCapacity_ = 0;
+    std::string selectedPortraitIconUri_;
+    HudInfoStats selectedInfoStats_;
+    std::vector<HudBuffItem> selectedBuffs_;
 
     bool chatOpen_ = false;
     std::vector<std::string> chatMessages_;

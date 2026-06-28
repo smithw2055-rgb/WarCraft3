@@ -1,7 +1,7 @@
 #include "unit_type.h"
 
 CUnitType::CUnitType(
-    const std::string& name, const std::string& legacyName, War3ID typeId,
+    const std::string& name, const std::string& legacyName, const std::string& iconPath, War3ID typeId,
     int maxLife, float lifeRegen, float manaRegen, CRegenType lifeRegenType,
     int manaInitial, int manaMaximum, int speed, int defense,
     War3ID defaultAutocastAbility,
@@ -49,7 +49,7 @@ CUnitType::CUnitType(
     int goldBountyAwardedBase, int goldBountyAwardedDice, int goldBountyAwardedSides,
     int lumberBountyAwardedBase, int lumberBountyAwardedDice, int lumberBountyAwardedSides,
     bool neutralBuildingShowMinimapIcon)
-    : name_(name), legacyName_(legacyName), typeId_(typeId)
+    : name_(name), legacyName_(legacyName), iconPath_(iconPath), typeId_(typeId)
     , maxLife_(maxLife), lifeRegen_(lifeRegen), manaRegen_(manaRegen), lifeRegenType_(lifeRegenType)
     , manaInitial_(manaInitial), manaMaximum_(manaMaximum), speed_(speed), defense_(defense)
     , defaultAutocastAbility_(defaultAutocastAbility), abilityList_(abilityList)
