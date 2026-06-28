@@ -1,0 +1,355 @@
+<UserControl
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  x:Class="War3UI.CampaignPanelControl">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="../GlueMenuResources.xaml"/>
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid x:Name="CampaignPanelRoot" Width="1536" Height="1152">
+    <Viewbox Stretch="UniformToFill">
+      <Grid Width="1536" Height="1152" Background="#FF05070A">
+        <Grid x:Name="CampaignBackdropNightElfLayer">
+          <Rectangle Width="1536" Height="1152" Fill="{StaticResource CampaignNightElfSkyBrush}" Opacity="0.56"/>
+          <Rectangle HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Height="520" Fill="{StaticResource SinglePlayerNightElfGroundBrush}" Opacity="0.58"/>
+          <Rectangle HorizontalAlignment="Left" VerticalAlignment="Bottom" Width="620" Height="420" Fill="{StaticResource SinglePlayerNightElfDetailsBrush}" Opacity="0.44"/>
+          <Rectangle HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,110,160,0" Width="280" Height="360" Fill="{StaticResource CampaignNightElfWaterfallBrush}" Opacity="0.26"/>
+          <Rectangle HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,92,220,0" Width="196" Height="196" Fill="{StaticResource SinglePlayerNightElfMoonGlowBrush}" Opacity="0.30"/>
+        </Grid>
+        <Grid x:Name="CampaignBackdropHumanLayer" Visibility="Collapsed">
+          <Rectangle Width="1536" Height="1152" Fill="{StaticResource CampaignHumanSkyBrush}" Opacity="0.58"/>
+          <Rectangle HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Height="570" Fill="{StaticResource CampaignHumanGroundBrush}" Opacity="0.64"/>
+          <Rectangle HorizontalAlignment="Left" VerticalAlignment="Center" Margin="120,110,0,0" Width="290" Height="290" Fill="{StaticResource CampaignHumanBloodElfBrush}" Opacity="0.54"/>
+          <Rectangle HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,150,260,0" Width="260" Height="260" Fill="{StaticResource MainMenuBlueGlowBrush}" Opacity="0.20"/>
+        </Grid>
+        <Grid x:Name="CampaignBackdropUndeadLayer" Visibility="Collapsed">
+          <Rectangle Width="1536" Height="1152" Fill="{StaticResource CampaignUndeadSkyBrush}" Opacity="0.70"/>
+          <Rectangle HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Height="650" Fill="{StaticResource CampaignUndeadGroundBrush}" Opacity="0.60"/>
+          <Rectangle HorizontalAlignment="Left" VerticalAlignment="Center" Margin="90,80,0,0" Width="340" Height="340" Fill="{StaticResource CampaignUndeadArthasCloakBrush}" Opacity="0.56"/>
+          <Rectangle HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,80,210,0" Width="200" Height="200" Fill="{StaticResource MainMenuSnowflakeBrush}" Opacity="0.18"/>
+        </Grid>
+        <Grid x:Name="CampaignBackdropOrcLayer" Visibility="Collapsed">
+          <Rectangle Width="1536" Height="1152" Fill="{StaticResource CampaignOrcSkyBrush}" Opacity="0.58"/>
+          <Rectangle HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Height="610" Fill="{StaticResource CampaignOrcGroundBrush}" Opacity="0.62"/>
+          <Rectangle HorizontalAlignment="Left" VerticalAlignment="Center" Margin="96,110,0,0" Width="360" Height="360" Fill="{StaticResource CampaignOrcRexxarBrush}" Opacity="0.54"/>
+          <Rectangle HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,120,250,0" Width="180" Height="180" Fill="{StaticResource MainMenuStar32Brush}" Opacity="0.18"/>
+        </Grid>
+        <Rectangle Width="1536" Height="1152" Fill="#9A000000"/>
+      </Grid>
+    </Viewbox>
+    <Rectangle Width="420" Height="210"
+               HorizontalAlignment="Right" VerticalAlignment="Top"
+               Margin="0,48,92,0"
+               Fill="{StaticResource War3xLogoBrush}"
+               Opacity="0.95"
+               IsHitTestVisible="False"/>
+    <Border x:Name="CampaignSelectFrame" Width="760" Height="660" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,104,118,0"
+            Style="{StaticResource GluePanelFrameStyle}">
+      <Grid>
+        <Border Background="{StaticResource GluePanelMetalPiecesExpansionBrush}" Opacity="0.82"/>
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="32"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="32"/>
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" Style="{StaticResource GluePanelSideRailStyle}"/>
+          <Border Grid.Column="2" Style="{StaticResource GluePanelSideRailStyle}"/>
+        </Grid>
+        <Border Width="16" Height="128" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="26,30,0,0" Style="{StaticResource GluePanelRailCapStyle}"/>
+        <Border Width="16" Height="128" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,30,26,0" Style="{StaticResource GluePanelRailCapStyle}"/>
+        <Border Width="128" Height="64" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="30,0,0,14" Style="{StaticResource GluePanelGearRailStyle}"/>
+        <Border Width="128" Height="64" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,30,14" Style="{StaticResource GluePanelGearRailStyle}"/>
+        <Border Margin="16" Background="{StaticResource GluePanelExpansionDetailBrush}" Opacity="0.50"/>
+        <Border Margin="28" Background="#D0060709"/>
+      <Grid Margin="34">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="84"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="72"/>
+        </Grid.RowDefinitions>
+        <StackPanel>
+          <TextBlock Text="CAMPAIGN" Foreground="#FFE7D184" FontSize="34" FontWeight="Bold"/>
+          <TextBlock Text="SELECT CAMPAIGN" Foreground="#FFB8AA77" FontSize="13" FontWeight="Bold" Margin="2,4,0,0"/>
+        </StackPanel>
+        <Grid Grid.Row="1">
+          <Grid x:Name="CampaignRootMenuUI">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="300"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid>
+              <Border Background="{StaticResource GluePanelExpansionDetailBrush}" Opacity="0.58"/>
+              <Border Background="#8F05070A" Margin="10"/>
+              <Border Background="{StaticResource GluePanelRailBrush}" HorizontalAlignment="Left" Width="10" Opacity="0.65"/>
+            <StackPanel Margin="18,24,12,18">
+            <Grid x:Name="CampaignPrologueButton" Height="62" Margin="0,0,0,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="50"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Border x:Name="CampaignPrologueSelected" Grid.ColumnSpan="2" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.45"/>
+              <Grid Width="42" Height="42" HorizontalAlignment="Left" VerticalAlignment="Center">
+                <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+                <Border Margin="10,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Margin="8,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{StaticResource GlueCampaignArrowBrush}"/>
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="CampaignPrologueButtonText" Text="PROLOGUE CAMPAIGN" Foreground="#FFE7D184" FontSize="14" FontWeight="Bold"/>
+                <TextBlock x:Name="CampaignPrologueNameText" Text="EXODUS OF THE HORDE" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" Margin="0,4,0,0"/>
+              </StackPanel>
+              <Border x:Name="GlueMenuButtonHoverCampaignPrologueButton" Grid.ColumnSpan="2" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.62"/>
+              <Border x:Name="GlueMenuButtonPressedCampaignPrologueButton" Grid.ColumnSpan="2" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            </Grid>
+            <Grid x:Name="CampaignHumanButton" Height="62" Margin="0,0,0,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="50"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Border x:Name="CampaignHumanSelected" Grid.ColumnSpan="2" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.45"/>
+              <Grid Width="42" Height="42" HorizontalAlignment="Left" VerticalAlignment="Center">
+                <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+                <Border Margin="10,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Margin="8,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{StaticResource GlueCampaignArrowBrush}"/>
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="CampaignHumanButtonText" Text="HUMAN CAMPAIGN" Foreground="#FFE7D184" FontSize="14" FontWeight="Bold"/>
+                <TextBlock x:Name="CampaignHumanNameText" Text="THE SCOURGE OF LORDAERON" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" Margin="0,4,0,0"/>
+              </StackPanel>
+              <Border x:Name="GlueMenuButtonHoverCampaignHumanButton" Grid.ColumnSpan="2" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.62"/>
+              <Border x:Name="GlueMenuButtonPressedCampaignHumanButton" Grid.ColumnSpan="2" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            </Grid>
+            <Grid x:Name="CampaignUndeadButton" Height="62" Margin="0,0,0,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="50"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Border x:Name="CampaignUndeadSelected" Grid.ColumnSpan="2" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.45"/>
+              <Grid Width="42" Height="42" HorizontalAlignment="Left" VerticalAlignment="Center">
+                <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+                <Border Margin="10,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Margin="8,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{StaticResource GlueCampaignArrowBrush}"/>
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="CampaignUndeadButtonText" Text="UNDEAD CAMPAIGN" Foreground="#FFE7D184" FontSize="14" FontWeight="Bold"/>
+                <TextBlock x:Name="CampaignUndeadNameText" Text="PATH OF THE DAMNED" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" Margin="0,4,0,0"/>
+              </StackPanel>
+              <Border x:Name="GlueMenuButtonHoverCampaignUndeadButton" Grid.ColumnSpan="2" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.62"/>
+              <Border x:Name="GlueMenuButtonPressedCampaignUndeadButton" Grid.ColumnSpan="2" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            </Grid>
+            <Grid x:Name="CampaignOrcButton" Height="62" Margin="0,0,0,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="50"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Border x:Name="CampaignOrcSelected" Grid.ColumnSpan="2" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.45"/>
+              <Grid Width="42" Height="42" HorizontalAlignment="Left" VerticalAlignment="Center">
+                <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+                <Border Margin="10,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Margin="8,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{StaticResource GlueCampaignArrowBrush}"/>
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="CampaignOrcButtonText" Text="ORC CAMPAIGN" Foreground="#FFE7D184" FontSize="14" FontWeight="Bold"/>
+                <TextBlock x:Name="CampaignOrcNameText" Text="THE INVASION OF KALIMDOR" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" Margin="0,4,0,0"/>
+              </StackPanel>
+              <Border x:Name="GlueMenuButtonHoverCampaignOrcButton" Grid.ColumnSpan="2" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.62"/>
+              <Border x:Name="GlueMenuButtonPressedCampaignOrcButton" Grid.ColumnSpan="2" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            </Grid>
+            <Grid x:Name="CampaignNightElfButton" Height="62">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="50"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Border x:Name="CampaignNightElfSelected" Grid.ColumnSpan="2" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.45"/>
+              <Grid Width="42" Height="42" HorizontalAlignment="Left" VerticalAlignment="Center">
+                <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+                <Border Margin="10,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Margin="8,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{StaticResource GlueCampaignArrowBrush}"/>
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="CampaignNightElfButtonText" Text="NIGHT ELF CAMPAIGN" Foreground="#FFE7D184" FontSize="14" FontWeight="Bold"/>
+                <TextBlock x:Name="CampaignNightElfNameText" Text="ETERNITY'S END" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" Margin="0,4,0,0"/>
+              </StackPanel>
+              <Border x:Name="GlueMenuButtonHoverCampaignNightElfButton" Grid.ColumnSpan="2" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.62"/>
+              <Border x:Name="GlueMenuButtonPressedCampaignNightElfButton" Grid.ColumnSpan="2" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            </Grid>
+            </StackPanel>
+            </Grid>
+            <Grid Grid.Column="1" Margin="28,0,0,0">
+              <Border Background="{StaticResource GluePanelExpansionDetailBrush}" Opacity="0.42"/>
+              <Border Background="#A805070A" Margin="10"/>
+              <Border Background="{StaticResource GluePanelRailBrush}" HorizontalAlignment="Left" Width="10" Opacity="0.52"/>
+              <Border Width="128" Height="64" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,8" Style="{StaticResource GluePanelGearRailStyle}"/>
+              <StackPanel Margin="30,30,28,24">
+                <TextBlock x:Name="CampaignSummaryHeaderText" Text="PROLOGUE" Foreground="#FFE7D184" FontSize="22" FontWeight="Bold"/>
+                <TextBlock x:Name="CampaignSummaryNameText" Text="EXODUS OF THE HORDE" Foreground="#FFFFFFFF" FontSize="24" FontWeight="Bold" TextWrapping="Wrap" Margin="0,8,0,18"/>
+                <Border Height="1" Background="#FF6F6036" Opacity="0.72" Margin="0,0,0,18"/>
+                <TextBlock x:Name="CampaignSummaryMissionCountText" Text="2 Missions" Foreground="#FFD8C98E" FontSize="16" FontWeight="Bold"/>
+                <TextBlock x:Name="CampaignSummaryMapText" Text="First Map: Campaigns\Prologue01.w3m" Foreground="#FFB8AA77" FontSize="13" TextWrapping="Wrap" Margin="0,10,0,0"/>
+              </StackPanel>
+            </Grid>
+          </Grid>
+          <Grid x:Name="CampaignMissionSelectMenuUI" Margin="0" Visibility="Collapsed">
+            <Border Background="{StaticResource GluePanelExpansionDetailBrush}" Opacity="0.76"/>
+            <Border Background="#C805070A" Margin="10"/>
+            <Border Background="{StaticResource GluePanelRailBrush}" HorizontalAlignment="Left" Width="10" Opacity="0.75"/>
+            <Border Width="16" Height="128" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12,18,0,0" Style="{StaticResource GluePanelRailCapStyle}"/>
+            <Border Width="128" Height="64" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,8" Style="{StaticResource GluePanelGearRailStyle}"/>
+            <StackPanel Margin="28,22,22,18">
+              <TextBlock x:Name="CampaignMissionHeaderText" Text="PROLOGUE" Foreground="#FFE7D184" FontSize="23" FontWeight="Bold"/>
+              <TextBlock x:Name="CampaignMissionNameText" Text="EXODUS OF THE HORDE" Foreground="#FFFFFFFF" FontSize="20" Margin="0,6,0,6"/>
+              <TextBlock x:Name="CampaignMissionMapText" Text="Map: Campaigns\Prologue01.w3m" Foreground="#FFB8AA77" FontSize="12" Margin="0,0,0,10" TextWrapping="Wrap"/>
+              <Border x:Name="CampaignMissionOneButton" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMissionOneSelected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMissionOneButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMissionOneButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMissionOneButtonText" Text="01  CHASING VISIONS" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMissionTwoButton" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMissionTwoSelected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMissionTwoButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMissionTwoButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMissionTwoButtonText" Text="02  DEPARTURES" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission3Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission3Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission3Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission3Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission3ButtonText" Text="03" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission4Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission4Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission4Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission4Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission4ButtonText" Text="04" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission5Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission5Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission5Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission5Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission5ButtonText" Text="05" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission6Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission6Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission6Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission6Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission6ButtonText" Text="06" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission7Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission7Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission7Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission7Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission7ButtonText" Text="07" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission8Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission8Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission8Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission8Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission8ButtonText" Text="08" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission9Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission9Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission9Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission9Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission9ButtonText" Text="09" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission10Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission10Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission10Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission10Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission10ButtonText" Text="10" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission11Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission11Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission11Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission11Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission11ButtonText" Text="11" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="CampaignMission12Button" Height="32" Margin="0,0,0,6" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="CampaignMission12Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverCampaignMission12Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedCampaignMission12Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="CampaignMission12ButtonText" Text="12" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MissionBackButton" Height="50" Width="190" HorizontalAlignment="Right" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                <Grid>
+                  <Border Margin="18,9" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border Margin="13,7" Style="{StaticResource GlueButtonFillStyle}"/>
+                  <Border x:Name="GlueMenuButtonHoverMissionBackButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMissionBackButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock Text="BACK" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+              </Border>
+            </StackPanel>
+          </Grid>
+        </Grid>
+        <Grid x:Name="BackButton" Grid.Row="2" Width="220" Height="52" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+          <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+          <Border Margin="20,10" Style="{StaticResource GlueButtonFillStyle}"/>
+          <Border Margin="15,8" Style="{StaticResource GlueButtonFillStyle}"/>
+          <Border x:Name="GlueMenuButtonHoverBackButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+          <Border x:Name="GlueMenuButtonPressedBackButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+          <TextBlock Text="BACK" Foreground="#FFFFFFFF" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Grid>
+      </Grid>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

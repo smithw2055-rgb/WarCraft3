@@ -1,0 +1,628 @@
+<UserControl
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  x:Class="War3UI.CustomGamePanelControl">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="../GlueMenuResources.xaml"/>
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid x:Name="CustomGamePanelRoot" Width="1536" Height="1152">
+    <Border x:Name="CustomGameFrame" Width="860" Height="700" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,92,118,0"
+            Style="{StaticResource GluePanelFrameStyle}">
+      <Grid>
+        <Grid Opacity="0.84">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="128"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="128"/>
+          </Grid.RowDefinitions>
+          <Border Grid.Row="0" Background="{StaticResource GlueCenterPanel01ExpansionBrush}"/>
+          <Border Grid.Row="1" Background="{StaticResource GlueCenterPanel02ExpansionBrush}"/>
+          <Border Grid.Row="2" Background="{StaticResource GlueCenterPanel03ExpansionBrush}"/>
+          <Border Width="64" HorizontalAlignment="Right" Background="{StaticResource GlueCenterPanel04ExpansionBrush}" Opacity="0.70"/>
+        </Grid>
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="32"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="32"/>
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" Style="{StaticResource GluePanelSideRailStyle}"/>
+          <Border Grid.Column="2" Style="{StaticResource GluePanelSideRailStyle}"/>
+        </Grid>
+        <Border Width="16" Height="128" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="26,30,0,0" Style="{StaticResource GluePanelRailCapStyle}"/>
+        <Border Width="16" Height="128" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,30,26,0" Style="{StaticResource GluePanelRailCapStyle}"/>
+        <Border Width="128" Height="64" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="30,0,0,14" Style="{StaticResource GluePanelGearRailStyle}"/>
+        <Border Width="128" Height="64" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,30,14" Style="{StaticResource GluePanelGearRailStyle}"/>
+        <Border Margin="16" Background="{StaticResource GluePanelExpansionDetailBrush}" Opacity="0.50"/>
+        <Border Margin="28" Background="#D0060709"/>
+      <Grid Margin="34">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="78"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="72"/>
+        </Grid.RowDefinitions>
+        <TextBlock Text="CUSTOM GAME" Foreground="#FFE7D184" FontSize="34" FontWeight="Bold"/>
+        <Grid Grid.Row="1">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="440"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <Border x:Name="MapListBox" Style="{StaticResource GlueCenterPanelBackdropStyle}" BorderThickness="0" Margin="0,0,22,0">
+            <Grid>
+              <Border Background="#BB05070A" Margin="10"/>
+              <Border Background="{StaticResource GluePanelRailBrush}" HorizontalAlignment="Left" Width="10" Opacity="0.75"/>
+              <Border Background="{StaticResource GlueCenterPanel04ExpansionBrush}" HorizontalAlignment="Right" Width="18" Opacity="0.58"/>
+              <StackPanel Margin="18,16,16,16">
+              <TextBlock Text="MAPS" Foreground="#FFE7D184" FontSize="22" FontWeight="Bold" Margin="0,0,0,16"/>
+              <Border x:Name="MapItem0Button" Height="28" Margin="0,0,0,6" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem0Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem0Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem0Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem0Text" Text="> (2)EchoIsles.w3x" Foreground="#FFFFFFFF" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MapItem1Button" Height="28" Margin="0,0,0,6" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem1Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem1Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem1Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem1Text" Text="  (4)LostTemple.w3m" Foreground="#FFCAB77A" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MapItem2Button" Height="28" Margin="0,0,0,6" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem2Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem2Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem2Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem2Text" Text="  (6)GnollWood.w3x" Foreground="#FFCAB77A" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MapItem3Button" Height="28" Margin="0,0,0,6" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem3Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem3Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem3Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem3Text" Text="  Map" Foreground="#FFCAB77A" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MapItem4Button" Height="28" Margin="0,0,0,6" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem4Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem4Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem4Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem4Text" Text="  Map" Foreground="#FFCAB77A" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MapItem5Button" Height="28" Margin="0,0,0,6" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem5Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem5Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem5Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem5Text" Text="  Map" Foreground="#FFCAB77A" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MapItem6Button" Height="28" Margin="0,0,0,6" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem6Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem6Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem6Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem6Text" Text="  Map" Foreground="#FFCAB77A" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MapItem7Button" Height="28" Margin="0,0,0,6" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem7Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem7Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem7Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem7Text" Text="  Map" Foreground="#FFCAB77A" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MapItem8Button" Height="28" Margin="0,0,0,6" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem8Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem8Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem8Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem8Text" Text="  Map" Foreground="#FFCAB77A" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Border x:Name="MapItem9Button" Height="28" Background="#22000000">
+                <Grid>
+                  <Border x:Name="MapItem9Selected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.42"/>
+                  <Border x:Name="GlueMenuButtonHoverMapItem9Button" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                  <Border x:Name="GlueMenuButtonPressedMapItem9Button" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                  <TextBlock x:Name="MapItem9Text" Text="  Map" Foreground="#FFCAB77A" FontSize="17" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <Grid Height="30" Margin="0,10,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="8"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="MapPageUpButton" Grid.Column="0" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                  <Grid>
+                    <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border x:Name="GlueMenuButtonHoverMapPageUpButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                    <Border x:Name="GlueMenuButtonPressedMapPageUpButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                    <TextBlock Text="PREV" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                  </Grid>
+                </Border>
+                <Border x:Name="MapPageDownButton" Grid.Column="2" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                  <Grid>
+                    <Border Margin="14,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border Margin="10,5" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border x:Name="GlueMenuButtonHoverMapPageDownButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                    <Border x:Name="GlueMenuButtonPressedMapPageDownButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                    <TextBlock Text="NEXT" Foreground="#FFFFFFFF" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                  </Grid>
+                </Border>
+              </Grid>
+              </StackPanel>
+            </Grid>
+          </Border>
+          <StackPanel Grid.Column="1">
+            <Border x:Name="MapInfoButton" Height="54" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0" Margin="0,0,0,12">
+              <Grid>
+                <Border Margin="20,10" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Margin="15,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border x:Name="GlueMenuButtonHoverMapInfoButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                <Border x:Name="GlueMenuButtonPressedMapInfoButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                <TextBlock Text="MAP INFO" Foreground="#FFFFFFFF" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+              </Grid>
+            </Border>
+            <Border x:Name="AdvancedOptionsButton" Height="54" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0" Margin="0,0,0,22">
+              <Grid>
+                <Border Margin="20,10" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border Margin="15,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                <Border x:Name="GlueMenuButtonHoverAdvancedOptionsButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                <Border x:Name="GlueMenuButtonPressedAdvancedOptionsButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                <TextBlock Text="ADVANCED OPTIONS" Foreground="#FFFFFFFF" FontSize="19" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+              </Grid>
+            </Border>
+            <Border x:Name="TeamSetupPane" Height="360" Style="{StaticResource GlueCenterPanelBackdropStyle}" BorderThickness="0">
+              <Grid>
+                <Border Background="#BB05070A" Margin="10"/>
+                <Border Background="{StaticResource GluePanelRailBrush}" HorizontalAlignment="Left" Width="10" Opacity="0.75"/>
+                <Border Background="{StaticResource GlueCenterPanel04ExpansionBrush}" HorizontalAlignment="Right" Width="18" Opacity="0.58"/>
+                <Grid Margin="18,14,14,14">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="30"/>
+                  <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="22"/>
+                    <RowDefinition Height="18"/>
+                  </Grid.RowDefinitions>
+                  <TextBlock Text="PLAYER SLOTS" Foreground="#FFE7D184" FontSize="19" FontWeight="Bold"/>
+                  <TextBlock x:Name="TeamSetupSummaryText" Grid.Row="1" Text="Slots: 2  Map Size: Unknown" Foreground="#FFCAB77A" FontSize="14"/>
+                </Grid>
+                <StackPanel Grid.Row="1" Margin="0,14,0,0">
+                  <Grid x:Name="PlayerSlot0" Height="20" Margin="0,0,0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot0NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot0NameText" Text="Player 1" Foreground="#FFFFFFFF" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot0RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot0RaceText" Text="Human" Foreground="#FFCAB77A" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot0TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot0TeamText" Text="Team 1" Foreground="#FFCAB77A" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot0ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot0ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor00Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot1" Height="20" Margin="0,0,0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot1NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot1NameText" Text="Computer Normal" Foreground="#FFFFFFFF" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot1RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot1RaceText" Text="Orc" Foreground="#FFCAB77A" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot1TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot1TeamText" Text="Team 2" Foreground="#FFCAB77A" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot1ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot1ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor01Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot2" Height="20" Margin="0,0,0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot2NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot2NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot2RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot2RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot2TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot2TeamText" Text="Team 3" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot2ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot2ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor02Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot3" Height="20" Margin="0,0,0,3" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot3NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot3NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot3RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot3RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot3TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot3TeamText" Text="Team 4" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot3ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot3ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor03Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot4" Height="20" Margin="0,0,0,3" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot4NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot4NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot4RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot4RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot4TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot4TeamText" Text="Team 5" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot4ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot4ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor04Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot5" Height="20" Margin="0,0,0,3" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot5NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot5NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot5RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot5RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot5TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot5TeamText" Text="Team 6" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot5ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot5ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor05Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot6" Height="20" Margin="0,0,0,3" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot6NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot6NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot6RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot6RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot6TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot6TeamText" Text="Team 7" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot6ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot6ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor06Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot7" Height="20" Margin="0,0,0,3" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot7NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot7NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot7RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot7RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot7TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot7TeamText" Text="Team 8" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot7ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot7ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor07Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot8" Height="20" Margin="0,0,0,3" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot8NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot8NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot8RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot8RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot8TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot8TeamText" Text="Team 9" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot8ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot8ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor08Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot9" Height="20" Margin="0,0,0,3" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot9NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot9NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot9RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot9RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot9TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot9TeamText" Text="Team 10" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot9ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot9ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor09Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot10" Height="20" Margin="0,0,0,3" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot10NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot10NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot10RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot10RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot10TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot10TeamText" Text="Team 11" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot10ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot10ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor10Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                  <Grid x:Name="PlayerSlot11" Height="20" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="78"/><ColumnDefinition Width="58"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                    <Border x:Name="PlayerSlot11NameMenu" Grid.Column="0" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot11NameText" Text="Open" Foreground="#FF777777" FontSize="17" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot11RaceMenu" Grid.Column="1" Style="{StaticResource GluePopupMenuDisabledCellStyle}">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot11RaceText" Text="Random" Foreground="#FF777777" FontSize="16" VerticalAlignment="Center" Margin="4,0,16,0"/>
+                        <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0" Background="{StaticResource GluePulldownArrowBrush}" Opacity="0.45"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot11TeamButton" Grid.Column="2" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <TextBlock x:Name="PlayerSlot11TeamText" Text="Team 12" Foreground="#FF777777" FontSize="15" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <Border x:Name="PlayerSlot11ColorButton" Grid.Column="3" Style="{StaticResource GluePopupMenuDisabledCellStyle}" Margin="3,0,0,0">
+                      <Grid>
+                        <Border x:Name="PlayerSlot11ColorButtonValue" Margin="4" Background="{StaticResource GlueTeamColor11Brush}"/>
+                      </Grid>
+                    </Border>
+                  </Grid>
+                </StackPanel>
+                </Grid>
+              </Grid>
+            </Border>
+            <Border x:Name="MapInfoPane" Height="292" Style="{StaticResource GlueCenterPanelBackdropStyle}" BorderThickness="0" Visibility="Collapsed">
+              <Grid>
+                <Border Background="#CC05070A" Margin="10"/>
+                <Border Background="{StaticResource GluePanelRailBrush}" HorizontalAlignment="Left" Width="10" Opacity="0.75"/>
+                <Border Background="{StaticResource GlueCenterPanel04ExpansionBrush}" HorizontalAlignment="Right" Width="18" Opacity="0.58"/>
+                <Grid Margin="18">
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="28"/>
+                    <RowDefinition Height="*"/>
+                  </Grid.RowDefinitions>
+                  <TextBlock Text="MAP INFO" Foreground="#FFE7D184" FontSize="20" FontWeight="Bold"/>
+                  <Grid Grid.Row="1" Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="128"/>
+                      <ColumnDefinition Width="14"/>
+                      <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Width="128" Height="128" VerticalAlignment="Top" Style="{StaticResource GlueInsetPanelStyle}">
+                      <Grid Margin="4">
+                        <Border Background="#FF000000"/>
+                        <Border x:Name="SelectedMapPreview0" Background="{StaticResource CustomGameMapPreview0Brush}"/>
+                        <Border x:Name="SelectedMapPreview1" Background="{StaticResource CustomGameMapPreview1Brush}" Visibility="Collapsed"/>
+                        <Border x:Name="SelectedMapPreview2" Background="{StaticResource CustomGameMapPreview2Brush}" Visibility="Collapsed"/>
+                        <Border x:Name="SelectedMapPreview3" Background="{StaticResource CustomGameMapPreview3Brush}" Visibility="Collapsed"/>
+                        <Border x:Name="SelectedMapPreview4" Background="{StaticResource CustomGameMapPreview4Brush}" Visibility="Collapsed"/>
+                        <Border x:Name="SelectedMapPreview5" Background="{StaticResource CustomGameMapPreview5Brush}" Visibility="Collapsed"/>
+                        <Border x:Name="SelectedMapPreview6" Background="{StaticResource CustomGameMapPreview6Brush}" Visibility="Collapsed"/>
+                        <Border x:Name="SelectedMapPreview7" Background="{StaticResource CustomGameMapPreview7Brush}" Visibility="Collapsed"/>
+                        <Border x:Name="SelectedMapPreview8" Background="{StaticResource CustomGameMapPreview8Brush}" Visibility="Collapsed"/>
+                        <Border x:Name="SelectedMapPreview9" Background="{StaticResource CustomGameMapPreview9Brush}" Visibility="Collapsed"/>
+                      </Grid>
+                    </Border>
+                    <StackPanel Grid.Column="2">
+                      <TextBlock x:Name="SelectedMapText" Text="Echo Isles" Foreground="#FFFFFFFF" FontSize="18"/>
+                      <TextBlock x:Name="SelectedMapPlayersText" Text="Suggested Players: 2" Foreground="#FFCAB77A" FontSize="16" Margin="0,8,0,0"/>
+                      <TextBlock x:Name="SelectedMapMaxPlayersText" Text="Max Players: 2" Foreground="#FFCAB77A" FontSize="16" Margin="0,4,0,0"/>
+                      <TextBlock x:Name="SelectedMapSizeText" Text="Map Size: Unknown" Foreground="#FFCAB77A" FontSize="16" Margin="0,4,0,0"/>
+                      <TextBlock x:Name="SelectedMapTilesetText" Text="Tileset: Unknown" Foreground="#FFCAB77A" FontSize="16" Margin="0,4,0,0"/>
+                      <TextBlock x:Name="SelectedMapAuthorText" Text="Author: Unknown" Foreground="#FFCAB77A" FontSize="16" Margin="0,4,0,0"/>
+                      <TextBlock x:Name="SelectedMapPageText" Text="Map 1 of 1" Foreground="#FFCAB77A" FontSize="16" Margin="0,4,0,0"/>
+                      <TextBlock x:Name="SelectedMapPathText" Text="Maps/FrozenThrone" Foreground="#FFCAB77A" FontSize="15" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                      <TextBlock x:Name="SelectedMapDescriptionText" Text="Small island duel map. Map preview and W3I details pending." Foreground="#FFCAB77A" FontSize="16" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                    </StackPanel>
+                  </Grid>
+                </Grid>
+              </Grid>
+            </Border>
+            <Border x:Name="AdvancedOptionsPane" Height="230" Style="{StaticResource GlueCenterPanelBackdropStyle}" BorderThickness="0" Visibility="Collapsed">
+              <Grid>
+                <Border Background="#CC05070A" Margin="10"/>
+                <Border Background="{StaticResource GluePanelRailBrush}" HorizontalAlignment="Left" Width="10" Opacity="0.75"/>
+                <Border Background="{StaticResource GlueCenterPanel04ExpansionBrush}" HorizontalAlignment="Right" Width="18" Opacity="0.58"/>
+                <StackPanel Margin="18">
+                <TextBlock Text="ADVANCED OPTIONS" Foreground="#FFE7D184" FontSize="20" FontWeight="Bold" Margin="0,0,0,12"/>
+                <Border x:Name="TeamsTogetherToggleButton" Height="42" Margin="0,0,0,8" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                  <Grid>
+                    <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border Margin="13,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border x:Name="GlueMenuButtonHoverTeamsTogetherToggleButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                    <Border x:Name="GlueMenuButtonPressedTeamsTogetherToggleButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                    <TextBlock Text="TEAMS TOGETHER" Foreground="#FFFFFFFF" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" Margin="24,0,70,0"/>
+                    <TextBlock x:Name="TeamsTogetherToggleText" Text="On" Foreground="#FFE7D184" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,24,0"/>
+                  </Grid>
+                </Border>
+                <Border x:Name="FixedTeamsToggleButton" Height="42" Margin="0,0,0,8" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                  <Grid>
+                    <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border Margin="13,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border x:Name="GlueMenuButtonHoverFixedTeamsToggleButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                    <Border x:Name="GlueMenuButtonPressedFixedTeamsToggleButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                    <TextBlock Text="FIXED TEAMS" Foreground="#FFFFFFFF" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" Margin="24,0,70,0"/>
+                    <TextBlock x:Name="FixedTeamsToggleText" Text="Off" Foreground="#FFE7D184" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,24,0"/>
+                  </Grid>
+                </Border>
+                <Border x:Name="FullSharedControlToggleButton" Height="42" Style="{StaticResource GlueButtonChromeStyle}" BorderThickness="0">
+                  <Grid>
+                    <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border Margin="13,6" Style="{StaticResource GlueButtonFillStyle}"/>
+                    <Border x:Name="GlueMenuButtonHoverFullSharedControlToggleButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+                    <Border x:Name="GlueMenuButtonPressedFullSharedControlToggleButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+                    <TextBlock Text="FULL SHARED CONTROL" Foreground="#FFFFFFFF" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" Margin="24,0,70,0"/>
+                    <TextBlock x:Name="FullSharedControlToggleText" Text="Off" Foreground="#FFE7D184" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,24,0"/>
+                  </Grid>
+                </Border>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </StackPanel>
+        </Grid>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+          <Grid x:Name="PlayGameButton" Width="220" Height="52" Margin="0,0,16,0">
+            <Grid>
+              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+              <Border Margin="20,10" Style="{StaticResource GlueButtonFillStyle}"/>
+              <Border Margin="15,8" Style="{StaticResource GlueButtonFillStyle}"/>
+              <Border x:Name="GlueMenuButtonHoverPlayGameButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+              <Border x:Name="GlueMenuButtonPressedPlayGameButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+              <TextBlock Text="PLAY GAME" Foreground="#FFFFFFFF" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+          </Grid>
+          <Grid x:Name="CustomGameCancelButton" Width="220" Height="52">
+            <Grid>
+              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+              <Border Margin="20,10" Style="{StaticResource GlueButtonFillStyle}"/>
+              <Border Margin="15,8" Style="{StaticResource GlueButtonFillStyle}"/>
+              <Border x:Name="GlueMenuButtonHoverCustomGameCancelButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+              <Border x:Name="GlueMenuButtonPressedCustomGameCancelButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+              <TextBlock Text="CANCEL" Foreground="#FFFFFFFF" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+          </Grid>
+        </StackPanel>
+      </Grid>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>
+

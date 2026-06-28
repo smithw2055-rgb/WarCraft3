@@ -1,0 +1,11 @@
+<Grid VerticalAlignment="Top" Height="61.44" Margin="0,0,0,0">
+  <Grid IsHitTestVisible="False">
+    <Image HorizontalAlignment="Left" Width="491.52" Height="61.44" Source="{StaticResource ConsoleTexture01TopCrop}" Stretch="Fill"/>
+    <Image HorizontalAlignment="Left" Margin="491.52,0,0,0" Width="167.04" Height="61.44" Source="{StaticResource ConsoleTexture02TopLeftCrop}" Stretch="Fill"/>
+    <Image HorizontalAlignment="Right" Margin="0,0,552.96,0" Width="101.76" Height="61.44" Source="{StaticResource ConsoleTexture02TopRightCrop}" Stretch="Fill"/>
+    <Image HorizontalAlignment="Right" Margin="0,0,61.44,0" Width="491.52" Height="61.44" Source="{StaticResource ConsoleTexture03TopCrop}" Stretch="Fill"/>
+    <Image HorizontalAlignment="Right" Width="61.44" Height="61.44" Source="{StaticResource ConsoleTexture04TopCrop}" Stretch="Fill"/>
+  </Grid>
+  <!-- @include ../widgets/topbar/UpperButtonBar.xaml -->
+  <!-- @include ../widgets/topbar/ResourceBar.xaml -->
+</Grid>

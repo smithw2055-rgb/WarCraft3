@@ -1,0 +1,18 @@
+<UserControl
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  x:Class="War3UI.MainMenuBackdropControl">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="../GlueMenuResources.xaml"/>
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid Background="#00000000">
+    <Viewbox Stretch="Uniform">
+      <Grid Width="1536" Height="1152"/>
+    </Viewbox>
+  </Grid>
+</UserControl>
