@@ -500,6 +500,7 @@ bool ParseDebugUiResources(const char* value, int& gold, int& lumber, int& foodU
 
 void AddJassErrorStats(const std::vector<std::string>& errors,
                        std::unordered_map<std::string, int>& unknownFunctions,
+                       std::unordered_map<std::string, int>& parserErrorCounts,
                        int& parserErrors,
                        int& lexerErrors,
                        int& otherErrors) {
@@ -510,6 +511,7 @@ void AddJassErrorStats(const std::vector<std::string>& errors,
             unknownFunctions[error.substr(unknownPos + unknownPrefix.size())]++;
         } else if (error.rfind("Parser:", 0) == 0) {
             parserErrors++;
+            parserErrorCounts[error.substr(8)]++;
         } else if (error.rfind("Lexer:", 0) == 0) {
             lexerErrors++;
         } else {
@@ -531,6 +533,22 @@ void PrintTopJassUnknowns(const std::unordered_map<std::string, int>& unknownFun
     }
     if (sorted.size() > limit) {
         std::cout << "  unknown_native_more=" << (sorted.size() - limit) << std::endl;
+    }
+}
+
+void PrintTopJassParserErrors(const std::unordered_map<std::string, int>& parserErrorCounts) {
+    std::vector<std::pair<std::string, int>> sorted(parserErrorCounts.begin(), parserErrorCounts.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+    const size_t limit = std::min<size_t>(sorted.size(), 20);
+    for (size_t i = 0; i < limit; ++i) {
+        std::cout << "  parser_error " << sorted[i].second
+                  << "x " << sorted[i].first << std::endl;
+    }
+    if (sorted.size() > limit) {
+        std::cout << "  parser_error_more=" << (sorted.size() - limit) << std::endl;
     }
 }
 
@@ -1110,7 +1128,7 @@ void GameController::InitLoading() {
         mpq_, simulation_, unitData_, destructableData_,
         itemData_, upgradeData_, scene_, texturedTerrain_, tileset_, map_, w3i_, wpm_);
     mapLoader_->SetConfigData(configEnv_ ? configEnv_->GetData() : nullptr);
-    mapLoader_->SetLoadRenderAssets(!debugHudGameMode_);
+    mapLoader_->SetLoadRenderAssets(!debugHudGameMode_ && !diagnoseMapOnly_);
     mapLoader_->CreateTasks(mapPath_, 0);
     loadingProgress_ = 0.0f;
     loadingInitialized_ = true;
@@ -1141,7 +1159,7 @@ void GameController::InitInGame() {
                   << loadingFailureReason_ << std::endl;
         return;
     }
-    if (!debugHudGameMode_ && !texturedTerrain_.IsValid()) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_ && !texturedTerrain_.IsValid()) {
         loadingFailed_ = true;
         loadingFailureReason_ = "Terrain was not built";
         std::cerr << "InitInGame: " << loadingFailureReason_ << std::endl;
@@ -1166,7 +1184,7 @@ void GameController::InitInGame() {
         simulation_.Update();
         simulationInitialized_ = true;
         ui_.SetSimulation(&simulation_);
-        if (!debugHudGameMode_) {
+        if (!debugHudGameMode_ && !diagnoseMapOnly_) {
             for (auto* unit : simulation_.GetUnits()) {
                 if (EnsureSimulationUnitVisual(unit))
                     visualUnitCreated++;
@@ -1188,7 +1206,7 @@ void GameController::InitInGame() {
 
     terrainLoaded_ = texturedTerrain_.IsValid();
 
-    if (!debugHudGameMode_) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_) {
         minimap_.Generate(texturedTerrain_, tileset_, map_, w3i_, &mpq_);
 
         Vec3 center = texturedTerrain_.GetCenter();
@@ -1274,15 +1292,16 @@ void GameController::DumpUnsupportedDiagnostics() {
               << " players=" << simulation_.GetPlayerCount() << std::endl;
 
     std::unordered_map<std::string, int> unknownFunctions;
+    std::unordered_map<std::string, int> parserErrorCounts;
     int parserErrors = 0;
     int lexerErrors = 0;
     int otherErrors = 0;
     if (configEnv_) {
-        AddJassErrorStats(configEnv_->GetVM().GetErrors(), unknownFunctions,
+        AddJassErrorStats(configEnv_->GetVM().GetErrors(), unknownFunctions, parserErrorCounts,
                           parserErrors, lexerErrors, otherErrors);
     }
     if (commonEnv_) {
-        AddJassErrorStats(commonEnv_->GetVM().GetErrors(), unknownFunctions,
+        AddJassErrorStats(commonEnv_->GetVM().GetErrors(), unknownFunctions, parserErrorCounts,
                           parserErrors, lexerErrors, otherErrors);
     }
 
@@ -1296,6 +1315,7 @@ void GameController::DumpUnsupportedDiagnostics() {
               << " lexer_errors=" << lexerErrors
               << " other_errors=" << otherErrors << std::endl;
     PrintTopJassUnknowns(unknownFunctions);
+    PrintTopJassParserErrors(parserErrorCounts);
     std::cout << "=== End Map Diagnostics ===" << std::endl;
 }
 
@@ -1340,7 +1360,7 @@ void GameController::RunSyncInit() {
         return;
     }
     terrainLoaded_ = texturedTerrain_.IsValid();
-    if (!debugHudGameMode_ && !terrainLoaded_) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_ && !terrainLoaded_) {
         loadingFailed_ = true;
         loadingFailureReason_ = "Terrain was not built";
         std::cerr << "RunSyncInit: " << loadingFailureReason_ << std::endl;
@@ -1348,7 +1368,7 @@ void GameController::RunSyncInit() {
         stateTransition_ = false;
         return;
     }
-    if (!debugHudGameMode_) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_) {
         scene_.PrintLoadStats();
     }
     InitInGame();
@@ -1530,13 +1550,13 @@ void GameController::UpdateLoading(float dt) {
             return;
         }
         terrainLoaded_ = texturedTerrain_.IsValid();
-        if (!debugHudGameMode_ && !terrainLoaded_) {
+        if (!debugHudGameMode_ && !diagnoseMapOnly_ && !terrainLoaded_) {
             loadingFailed_ = true;
             loadingFailureReason_ = "Terrain was not built";
             std::cerr << "UpdateLoading: " << loadingFailureReason_ << std::endl;
             return;
         }
-        if (!debugHudGameMode_) {
+        if (!debugHudGameMode_ && !diagnoseMapOnly_) {
             scene_.PrintLoadStats();
         }
         TransitionTo(GameState::IN_GAME);
@@ -1600,7 +1620,7 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
     StepSimulation(dt);
 
     // After sim step, sync visuals
-    if (!debugHudGameMode_) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_) {
         SyncAndReconcileVisuals();
         RefreshRuntimeUnitSplats();
     }
@@ -1624,7 +1644,7 @@ void GameController::StepSimulation(float dt) {
     }
 
     if (ranSimulationStep) {
-        if (!debugHudGameMode_) {
+        if (!debugHudGameMode_ && !diagnoseMapOnly_) {
             SyncAndReconcileVisuals();
         }
         RefreshSelectionUi(false);
@@ -2526,7 +2546,9 @@ void GameController::EnsureHumanMeleeStartsFromMapConfig() {
 
 void GameController::FlushStartupSimulationState() {
     if (!simulationInitialized_) return;
-    SyncAndReconcileVisuals();
+    if (!diagnoseMapOnly_) {
+        SyncAndReconcileVisuals();
+    }
     if (!jassNatives_) return;
     constexpr int maxWarmup = 4;
     for (int i = 0; i < maxWarmup; ++i) {
@@ -2534,7 +2556,9 @@ void GameController::FlushStartupSimulationState() {
         simulation_.Update();
         int timers = jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
         int pumped = jassNatives_->PumpQueuedThreads(1024);
-        SyncAndReconcileVisuals();
+        if (!diagnoseMapOnly_) {
+            SyncAndReconcileVisuals();
+        }
         if (timers == 0 && pumped == 0 && simulation_.GetUnits().size() == before) break;
     }
 }

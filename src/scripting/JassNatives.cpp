@@ -786,7 +786,12 @@ void JassNatives::RegisterConversionNatives() {
         "ConvertArmorType", "ConvertOriginFrameType", "ConvertFramePointType",
         "ConvertTextureTileFlag", "ConvertCamDistanceSetting", "ConvertItemType",
         "ConvertBuff", "ConvertEffectType", "ConvertUnitType", "ConvertHeroStat",
-        "ConvertPlayerColor", "ConvertPlayerSlotState"
+        "ConvertPlayerColor", "ConvertPlayerSlotState", "ConvertMapFlag",
+        "ConvertGameType", "ConvertPathingType", "ConvertVolumeGroup",
+        "ConvertBlendMode", "ConvertCameraField", "ConvertGameSpeed",
+        "ConvertGameDifficulty", "ConvertTexMapFlags", "ConvertAIDifficulty",
+        "ConvertFogState", "ConvertStartLocPrio", "ConvertDialogEvent",
+        "ConvertRarityControl", "ConvertVersion"
     };
     for (auto name : convertNames) vm_.RegisterNative(name, convertPassthrough);
 
@@ -3412,6 +3417,21 @@ void JassNatives::RegisterLightningNatives() {
 // 24. Camera natives
 // ============================================================
 void JassNatives::RegisterCameraNatives() {
+    vm_.RegisterNative("CreateCameraSetup", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::CAMERA_SETUP, data->nextHandleId++));
+    });
+    vm_.RegisterNative("CameraSetupSetField", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("CameraSetupGetField", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Real(0); });
+    vm_.RegisterNative("CameraSetupSetDestPosition", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("CameraSetupGetDestPositionLoc", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
+    vm_.RegisterNative("CameraSetupGetDestPositionX", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Real(0); });
+    vm_.RegisterNative("CameraSetupGetDestPositionY", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Real(0); });
+    vm_.RegisterNative("CameraSetupApply", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("CameraSetupApplyWithZ", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("CameraSetupApplyForceDuration", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("CameraSetupApplyForceDurationWithZ", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("CameraSetupApplyForPlayer", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("CameraSetupApplyForPlayerWithZ", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("SetCameraPosition", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() >= 3 && data->camSetPosition)
             data->camSetPosition(args[0].realVal, args[1].realVal, args[2].realVal);

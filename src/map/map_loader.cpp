@@ -38,9 +38,7 @@ void MapLoader::CreateTasks(const std::string& mapPath, int localPlayerIndex) {
     }
     tasks_.push_back([this]() { LoadObjectModifications(mapPath_); });
     tasks_.push_back([this, localPlayerIndex]() { CreateSimulation(localPlayerIndex); });
-    if (loadRenderAssets_) {
-        tasks_.push_back([this]() { LoadDoodadsAndDestructibles(mapPath_); });
-    }
+    tasks_.push_back([this]() { LoadDoodadsAndDestructibles(mapPath_); });
     tasks_.push_back([this]() { LoadUnits(mapPath_); });
     tasks_.push_back([this]() { LoadSounds(); });
 
@@ -217,7 +215,8 @@ void MapLoader::LoadDoodadsAndDestructibles(const std::string& mapPath) {
                         simDestructableCreated++;
                 }
             }
-            if (scene_.AddDoodad(d.id, d.pos, d.angle, d.scale, d.variation, d.flags, d.life, d.skinId))
+            if (loadRenderAssets_ &&
+                scene_.AddDoodad(d.id, d.pos, d.angle, d.scale, d.variation, d.flags, d.life, d.skinId))
                 doodAdded++;
         }
         if (doodAdded > 0) std::cout << "  Doodads: " << doodAdded << " rendered" << std::endl;

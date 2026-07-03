@@ -37,6 +37,7 @@ std::string JassParser::ParseType() {
         case JassTokenType::TYPE_STRING: Advance(); return "string";
         case JassTokenType::TYPE_HANDLE: Advance(); return "handle";
         case JassTokenType::TYPE_CODE: Advance(); return "code";
+        case JassTokenType::KW_NOTHING: Advance(); return "nothing";
         case JassTokenType::IDENTIFIER: Advance(); return tok.text; // handle subtype
         default: return "nothing";
     }
@@ -58,7 +59,7 @@ std::unique_ptr<AstNode> JassParser::ParseProgram() {
             decl->text = Expect(JassTokenType::IDENTIFIER).text;
             if (Peek().type == JassTokenType::KW_EXTENDS || Peek().text == "extends") {
                 Advance();
-                decl->extendsType = Expect(JassTokenType::IDENTIFIER).text;
+                decl->extendsType = ParseType();
             }
             program->children.push_back(std::move(decl));
             SkipNewlines();
@@ -67,7 +68,36 @@ std::unique_ptr<AstNode> JassParser::ParseProgram() {
             program->children.push_back(ParseGlobalBlock());
         } else if (Match(JassTokenType::KW_NATIVE)) {
             program->children.push_back(ParseNativeDecl());
-        } else if (Peek().type == JassTokenType::KW_FUNCTION || Peek().type == JassTokenType::KW_CONSTANT) {
+        } else if (Peek().type == JassTokenType::KW_CONSTANT) {
+            Advance();
+            if (Match(JassTokenType::KW_NATIVE)) {
+                program->children.push_back(ParseNativeDecl(true));
+            } else if (Peek().type == JassTokenType::KW_FUNCTION) {
+                program->children.push_back(ParseFunctionDecl(true));
+            } else {
+                auto decl = std::make_unique<AstNode>(AstNodeType::GLOBAL_DECL);
+                decl->isConstant = true;
+                decl->returnType = ParseType();
+                if (decl->returnType == "nothing") {
+                    Advance();
+                    SkipNewlines();
+                    continue;
+                }
+                if (Match(JassTokenType::KW_ARRAY)) {
+                    decl->isArray = true;
+                }
+                if (Peek().type == JassTokenType::IDENTIFIER) {
+                    decl->text = Advance().text;
+                    if (Match(JassTokenType::KW_ARRAY)) {
+                        decl->isArray = true;
+                    }
+                    if (Match(JassTokenType::OP_ASSIGN)) {
+                        decl->children.push_back(ParseExpression());
+                    }
+                }
+                program->children.push_back(std::move(decl));
+            }
+        } else if (Peek().type == JassTokenType::KW_FUNCTION) {
             program->children.push_back(ParseFunctionDecl());
         } else if (Peek().type == JassTokenType::KW_DEBUG) {
             Advance(); // skip debug
@@ -118,7 +148,7 @@ std::unique_ptr<AstNode> JassParser::ParseGlobalBlock() {
             decl->text = Expect(JassTokenType::IDENTIFIER).text;
             if (Peek().type == JassTokenType::KW_EXTENDS || Peek().text == "extends") {
                 Advance();
-                decl->extendsType = Expect(JassTokenType::IDENTIFIER).text;
+                decl->extendsType = ParseType();
             }
             block->children.push_back(std::move(decl));
             SkipNewlines();
@@ -154,8 +184,8 @@ std::unique_ptr<AstNode> JassParser::ParseGlobalBlock() {
     return block;
 }
 
-std::unique_ptr<AstNode> JassParser::ParseFunctionDecl() {
-    bool isConst = Match(JassTokenType::KW_CONSTANT);
+std::unique_ptr<AstNode> JassParser::ParseFunctionDecl(bool isConstant) {
+    bool isConst = isConstant || Match(JassTokenType::KW_CONSTANT);
     Expect(JassTokenType::KW_FUNCTION);
 
     auto func = std::make_unique<AstNode>(AstNodeType::FUNCTION_DECL);
@@ -201,12 +231,12 @@ std::unique_ptr<AstNode> JassParser::ParseFunctionDecl() {
     return func;
 }
 
-std::unique_ptr<AstNode> JassParser::ParseNativeDecl() {
+std::unique_ptr<AstNode> JassParser::ParseNativeDecl(bool isConstant) {
     auto native = std::make_unique<AstNode>(AstNodeType::NATIVE_DECL);
     // Check for constant native
-    if (Peek().type == JassTokenType::KW_CONSTANT) {
+    if (isConstant || Peek().type == JassTokenType::KW_CONSTANT) {
         native->isConstant = true;
-        Advance();
+        if (!isConstant) Advance();
     }
     native->text = Expect(JassTokenType::IDENTIFIER).text;
     native->line = Peek().line;

@@ -48,8 +48,8 @@ private:
 
     std::unique_ptr<AstNode> ParseProgram();
     std::unique_ptr<AstNode> ParseGlobalBlock();
-    std::unique_ptr<AstNode> ParseFunctionDecl();
-    std::unique_ptr<AstNode> ParseNativeDecl();
+    std::unique_ptr<AstNode> ParseFunctionDecl(bool isConstant = false);
+    std::unique_ptr<AstNode> ParseNativeDecl(bool isConstant = false);
     std::unique_ptr<AstNode> ParseBlock();
     std::unique_ptr<AstNode> ParseStatement();
     std::unique_ptr<AstNode> ParseExpression();
