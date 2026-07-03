@@ -1,4 +1,4 @@
-﻿#include "GlueMenuControl.h"
+#include "GlueMenuControl.h"
 
 #include <NsCore/DynamicCast.h>
 #include <NsCore/ReflectionImplement.h>
@@ -18,6 +18,10 @@
 #include <sstream>
 #include <vector>
 
+#ifdef FindResource
+#undef FindResource
+#endif
+
 #ifndef PROJECT_SOURCE_DIR
 #define PROJECT_SOURCE_DIR "."
 #endif
@@ -31,6 +35,8 @@ enum GlueMenuAction {
     kGlueMenuOptions,
     kGlueMenuCredits,
     kGlueMenuExit,
+    kGlueMenuQuitConfirmOK,
+    kGlueMenuQuitConfirmCancel,
     kGlueMenuProfile,
     kGlueMenuLoadSaved,
     kGlueMenuViewReplay,
@@ -100,13 +106,29 @@ enum GlueMenuAction {
     kGlueMenuPlayerSlot9Race,
     kGlueMenuPlayerSlot10Race,
     kGlueMenuPlayerSlot11Race,
+    kGlueMenuOptionsGameplay,
+    kGlueMenuOptionsVideo,
+    kGlueMenuOptionsSound,
+    kGlueMenuOptionsNetwork,
+    kGlueMenuOptionsBack,
+    kGlueMenuOptionsOK,
+    kGlueMenuOptionsCancel,
+    kGlueMenuBattleNetLogon,
+    kGlueMenuBattleNetCreateAccount,
+    kGlueMenuBattleNetRecoverPassword,
+    kGlueMenuQuitBattleNet,
+    kGlueMenuLanRefresh,
+    kGlueMenuLanCreateGame,
+    kGlueMenuLanJoinGame,
+    kGlueMenuQuitLocalAreaNetwork,
 };
 
-constexpr int kGlueMenuActionElementNameCount = 75;
+constexpr int kGlueMenuActionElementNameCount = 92;
 constexpr int kGlueMapSlotCount = 10;
 constexpr int kGluePlayerSlotCount = 12;
 constexpr int kGlueCampaignButtonCount = 5;
 constexpr int kGlueMissionButtonCount = 12;
+constexpr int kGlueOptionsTabCount = 4;
 
 const char* GlueMenuActionElementName(int action) {
     static constexpr const char* kNames[] = {
@@ -116,6 +138,8 @@ const char* GlueMenuActionElementName(int action) {
         "OptionsButton",
         "CreditsButton",
         "ExitButton",
+        "QuitConfirmOKButton",
+        "QuitConfirmCancelButton",
         "ProfileButton",
         "LoadSavedButton",
         "ViewReplayButton",
@@ -185,6 +209,21 @@ const char* GlueMenuActionElementName(int action) {
         "PlayerSlot9RaceMenu",
         "PlayerSlot10RaceMenu",
         "PlayerSlot11RaceMenu",
+        "OptionsGameplayButton",
+        "OptionsVideoButton",
+        "OptionsSoundButton",
+        "OptionsNetworkButton",
+        "OptionsBackButton",
+        "OptionsOKButton",
+        "OptionsCancelButton",
+        "BattleNetLogonButton",
+        "BattleNetCreateAccountButton",
+        "BattleNetRecoverPasswordButton",
+        "QuitBattleNetButton",
+        "LanRefreshButton",
+        "LanCreateGameButton",
+        "LanJoinGameButton",
+        "QuitLocalAreaNetworkButton",
     };
     if (action < 0 || action >= (int)(sizeof(kNames) / sizeof(kNames[0]))) return "";
     return kNames[action];
@@ -198,6 +237,8 @@ const char* GlueMenuActionPageName(int action) {
     case kGlueMenuOptions:
     case kGlueMenuCredits:
     case kGlueMenuExit:
+    case kGlueMenuQuitConfirmOK:
+    case kGlueMenuQuitConfirmCancel:
         return "MainMenuFrame";
     case kGlueMenuProfile:
     case kGlueMenuCampaign:
@@ -272,6 +313,24 @@ const char* GlueMenuActionPageName(int action) {
     case kGlueMenuPlayerSlot10Race:
     case kGlueMenuPlayerSlot11Race:
         return "CustomGameMenu";
+    case kGlueMenuOptionsGameplay:
+    case kGlueMenuOptionsVideo:
+    case kGlueMenuOptionsSound:
+    case kGlueMenuOptionsNetwork:
+    case kGlueMenuOptionsBack:
+    case kGlueMenuOptionsOK:
+    case kGlueMenuOptionsCancel:
+        return "OptionsMenu";
+    case kGlueMenuBattleNetLogon:
+    case kGlueMenuBattleNetCreateAccount:
+    case kGlueMenuBattleNetRecoverPassword:
+    case kGlueMenuQuitBattleNet:
+        return "BattleNetMenu";
+    case kGlueMenuLanRefresh:
+    case kGlueMenuLanCreateGame:
+    case kGlueMenuLanJoinGame:
+    case kGlueMenuQuitLocalAreaNetwork:
+        return "LocalAreaNetworkMenu";
     default:
         return "";
     }
@@ -295,10 +354,12 @@ int GlueMenuActionForDebugName(const std::string& name) {
         }
     }
     if (key == "singleplayer") return kGlueMenuSinglePlayer;
-    if (key == "battlenet" || key == "battle.net" || key == "battle") return kGlueMenuBattleNet;
+    if (key == "battlenet" || key == "battle.net" || key == "battle" || key == "bnet") return kGlueMenuBattleNet;
     if (key == "localareanetwork" || key == "lan" || key == "localnetwork") return kGlueMenuLocalAreaNetwork;
     if (key == "options") return kGlueMenuOptions;
     if (key == "credits") return kGlueMenuCredits;
+    if (key == "quitok" || key == "exitok" || key == "confirmquit" || key == "confirmexit") return kGlueMenuQuitConfirmOK;
+    if (key == "quitcancel" || key == "exitcancel" || key == "cancelquit" || key == "cancelexit") return kGlueMenuQuitConfirmCancel;
     if (key == "exit" || key == "quit") return kGlueMenuExit;
     if (key == "profile") return kGlueMenuProfile;
     if (key == "loadsaved" || key == "loadsavedgame" || key == "loadgame") return kGlueMenuLoadSaved;
@@ -369,6 +430,21 @@ int GlueMenuActionForDebugName(const std::string& name) {
     if (key == "slot9race") return kGlueMenuPlayerSlot9Race;
     if (key == "slot10race") return kGlueMenuPlayerSlot10Race;
     if (key == "slot11race") return kGlueMenuPlayerSlot11Race;
+    if (key == "optionsgameplay" || key == "gameplay") return kGlueMenuOptionsGameplay;
+    if (key == "optionsvideo" || key == "video") return kGlueMenuOptionsVideo;
+    if (key == "optionssound" || key == "sound" || key == "audio") return kGlueMenuOptionsSound;
+    if (key == "optionsnetwork" || key == "network") return kGlueMenuOptionsNetwork;
+    if (key == "optionsback" || key == "optionsprevious" || key == "previousmenu") return kGlueMenuOptionsBack;
+    if (key == "optionsok" || key == "ok") return kGlueMenuOptionsOK;
+    if (key == "optionscancel") return kGlueMenuOptionsCancel;
+    if (key == "battlenetlogon" || key == "logon" || key == "login") return kGlueMenuBattleNetLogon;
+    if (key == "battlenetcreateaccount" || key == "createaccount") return kGlueMenuBattleNetCreateAccount;
+    if (key == "battlenetrecoverpassword" || key == "recoverpassword") return kGlueMenuBattleNetRecoverPassword;
+    if (key == "quitbattlenet" || key == "battlenetcancel" || key == "bnetcancel") return kGlueMenuQuitBattleNet;
+    if (key == "lanrefresh" || key == "refreshlan") return kGlueMenuLanRefresh;
+    if (key == "lancreategame" || key == "createlangame" || key == "lancreate") return kGlueMenuLanCreateGame;
+    if (key == "lanjoingame" || key == "joinlangame" || key == "lanjoin") return kGlueMenuLanJoinGame;
+    if (key == "quitlocalareanetwork" || key == "lancancel" || key == "quitlan") return kGlueMenuQuitLocalAreaNetwork;
     if (key == "main" || key == "mainmenu" || key == "mainmenuframe") return -2;
     if (key == "back") return kGlueMenuBack;
     if (key == "cancel") return kGlueMenuCancel;
@@ -506,11 +582,11 @@ const char* OnOff(bool value) {
     return value ? "On" : "Off";
 }
 
-Noesis::Brush* FindGlueTeamColorBrush(Noesis::FrameworkElement* scope, int colorIndex) {
+Aero::Brush* FindGlueTeamColorBrush(Aero::FrameworkElement* scope, int colorIndex) {
     if (!scope) return nullptr;
     char key[32];
     std::snprintf(key, sizeof(key), "GlueTeamColor%02dBrush", std::clamp(colorIndex, 0, 11));
-    return scope->FindResource<Noesis::Brush>(key);
+    return Aero::DynamicCast<Aero::Brush*>(scope->FindResource(key));
 }
 
 int CampaignActionToIndex(int action) {
@@ -560,18 +636,18 @@ int PlayerSlotRaceActionToSlot(int action) {
 }
 
 template<class T>
-T* FindAs(Noesis::FrameworkElement* root, const char* name) {
-    return root ? Noesis::DynamicCast<T*>(root->FindName(name)) : nullptr;
+T* FindAs(Aero::FrameworkElement* root, const char* name) {
+    return root ? Aero::DynamicCast<T*>(root->FindName(name)) : nullptr;
 }
 
 template<class T>
-T* FindAsAny(Noesis::FrameworkElement* primary,
-             std::initializer_list<Noesis::FrameworkElement*> secondaryRoots,
+T* FindAsAny(Aero::FrameworkElement* primary,
+             std::initializer_list<Aero::FrameworkElement*> secondaryRoots,
              const char* name) {
     if (T* found = FindAs<T>(primary, name)) {
         return found;
     }
-    for (Noesis::FrameworkElement* secondary : secondaryRoots) {
+    for (Aero::FrameworkElement* secondary : secondaryRoots) {
         if (T* found = FindAs<T>(secondary, name)) {
             return found;
         }
@@ -589,7 +665,7 @@ void GlueDiagLog(const char* fmt, ...) {
     std::error_code ec;
     std::filesystem::path logDir = std::filesystem::path(PROJECT_SOURCE_DIR) / "Logs";
     std::filesystem::create_directories(logDir, ec);
-    std::ofstream out(logDir / "noesis-hud.log", std::ios::app);
+    std::ofstream out(logDir / "aero-hud.log", std::ios::app);
     if (out) {
         out << buffer << '\n';
     }
@@ -600,13 +676,19 @@ void GlueDiagLog(const char* fmt, ...) {
 namespace War3UI {
 
 void GlueMenuControl::CacheElements() {
-    nightElfBackdropLayer_ = FindAs<Noesis::FrameworkElement>(this, "GlueNightElfBackdropLayer");
-    mainMenuFrame_ = FindAs<Noesis::FrameworkElement>(this, "MainMenuFrame");
-    singlePlayerMenu_ = FindAs<Noesis::FrameworkElement>(this, "SinglePlayerMenu");
-    campaignMenu_ = FindAs<Noesis::FrameworkElement>(this, "CampaignMenu");
-    campaignSelectFrame_ = FindAs<Noesis::FrameworkElement>(campaignMenu_, "CampaignSelectFrame");
-    campaignRootMenuUI_ = FindAs<Noesis::FrameworkElement>(campaignMenu_, "CampaignRootMenuUI");
-    campaignMissionSelectUI_ = FindAs<Noesis::FrameworkElement>(campaignMenu_, "CampaignMissionSelectMenuUI");
+    nightElfBackdropLayer_ = FindAs<Aero::FrameworkElement>(this, "GlueNightElfBackdropLayer");
+    mainMenuBackdropFrame_ = FindAs<Aero::FrameworkElement>(this, "MainMenuBackdropFrame");
+    mainMenuFrame_ = FindAs<Aero::FrameworkElement>(this, "MainMenuFrame");
+    quitConfirmDialog_ = FindAs<Aero::FrameworkElement>(mainMenuFrame_, "QuitConfirmDialog");
+    battleNetMenu_ = FindAs<Aero::FrameworkElement>(this, "BattleNetMenu");
+    localAreaNetworkMenu_ = FindAs<Aero::FrameworkElement>(this, "LocalAreaNetworkMenu");
+    singlePlayerMenu_ = FindAs<Aero::FrameworkElement>(this, "SinglePlayerMenu");
+    singlePlayerMainPanel_ = FindAs<Aero::FrameworkElement>(singlePlayerMenu_, "SinglePlayerMainPanel");
+    profilePanel_ = FindAs<Aero::FrameworkElement>(singlePlayerMenu_, "ProfilePanel");
+    campaignMenu_ = FindAs<Aero::FrameworkElement>(this, "CampaignMenu");
+    campaignSelectFrame_ = FindAs<Aero::FrameworkElement>(campaignMenu_, "CampaignSelectFrame");
+    campaignRootMenuUI_ = FindAs<Aero::FrameworkElement>(campaignMenu_, "CampaignRootMenuUI");
+    campaignMissionSelectUI_ = FindAs<Aero::FrameworkElement>(campaignMenu_, "CampaignMissionSelectMenuUI");
     static constexpr const char* kCampaignBackdropLayerNames[] = {
         "CampaignBackdropNightElfLayer",
         "CampaignBackdropHumanLayer",
@@ -614,15 +696,15 @@ void GlueMenuControl::CacheElements() {
         "CampaignBackdropOrcLayer",
     };
     for (int i = 0; i < 4; ++i) {
-        campaignBackdropLayers_[i] = FindAs<Noesis::FrameworkElement>(campaignMenu_, kCampaignBackdropLayerNames[i]);
+        campaignBackdropLayers_[i] = FindAs<Aero::FrameworkElement>(campaignMenu_, kCampaignBackdropLayerNames[i]);
     }
-    campaignSummaryHeaderText_ = FindAs<Noesis::TextBlock>(campaignMenu_, "CampaignSummaryHeaderText");
-    campaignSummaryNameText_ = FindAs<Noesis::TextBlock>(campaignMenu_, "CampaignSummaryNameText");
-    campaignSummaryMissionCountText_ = FindAs<Noesis::TextBlock>(campaignMenu_, "CampaignSummaryMissionCountText");
-    campaignSummaryMapText_ = FindAs<Noesis::TextBlock>(campaignMenu_, "CampaignSummaryMapText");
-    campaignMissionHeaderText_ = FindAs<Noesis::TextBlock>(campaignMenu_, "CampaignMissionHeaderText");
-    campaignMissionNameText_ = FindAs<Noesis::TextBlock>(campaignMenu_, "CampaignMissionNameText");
-    campaignMissionMapText_ = FindAs<Noesis::TextBlock>(campaignMenu_, "CampaignMissionMapText");
+    campaignSummaryHeaderText_ = FindAs<Aero::TextBlock>(campaignMenu_, "CampaignSummaryHeaderText");
+    campaignSummaryNameText_ = FindAs<Aero::TextBlock>(campaignMenu_, "CampaignSummaryNameText");
+    campaignSummaryMissionCountText_ = FindAs<Aero::TextBlock>(campaignMenu_, "CampaignSummaryMissionCountText");
+    campaignSummaryMapText_ = FindAs<Aero::TextBlock>(campaignMenu_, "CampaignSummaryMapText");
+    campaignMissionHeaderText_ = FindAs<Aero::TextBlock>(campaignMenu_, "CampaignMissionHeaderText");
+    campaignMissionNameText_ = FindAs<Aero::TextBlock>(campaignMenu_, "CampaignMissionNameText");
+    campaignMissionMapText_ = FindAs<Aero::TextBlock>(campaignMenu_, "CampaignMissionMapText");
     static constexpr const char* kCampaignButtonTextNames[kGlueCampaignButtonCount] = {
         "CampaignPrologueButtonText",
         "CampaignHumanButtonText",
@@ -645,9 +727,9 @@ void GlueMenuControl::CacheElements() {
         "CampaignNightElfSelected",
     };
     for (int i = 0; i < kGlueCampaignButtonCount; ++i) {
-        campaignButtonTexts_[i] = FindAs<Noesis::TextBlock>(campaignMenu_, kCampaignButtonTextNames[i]);
-        campaignButtonNameTexts_[i] = FindAs<Noesis::TextBlock>(campaignMenu_, kCampaignButtonNameTextNames[i]);
-        campaignButtonSelected_[i] = FindAs<Noesis::FrameworkElement>(campaignMenu_, kCampaignButtonSelectedNames[i]);
+        campaignButtonTexts_[i] = FindAs<Aero::TextBlock>(campaignMenu_, kCampaignButtonTextNames[i]);
+        campaignButtonNameTexts_[i] = FindAs<Aero::TextBlock>(campaignMenu_, kCampaignButtonNameTextNames[i]);
+        campaignButtonSelected_[i] = FindAs<Aero::FrameworkElement>(campaignMenu_, kCampaignButtonSelectedNames[i]);
     }
     static constexpr const char* kMissionButtonTextNames[kGlueMissionButtonCount] = {
         "CampaignMissionOneButtonText",
@@ -678,63 +760,83 @@ void GlueMenuControl::CacheElements() {
         "CampaignMission12Selected",
     };
     for (int i = 0; i < kGlueMissionButtonCount; ++i) {
-        missionButtonTexts_[i] = FindAs<Noesis::TextBlock>(campaignMenu_, kMissionButtonTextNames[i]);
-        missionButtonSelected_[i] = FindAs<Noesis::FrameworkElement>(campaignMenu_, kMissionButtonSelectedNames[i]);
+        missionButtonTexts_[i] = FindAs<Aero::TextBlock>(campaignMenu_, kMissionButtonTextNames[i]);
+        missionButtonSelected_[i] = FindAs<Aero::FrameworkElement>(campaignMenu_, kMissionButtonSelectedNames[i]);
     }
-    customGameMenu_ = FindAs<Noesis::FrameworkElement>(this, "CustomGameMenu");
-    customGameTeamSetupPane_ = FindAs<Noesis::FrameworkElement>(customGameMenu_, "TeamSetupPane");
-    customGameMapInfoPane_ = FindAs<Noesis::FrameworkElement>(customGameMenu_, "MapInfoPane");
-    customGameAdvancedOptionsPane_ = FindAs<Noesis::FrameworkElement>(customGameMenu_, "AdvancedOptionsPane");
-    selectedMapText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "SelectedMapText");
-    selectedMapPlayersText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "SelectedMapPlayersText");
-    selectedMapMaxPlayersText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "SelectedMapMaxPlayersText");
-    selectedMapSizeText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "SelectedMapSizeText");
-    selectedMapTilesetText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "SelectedMapTilesetText");
-    selectedMapAuthorText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "SelectedMapAuthorText");
-    selectedMapPageText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "SelectedMapPageText");
-    selectedMapPathText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "SelectedMapPathText");
-    selectedMapDescriptionText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "SelectedMapDescriptionText");
+    customGameMenu_ = FindAs<Aero::FrameworkElement>(this, "CustomGameMenu");
+    optionsMenu_ = FindAs<Aero::FrameworkElement>(this, "OptionsMenu");
+    optionsListPanel_ = FindAs<Aero::FrameworkElement>(optionsMenu_, "GlueOptionsListPanel");
+    optionsListBottomPanel_ = FindAs<Aero::FrameworkElement>(optionsMenu_, "GlueOptionsListBottomPanel");
+    optionsDetailBottomPanel_ = FindAs<Aero::FrameworkElement>(optionsMenu_, "GlueOptionsDetailBottomPanel");
+    static constexpr const char* kOptionsPanelNames[kGlueOptionsTabCount] = {
+        "GlueOptionsGameplayPanel",
+        "GlueOptionsVideoPanel",
+        "GlueOptionsSoundPanel",
+        "GlueOptionsNetworkPanel",
+    };
+    static constexpr const char* kOptionsSelectedNames[kGlueOptionsTabCount] = {
+        "GlueOptionsGameplaySelected",
+        "GlueOptionsVideoSelected",
+        "GlueOptionsSoundSelected",
+        "GlueOptionsNetworkSelected",
+    };
+    for (int i = 0; i < kGlueOptionsTabCount; ++i) {
+        optionsPanels_[i] = FindAs<Aero::FrameworkElement>(optionsMenu_, kOptionsPanelNames[i]);
+        optionsSelected_[i] = FindAs<Aero::FrameworkElement>(optionsMenu_, kOptionsSelectedNames[i]);
+    }
+    customGameTeamSetupPane_ = FindAs<Aero::FrameworkElement>(customGameMenu_, "TeamSetupPane");
+    customGameMapInfoPane_ = FindAs<Aero::FrameworkElement>(customGameMenu_, "MapInfoPane");
+    customGameAdvancedOptionsPane_ = FindAs<Aero::FrameworkElement>(customGameMenu_, "AdvancedOptionsPane");
+    selectedMapText_ = FindAs<Aero::TextBlock>(customGameMenu_, "SelectedMapText");
+    selectedMapPlayersText_ = FindAs<Aero::TextBlock>(customGameMenu_, "SelectedMapPlayersText");
+    selectedMapMaxPlayersText_ = FindAs<Aero::TextBlock>(customGameMenu_, "SelectedMapMaxPlayersText");
+    selectedMapSizeText_ = FindAs<Aero::TextBlock>(customGameMenu_, "SelectedMapSizeText");
+    selectedMapTilesetText_ = FindAs<Aero::TextBlock>(customGameMenu_, "SelectedMapTilesetText");
+    selectedMapAuthorText_ = FindAs<Aero::TextBlock>(customGameMenu_, "SelectedMapAuthorText");
+    selectedMapPageText_ = FindAs<Aero::TextBlock>(customGameMenu_, "SelectedMapPageText");
+    selectedMapPathText_ = FindAs<Aero::TextBlock>(customGameMenu_, "SelectedMapPathText");
+    selectedMapDescriptionText_ = FindAs<Aero::TextBlock>(customGameMenu_, "SelectedMapDescriptionText");
     for (int i = 0; i < kGlueMapSlotCount; ++i) {
         char name[64];
         std::snprintf(name, sizeof(name), "SelectedMapPreview%d", i);
-        selectedMapPreviewImages_[i] = FindAs<Noesis::FrameworkElement>(customGameMenu_, name);
+        selectedMapPreviewImages_[i] = FindAs<Aero::FrameworkElement>(customGameMenu_, name);
     }
-    teamSetupSummaryText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "TeamSetupSummaryText");
-    teamsTogetherToggleText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "TeamsTogetherToggleText");
-    fixedTeamsToggleText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "FixedTeamsToggleText");
-    fullSharedControlToggleText_ = FindAs<Noesis::TextBlock>(customGameMenu_, "FullSharedControlToggleText");
+    teamSetupSummaryText_ = FindAs<Aero::TextBlock>(customGameMenu_, "TeamSetupSummaryText");
+    teamsTogetherToggleText_ = FindAs<Aero::TextBlock>(customGameMenu_, "TeamsTogetherToggleText");
+    fixedTeamsToggleText_ = FindAs<Aero::TextBlock>(customGameMenu_, "FixedTeamsToggleText");
+    fullSharedControlToggleText_ = FindAs<Aero::TextBlock>(customGameMenu_, "FullSharedControlToggleText");
     for (int i = 0; i < kGlueMapSlotCount; ++i) {
         char name[64];
         std::snprintf(name, sizeof(name), "MapItem%dText", i);
-        mapItemTexts_[i] = FindAs<Noesis::TextBlock>(customGameMenu_, name);
+        mapItemTexts_[i] = FindAs<Aero::TextBlock>(customGameMenu_, name);
         std::snprintf(name, sizeof(name), "MapItem%dSelected", i);
-        mapItemSelected_[i] = FindAs<Noesis::FrameworkElement>(customGameMenu_, name);
+        mapItemSelected_[i] = FindAs<Aero::FrameworkElement>(customGameMenu_, name);
     }
     for (int i = 0; i < kGluePlayerSlotCount; ++i) {
         char name[64];
         std::snprintf(name, sizeof(name), "PlayerSlot%d", i);
-        playerSlotRows_[i] = FindAs<Noesis::FrameworkElement>(customGameMenu_, name);
+        playerSlotRows_[i] = FindAs<Aero::FrameworkElement>(customGameMenu_, name);
         std::snprintf(name, sizeof(name), "PlayerSlot%dNameText", i);
-        playerSlotNameTexts_[i] = FindAs<Noesis::TextBlock>(customGameMenu_, name);
+        playerSlotNameTexts_[i] = FindAs<Aero::TextBlock>(customGameMenu_, name);
         std::snprintf(name, sizeof(name), "PlayerSlot%dRaceText", i);
-        playerSlotRaceTexts_[i] = FindAs<Noesis::TextBlock>(customGameMenu_, name);
+        playerSlotRaceTexts_[i] = FindAs<Aero::TextBlock>(customGameMenu_, name);
         std::snprintf(name, sizeof(name), "PlayerSlot%dTeamText", i);
-        playerSlotTeamTexts_[i] = FindAs<Noesis::TextBlock>(customGameMenu_, name);
+        playerSlotTeamTexts_[i] = FindAs<Aero::TextBlock>(customGameMenu_, name);
         std::snprintf(name, sizeof(name), "PlayerSlot%dColorButtonValue", i);
-        playerSlotColorButtonValues_[i] = FindAs<Noesis::Border>(customGameMenu_, name);
+        playerSlotColorButtonValues_[i] = FindAs<Aero::Border>(customGameMenu_, name);
     }
-    stateText_ = FindAs<Noesis::TextBlock>(this, "GlueMenuStateText");
+    stateText_ = FindAs<Aero::TextBlock>(this, "GlueMenuStateText");
     for (int i = 0; i < kActionCount; ++i) {
         const char* elementName = GlueMenuActionElementName(i);
-        buttons_[i] = FindAsAny<Noesis::FrameworkElement>(
-            this, {mainMenuFrame_, singlePlayerMenu_, campaignMenu_, customGameMenu_}, elementName);
+        buttons_[i] = FindAsAny<Aero::FrameworkElement>(
+            this, {mainMenuFrame_, battleNetMenu_, localAreaNetworkMenu_, singlePlayerMenu_, campaignMenu_, customGameMenu_, optionsMenu_}, elementName);
         char name[96];
         std::snprintf(name, sizeof(name), "GlueMenuButtonHover%s", elementName);
-        buttonHighlights_[i] = FindAsAny<Noesis::FrameworkElement>(
-            this, {mainMenuFrame_, singlePlayerMenu_, campaignMenu_, customGameMenu_}, name);
+        buttonHighlights_[i] = FindAsAny<Aero::FrameworkElement>(
+            this, {mainMenuFrame_, battleNetMenu_, localAreaNetworkMenu_, singlePlayerMenu_, campaignMenu_, customGameMenu_, optionsMenu_}, name);
         std::snprintf(name, sizeof(name), "GlueMenuButtonPressed%s", elementName);
-        buttonPressed_[i] = FindAsAny<Noesis::FrameworkElement>(
-            this, {mainMenuFrame_, singlePlayerMenu_, campaignMenu_, customGameMenu_}, name);
+        buttonPressed_[i] = FindAsAny<Aero::FrameworkElement>(
+            this, {mainMenuFrame_, battleNetMenu_, localAreaNetworkMenu_, singlePlayerMenu_, campaignMenu_, customGameMenu_, optionsMenu_}, name);
     }
 }
 
@@ -745,12 +847,22 @@ void GlueMenuControl::LogMissingElements() const {
     };
 
     check(mainMenuFrame_, "MainMenuFrame");
+    check(mainMenuBackdropFrame_, "MainMenuBackdropFrame");
+    check(quitConfirmDialog_, "QuitConfirmDialog");
+    check(battleNetMenu_, "BattleNetMenu");
+    check(localAreaNetworkMenu_, "LocalAreaNetworkMenu");
     check(nightElfBackdropLayer_, "GlueNightElfBackdropLayer");
     check(singlePlayerMenu_, "SinglePlayerMenu");
+    check(singlePlayerMainPanel_, "SinglePlayerMainPanel");
+    check(profilePanel_, "ProfilePanel");
     check(campaignMenu_, "CampaignMenu");
     check(campaignSelectFrame_, "CampaignSelectFrame");
     check(campaignRootMenuUI_, "CampaignRootMenuUI");
     check(campaignMissionSelectUI_, "CampaignMissionSelectMenuUI");
+    check(optionsMenu_, "OptionsMenu");
+    check(optionsListPanel_, "GlueOptionsListPanel");
+    check(optionsListBottomPanel_, "GlueOptionsListBottomPanel");
+    check(optionsDetailBottomPanel_, "GlueOptionsDetailBottomPanel");
     static constexpr const char* kCampaignBackdropLayerNames[] = {
         "CampaignBackdropNightElfLayer",
         "CampaignBackdropHumanLayer",
@@ -983,13 +1095,17 @@ bool GlueMenuControl::IsActionVisible(int action) const {
     case kGlueMenuOptions:
     case kGlueMenuCredits:
     case kGlueMenuExit:
-        return page_ == Page::MainMenu;
+        return page_ == Page::MainMenu && !quitConfirmOpen_;
+    case kGlueMenuQuitConfirmOK:
+    case kGlueMenuQuitConfirmCancel:
+        return page_ == Page::MainMenu && quitConfirmOpen_;
     case kGlueMenuProfile:
     case kGlueMenuCampaign:
     case kGlueMenuLoadSaved:
     case kGlueMenuViewReplay:
     case kGlueMenuCustomCampaign:
     case kGlueMenuCustomGame:
+        return page_ == Page::SinglePlayer && !singlePlayerProfileOpen_;
     case kGlueMenuCancel:
         return page_ == Page::SinglePlayer;
     case kGlueMenuBack:
@@ -1032,6 +1148,26 @@ bool GlueMenuControl::IsActionVisible(int action) const {
     case kGlueMenuMapInfo:
     case kGlueMenuAdvancedOptions:
         return page_ == Page::CustomGame;
+    case kGlueMenuOptionsGameplay:
+    case kGlueMenuOptionsVideo:
+    case kGlueMenuOptionsSound:
+    case kGlueMenuOptionsNetwork:
+        return page_ == Page::Options && selectedOptionsTab_ < 0;
+    case kGlueMenuOptionsBack:
+        return page_ == Page::Options && selectedOptionsTab_ < 0;
+    case kGlueMenuOptionsOK:
+    case kGlueMenuOptionsCancel:
+        return page_ == Page::Options && selectedOptionsTab_ >= 0;
+    case kGlueMenuBattleNetLogon:
+    case kGlueMenuBattleNetCreateAccount:
+    case kGlueMenuBattleNetRecoverPassword:
+    case kGlueMenuQuitBattleNet:
+        return page_ == Page::BattleNet;
+    case kGlueMenuLanRefresh:
+    case kGlueMenuLanCreateGame:
+    case kGlueMenuLanJoinGame:
+    case kGlueMenuQuitLocalAreaNetwork:
+        return page_ == Page::LocalAreaNetwork;
     case kGlueMenuTeamsTogetherToggle:
     case kGlueMenuFixedTeamsToggle:
     case kGlueMenuFullSharedControlToggle:
@@ -1116,19 +1252,32 @@ void GlueMenuControl::HandleAction(int action) {
 
     switch (action) {
     case kGlueMenuSinglePlayer:
+        quitConfirmOpen_ = false;
         page_ = Page::SinglePlayer;
+        singlePlayerProfileOpen_ = false;
         break;
     case kGlueMenuBattleNet:
-        GlueDiagLog("GlueMenuControl: Battle.net requested (UI page pending)");
+        quitConfirmOpen_ = false;
+        page_ = Page::BattleNet;
+        singlePlayerProfileOpen_ = false;
         break;
     case kGlueMenuLocalAreaNetwork:
-        GlueDiagLog("GlueMenuControl: Local Area Network requested (UI page pending)");
+        quitConfirmOpen_ = false;
+        page_ = Page::LocalAreaNetwork;
+        singlePlayerProfileOpen_ = false;
+        break;
+    case kGlueMenuOptions:
+        quitConfirmOpen_ = false;
+        page_ = Page::Options;
+        selectedOptionsTab_ = -1;
         break;
     case kGlueMenuProfile:
-        GlueDiagLog("GlueMenuControl: Profile requested (UI page pending)");
+        singlePlayerProfileOpen_ = true;
+        GlueDiagLog("GlueMenuControl: Profile panel opened");
         break;
     case kGlueMenuCampaign:
         page_ = Page::Campaign;
+        singlePlayerProfileOpen_ = false;
         break;
     case kGlueMenuLoadSaved:
         GlueDiagLog("GlueMenuControl: Load Saved Game requested (UI page pending)");
@@ -1141,14 +1290,22 @@ void GlueMenuControl::HandleAction(int action) {
         break;
     case kGlueMenuCustomGame:
         page_ = Page::CustomGame;
+        singlePlayerProfileOpen_ = false;
         customGameMapInfoOpen_ = false;
         customGameAdvancedOptionsOpen_ = false;
         break;
     case kGlueMenuCancel:
-        page_ = Page::MainMenu;
+        quitConfirmOpen_ = false;
+        if (singlePlayerProfileOpen_) {
+            singlePlayerProfileOpen_ = false;
+            GlueDiagLog("GlueMenuControl: Profile panel closed");
+        } else {
+            page_ = Page::MainMenu;
+        }
         break;
     case kGlueMenuBack:
         page_ = Page::SinglePlayer;
+        singlePlayerProfileOpen_ = false;
         break;
     case kGlueMenuMissionBack:
         page_ = Page::Campaign;
@@ -1198,15 +1355,22 @@ void GlueMenuControl::HandleAction(int action) {
     }
     case kGlueMenuCustomGameCancel:
         page_ = Page::SinglePlayer;
-        break;
-    case kGlueMenuOptions:
-        GlueDiagLog("GlueMenuControl: Options requested (UI page pending)");
+        singlePlayerProfileOpen_ = false;
         break;
     case kGlueMenuCredits:
         GlueDiagLog("GlueMenuControl: Credits requested (UI page pending)");
         break;
     case kGlueMenuExit:
-        GlueDiagLog("GlueMenuControl: Exit requested (application exit suppressed)");
+        quitConfirmOpen_ = true;
+        GlueDiagLog("GlueMenuControl: Quit confirmation opened");
+        break;
+    case kGlueMenuQuitConfirmOK:
+        quitConfirmOpen_ = false;
+        GlueDiagLog("GlueMenuControl: Exit confirmed (application exit suppressed)");
+        break;
+    case kGlueMenuQuitConfirmCancel:
+        quitConfirmOpen_ = false;
+        GlueDiagLog("GlueMenuControl: Quit confirmation canceled");
         break;
     case kGlueMenuPlayGame: {
         std::ostringstream slots;
@@ -1268,6 +1432,52 @@ void GlueMenuControl::HandleAction(int action) {
         advancedFullSharedControl_ = !advancedFullSharedControl_;
         GlueDiagLog("GlueMenuControl: Advanced option Full Shared Control %s",
                     advancedFullSharedControl_ ? "On" : "Off");
+        break;
+    case kGlueMenuOptionsGameplay:
+    case kGlueMenuOptionsVideo:
+    case kGlueMenuOptionsSound:
+    case kGlueMenuOptionsNetwork:
+        selectedOptionsTab_ = std::clamp(action - kGlueMenuOptionsGameplay, 0, kGlueOptionsTabCount - 1);
+        GlueDiagLog("GlueMenuControl: Options tab %d selected", selectedOptionsTab_);
+        break;
+    case kGlueMenuOptionsBack:
+        if (selectedOptionsTab_ >= 0) {
+            selectedOptionsTab_ = -1;
+        } else {
+            page_ = Page::MainMenu;
+        }
+        break;
+    case kGlueMenuOptionsOK:
+        GlueDiagLog("GlueMenuControl: Options tab %d accepted", selectedOptionsTab_);
+        selectedOptionsTab_ = -1;
+        break;
+    case kGlueMenuOptionsCancel:
+        GlueDiagLog("GlueMenuControl: Options tab %d canceled", selectedOptionsTab_);
+        selectedOptionsTab_ = -1;
+        break;
+    case kGlueMenuBattleNetLogon:
+        GlueDiagLog("GlueMenuControl: Battle.net logon requested (network pending)");
+        break;
+    case kGlueMenuBattleNetCreateAccount:
+        GlueDiagLog("GlueMenuControl: Battle.net create account requested (network pending)");
+        break;
+    case kGlueMenuBattleNetRecoverPassword:
+        GlueDiagLog("GlueMenuControl: Battle.net recover password requested (network pending)");
+        break;
+    case kGlueMenuQuitBattleNet:
+        page_ = Page::MainMenu;
+        break;
+    case kGlueMenuLanRefresh:
+        GlueDiagLog("GlueMenuControl: Local Area Network refresh requested (discovery pending)");
+        break;
+    case kGlueMenuLanCreateGame:
+        GlueDiagLog("GlueMenuControl: Local Area Network create game requested (host setup pending)");
+        break;
+    case kGlueMenuLanJoinGame:
+        GlueDiagLog("GlueMenuControl: Local Area Network join game requested (no selected game)");
+        break;
+    case kGlueMenuQuitLocalAreaNetwork:
+        page_ = Page::MainMenu;
         break;
     case kGlueMenuMapItem0:
     case kGlueMenuMapItem1:
@@ -1393,21 +1603,61 @@ void GlueMenuControl::HandleAction(int action) {
 
 void GlueMenuControl::OpenDebugPage(const std::string& pageName) {
     std::string key = NormalizeDebugKey(pageName);
+    quitConfirmOpen_ = false;
     if (key.empty() || key == "main" || key == "mainmenu" || key == "home" || key == "mainmenuframe") {
         page_ = Page::MainMenu;
+        singlePlayerProfileOpen_ = false;
+    } else if (key == "quitconfirm" || key == "exitconfirm" || key == "quitdialog" || key == "exitdialog") {
+        page_ = Page::MainMenu;
+        singlePlayerProfileOpen_ = false;
+        quitConfirmOpen_ = true;
+    } else if (key == "battlenet" || key == "battle.net" || key == "bnet" || key == "battlenetmenu") {
+        page_ = Page::BattleNet;
+        singlePlayerProfileOpen_ = false;
+    } else if (key == "localareanetwork" || key == "lan" || key == "localnetwork" || key == "localareanetworkmenu") {
+        page_ = Page::LocalAreaNetwork;
+        singlePlayerProfileOpen_ = false;
     } else if (key == "singleplayer" || key == "singleplayermenu") {
         page_ = Page::SinglePlayer;
+        singlePlayerProfileOpen_ = false;
+    } else if (key == "profile" || key == "profiles" || key == "singleplayerprofile") {
+        page_ = Page::SinglePlayer;
+        singlePlayerProfileOpen_ = true;
     } else if (key == "campaign" || key == "campaignmenu") {
         page_ = Page::Campaign;
+        singlePlayerProfileOpen_ = false;
     } else if (key == "missionselect" || key == "mission") {
         page_ = Page::MissionSelect;
+        singlePlayerProfileOpen_ = false;
     } else if (key == "customgame" || key == "customgames" || key == "skirmish" || key == "singleplayerskirmish") {
         page_ = Page::CustomGame;
+        singlePlayerProfileOpen_ = false;
         customGameMapInfoOpen_ = false;
         customGameAdvancedOptionsOpen_ = false;
+    } else if (key == "options" || key == "optionsmenu") {
+        page_ = Page::Options;
+        singlePlayerProfileOpen_ = false;
+        selectedOptionsTab_ = -1;
+    } else if (key == "gameplay" || key == "optionsgameplay") {
+        page_ = Page::Options;
+        singlePlayerProfileOpen_ = false;
+        selectedOptionsTab_ = 0;
+    } else if (key == "video" || key == "optionsvideo") {
+        page_ = Page::Options;
+        singlePlayerProfileOpen_ = false;
+        selectedOptionsTab_ = 1;
+    } else if (key == "sound" || key == "audio" || key == "optionssound") {
+        page_ = Page::Options;
+        singlePlayerProfileOpen_ = false;
+        selectedOptionsTab_ = 2;
+    } else if (key == "network" || key == "optionsnetwork") {
+        page_ = Page::Options;
+        singlePlayerProfileOpen_ = false;
+        selectedOptionsTab_ = 3;
     } else {
         GlueDiagLog("GlueMenuControl: debug page '%s' not found, using MainMenuFrame", pageName.c_str());
         page_ = Page::MainMenu;
+        singlePlayerProfileOpen_ = false;
     }
     ApplyState();
     GlueDiagLog("GlueMenuControl: debug showing %s", PageLabel());
@@ -1417,6 +1667,8 @@ bool GlueMenuControl::InvokeActionForDebug(const std::string& actionName) {
     const int action = GlueMenuActionForDebugName(actionName);
     if (action == -2) {
         page_ = Page::MainMenu;
+        quitConfirmOpen_ = false;
+        singlePlayerProfileOpen_ = false;
         ApplyState();
         GlueDiagLog("GlueMenuControl: debug action '%s' selected MainMenuFrame", actionName.c_str());
         return true;
@@ -1451,13 +1703,13 @@ void GlueMenuControl::ApplyCampaignData() {
         const bool hasCampaign = campaigns_.empty() ? i < 2 : i < (int)campaigns_.size();
         if (buttons_[kGlueMenuCampaignPrologue + i]) {
             buttons_[kGlueMenuCampaignPrologue + i]->SetVisibility(hasCampaign
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (campaignButtonSelected_[i]) {
             campaignButtonSelected_[i]->SetVisibility(hasCampaign && i == selectedCampaignIndex_
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (!campaigns_.empty() && i < (int)campaigns_.size()) {
             if (campaignButtonTexts_[i]) {
@@ -1500,8 +1752,8 @@ void GlueMenuControl::ApplyCampaignData() {
     for (int i = 0; i < (int)campaignBackdropLayers_.size(); ++i) {
         if (campaignBackdropLayers_[i]) {
             campaignBackdropLayers_[i]->SetVisibility(i == campaignBackdropIndex
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
     }
     const int missionCount = campaign ? (int)campaign->missions.size() : 2;
@@ -1561,13 +1813,13 @@ void GlueMenuControl::ApplyCampaignData() {
         const bool hasMission = campaign ? i < (int)campaign->missions.size() : i < 2;
         if (buttons_[kGlueMenuCampaignMissionOne + i]) {
             buttons_[kGlueMenuCampaignMissionOne + i]->SetVisibility(hasMission
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (missionButtonSelected_[i]) {
             missionButtonSelected_[i]->SetVisibility(hasMission && i == selectedCampaignMissionIndex_
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (!missionButtonTexts_[i]) continue;
         if (campaign && i < (int)campaign->missions.size()) {
@@ -1580,47 +1832,116 @@ void GlueMenuControl::ApplyCampaignData() {
 }
 
 void GlueMenuControl::ApplyState() {
-    SetVisibility(Noesis::Visibility_Visible);
+    SetVisibility(Aero::Visibility_Visible);
 
     const bool mainVisible = page_ == Page::MainMenu;
+    const bool battleNetVisible = page_ == Page::BattleNet;
+    const bool localAreaNetworkVisible = page_ == Page::LocalAreaNetwork;
     const bool singlePlayerVisible = page_ == Page::SinglePlayer;
     const bool campaignVisible = page_ == Page::Campaign;
     const bool missionSelectVisible = page_ == Page::MissionSelect;
     const bool customGameVisible = page_ == Page::CustomGame;
-    if (nightElfBackdropLayer_) {
-        const bool nightElfBackdropVisible = singlePlayerVisible || campaignVisible || missionSelectVisible || customGameVisible;
-        nightElfBackdropLayer_->SetVisibility(nightElfBackdropVisible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+    const bool optionsVisible = page_ == Page::Options;
+    if (!mainVisible) {
+        quitConfirmOpen_ = false;
     }
-    if (mainMenuFrame_) mainMenuFrame_->SetVisibility(mainVisible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
-    if (singlePlayerMenu_) singlePlayerMenu_->SetVisibility(singlePlayerVisible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+    if (!singlePlayerVisible) {
+        singlePlayerProfileOpen_ = false;
+    }
+    if (nightElfBackdropLayer_) {
+        const bool nightElfBackdropVisible = singlePlayerVisible || customGameVisible || optionsVisible;
+        nightElfBackdropLayer_->SetVisibility(nightElfBackdropVisible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
+    }
+    if (mainMenuBackdropFrame_) {
+        const bool mainMenuBackdropVisible = mainVisible || singlePlayerVisible;
+        mainMenuBackdropFrame_->SetVisibility(mainMenuBackdropVisible
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
+    }
+    if (mainMenuFrame_) mainMenuFrame_->SetVisibility(mainVisible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
+    if (quitConfirmDialog_) {
+        quitConfirmDialog_->SetVisibility(mainVisible && quitConfirmOpen_
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
+    }
+    if (battleNetMenu_) battleNetMenu_->SetVisibility(battleNetVisible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
+    if (localAreaNetworkMenu_) {
+        localAreaNetworkMenu_->SetVisibility(localAreaNetworkVisible
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
+    }
+    if (singlePlayerMenu_) singlePlayerMenu_->SetVisibility(singlePlayerVisible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
+    if (singlePlayerMainPanel_) {
+        singlePlayerMainPanel_->SetVisibility(singlePlayerVisible && !singlePlayerProfileOpen_
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
+    }
+    if (profilePanel_) {
+        profilePanel_->SetVisibility(singlePlayerVisible && singlePlayerProfileOpen_
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
+    }
     if (campaignMenu_) {
-        campaignMenu_->SetVisibility((campaignVisible || missionSelectVisible) ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        campaignMenu_->SetVisibility((campaignVisible || missionSelectVisible) ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (campaignSelectFrame_) {
-        campaignSelectFrame_->SetVisibility((campaignVisible || missionSelectVisible) ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        campaignSelectFrame_->SetVisibility((campaignVisible || missionSelectVisible) ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (campaignRootMenuUI_) {
         campaignRootMenuUI_->SetVisibility(campaignVisible
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
-    if (campaignMissionSelectUI_) campaignMissionSelectUI_->SetVisibility(missionSelectVisible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
-    if (customGameMenu_) customGameMenu_->SetVisibility(customGameVisible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+    if (campaignMissionSelectUI_) campaignMissionSelectUI_->SetVisibility(missionSelectVisible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
+    if (customGameMenu_) customGameMenu_->SetVisibility(customGameVisible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
+    if (optionsMenu_) optionsMenu_->SetVisibility(optionsVisible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
+    if (optionsVisible) {
+        selectedOptionsTab_ = std::clamp(selectedOptionsTab_, -1, kGlueOptionsTabCount - 1);
+    } else {
+        selectedOptionsTab_ = -1;
+    }
+    if (optionsListPanel_) {
+        optionsListPanel_->SetVisibility(optionsVisible && selectedOptionsTab_ < 0
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
+    }
+    if (optionsListBottomPanel_) {
+        optionsListBottomPanel_->SetVisibility(optionsVisible && selectedOptionsTab_ < 0
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
+    }
+    if (optionsDetailBottomPanel_) {
+        optionsDetailBottomPanel_->SetVisibility(optionsVisible && selectedOptionsTab_ >= 0
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
+    }
+    for (int i = 0; i < kGlueOptionsTabCount; ++i) {
+        if (optionsPanels_[i]) {
+            optionsPanels_[i]->SetVisibility(optionsVisible && i == selectedOptionsTab_
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
+        }
+        if (optionsSelected_[i]) {
+            optionsSelected_[i]->SetVisibility(optionsVisible && i == selectedOptionsTab_
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
+        }
+    }
     ApplyCampaignData();
     if (customGameTeamSetupPane_) {
         customGameTeamSetupPane_->SetVisibility(customGameVisible && !customGameMapInfoOpen_ && !customGameAdvancedOptionsOpen_
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (customGameMapInfoPane_) {
         customGameMapInfoPane_->SetVisibility(customGameVisible && customGameMapInfoOpen_
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (customGameAdvancedOptionsPane_) {
         customGameAdvancedOptionsPane_->SetVisibility(customGameVisible && customGameAdvancedOptionsOpen_
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
 
     const bool hasFullMaps = !allMapNames_.empty();
@@ -1643,12 +1964,12 @@ void GlueMenuControl::ApplyState() {
             ? i < visibleMapCount_ && mapIndex < (int)allMapNames_.size()
             : i < visibleMapCount_ && !mapNames_[i].empty();
         if (buttons_[kGlueMenuMapItem0 + i]) {
-            buttons_[kGlueMenuMapItem0 + i]->SetVisibility(hasMap ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            buttons_[kGlueMenuMapItem0 + i]->SetVisibility(hasMap ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (mapItemSelected_[i]) {
             mapItemSelected_[i]->SetVisibility(hasMap && mapIndex == selectedMapIndex_
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (mapItemTexts_[i]) {
             std::string text = (mapIndex == selectedMapIndex_) ? "> " : "  ";
@@ -1664,7 +1985,7 @@ void GlueMenuControl::ApplyState() {
     for (int i = 0; i < kGlueMapSlotCount; ++i) {
         if (!selectedMapPreviewImages_[i]) continue;
         selectedMapPreviewImages_[i]->SetVisibility(
-            selectedMapDataIndex == i ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            selectedMapDataIndex == i ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (selectedMapText_) {
         selectedMapText_->SetText(hasFullMaps ? allMapLabels_[selectedMapDataIndex].c_str() : mapLabels_[selectedMapDataIndex].c_str());
@@ -1717,7 +2038,7 @@ void GlueMenuControl::ApplyState() {
     for (int i = 0; i < kGluePlayerSlotCount; ++i) {
         const bool showSlot = i < visiblePlayerSlots;
         if (playerSlotRows_[i]) {
-            playerSlotRows_[i]->SetVisibility(showSlot ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            playerSlotRows_[i]->SetVisibility(showSlot ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         playerSlotTypeIndices_[i] = std::clamp(playerSlotTypeIndices_[i], 0, 4);
         playerSlotRaceIndices_[i] = std::clamp(playerSlotRaceIndices_[i], 0, 4);
@@ -1735,7 +2056,7 @@ void GlueMenuControl::ApplyState() {
         }
         playerSlotColorIndices_[i] = std::clamp(playerSlotColorIndices_[i], 0, 11);
         if (playerSlotColorButtonValues_[i]) {
-            if (Noesis::Brush* brush = FindGlueTeamColorBrush(customGameMenu_, playerSlotColorIndices_[i])) {
+            if (Aero::Brush* brush = FindGlueTeamColorBrush(customGameMenu_, playerSlotColorIndices_[i])) {
                 playerSlotColorButtonValues_[i]->SetBackground(brush);
             }
         }
@@ -1757,29 +2078,37 @@ void GlueMenuControl::ApplyState() {
 
     for (int i = 0; i < kActionCount; ++i) {
         const bool visible = IsActionVisible(i);
+        const bool mainButtonVisibleBehindDialog = quitConfirmOpen_
+            && page_ == Page::MainMenu
+            && i >= kGlueMenuSinglePlayer
+            && i <= kGlueMenuExit;
+        const bool visualVisible = visible || mainButtonVisibleBehindDialog;
         const bool pressed = visible && pressedAction_ == i;
         const bool hovered = visible && hoveredAction_ == i;
         if (buttons_[i]) {
-            buttons_[i]->SetVisibility(visible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            buttons_[i]->SetVisibility(visualVisible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (buttonHighlights_[i]) {
-            buttonHighlights_[i]->SetVisibility(hovered && !pressed ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            buttonHighlights_[i]->SetVisibility(hovered && !pressed ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (buttonPressed_[i]) {
-            buttonPressed_[i]->SetVisibility(pressed ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            buttonPressed_[i]->SetVisibility(pressed ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
     }
 }
 
 const char* GlueMenuControl::PageLabel() const {
     switch (page_) {
-    case Page::SinglePlayer: return "SinglePlayerMenu";
+    case Page::BattleNet: return "BattleNetMenu";
+    case Page::LocalAreaNetwork: return "LocalAreaNetworkMenu";
+    case Page::SinglePlayer: return singlePlayerProfileOpen_ ? "ProfilePanel" : "SinglePlayerMenu";
     case Page::Campaign: return "CampaignMenu";
     case Page::MissionSelect: return "MissionSelect";
     case Page::CustomGame: return "CustomGameMenu";
+    case Page::Options: return "OptionsMenu";
     case Page::MainMenu:
     default:
-        return "MainMenuFrame";
+        return quitConfirmOpen_ ? "QuitConfirmDialog" : "MainMenuFrame";
     }
 }
 

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 
 TextRenderer::TextRenderer() {}
@@ -51,7 +52,27 @@ bool TextRenderer::LoadFromMpq(MpqManager* mpq, const char* fontPath, float font
             }
         }
     }
-    std::cerr << "TextRenderer: no font found in MPQ" << std::endl;
+
+    const char* fallbackPaths[] = {
+        "C:/Windows/Fonts/framd.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+    };
+    for (auto p : fallbackPaths) {
+        std::ifstream in(p, std::ios::binary | std::ios::ate);
+        if (!in) continue;
+        const std::streamsize size = in.tellg();
+        if (size <= 0) continue;
+        std::vector<uint8_t> buf((size_t)size);
+        in.seekg(0, std::ios::beg);
+        if (!in.read(reinterpret_cast<char*>(buf.data()), size)) continue;
+        if (LoadFromMemory(buf.data(), (int)buf.size(), fontSize)) {
+            std::cout << "TextRenderer: loaded fallback font '" << p << "' at size " << fontSize << std::endl;
+            return true;
+        }
+    }
+
+    std::cerr << "TextRenderer: no font found in MPQ or Windows fallback fonts" << std::endl;
     return false;
 }
 

@@ -2,7 +2,7 @@
 
 #include "MdxUiSceneRenderer.h"
 
-#include <NsCore/Noesis.h>
+#include <NsCore/Aero.h>
 #include <NsCore/Ptr.h>
 #include <NsGui/DynamicTextureSource.h>
 #include <NsGui/FrameworkElement.h>
@@ -14,7 +14,7 @@ class MpqManager;
 
 namespace War3UI {
 
-class MdxSceneControl final : public Noesis::FrameworkElement {
+class MdxSceneControl final : public Aero::FrameworkElement {
 public:
     MdxSceneControl();
     ~MdxSceneControl();
@@ -37,39 +37,39 @@ public:
     bool GetUseModelCamera() const;
     void SetUseModelCamera(bool value);
 
-    Noesis::Stretch GetStretch() const;
-    void SetStretch(Noesis::Stretch value);
+    Aero::Stretch GetStretch() const;
+    void SetStretch(Aero::Stretch value);
 
     bool GetIsActive() const;
     void SetIsActive(bool value);
 
     void RenderFrame(float dt);
 
-    static const Noesis::DependencyProperty* SceneKeyProperty;
-    static const Noesis::DependencyProperty* ModelPathProperty;
-    static const Noesis::DependencyProperty* SequenceProperty;
-    static const Noesis::DependencyProperty* AutoPlayProperty;
-    static const Noesis::DependencyProperty* UseModelCameraProperty;
-    static const Noesis::DependencyProperty* StretchProperty;
-    static const Noesis::DependencyProperty* IsActiveProperty;
+    static const Aero::DependencyProperty* SceneKeyProperty;
+    static const Aero::DependencyProperty* ModelPathProperty;
+    static const Aero::DependencyProperty* SequenceProperty;
+    static const Aero::DependencyProperty* AutoPlayProperty;
+    static const Aero::DependencyProperty* UseModelCameraProperty;
+    static const Aero::DependencyProperty* StretchProperty;
+    static const Aero::DependencyProperty* IsActiveProperty;
 
 protected:
-    void OnRender(Noesis::DrawingContext* context) override;
-    Noesis::Size MeasureOverride(const Noesis::Size& availableSize) override;
-    Noesis::Size ArrangeOverride(const Noesis::Size& finalSize) override;
+    void OnRender(Aero::DrawingContext* context) override;
+    Aero::Size MeasureOverride(const Aero::Size& availableSize) override;
+    Aero::Size ArrangeOverride(const Aero::Size& finalSize) override;
 
 private:
     void MarkRendererDirty();
     void EnsureRendererConfigured();
     void EnsureTextureSource(int width, int height);
-    Noesis::Rect ComputeImageRect(const Noesis::Size& arrangeSize) const;
+    Aero::Rect ComputeImageRect(const Aero::Size& arrangeSize) const;
 
-    static Noesis::Texture* TextureRenderCallback(Noesis::RenderDevice* device, void* user);
-    static void OnScenePropertyChanged(Noesis::DependencyObject* d,
-        const Noesis::DependencyPropertyChangedEventArgs& e);
+    static Aero::Texture* TextureRenderCallback(Aero::RenderDevice* device, void* user);
+    static void OnScenePropertyChanged(Aero::DependencyObject* d,
+        const Aero::DependencyPropertyChangedEventArgs& e);
 
     MdxUiSceneRenderer renderer_;
-    Noesis::Ptr<Noesis::DynamicTextureSource> textureSource_;
+    Aero::Ptr<Aero::DynamicTextureSource> textureSource_;
     std::string appliedSceneKey_;
     std::string appliedModelPath_;
     std::string appliedSequence_;

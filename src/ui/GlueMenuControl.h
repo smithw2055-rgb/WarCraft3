@@ -1,9 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include "MainUI.h"
 #include "GlueMenuTypes.h"
 
-#include <NsCore/Noesis.h>
+#include <NsCore/Aero.h>
 #include <NsGui/UserControl.h>
 #include <array>
 #include <cstdint>
@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace Noesis {
+namespace Aero {
 class Border;
 class Brush;
 class FrameworkElement;
@@ -20,11 +20,11 @@ class TextBlock;
 
 namespace War3UI {
 
-class GlueMenuControl final : public Noesis::UserControl {
+class GlueMenuControl final : public Aero::UserControl {
 public:
-    static constexpr int kActionCount = 75;
+    static constexpr int kActionCount = 92;
 
-    using RectResolver = std::function<ScreenRect(Noesis::FrameworkElement*)>;
+    using RectResolver = std::function<ScreenRect(Aero::FrameworkElement*)>;
 
     void CacheElements();
     void LogMissingElements() const;
@@ -44,66 +44,81 @@ public:
 private:
     enum class Page : uint8_t {
         MainMenu,
+        BattleNet,
+        LocalAreaNetwork,
         SinglePlayer,
         Campaign,
         MissionSelect,
         CustomGame,
+        Options,
     };
 
     const char* PageLabel() const;
     void SelectCampaign(int index);
     void ApplyCampaignData();
 
-    Noesis::FrameworkElement* nightElfBackdropLayer_ = nullptr;
-    Noesis::FrameworkElement* mainMenuFrame_ = nullptr;
-    Noesis::FrameworkElement* singlePlayerMenu_ = nullptr;
-    Noesis::FrameworkElement* campaignMenu_ = nullptr;
-    Noesis::FrameworkElement* campaignSelectFrame_ = nullptr;
-    Noesis::FrameworkElement* campaignRootMenuUI_ = nullptr;
-    Noesis::FrameworkElement* campaignMissionSelectUI_ = nullptr;
-    std::array<Noesis::FrameworkElement*, 4> campaignBackdropLayers_{};
-    Noesis::TextBlock* campaignSummaryHeaderText_ = nullptr;
-    Noesis::TextBlock* campaignSummaryNameText_ = nullptr;
-    Noesis::TextBlock* campaignSummaryMissionCountText_ = nullptr;
-    Noesis::TextBlock* campaignSummaryMapText_ = nullptr;
-    Noesis::TextBlock* campaignMissionHeaderText_ = nullptr;
-    Noesis::TextBlock* campaignMissionNameText_ = nullptr;
-    Noesis::TextBlock* campaignMissionMapText_ = nullptr;
-    std::array<Noesis::TextBlock*, 5> campaignButtonTexts_{};
-    std::array<Noesis::TextBlock*, 5> campaignButtonNameTexts_{};
-    std::array<Noesis::FrameworkElement*, 5> campaignButtonSelected_{};
-    std::array<Noesis::TextBlock*, 12> missionButtonTexts_{};
-    std::array<Noesis::FrameworkElement*, 12> missionButtonSelected_{};
-    Noesis::FrameworkElement* customGameMenu_ = nullptr;
-    Noesis::FrameworkElement* customGameTeamSetupPane_ = nullptr;
-    Noesis::FrameworkElement* customGameMapInfoPane_ = nullptr;
-    Noesis::FrameworkElement* customGameAdvancedOptionsPane_ = nullptr;
-    Noesis::TextBlock* selectedMapText_ = nullptr;
-    Noesis::TextBlock* selectedMapPlayersText_ = nullptr;
-    Noesis::TextBlock* selectedMapMaxPlayersText_ = nullptr;
-    Noesis::TextBlock* selectedMapSizeText_ = nullptr;
-    Noesis::TextBlock* selectedMapTilesetText_ = nullptr;
-    Noesis::TextBlock* selectedMapAuthorText_ = nullptr;
-    Noesis::TextBlock* selectedMapPageText_ = nullptr;
-    Noesis::TextBlock* selectedMapPathText_ = nullptr;
-    Noesis::TextBlock* selectedMapDescriptionText_ = nullptr;
-    std::array<Noesis::FrameworkElement*, 10> selectedMapPreviewImages_{};
-    Noesis::TextBlock* teamSetupSummaryText_ = nullptr;
-    Noesis::TextBlock* teamsTogetherToggleText_ = nullptr;
-    Noesis::TextBlock* fixedTeamsToggleText_ = nullptr;
-    Noesis::TextBlock* fullSharedControlToggleText_ = nullptr;
+    Aero::FrameworkElement* nightElfBackdropLayer_ = nullptr;
+    Aero::FrameworkElement* mainMenuBackdropFrame_ = nullptr;
+    Aero::FrameworkElement* mainMenuFrame_ = nullptr;
+    Aero::FrameworkElement* quitConfirmDialog_ = nullptr;
+    Aero::FrameworkElement* battleNetMenu_ = nullptr;
+    Aero::FrameworkElement* localAreaNetworkMenu_ = nullptr;
+    Aero::FrameworkElement* singlePlayerMenu_ = nullptr;
+    Aero::FrameworkElement* singlePlayerMainPanel_ = nullptr;
+    Aero::FrameworkElement* profilePanel_ = nullptr;
+    Aero::FrameworkElement* campaignMenu_ = nullptr;
+    Aero::FrameworkElement* campaignSelectFrame_ = nullptr;
+    Aero::FrameworkElement* campaignRootMenuUI_ = nullptr;
+    Aero::FrameworkElement* campaignMissionSelectUI_ = nullptr;
+    std::array<Aero::FrameworkElement*, 4> campaignBackdropLayers_{};
+    Aero::TextBlock* campaignSummaryHeaderText_ = nullptr;
+    Aero::TextBlock* campaignSummaryNameText_ = nullptr;
+    Aero::TextBlock* campaignSummaryMissionCountText_ = nullptr;
+    Aero::TextBlock* campaignSummaryMapText_ = nullptr;
+    Aero::TextBlock* campaignMissionHeaderText_ = nullptr;
+    Aero::TextBlock* campaignMissionNameText_ = nullptr;
+    Aero::TextBlock* campaignMissionMapText_ = nullptr;
+    std::array<Aero::TextBlock*, 5> campaignButtonTexts_{};
+    std::array<Aero::TextBlock*, 5> campaignButtonNameTexts_{};
+    std::array<Aero::FrameworkElement*, 5> campaignButtonSelected_{};
+    std::array<Aero::TextBlock*, 12> missionButtonTexts_{};
+    std::array<Aero::FrameworkElement*, 12> missionButtonSelected_{};
+    Aero::FrameworkElement* customGameMenu_ = nullptr;
+    Aero::FrameworkElement* optionsMenu_ = nullptr;
+    Aero::FrameworkElement* optionsListPanel_ = nullptr;
+    Aero::FrameworkElement* optionsListBottomPanel_ = nullptr;
+    Aero::FrameworkElement* optionsDetailBottomPanel_ = nullptr;
+    std::array<Aero::FrameworkElement*, 4> optionsPanels_{};
+    std::array<Aero::FrameworkElement*, 4> optionsSelected_{};
+    Aero::FrameworkElement* customGameTeamSetupPane_ = nullptr;
+    Aero::FrameworkElement* customGameMapInfoPane_ = nullptr;
+    Aero::FrameworkElement* customGameAdvancedOptionsPane_ = nullptr;
+    Aero::TextBlock* selectedMapText_ = nullptr;
+    Aero::TextBlock* selectedMapPlayersText_ = nullptr;
+    Aero::TextBlock* selectedMapMaxPlayersText_ = nullptr;
+    Aero::TextBlock* selectedMapSizeText_ = nullptr;
+    Aero::TextBlock* selectedMapTilesetText_ = nullptr;
+    Aero::TextBlock* selectedMapAuthorText_ = nullptr;
+    Aero::TextBlock* selectedMapPageText_ = nullptr;
+    Aero::TextBlock* selectedMapPathText_ = nullptr;
+    Aero::TextBlock* selectedMapDescriptionText_ = nullptr;
+    std::array<Aero::FrameworkElement*, 10> selectedMapPreviewImages_{};
+    Aero::TextBlock* teamSetupSummaryText_ = nullptr;
+    Aero::TextBlock* teamsTogetherToggleText_ = nullptr;
+    Aero::TextBlock* fixedTeamsToggleText_ = nullptr;
+    Aero::TextBlock* fullSharedControlToggleText_ = nullptr;
     static constexpr int kPlayerSlotCount = 12;
-    std::array<Noesis::TextBlock*, 10> mapItemTexts_{};
-    std::array<Noesis::FrameworkElement*, 10> mapItemSelected_{};
-    std::array<Noesis::FrameworkElement*, kPlayerSlotCount> playerSlotRows_{};
-    std::array<Noesis::TextBlock*, kPlayerSlotCount> playerSlotNameTexts_{};
-    std::array<Noesis::TextBlock*, kPlayerSlotCount> playerSlotRaceTexts_{};
-    std::array<Noesis::TextBlock*, kPlayerSlotCount> playerSlotTeamTexts_{};
-    std::array<Noesis::Border*, kPlayerSlotCount> playerSlotColorButtonValues_{};
-    Noesis::TextBlock* stateText_ = nullptr;
-    std::array<Noesis::FrameworkElement*, kActionCount> buttons_{};
-    std::array<Noesis::FrameworkElement*, kActionCount> buttonHighlights_{};
-    std::array<Noesis::FrameworkElement*, kActionCount> buttonPressed_{};
+    std::array<Aero::TextBlock*, 10> mapItemTexts_{};
+    std::array<Aero::FrameworkElement*, 10> mapItemSelected_{};
+    std::array<Aero::FrameworkElement*, kPlayerSlotCount> playerSlotRows_{};
+    std::array<Aero::TextBlock*, kPlayerSlotCount> playerSlotNameTexts_{};
+    std::array<Aero::TextBlock*, kPlayerSlotCount> playerSlotRaceTexts_{};
+    std::array<Aero::TextBlock*, kPlayerSlotCount> playerSlotTeamTexts_{};
+    std::array<Aero::Border*, kPlayerSlotCount> playerSlotColorButtonValues_{};
+    Aero::TextBlock* stateText_ = nullptr;
+    std::array<Aero::FrameworkElement*, kActionCount> buttons_{};
+    std::array<Aero::FrameworkElement*, kActionCount> buttonHighlights_{};
+    std::array<Aero::FrameworkElement*, kActionCount> buttonPressed_{};
     std::array<ScreenRect, kActionCount> buttonRects_{};
     std::array<std::string, 10> mapNames_{{
         "(2)EchoIsles.w3x", "(4)LostTemple.w3m", "(6)GnollWood.w3x",
@@ -134,9 +149,9 @@ private:
         "", "", "", "", "", "", "",
     }};
     std::array<std::string, 10> mapDescriptions_{{
-        "Small island duel map. Map preview and W3I details pending.",
-        "Classic four-player melee layout. Map preview and slots pending.",
-        "Large forest melee layout. Map preview and slots pending.",
+        "Small island duel map with map preview, player slots, and tileset details.",
+        "Classic four-player melee layout with map preview and player slots.",
+        "Large forest melee layout with map preview and player slots.",
         "", "", "", "", "", "", "",
     }};
     std::array<int, 10> mapPlayerSlotCounts_{2, 4, 6, 0, 0, 0, 0, 0, 0, 0};
@@ -153,6 +168,8 @@ private:
     std::vector<GlueCampaignListItem> campaigns_;
 
     Page page_ = Page::MainMenu;
+    bool quitConfirmOpen_ = false;
+    bool singlePlayerProfileOpen_ = false;
     bool customGameMapInfoOpen_ = false;
     bool customGameAdvancedOptionsOpen_ = false;
     bool advancedTeamsTogether_ = true;
@@ -162,6 +179,7 @@ private:
     int mapListOffset_ = 0;
     int selectedCampaignIndex_ = 0;
     int selectedCampaignMissionIndex_ = 0;
+    int selectedOptionsTab_ = -1;
     int loggedCampaignBackdropIndex_ = -1;
     std::string loggedCampaignBackdropId_;
     std::array<int, kPlayerSlotCount> playerSlotTypeIndices_{0, 3, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0};

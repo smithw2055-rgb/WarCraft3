@@ -305,7 +305,7 @@ bool MainUI::Init(MpqManager* mpq, int screenW, int screenH,
 
     hudHost_ = std::make_unique<NoesisHudHost>();
     if (!hudHost_->Initialize(PROJECT_SOURCE_DIR, screenW, screenH, hudXamlPath, mpq_, gameVersion)) {
-        std::fprintf(stderr, "MainUI: Noesis HUD host init failed\n");
+        std::fprintf(stderr, "MainUI: Aero HUD host init failed\n");
         return false;
     }
 
@@ -1640,7 +1640,7 @@ std::string MainUI::ExportNoesisTexture(const std::string& normalizedPath, const
     std::error_code ec;
     std::filesystem::create_directories(absolutePath.parent_path(), ec);
     if (ec) {
-        std::cerr << "MainUI: failed to create Noesis icon cache directory: " << ec.message() << std::endl;
+        std::cerr << "MainUI: failed to create Aero icon cache directory: " << ec.message() << std::endl;
         return {};
     }
 
@@ -1674,7 +1674,7 @@ std::string MainUI::ExportNoesisTexture(const std::string& normalizedPath, const
     if (width <= 0 || height <= 0 || rgba.empty()) return {};
 
     if (!stbi_write_png(absolutePath.string().c_str(), width, height, 4, rgba.data(), width * 4)) {
-        std::cerr << "MainUI: failed to write Noesis icon cache: " << absolutePath.string() << std::endl;
+        std::cerr << "MainUI: failed to write Aero icon cache: " << absolutePath.string() << std::endl;
         return {};
     }
 

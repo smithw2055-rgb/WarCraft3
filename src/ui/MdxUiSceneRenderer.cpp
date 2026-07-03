@@ -389,7 +389,7 @@ void MdxUiSceneRenderer::Resize(int width, int height) {
     ReleaseTarget();
 }
 
-Noesis::Texture* MdxUiSceneRenderer::GetTexture() const {
+Aero::Texture* MdxUiSceneRenderer::GetTexture() const {
     return noesisTexture_.GetPtr();
 }
 
@@ -580,7 +580,7 @@ bool MdxUiSceneRenderer::EnsureTarget() {
         return false;
     }
 
-    noesisTexture_ = NoesisApp::GLFactory::WrapTexture(colorTexture_, (uint32_t)width_, (uint32_t)height_,
+    noesisTexture_ = AeroApp::GLFactory::WrapTexture(colorTexture_, (uint32_t)width_, (uint32_t)height_,
         1, true, true);
     return noesisTexture_ != nullptr;
 }

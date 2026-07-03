@@ -270,18 +270,23 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
     }
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton parent links ready\n");
 
-    int denseBoneIndex = 0;
-    for (int idx : builtNodeOrder) {
-        auto& n = builtNodes[idx];
-        n.boneIndex = denseBoneIndex++;
+    int maxObjectId = -1;
+    for (const auto& n : builtNodes) {
+        if (n.objectId > maxObjectId) {
+            maxObjectId = n.objectId;
+        }
+    }
+
+    for (auto& n : builtNodes) {
+        n.boneIndex = n.objectId;
         builtObjectIdToBoneIndex.push_back({n.objectId, n.boneIndex});
     }
-    MdxAnimatorLog( "MdxAnimator::BuildSkeleton bone indices ready count=%d\n", denseBoneIndex);
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton bone indices ready count=%d\n", maxObjectId + 1);
     nodes_.swap(builtNodes);
     nodeOrder_.swap(builtNodeOrder);
     objectIdToBoneIndex_.swap(builtObjectIdToBoneIndex);
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton member swaps complete\n");
-    boneCount_ = denseBoneIndex;
+    boneCount_ = maxObjectId + 1;
     std::vector<Mat4> builtBoneMatrices(boneCount_, Mat4::Identity());
     boneMatrices_.swap(builtBoneMatrices);
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton bone matrices ready count=%zu\n", boneMatrices_.size());

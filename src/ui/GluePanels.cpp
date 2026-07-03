@@ -11,7 +11,7 @@ MainMenuBackdropControl::MainMenuBackdropControl() {
 }
 
 void MainMenuBackdropControl::InitializeComponent() {
-    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/MainMenuBackdrop.xaml"));
+    Aero::GUI::LoadComponent(this, Aero::Uri("assets/ui/glue/MainMenuBackdrop.xaml"));
 }
 
 MainMenuPanelControl::MainMenuPanelControl() {
@@ -19,7 +19,7 @@ MainMenuPanelControl::MainMenuPanelControl() {
 }
 
 void MainMenuPanelControl::InitializeComponent() {
-    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/MainMenuPanel.xaml"));
+    Aero::GUI::LoadComponent(this, Aero::Uri("assets/ui/glue/MainMenuPanel.xaml"));
 }
 
 SinglePlayerPanelControl::SinglePlayerPanelControl() {
@@ -27,7 +27,7 @@ SinglePlayerPanelControl::SinglePlayerPanelControl() {
 }
 
 void SinglePlayerPanelControl::InitializeComponent() {
-    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/SinglePlayerPanel.xaml"));
+    Aero::GUI::LoadComponent(this, Aero::Uri("assets/ui/glue/SinglePlayerPanel.xaml"));
 }
 
 CampaignPanelControl::CampaignPanelControl() {
@@ -35,7 +35,7 @@ CampaignPanelControl::CampaignPanelControl() {
 }
 
 void CampaignPanelControl::InitializeComponent() {
-    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/CampaignPanel.xaml"));
+    Aero::GUI::LoadComponent(this, Aero::Uri("assets/ui/glue/CampaignPanel.xaml"));
 }
 
 CustomGamePanelControl::CustomGamePanelControl() {
@@ -43,7 +43,31 @@ CustomGamePanelControl::CustomGamePanelControl() {
 }
 
 void CustomGamePanelControl::InitializeComponent() {
-    Noesis::GUI::LoadComponent(this, Noesis::Uri("assets/ui/glue/CustomGamePanel.xaml"));
+    Aero::GUI::LoadComponent(this, Aero::Uri("assets/ui/glue/CustomGamePanel.xaml"));
+}
+
+GlueOptionsPanelControl::GlueOptionsPanelControl() {
+    InitializeComponent();
+}
+
+void GlueOptionsPanelControl::InitializeComponent() {
+    Aero::GUI::LoadComponent(this, Aero::Uri("assets/ui/glue/OptionsPanel.xaml"));
+}
+
+GlueBattleNetPanelControl::GlueBattleNetPanelControl() {
+    InitializeComponent();
+}
+
+void GlueBattleNetPanelControl::InitializeComponent() {
+    Aero::GUI::LoadComponent(this, Aero::Uri("assets/ui/glue/BattleNetPanel.xaml"));
+}
+
+GlueLocalAreaNetworkPanelControl::GlueLocalAreaNetworkPanelControl() {
+    InitializeComponent();
+}
+
+void GlueLocalAreaNetworkPanelControl::InitializeComponent() {
+    Aero::GUI::LoadComponent(this, Aero::Uri("assets/ui/glue/LocalAreaNetworkPanel.xaml"));
 }
 
 NS_BEGIN_COLD_REGION
@@ -65,6 +89,18 @@ NS_IMPLEMENT_REFLECTION(CampaignPanelControl, "War3UI.CampaignPanelControl")
 }
 
 NS_IMPLEMENT_REFLECTION(CustomGamePanelControl, "War3UI.CustomGamePanelControl")
+{
+}
+
+NS_IMPLEMENT_REFLECTION(GlueOptionsPanelControl, "War3UI.GlueOptionsPanelControl")
+{
+}
+
+NS_IMPLEMENT_REFLECTION(GlueBattleNetPanelControl, "War3UI.GlueBattleNetPanelControl")
+{
+}
+
+NS_IMPLEMENT_REFLECTION(GlueLocalAreaNetworkPanelControl, "War3UI.GlueLocalAreaNetworkPanelControl")
 {
 }
 

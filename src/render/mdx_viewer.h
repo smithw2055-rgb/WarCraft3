@@ -94,8 +94,8 @@ private:
         float px, py, pz;
         float nx, ny, nz;
         float tu, tv;
-        uint8_t boneIndices[4];
-        float boneWeights[4];
+        uint8_t boneIndices[8];
+        float boneWeights[8];
         float boneCount;
     };
 

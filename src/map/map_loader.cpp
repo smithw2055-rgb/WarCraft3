@@ -33,10 +33,14 @@ void MapLoader::CreateTasks(const std::string& mapPath, int localPlayerIndex) {
     tasks_.push_back([this]() { LoadUnitDataTables(); });
     tasks_.push_back([this]() { LoadTerrainData(mapPath_); });
     tasks_.push_back([this]() { LoadPathingData(mapPath_); });
-    tasks_.push_back([this]() { BuildTerrain(); });
+    if (loadRenderAssets_) {
+        tasks_.push_back([this]() { BuildTerrain(); });
+    }
     tasks_.push_back([this]() { LoadObjectModifications(mapPath_); });
     tasks_.push_back([this, localPlayerIndex]() { CreateSimulation(localPlayerIndex); });
-    tasks_.push_back([this]() { LoadDoodadsAndDestructibles(mapPath_); });
+    if (loadRenderAssets_) {
+        tasks_.push_back([this]() { LoadDoodadsAndDestructibles(mapPath_); });
+    }
     tasks_.push_back([this]() { LoadUnits(mapPath_); });
     tasks_.push_back([this]() { LoadSounds(); });
 
@@ -157,7 +161,9 @@ void MapLoader::LoadObjectModifications(const std::string& mapPath) {
         sim_.SetDestructableData(&destructableData_);
         sim_.SetItemData(&itemData_);
         sim_.SetUpgradeData(&upgradeData_);
-        scene_.ApplyMapObjectModifications(mapPath);
+        if (loadRenderAssets_) {
+            scene_.ApplyMapObjectModifications(mapPath);
+        }
     }
     std::cout << "  Object modifications applied" << std::endl;
 }
@@ -246,6 +252,9 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
             }
         }
         if (!simUnit) {
+            if (!loadRenderAssets_) {
+                continue;
+            }
             if (scene_.HasItemPath(u.id, u.skinId)) {
                 int itemHandleId = -1;
                 if (configData_ && itemData_.HasItem(id)) {

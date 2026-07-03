@@ -59,6 +59,7 @@ public:
 
     void CreateTasks(const std::string& mapPath, int localPlayerIndex);
     void SetConfigData(std::shared_ptr<JassNativesData> configData) { configData_ = std::move(configData); }
+    void SetLoadRenderAssets(bool enabled) { loadRenderAssets_ = enabled; }
 
     bool Process();
     float GetCompletionRatio() const;
@@ -108,4 +109,5 @@ private:
     UnitLoadResult unitLoadResult_;
     bool fatalError_ = false;
     std::string fatalErrorMessage_;
+    bool loadRenderAssets_ = true;
 };

@@ -17,6 +17,9 @@ struct PlacedModel {
     float turnRate = 0.0f;
     int player = 0;
     int variation = 0;
+    uint32_t debugWar3ID = 0;
+    uint32_t debugSkinID = 0;
+    std::string debugKind;
     bool visible = true;
     bool smoothMotion = false;
     std::unique_ptr<MdxViewer> ownedViewer;
@@ -46,6 +49,8 @@ public:
 
     // Render all placed models
     void RenderAll(const Mat4& view, const Mat4& proj, float dt);
+    void SetDebugRenderRange(int start, int count);
+    void SetDebugRenderKind(const std::string& kind);
 
     // Update position of a placed instance
     bool UpdateInstancePosition(int index, const float pos[3], float angle,
@@ -96,4 +101,7 @@ private:
     std::unordered_map<uint32_t, std::string> doodadDirs_;
     std::unordered_map<uint32_t, std::string> doodadFiles_;
     LoadStats loadStats_;
+    int debugRenderStart_ = 0;
+    int debugRenderCount_ = -1;
+    std::string debugRenderKind_;
 };

@@ -22,6 +22,7 @@ static bool IsPortraitOnlyNodeName(const std::string& name) {
 }
 
 static bool ShouldLogModelDebug(const std::string& name) {
+    (void)name;
     return false;
 }
 
@@ -880,9 +881,11 @@ void MdxViewer::InitSharedShader() {
             layout(location = 0) in vec3 aPos;
             layout(location = 1) in vec3 aNorm;
             layout(location = 2) in vec2 aUV;
-            layout(location = 3) in uvec4 aBoneIndices;
-            layout(location = 4) in vec4 aBoneWeights;
-            layout(location = 5) in float aBoneCount;
+            layout(location = 3) in vec4 aBoneIndices0;
+            layout(location = 4) in vec4 aBoneIndices1;
+            layout(location = 5) in vec4 aBoneWeights0;
+            layout(location = 6) in vec4 aBoneWeights1;
+            layout(location = 7) in float aBoneCount;
 
             out vec2 vUV;
             out vec3 vNorm;
@@ -905,9 +908,9 @@ void MdxViewer::InitSharedShader() {
                 vec3 pos = vec3(0);
                 vec3 norm = vec3(0);
                 int numBones = int(aBoneCount);
-                for (int i = 0; i < 4 && i < numBones; i++) {
-                    int bi = int(aBoneIndices[i]);
-                    float w = aBoneWeights[i];
+                for (int i = 0; i < 8 && i < numBones; i++) {
+                    int bi = i < 4 ? int(aBoneIndices0[i]) : int(aBoneIndices1[i - 4]);
+                    float w = i < 4 ? aBoneWeights0[i] : aBoneWeights1[i - 4];
                     if (bi >= 0 && bi < uBoneCount) {
                         mat4 m = getBoneMatrix(bi);
                         pos += (m * vec4(aPos, 1.0)).xyz * w;
@@ -1079,15 +1082,17 @@ void MdxViewer::InitSharedShader() {
         pd.depth.write_enabled = true;
         pd.cull_mode = SG_CULLMODE_NONE;
         pd.colors[0].blend.enabled = false;
-        // Vertex: pos(3f) + norm(3f) + uv(2f) + boneIdx(4ub) + boneWt(4f) + boneCount(1f)
-        // Stride = 12 + 12 + 8 + 4 + 16 + 4 = 56 bytes
-        pd.layout.buffers[0].stride = 56;
+        // Vertex: pos(3f) + norm(3f) + uv(2f) + boneIdx(8ub) + boneWt(8f) + boneCount(1f)
+        // Stride = 12 + 12 + 8 + 8 + 32 + 4 = 76 bytes
+        pd.layout.buffers[0].stride = sizeof(VertexSkinned);
         pd.layout.attrs[0] = {0, 0, SG_VERTEXFORMAT_FLOAT3};          // aPos
         pd.layout.attrs[1] = {0, 12, SG_VERTEXFORMAT_FLOAT3};         // aNorm
         pd.layout.attrs[2] = {0, 24, SG_VERTEXFORMAT_FLOAT2};         // aUV
-        pd.layout.attrs[3] = {0, 32, SG_VERTEXFORMAT_UBYTE4};         // aBoneIndices
-        pd.layout.attrs[4] = {0, 36, SG_VERTEXFORMAT_FLOAT4};         // aBoneWeights
-        pd.layout.attrs[5] = {0, 52, SG_VERTEXFORMAT_FLOAT};          // aBoneCount
+        pd.layout.attrs[3] = {0, 32, SG_VERTEXFORMAT_UBYTE4};         // aBoneIndices0
+        pd.layout.attrs[4] = {0, 36, SG_VERTEXFORMAT_UBYTE4};         // aBoneIndices1
+        pd.layout.attrs[5] = {0, 40, SG_VERTEXFORMAT_FLOAT4};         // aBoneWeights0
+        pd.layout.attrs[6] = {0, 56, SG_VERTEXFORMAT_FLOAT4};         // aBoneWeights1
+        pd.layout.attrs[7] = {0, 72, SG_VERTEXFORMAT_FLOAT};          // aBoneCount
         sharedSkinnedPipeline_ = sg_make_pipeline(&pd);
 
         pd.depth.write_enabled = false;
@@ -1719,6 +1724,44 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
                     } else { verts[i].tu = 0; verts[i].tv = 0; }
                 }
 
+                bool invalidGeometry = false;
+                const char* invalidReason = "";
+                float maxAbsCoord = 0.0f;
+                for (const auto& v : verts) {
+                    if (!std::isfinite(v.px) || !std::isfinite(v.py) || !std::isfinite(v.pz)) {
+                        invalidGeometry = true;
+                        invalidReason = "non-finite vertex";
+                        break;
+                    }
+                    maxAbsCoord = std::max(maxAbsCoord, std::fabs(v.px));
+                    maxAbsCoord = std::max(maxAbsCoord, std::fabs(v.py));
+                    maxAbsCoord = std::max(maxAbsCoord, std::fabs(v.pz));
+                }
+                if (!invalidGeometry && maxAbsCoord > 100000.0f) {
+                    invalidGeometry = true;
+                    invalidReason = "extreme vertex";
+                }
+                if (!invalidGeometry) {
+                    for (unsigned index : geo.indices) {
+                        if (index >= (unsigned)vc) {
+                            invalidGeometry = true;
+                            invalidReason = "index out of range";
+                            break;
+                        }
+                    }
+                }
+                if (invalidGeometry) {
+                    std::cerr << "MdxViewer: skipped invalid static batch model='" << name_
+                              << "' geoset=" << gi
+                              << " pass=" << pass
+                              << " reason=" << invalidReason
+                              << " vertices=" << vc
+                              << " indices=" << geo.indices.size()
+                              << " maxAbs=" << maxAbsCoord
+                              << std::endl;
+                    continue;
+                }
+
                 Batch batch;
                 batch.indexCount = (int)geo.indices.size();
                 batch.textureHandle = texHandle;
@@ -2218,11 +2261,11 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
         }
 
         // Bone data
-        memset(verts[i].boneIndices, 0, 4);
+        memset(verts[i].boneIndices, 0, 8);
         verts[i].boneWeights[0] = 1.0f;
-        verts[i].boneWeights[1] = 0;
-        verts[i].boneWeights[2] = 0;
-        verts[i].boneWeights[3] = 0;
+        for (int b = 1; b < 8; ++b) {
+            verts[i].boneWeights[b] = 0.0f;
+        }
         verts[i].boneCount = 1;
 
         if (hasCompactSkin) {
@@ -2256,7 +2299,7 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
                     groupStart += (int)geo.matrixGroups[mg];
                 int groupBoneCount = (int)geo.matrixGroups[groupIdx];
                 int influenceCount = 0;
-                for (int b = 0; b < groupBoneCount && influenceCount < 4; ++b) {
+                for (int b = 0; b < groupBoneCount && influenceCount < 8; ++b) {
                     int mi = groupStart + b;
                     if (mi < (int)geo.matrixIndices.size()) {
                         int objectId = (int)geo.matrixIndices[mi];
@@ -2276,6 +2319,43 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
                 }
             }
         }
+    }
+
+    bool invalidGeometry = false;
+    const char* invalidReason = "";
+    float maxAbsCoord = 0.0f;
+    for (const auto& v : verts) {
+        if (!std::isfinite(v.px) || !std::isfinite(v.py) || !std::isfinite(v.pz)) {
+            invalidGeometry = true;
+            invalidReason = "non-finite vertex";
+            break;
+        }
+        maxAbsCoord = std::max(maxAbsCoord, std::fabs(v.px));
+        maxAbsCoord = std::max(maxAbsCoord, std::fabs(v.py));
+        maxAbsCoord = std::max(maxAbsCoord, std::fabs(v.pz));
+    }
+    if (!invalidGeometry && maxAbsCoord > 100000.0f) {
+        invalidGeometry = true;
+        invalidReason = "extreme vertex";
+    }
+    if (!invalidGeometry) {
+        for (unsigned index : geo.indices) {
+            if (index >= (unsigned)vc) {
+                invalidGeometry = true;
+                invalidReason = "index out of range";
+                break;
+            }
+        }
+    }
+    if (invalidGeometry) {
+        std::cerr << "MdxViewer: skipped invalid skinned batch model='" << name_
+                  << "' geoset=" << geosetIdx
+                  << " reason=" << invalidReason
+                  << " vertices=" << vc
+                  << " indices=" << geo.indices.size()
+                  << " maxAbs=" << maxAbsCoord
+                  << std::endl;
+        return;
     }
 
     Batch batch;

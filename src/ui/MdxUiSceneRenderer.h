@@ -10,7 +10,7 @@
 #include <memory>
 #include <string>
 
-namespace Noesis {
+namespace Aero {
 class Texture;
 }
 
@@ -27,7 +27,7 @@ public:
                    bool autoPlay, bool useModelCamera);
     void Resize(int width, int height);
     void Render(float dt);
-    Noesis::Texture* GetTexture() const;
+    Aero::Texture* GetTexture() const;
 
 private:
     struct Layer {
@@ -69,7 +69,7 @@ private:
     sg_image depthImage_ = {0};
     sg_view colorAttachmentView_ = {0};
     sg_view depthAttachmentView_ = {0};
-    Noesis::Ptr<Noesis::Texture> noesisTexture_;
+    Aero::Ptr<Aero::Texture> noesisTexture_;
 
     Layer single_;
     Layer background_;

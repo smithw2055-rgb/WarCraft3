@@ -762,6 +762,9 @@ bool SceneManager::AddDoodad(uint32_t war3ID, const float pos[3], float angle,
     inst->renderAngle = angle;
     inst->scale[0] = scale[0]; inst->scale[1] = scale[2]; inst->scale[2] = scale[1];
     inst->variation = variation;
+    inst->debugWar3ID = war3ID;
+    inst->debugSkinID = skinId;
+    inst->debugKind = "doodad";
     inst->visible = true;
     inst->viewer = viewer;
     instances_.push_back(inst);
@@ -819,6 +822,9 @@ int SceneManager::AddItem(uint32_t war3ID, const float pos[3], float angle,
     inst->angle = angle;
     inst->renderAngle = angle;
     inst->scale[0] = scale[0]; inst->scale[1] = scale[2]; inst->scale[2] = scale[1];
+    inst->debugWar3ID = war3ID;
+    inst->debugSkinID = skinId;
+    inst->debugKind = "item";
     inst->visible = true;
     inst->viewer = viewer;
     const int instanceIndex = (int)instances_.size();
@@ -875,6 +881,9 @@ int SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
     inst->renderAngle = angle;
     inst->scale[0] = scale[0]; inst->scale[1] = scale[2]; inst->scale[2] = scale[1];
     inst->player = player;
+    inst->debugWar3ID = war3ID;
+    inst->debugSkinID = skinId;
+    inst->debugKind = "unit";
     inst->visible = true;
     inst->smoothMotion = true;
     inst->ownedViewer = std::move(uniqueViewer);
@@ -894,8 +903,8 @@ bool SceneManager::UpdateInstancePosition(int index, const float pos[3], float a
     if (index < 0 || index >= (int)instances_.size()) return false;
     auto* inst = instances_[index];
     inst->pos[0] = pos[0];
-    inst->pos[1] = pos[2]; // Y and Z swapped
-    inst->pos[2] = pos[1];
+    inst->pos[1] = pos[1];
+    inst->pos[2] = pos[2];
     inst->angle = angle;
     inst->movementSpeed = movementSpeed;
     inst->turnRate = turnRate;
@@ -907,6 +916,15 @@ bool SceneManager::SetInstanceVisible(int index, bool visible) {
     if (index < 0 || index >= (int)instances_.size()) return false;
     instances_[index]->visible = visible;
     return true;
+}
+
+void SceneManager::SetDebugRenderRange(int start, int count) {
+    debugRenderStart_ = std::max(0, start);
+    debugRenderCount_ = count;
+}
+
+void SceneManager::SetDebugRenderKind(const std::string& kind) {
+    debugRenderKind_ = kind;
 }
 
 void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
@@ -966,7 +984,43 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
         }
     }
 
-    for (auto* inst : instances_) {
+    const int renderStart = std::max(0, debugRenderStart_);
+    const int renderEnd = (debugRenderCount_ < 0)
+        ? (int)instances_.size()
+        : std::min((int)instances_.size(), renderStart + std::max(0, debugRenderCount_));
+    static int loggedDebugStart = -1;
+    static int loggedDebugCount = -2;
+    if (debugRenderCount_ >= 0 && debugRenderCount_ <= 16 &&
+        (loggedDebugStart != renderStart || loggedDebugCount != debugRenderCount_)) {
+        loggedDebugStart = renderStart;
+        loggedDebugCount = debugRenderCount_;
+        auto fourCC = [](uint32_t id) {
+            char s[5] = {(char)(id & 0xFF), (char)((id >> 8) & 0xFF),
+                         (char)((id >> 16) & 0xFF), (char)((id >> 24) & 0xFF), 0};
+            return std::string(s);
+        };
+        std::cout << "SceneDebugRange: start=" << renderStart
+                  << " count=" << debugRenderCount_
+                  << " end=" << renderEnd
+                  << " total=" << instances_.size()
+                  << std::endl;
+        for (int index = renderStart; index < renderEnd; ++index) {
+            auto* inst = instances_[index];
+            if (!debugRenderKind_.empty() && inst->debugKind != debugRenderKind_) continue;
+            std::cout << "SceneDebugInstance[" << index << "]: kind=" << inst->debugKind
+                      << " id=" << fourCC(inst->debugWar3ID)
+                      << " skin=" << fourCC(inst->debugSkinID)
+                      << " model=" << (inst->viewer ? inst->viewer->GetName() : "<null>")
+                      << " pos=(" << inst->renderPos[0] << "," << inst->renderPos[1] << "," << inst->renderPos[2] << ")"
+                      << " scale=(" << inst->scale[0] << "," << inst->scale[1] << "," << inst->scale[2] << ")"
+                      << " angle=" << inst->renderAngle
+                      << " visible=" << (inst->visible ? 1 : 0)
+                      << std::endl;
+        }
+    }
+    for (int index = renderStart; index < renderEnd; ++index) {
+        auto* inst = instances_[index];
+        if (!debugRenderKind_.empty() && inst->debugKind != debugRenderKind_) continue;
         if (inst->visible && inst->viewer) {
             Vec3 p = {inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
             float s = (inst->scale[0] + inst->scale[1] + inst->scale[2]) / 3.0f;

@@ -186,6 +186,7 @@ private:
     void ReadMapFile(const std::string& mapPath, const std::string& fileName,
                      std::vector<uint8_t>& out);
     void WireJassCallbacks();
+    void DumpUnsupportedDiagnostics();
     void EnsureHumanMeleeStartsFromMapConfig();
     void EnsureHumanMeleeStartForPlayer(int playerIndex, float startX, float startY);
     void FlushStartupSimulationState();
@@ -202,6 +203,14 @@ private:
     int frameCount_ = 0;
     int exitAfterFrame_ = -1;
     bool uiOnlyMode_ = false;
+    bool debugHudGameMode_ = false;
+    bool hideHud_ = false;
+    bool terrainOnly_ = false;
+    bool dumpUnsupported_ = false;
+    bool diagnoseMapOnly_ = false;
+    int debugSceneRenderStart_ = 0;
+    int debugSceneRenderCount_ = -1;
+    std::string debugSceneRenderKind_;
     bool debugUiCommandCard_ = false;
     bool debugUiGameMenu_ = false;
     bool debugUiResources_ = false;
@@ -230,6 +239,7 @@ private:
     bool mapConfigInitialized_ = false;
     bool loadingInitialized_ = false;
     bool loadingFailed_ = false;
+    bool overviewCamera_ = false;
     std::string loadingFailureReason_;
     W3EMap map_;
     W3iInfo w3i_;

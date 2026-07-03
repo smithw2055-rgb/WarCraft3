@@ -26,6 +26,8 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #ifndef WITHOUT_STORMLIB
@@ -496,6 +498,42 @@ bool ParseDebugUiResources(const char* value, int& gold, int& lumber, int& foodU
     return true;
 }
 
+void AddJassErrorStats(const std::vector<std::string>& errors,
+                       std::unordered_map<std::string, int>& unknownFunctions,
+                       int& parserErrors,
+                       int& lexerErrors,
+                       int& otherErrors) {
+    for (const std::string& error : errors) {
+        const std::string unknownPrefix = "Unknown function: ";
+        const size_t unknownPos = error.find(unknownPrefix);
+        if (unknownPos != std::string::npos) {
+            unknownFunctions[error.substr(unknownPos + unknownPrefix.size())]++;
+        } else if (error.rfind("Parser:", 0) == 0) {
+            parserErrors++;
+        } else if (error.rfind("Lexer:", 0) == 0) {
+            lexerErrors++;
+        } else {
+            otherErrors++;
+        }
+    }
+}
+
+void PrintTopJassUnknowns(const std::unordered_map<std::string, int>& unknownFunctions) {
+    std::vector<std::pair<std::string, int>> sorted(unknownFunctions.begin(), unknownFunctions.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+    const size_t limit = std::min<size_t>(sorted.size(), 25);
+    for (size_t i = 0; i < limit; ++i) {
+        std::cout << "  unknown_native " << sorted[i].first
+                  << " count=" << sorted[i].second << std::endl;
+    }
+    if (sorted.size() > limit) {
+        std::cout << "  unknown_native_more=" << (sorted.size() - limit) << std::endl;
+    }
+}
+
 void PlayResolvedUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController* g) {
     if (!unit || !viewer) return;
 
@@ -682,6 +720,58 @@ void GameController::ParseArgs(int argc, char* argv[]) {
             exitAfterFrame_ = std::max(0, std::atoi(arg + 19));
         } else if (std::strcmp(arg, "--ui-only") == 0) {
             uiOnlyMode_ = true;
+        } else if (std::strcmp(arg, "--hide-hud") == 0) {
+            hideHud_ = true;
+        } else if (std::strcmp(arg, "--terrain-only") == 0) {
+            terrainOnly_ = true;
+            hideHud_ = true;
+        } else if (std::strcmp(arg, "--dump-unsupported") == 0) {
+            dumpUnsupported_ = true;
+        } else if (std::strcmp(arg, "--diagnose-map") == 0) {
+            diagnoseMapOnly_ = true;
+            dumpUnsupported_ = true;
+            if (exitAfterFrame_ < 0) exitAfterFrame_ = 1;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                mapPath_ = argv[++i];
+            }
+        } else if (std::strncmp(arg, "--diagnose-map=", 15) == 0) {
+            diagnoseMapOnly_ = true;
+            dumpUnsupported_ = true;
+            if (exitAfterFrame_ < 0) exitAfterFrame_ = 1;
+            mapPath_ = arg + 15;
+        } else if (std::strcmp(arg, "--overview-camera") == 0) {
+            overviewCamera_ = true;
+        } else if (std::strcmp(arg, "--scene-kind") == 0 && i + 1 < argc) {
+            debugSceneRenderKind_ = argv[++i];
+            hideHud_ = true;
+        } else if (std::strncmp(arg, "--scene-kind=", 13) == 0) {
+            debugSceneRenderKind_ = arg + 13;
+            hideHud_ = true;
+        } else if (std::strcmp(arg, "--scene-first") == 0 && i + 1 < argc) {
+            debugSceneRenderStart_ = 0;
+            debugSceneRenderCount_ = std::max(0, std::atoi(argv[++i]));
+            hideHud_ = true;
+        } else if (std::strncmp(arg, "--scene-first=", 14) == 0) {
+            debugSceneRenderStart_ = 0;
+            debugSceneRenderCount_ = std::max(0, std::atoi(arg + 14));
+            hideHud_ = true;
+        } else if (std::strcmp(arg, "--scene-range") == 0 && i + 1 < argc) {
+            int start = 0;
+            int count = -1;
+            std::sscanf(argv[++i], "%d,%d", &start, &count);
+            debugSceneRenderStart_ = std::max(0, start);
+            debugSceneRenderCount_ = count;
+            hideHud_ = true;
+        } else if (std::strncmp(arg, "--scene-range=", 14) == 0) {
+            int start = 0;
+            int count = -1;
+            std::sscanf(arg + 14, "%d,%d", &start, &count);
+            debugSceneRenderStart_ = std::max(0, start);
+            debugSceneRenderCount_ = count;
+            hideHud_ = true;
+        } else if (std::strcmp(arg, "--debug-hud-game") == 0) {
+            debugHudGameMode_ = true;
+            debugSelectFirstUnitForHud_ = true;
         } else if (std::strcmp(arg, "--debug-ui-command-card") == 0) {
             debugUiCommandCard_ = true;
         } else if (std::strcmp(arg, "--debug-ui-game-menu") == 0) {
@@ -872,19 +962,31 @@ bool GameController::Initialize() {
         mpq_.Open(mapPath_);
     }
 
-    scene_.Init(mpq_);
-    splatMeta_.Load(mpq_);
+    if (debugHudGameMode_) {
+        std::cout << "HUD game debug: loading game state from default map and rendering HUD only" << std::endl;
+    }
 
-    audio_.Init();
-    if (audio_.IsValid() && mpq_.ArchiveCount() > 0) {
+    if (!debugHudGameMode_) {
+        scene_.Init(mpq_);
+        splatMeta_.Load(mpq_);
+    }
+
+    if (!debugHudGameMode_) {
+        audio_.Init();
+    }
+    if (!debugHudGameMode_ && audio_.IsValid() && mpq_.ArchiveCount() > 0) {
         audio_.SetMpqManager(&mpq_);
         audio_.LoadSound("ui_click", "UI\\Mouse\\HumanClick1.wav", &mpq_);
         audio_.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &mpq_);
     }
 
-    if (!ui_.Init(&mpq_, 1280, 720, hudXamlPath_, config_.gameVersion)) {
-        std::cerr << "GameController: MainUI init failed" << std::endl;
-        return false;
+    if (!hideHud_) {
+        if (!ui_.Init(&mpq_, 1280, 720, hudXamlPath_, config_.gameVersion)) {
+            std::cerr << "GameController: MainUI init failed" << std::endl;
+            return false;
+        }
+    } else {
+        std::cout << "GameController: HUD init skipped (--hide-hud)" << std::endl;
     }
     initialized_ = true;
     return true;
@@ -969,7 +1071,9 @@ void GameController::InitMapConfig() {
         return;
     }
 
-    scene_.ResetLoadStats();
+    if (!debugHudGameMode_) {
+        scene_.ResetLoadStats();
+    }
 
     W3ILoadFromMpq(mapPath_, w3i_);
     W3IPrint(w3i_);
@@ -1006,6 +1110,7 @@ void GameController::InitLoading() {
         mpq_, simulation_, unitData_, destructableData_,
         itemData_, upgradeData_, scene_, texturedTerrain_, tileset_, map_, w3i_, wpm_);
     mapLoader_->SetConfigData(configEnv_ ? configEnv_->GetData() : nullptr);
+    mapLoader_->SetLoadRenderAssets(!debugHudGameMode_);
     mapLoader_->CreateTasks(mapPath_, 0);
     loadingProgress_ = 0.0f;
     loadingInitialized_ = true;
@@ -1036,7 +1141,7 @@ void GameController::InitInGame() {
                   << loadingFailureReason_ << std::endl;
         return;
     }
-    if (!texturedTerrain_.IsValid()) {
+    if (!debugHudGameMode_ && !texturedTerrain_.IsValid()) {
         loadingFailed_ = true;
         loadingFailureReason_ = "Terrain was not built";
         std::cerr << "InitInGame: " << loadingFailureReason_ << std::endl;
@@ -1061,11 +1166,13 @@ void GameController::InitInGame() {
         simulation_.Update();
         simulationInitialized_ = true;
         ui_.SetSimulation(&simulation_);
-        for (auto* unit : simulation_.GetUnits()) {
-            if (EnsureSimulationUnitVisual(unit))
-                visualUnitCreated++;
-            else
-                visualMissForSimUnits++;
+        if (!debugHudGameMode_) {
+            for (auto* unit : simulation_.GetUnits()) {
+                if (EnsureSimulationUnitVisual(unit))
+                    visualUnitCreated++;
+                else
+                    visualMissForSimUnits++;
+            }
         }
         std::cout << "Simulation: " << simulation_.GetUnits().size() << " units" << std::endl;
         std::cout << "SceneUnitSync: simCreated=" << unitLoadResult.simCreated
@@ -1081,16 +1188,30 @@ void GameController::InitInGame() {
 
     terrainLoaded_ = texturedTerrain_.IsValid();
 
-    minimap_.Generate(texturedTerrain_, tileset_, map_, w3i_, &mpq_);
+    if (!debugHudGameMode_) {
+        minimap_.Generate(texturedTerrain_, tileset_, map_, w3i_, &mpq_);
 
-    Vec3 center = texturedTerrain_.GetCenter();
-    camera_.SetTarget(center.x, center.y, center.z);
-    camera_.SetDistance(2500.0f);
-    camera_.SetMaxDistance(5000.0f);
-    camera_.SaveHomeState();
-    FocusCameraAndMinimapOnInitialSpawn();
+        Vec3 center = texturedTerrain_.GetCenter();
+        camera_.SetTarget(center.x, center.y, center.z);
+        camera_.SetDistance(2500.0f);
+        camera_.SetMaxDistance(5000.0f);
+        camera_.SaveHomeState();
+        if (overviewCamera_) {
+            camera_.SetTarget(center.x, center.y, center.z);
+            camera_.SetMaxDistance(20000.0f);
+            camera_.SetDistance(11000.0f);
+            camera_.SetAngles(0.8f, 1.35f);
+            camera_.SaveHomeState();
+            std::cout << "OverviewCamera: map center (" << center.x << ", " << center.y << ", " << center.z << ")" << std::endl;
+        }
+        else {
+            FocusCameraAndMinimapOnInitialSpawn();
+        }
+    }
 
-    if (mpq_.ArchiveCount() > 0) {
+    if (debugHudGameMode_) {
+        std::cout << "JASS Common: skipped for HUD game debug" << std::endl;
+    } else if (mpq_.ArchiveCount() > 0) {
         commonEnv_ = std::make_unique<JassCommonEnv>();
         if (commonEnv_->Init(mpq_, mapPath_, &simulation_, config_.jassFileList,
                              configEnv_ ? configEnv_->GetData() : nullptr)) {
@@ -1117,7 +1238,65 @@ void GameController::InitInGame() {
         DebugSelectFirstUnitForHud();
     }
 
+    if (dumpUnsupported_) {
+        DumpUnsupportedDiagnostics();
+    }
+
+    if (diagnoseMapOnly_) {
+        std::cout << "Diagnose-map complete; requesting quit." << std::endl;
+        sapp_request_quit();
+    }
+
     std::cout << "Initialization complete. Starting render loop..." << std::endl;
+}
+
+void GameController::DumpUnsupportedDiagnostics() {
+    std::cout << "=== Map Diagnostics ===" << std::endl;
+    std::cout << "map=" << mapPath_ << std::endl;
+    std::cout << "archives=" << mpq_.ArchiveCount() << std::endl;
+    std::cout << "terrain valid=" << (texturedTerrain_.IsValid() ? "yes" : "no")
+              << " size=" << map_.tileWidth << "x" << map_.tileHeight
+              << " tileset=" << map_.tileset
+              << " corners=" << map_.tiles.size() << std::endl;
+
+    if (mapLoader_) {
+        const auto& unitLoad = mapLoader_->GetUnitLoadResult();
+        std::cout << "map_units total=" << unitLoad.mapUnitCount
+                  << " sim_created=" << unitLoad.simCreated
+                  << " visual_created=" << unitLoad.visualCreated
+                  << " visual_miss_for_sim_units=" << unitLoad.visualMissForSimUnits
+                  << " items_registered=" << unitLoad.itemRegistered << std::endl;
+    }
+
+    std::cout << "simulation units=" << simulation_.GetUnits().size()
+              << " destructables=" << simulation_.GetDestructables().size()
+              << " items=" << simulation_.GetItems().size()
+              << " players=" << simulation_.GetPlayerCount() << std::endl;
+
+    std::unordered_map<std::string, int> unknownFunctions;
+    int parserErrors = 0;
+    int lexerErrors = 0;
+    int otherErrors = 0;
+    if (configEnv_) {
+        AddJassErrorStats(configEnv_->GetVM().GetErrors(), unknownFunctions,
+                          parserErrors, lexerErrors, otherErrors);
+    }
+    if (commonEnv_) {
+        AddJassErrorStats(commonEnv_->GetVM().GetErrors(), unknownFunctions,
+                          parserErrors, lexerErrors, otherErrors);
+    }
+
+    int totalUnknownCalls = 0;
+    for (const auto& entry : unknownFunctions) {
+        totalUnknownCalls += entry.second;
+    }
+    std::cout << "jass_unknown_unique=" << unknownFunctions.size()
+              << " jass_unknown_calls=" << totalUnknownCalls
+              << " parser_errors=" << parserErrors
+              << " lexer_errors=" << lexerErrors
+              << " other_errors=" << otherErrors << std::endl;
+    PrintTopJassUnknowns(unknownFunctions);
+    std::cout << "=== End Map Diagnostics ===" << std::endl;
 }
 
 void GameController::RunSyncInit() {
@@ -1161,7 +1340,7 @@ void GameController::RunSyncInit() {
         return;
     }
     terrainLoaded_ = texturedTerrain_.IsValid();
-    if (!terrainLoaded_) {
+    if (!debugHudGameMode_ && !terrainLoaded_) {
         loadingFailed_ = true;
         loadingFailureReason_ = "Terrain was not built";
         std::cerr << "RunSyncInit: " << loadingFailureReason_ << std::endl;
@@ -1169,7 +1348,9 @@ void GameController::RunSyncInit() {
         stateTransition_ = false;
         return;
     }
-    scene_.PrintLoadStats();
+    if (!debugHudGameMode_) {
+        scene_.PrintLoadStats();
+    }
     InitInGame();
     if (!simulationInitialized_) {
         pendingState_ = state_;
@@ -1349,13 +1530,15 @@ void GameController::UpdateLoading(float dt) {
             return;
         }
         terrainLoaded_ = texturedTerrain_.IsValid();
-        if (!terrainLoaded_) {
+        if (!debugHudGameMode_ && !terrainLoaded_) {
             loadingFailed_ = true;
             loadingFailureReason_ = "Terrain was not built";
             std::cerr << "UpdateLoading: " << loadingFailureReason_ << std::endl;
             return;
         }
-        scene_.PrintLoadStats();
+        if (!debugHudGameMode_) {
+            scene_.PrintLoadStats();
+        }
         TransitionTo(GameState::IN_GAME);
     }
 }
@@ -1417,8 +1600,10 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
     StepSimulation(dt);
 
     // After sim step, sync visuals
-    SyncAndReconcileVisuals();
-    RefreshRuntimeUnitSplats();
+    if (!debugHudGameMode_) {
+        SyncAndReconcileVisuals();
+        RefreshRuntimeUnitSplats();
+    }
     RefreshSelectionUi(false);
 }
 
@@ -1439,7 +1624,9 @@ void GameController::StepSimulation(float dt) {
     }
 
     if (ranSimulationStep) {
-        SyncAndReconcileVisuals();
+        if (!debugHudGameMode_) {
+            SyncAndReconcileVisuals();
+        }
         RefreshSelectionUi(false);
     }
 }
@@ -1559,6 +1746,32 @@ void GameController::Render(int screenW, int screenH) {
         RenderUiOnly(screenW, screenH);
         return;
     }
+
+    if (debugHudGameMode_) {
+        ui_.Update(screenW, screenH);
+
+        const float hudDebugClearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        Renderer::SetClearColor(hudDebugClearColor);
+        Renderer::BeginFrame();
+        sg_reset_state_cache();
+        sg_apply_viewport(0, 0, screenW, screenH, true);
+        sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+        ui_.RenderNoesisOnly();
+        if (screenshotFrame >= 0) {
+            screenshotFrame = std::min(screenshotFrame, frameCount_);
+            CaptureScreenshotIfNeeded(screenW, screenH);
+        }
+        Renderer::EndFrame();
+        Platform::ProcessInput();
+        if (screenshotFrame < 0 && exitAfterFrame_ >= 0) {
+            sapp_request_quit();
+            exitAfterFrame_ = -1;
+            return;
+        }
+        MaybeExitAfterFrame();
+        return;
+    }
+
     if (state_ != GameState::IN_GAME) {
         if (screenshotFrame >= 0 || exitAfterFrame_ >= 0) {
             ui_.Update(screenW, screenH);
@@ -1580,7 +1793,9 @@ void GameController::Render(int screenW, int screenH) {
     Mat4 view = camera_.GetViewMatrix();
     Mat4 proj = camera_.GetProjectionMatrix(aspect);
 
-    ui_.Update(screenW, screenH);
+    if (!hideHud_) {
+        ui_.Update(screenW, screenH);
+    }
 
     Renderer::BeginFrame();
     Renderer::SetWireframe(wireframe);
@@ -1593,17 +1808,21 @@ void GameController::Render(int screenW, int screenH) {
     sg_reset_state_cache();
     sg_apply_viewport(0, 0, screenW, screenH, true);
     sg_apply_scissor_rect(0, 0, screenW, screenH, true);
-    scene_.RenderAll(view, proj, dt);
+    if (!terrainOnly_) {
+            scene_.SetDebugRenderRange(debugSceneRenderStart_, debugSceneRenderCount_);
+            scene_.SetDebugRenderKind(debugSceneRenderKind_);
+            scene_.RenderAll(view, proj, dt);
+    }
 
-    ScreenRect minimapRect = ui_.GetMinimapRect();
-    if (!minimapRect.IsValid()) {
+    ScreenRect minimapRect = hideHud_ ? ScreenRect{} : ui_.GetMinimapRect();
+    if (!hideHud_ && !minimapRect.IsValid()) {
         minimapRect = FallbackMinimapRect(screenW, screenH);
     }
-    if (minimapRect.IsValid()) {
+    if (!hideHud_ && minimapRect.IsValid()) {
         minimap_.SetScreenRect(minimapRect.x, minimapRect.y, minimapRect.w, minimapRect.h);
     }
 
-    if (showMinimap && minimap_.IsValid()) {
+    if (!hideHud_ && showMinimap && minimap_.IsValid()) {
         sg_reset_state_cache();
         sg_apply_viewport(0, 0, screenW, screenH, true);
         sg_apply_scissor_rect(0, 0, screenW, screenH, true);
@@ -1612,13 +1831,15 @@ void GameController::Render(int screenW, int screenH) {
         sg_reset_state_cache();
     }
 
-    CollectUnitOverlays(screenW, screenH);
-    sg_reset_state_cache();
-    sg_apply_viewport(0, 0, screenW, screenH, true);
-    sg_apply_scissor_rect(0, 0, screenW, screenH, true);
-    ui_.Render();
+    if (!hideHud_) {
+        CollectUnitOverlays(screenW, screenH);
+        sg_reset_state_cache();
+        sg_apply_viewport(0, 0, screenW, screenH, true);
+        sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+        ui_.Render();
 
-    ui_.RenderNoesisOnly();
+        ui_.RenderNoesisOnly();
+    }
     CaptureScreenshotIfNeeded(screenW, screenH);
     Renderer::EndFrame();
     Platform::ProcessInput();
@@ -1909,6 +2130,9 @@ bool GameController::WriteFramebufferPng(const std::string& path, int screenW, i
 
 void GameController::MaybeExitAfterFrame() {
     if (exitAfterFrame_ >= 0 && frameCount_ >= exitAfterFrame_) {
+        if (debugHudGameMode_ && state_ == GameState::IN_GAME && screenshotFrame >= 0) {
+            return;
+        }
         std::cout << "Exit-after-frame reached: " << frameCount_ << std::endl;
         sapp_request_quit();
         exitAfterFrame_ = -1;
@@ -2336,7 +2560,10 @@ bool GameController::EnsureSimulationUnitVisual(CUnit* unit) {
         skinId = seedIt->second.skinId; hp = seedIt->second.hitpoints; flags = seedIt->second.flags;
     }
 
-    float pos[3] = {unit->GetX(), unit->GetY(), 0.0f};
+    float height = texturedTerrain_.IsValid()
+        ? texturedTerrain_.GetGroundHeight(unit->GetX(), unit->GetY())
+        : 0.0f;
+    float pos[3] = {unit->GetX(), unit->GetY(), height};
     int visualIdx = scene_.AddUnit(unit->GetTypeId().value, pos, unit->GetFacing(),
                                    scale, unit->GetPlayerIndex(), hp, flags, skinId);
     if (visualIdx < 0) {
@@ -2362,7 +2589,7 @@ bool GameController::EnsureSimulationItemVisual(CItem* item) {
     float height = texturedTerrain_.IsValid()
         ? texturedTerrain_.GetGroundHeight(item->GetX(), item->GetY())
         : 0.0f;
-    float pos[3] = {item->GetX(), height, item->GetY()};
+    float pos[3] = {item->GetX(), item->GetY(), height};
     float scale[3] = {1.0f, 1.0f, 1.0f};
     const int visualIdx = scene_.AddItem(item->GetTypeId().value, pos, 0.0f, scale, 0, 0);
     if (visualIdx < 0) {
@@ -2465,19 +2692,41 @@ void GameController::DebugSelectFirstUnitForHud() {
     if (!simulationInitialized_) return;
 
     CUnit* fallback = nullptr;
+    CUnit* fallbackNonGoldMine = nullptr;
+    CUnit* preferredWorker = nullptr;
+    CUnit* localPlayerBuilding = nullptr;
     CUnit* localPlayerUnit = nullptr;
     const int localPlayer = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+
+    auto isGoldMine = [](CUnit* unit) {
+        return unit && unit->GetAbility(War3ID("Agld")) != nullptr;
+    };
 
     for (auto* unit : simulation_.GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsHidden()) continue;
         if (!fallback) fallback = unit;
+        if (!fallbackNonGoldMine && !isGoldMine(unit)) {
+            fallbackNonGoldMine = unit;
+        }
         if (unit->GetPlayerIndex() == localPlayer) {
-            localPlayerUnit = unit;
-            break;
+            if (!isGoldMine(unit)) {
+                if (!preferredWorker && unit->GetTypeId() == War3ID("hpea")) {
+                    preferredWorker = unit;
+                }
+                if (!unit->IsBuilding()) {
+                    localPlayerUnit = unit;
+                }
+                if (!localPlayerBuilding) {
+                    localPlayerBuilding = unit;
+                }
+            }
         }
     }
 
-    CUnit* selected = localPlayerUnit ? localPlayerUnit : fallback;
+    CUnit* selected = preferredWorker ? preferredWorker
+        : (localPlayerUnit ? localPlayerUnit
+        : (localPlayerBuilding ? localPlayerBuilding
+        : (fallbackNonGoldMine ? fallbackNonGoldMine : fallback)));
     if (!selected) {
         std::cout << "DebugSelectFirstUnitForHud: no selectable unit found" << std::endl;
         return;

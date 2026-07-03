@@ -6,7 +6,7 @@
 #include "third_party/sokol/sokol_app.h"
 #include "third_party/sokol/sokol_glue.h"
 #include <NsCore/DynamicCast.h>
-#include <NsCore/Noesis.h>
+#include <NsCore/Aero.h>
 #include <NsCore/RegisterComponent.h>
 #include <NsGui/BitmapImage.h>
 #include <NsGui/Border.h>
@@ -196,7 +196,7 @@ void HudDiagLog(const char* fmt, ...) {
     std::fprintf(stderr, "%s\n", buffer);
 
     std::error_code ec;
-    std::filesystem::path logPath = std::filesystem::path(PROJECT_SOURCE_DIR) / "Logs" / "noesis-hud.log";
+    std::filesystem::path logPath = std::filesystem::path(PROJECT_SOURCE_DIR) / "Logs" / "aero-hud.log";
     std::filesystem::create_directories(logPath.parent_path(), ec);
     std::ofstream log(logPath, std::ios::app);
     if (log) {
@@ -556,60 +556,60 @@ void InstallLogHandler() {
     if (installed) return;
     installed = true;
 
-    Noesis::GUI::SetLogHandler([](const char*, uint32_t, uint32_t level, const char*, const char* msg) {
+    Aero::GUI::SetLogHandler([](const char*, uint32_t, uint32_t level, const char*, const char* msg) {
         const char* prefixes[] = {"T", "D", "I", "W", "E"};
-        HudDiagLog("[NOESIS/%s] %s", prefixes[level], msg);
+        HudDiagLog("[AERO/%s] %s", prefixes[level], msg);
     });
 }
 
-Noesis::Key MapKey(int sokolKey) {
+Aero::Key MapKey(int sokolKey) {
     switch (sokolKey) {
-    case SAPP_KEYCODE_BACKSPACE: return Noesis::Key_Back;
-    case SAPP_KEYCODE_TAB: return Noesis::Key_Tab;
-    case SAPP_KEYCODE_ENTER: return Noesis::Key_Return;
-    case SAPP_KEYCODE_ESCAPE: return Noesis::Key_Escape;
-    case SAPP_KEYCODE_SPACE: return Noesis::Key_Space;
-    case SAPP_KEYCODE_DELETE: return Noesis::Key_Delete;
-    case SAPP_KEYCODE_LEFT: return Noesis::Key_Left;
-    case SAPP_KEYCODE_RIGHT: return Noesis::Key_Right;
-    case SAPP_KEYCODE_UP: return Noesis::Key_Up;
-    case SAPP_KEYCODE_DOWN: return Noesis::Key_Down;
-    case SAPP_KEYCODE_HOME: return Noesis::Key_Home;
-    case SAPP_KEYCODE_END: return Noesis::Key_End;
-    case SAPP_KEYCODE_PAGE_UP: return Noesis::Key_PageUp;
-    case SAPP_KEYCODE_PAGE_DOWN: return Noesis::Key_PageDown;
-    case SAPP_KEYCODE_INSERT: return Noesis::Key_Insert;
-    case SAPP_KEYCODE_F1: return Noesis::Key_F1;
-    case SAPP_KEYCODE_F2: return Noesis::Key_F2;
-    case SAPP_KEYCODE_F3: return Noesis::Key_F3;
-    case SAPP_KEYCODE_F4: return Noesis::Key_F4;
-    case SAPP_KEYCODE_F5: return Noesis::Key_F5;
-    case SAPP_KEYCODE_F6: return Noesis::Key_F6;
-    case SAPP_KEYCODE_F7: return Noesis::Key_F7;
-    case SAPP_KEYCODE_F8: return Noesis::Key_F8;
-    case SAPP_KEYCODE_F9: return Noesis::Key_F9;
-    case SAPP_KEYCODE_F10: return Noesis::Key_F10;
-    case SAPP_KEYCODE_F11: return Noesis::Key_F11;
-    case SAPP_KEYCODE_F12: return Noesis::Key_F12;
+    case SAPP_KEYCODE_BACKSPACE: return Aero::Key_Back;
+    case SAPP_KEYCODE_TAB: return Aero::Key_Tab;
+    case SAPP_KEYCODE_ENTER: return Aero::Key_Return;
+    case SAPP_KEYCODE_ESCAPE: return Aero::Key_Escape;
+    case SAPP_KEYCODE_SPACE: return Aero::Key_Space;
+    case SAPP_KEYCODE_DELETE: return Aero::Key_Delete;
+    case SAPP_KEYCODE_LEFT: return Aero::Key_Left;
+    case SAPP_KEYCODE_RIGHT: return Aero::Key_Right;
+    case SAPP_KEYCODE_UP: return Aero::Key_Up;
+    case SAPP_KEYCODE_DOWN: return Aero::Key_Down;
+    case SAPP_KEYCODE_HOME: return Aero::Key_Home;
+    case SAPP_KEYCODE_END: return Aero::Key_End;
+    case SAPP_KEYCODE_PAGE_UP: return Aero::Key_PageUp;
+    case SAPP_KEYCODE_PAGE_DOWN: return Aero::Key_PageDown;
+    case SAPP_KEYCODE_INSERT: return Aero::Key_Insert;
+    case SAPP_KEYCODE_F1: return Aero::Key_F1;
+    case SAPP_KEYCODE_F2: return Aero::Key_F2;
+    case SAPP_KEYCODE_F3: return Aero::Key_F3;
+    case SAPP_KEYCODE_F4: return Aero::Key_F4;
+    case SAPP_KEYCODE_F5: return Aero::Key_F5;
+    case SAPP_KEYCODE_F6: return Aero::Key_F6;
+    case SAPP_KEYCODE_F7: return Aero::Key_F7;
+    case SAPP_KEYCODE_F8: return Aero::Key_F8;
+    case SAPP_KEYCODE_F9: return Aero::Key_F9;
+    case SAPP_KEYCODE_F10: return Aero::Key_F10;
+    case SAPP_KEYCODE_F11: return Aero::Key_F11;
+    case SAPP_KEYCODE_F12: return Aero::Key_F12;
     default: break;
     }
 
     if (sokolKey >= SAPP_KEYCODE_A && sokolKey <= SAPP_KEYCODE_Z) {
-        return static_cast<Noesis::Key>(Noesis::Key_A + (sokolKey - SAPP_KEYCODE_A));
+        return static_cast<Aero::Key>(Aero::Key_A + (sokolKey - SAPP_KEYCODE_A));
     }
     if (sokolKey >= SAPP_KEYCODE_0 && sokolKey <= SAPP_KEYCODE_9) {
-        return static_cast<Noesis::Key>(Noesis::Key_D0 + (sokolKey - SAPP_KEYCODE_0));
+        return static_cast<Aero::Key>(Aero::Key_D0 + (sokolKey - SAPP_KEYCODE_0));
     }
-    return Noesis::Key_None;
+    return Aero::Key_None;
 }
 
 template<class T>
-T* FindAs(Noesis::FrameworkElement* root, const char* name) {
-    return root ? Noesis::DynamicCast<T*>(root->FindName(name)) : nullptr;
+T* FindAs(Aero::FrameworkElement* root, const char* name) {
+    return root ? Aero::DynamicCast<T*>(root->FindName(name)) : nullptr;
 }
 
 template<class T>
-T* FindFirstAs(Noesis::FrameworkElement* root, const char* primaryName, const char* fallbackName) {
+T* FindFirstAs(Aero::FrameworkElement* root, const char* primaryName, const char* fallbackName) {
     if (T* primary = FindAs<T>(root, primaryName)) return primary;
     return FindAs<T>(root, fallbackName);
 }
@@ -638,13 +638,13 @@ std::string TrimAscii(std::string s) {
 
 bool ExpandXamlIncludes(const std::filesystem::path& path, int depth, std::string& out) {
     if (depth > 16) {
-        HudDiagLog("NoesisHudHost: XAML include depth exceeded at '%s'", path.string().c_str());
+        HudDiagLog("AeroHudHost: XAML include depth exceeded at '%s'", path.string().c_str());
         return false;
     }
 
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        HudDiagLog("NoesisHudHost: unable to read XAML include '%s'", path.string().c_str());
+        HudDiagLog("AeroHudHost: unable to read XAML include '%s'", path.string().c_str());
         return false;
     }
 
@@ -661,7 +661,7 @@ bool ExpandXamlIncludes(const std::filesystem::path& path, int depth, std::strin
         const size_t pathStart = markerPos + marker.size();
         const size_t pathEnd = line.find("-->", pathStart);
         if (pathEnd == std::string::npos) {
-            HudDiagLog("NoesisHudHost: malformed XAML include in '%s': %s", path.string().c_str(), line.c_str());
+            HudDiagLog("AeroHudHost: malformed XAML include in '%s': %s", path.string().c_str(), line.c_str());
             return false;
         }
 
@@ -685,7 +685,7 @@ bool XamlHasIncludeMarker(const std::filesystem::path& path, bool& hasIncludes) 
     hasIncludes = false;
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        HudDiagLog("NoesisHudHost: unable to read XAML '%s'", path.string().c_str());
+        HudDiagLog("AeroHudHost: unable to read XAML '%s'", path.string().c_str());
         return false;
     }
 
@@ -721,13 +721,13 @@ bool ComposeXamlForNoesis(const std::string& assetRoot,
         sourcePath.parent_path() / (sourcePath.stem().string() + ".composed" + sourcePath.extension().string());
     std::ofstream out(composedPath, std::ios::binary | std::ios::trunc);
     if (!out) {
-        HudDiagLog("NoesisHudHost: unable to write composed XAML '%s'", composedPath.string().c_str());
+        HudDiagLog("AeroHudHost: unable to write composed XAML '%s'", composedPath.string().c_str());
         return false;
     }
     out << composed;
     out.close();
     if (!out) {
-        HudDiagLog("NoesisHudHost: failed while writing composed XAML '%s'", composedPath.string().c_str());
+        HudDiagLog("AeroHudHost: failed while writing composed XAML '%s'", composedPath.string().c_str());
         return false;
     }
 
@@ -744,12 +744,12 @@ std::array<int, 5> TooltipCostValues(const HudResourceCosts& costs) {
     return { costs.gold, costs.lumber, costs.stone, costs.mana, costs.food };
 }
 
-Noesis::Ptr<Noesis::SolidColorBrush> MakeBrushFromArgb(uint32_t argb) {
+Aero::Ptr<Aero::SolidColorBrush> MakeBrushFromArgb(uint32_t argb) {
     const int a = (argb >> 24) & 0xFF;
     const int r = (argb >> 16) & 0xFF;
     const int g = (argb >> 8) & 0xFF;
     const int b = argb & 0xFF;
-    return Noesis::MakePtr<Noesis::SolidColorBrush>(Noesis::Color(r, g, b, a));
+    return Aero::MakePtr<Aero::SolidColorBrush>(Aero::Color(r, g, b, a));
 }
 
 uint32_t HealthBarTintArgb(float ratio) {
@@ -801,7 +801,7 @@ bool NoesisHudHost::Initialize(const std::string& assetRoot, int width, int heig
     std::string resolvedXamlPath = xamlPath.empty() ? "assets/ui/Hud.xaml" : xamlPath;
     std::replace(resolvedXamlPath.begin(), resolvedXamlPath.end(), '\\', '/');
     if (resolvedXamlPath == "assets/noesis/Hud.xaml" || resolvedXamlPath == "./assets/noesis/Hud.xaml") {
-        HudDiagLog("NoesisHudHost: remapping legacy HUD XAML '%s' to 'assets/ui/Hud.xaml'",
+        HudDiagLog("AeroHudHost: remapping legacy HUD XAML '%s' to 'assets/ui/Hud.xaml'",
                    resolvedXamlPath.c_str());
         resolvedXamlPath = "assets/ui/Hud.xaml";
     }
@@ -811,69 +811,72 @@ bool NoesisHudHost::Initialize(const std::string& assetRoot, int width, int heig
     width_ = ToLogicalPixels(width, dpiScale_);
     height_ = ToLogicalPixels(height, dpiScale_);
     HudDiagLog(
-        "NoesisHudHost: initializing xaml='%s' assetRoot='%s' physical=%dx%d logical=%dx%d dpi=%.2f",
+        "AeroHudHost: initializing xaml='%s' assetRoot='%s' physical=%dx%d logical=%dx%d dpi=%.2f",
         resolvedXamlPath.c_str(), assetRoot_.c_str(), physicalWidth_, physicalHeight_, width_, height_, dpiScale_);
 
     InstallLogHandler();
-    Noesis::GUI::SetLicense(NS_LICENSE_NAME, NS_LICENSE_KEY);
-    Noesis::GUI::Init();
+    Aero::GUI::SetLicense(NS_LICENSE_NAME, NS_LICENSE_KEY);
+    Aero::GUI::Init();
     guiInitialized_ = true;
     War3UI::MdxSceneControl::SetSharedContext(mpq, gameVersion);
-    Noesis::RegisterComponent<War3UI::GlueMenuControl>();
+    Aero::RegisterComponent<War3UI::GlueMenuControl>();
 
-    NoesisApp::Launcher::RegisterAppComponents();
-    Noesis::RegisterComponent<War3UI::MdxSceneControl>();
-    Noesis::RegisterComponent<War3UI::MainMenuBackdropControl>();
-    Noesis::RegisterComponent<War3UI::MainMenuPanelControl>();
-    Noesis::RegisterComponent<War3UI::SinglePlayerPanelControl>();
-    Noesis::RegisterComponent<War3UI::CampaignPanelControl>();
-    Noesis::RegisterComponent<War3UI::CustomGamePanelControl>();
-    Noesis::GUI::SetXamlProvider(Noesis::MakePtr<NoesisApp::LocalXamlProvider>(assetRoot_.c_str()));
-    Noesis::GUI::SetTextureProvider(Noesis::MakePtr<NoesisApp::LocalTextureProvider>(assetRoot_.c_str()));
-    Noesis::GUI::SetFontProvider(Noesis::MakePtr<NoesisApp::LocalFontProvider>(assetRoot_.c_str()));
-    NoesisApp::SetThemeProviders();
-    Noesis::GUI::LoadApplicationResources(NoesisApp::Theme::DarkBlue());
+    AeroApp::Launcher::RegisterAppComponents();
+    Aero::RegisterComponent<War3UI::MdxSceneControl>();
+    Aero::RegisterComponent<War3UI::MainMenuBackdropControl>();
+    Aero::RegisterComponent<War3UI::MainMenuPanelControl>();
+    Aero::RegisterComponent<War3UI::SinglePlayerPanelControl>();
+    Aero::RegisterComponent<War3UI::CampaignPanelControl>();
+    Aero::RegisterComponent<War3UI::CustomGamePanelControl>();
+    Aero::RegisterComponent<War3UI::GlueOptionsPanelControl>();
+    Aero::RegisterComponent<War3UI::GlueBattleNetPanelControl>();
+    Aero::RegisterComponent<War3UI::GlueLocalAreaNetworkPanelControl>();
+    Aero::GUI::SetXamlProvider(Aero::MakePtr<AeroApp::LocalXamlProvider>(assetRoot_.c_str()));
+    Aero::GUI::SetTextureProvider(Aero::MakePtr<AeroApp::LocalTextureProvider>(assetRoot_.c_str()));
+    Aero::GUI::SetFontProvider(Aero::MakePtr<AeroApp::LocalFontProvider>(assetRoot_.c_str()));
+    AeroApp::SetThemeProviders();
+    Aero::GUI::LoadApplicationResources(AeroApp::Theme::DarkBlue());
 
     std::string loadXamlPath = resolvedXamlPath;
     if (!ComposeXamlForNoesis(assetRoot_, resolvedXamlPath, loadXamlPath)) {
-        HudDiagLog("NoesisHudHost: failed to compose '%s'", resolvedXamlPath.c_str());
+        HudDiagLog("AeroHudHost: failed to compose '%s'", resolvedXamlPath.c_str());
         return false;
     }
     if (loadXamlPath == resolvedXamlPath) {
-        HudDiagLog("NoesisHudHost: loading '%s' without composition", resolvedXamlPath.c_str());
+        HudDiagLog("AeroHudHost: loading '%s' without composition", resolvedXamlPath.c_str());
     } else {
-        HudDiagLog("NoesisHudHost: composed '%s' -> '%s'", resolvedXamlPath.c_str(), loadXamlPath.c_str());
+        HudDiagLog("AeroHudHost: composed '%s' -> '%s'", resolvedXamlPath.c_str(), loadXamlPath.c_str());
     }
 
-    root_ = Noesis::GUI::LoadXaml<Noesis::UserControl>(loadXamlPath.c_str());
+    root_ = Aero::GUI::LoadXaml<Aero::UserControl>(loadXamlPath.c_str());
     if (!root_) {
-        HudDiagLog("NoesisHudHost: failed to load '%s'", loadXamlPath.c_str());
+        HudDiagLog("AeroHudHost: failed to load '%s'", loadXamlPath.c_str());
         return false;
     }
-    HudDiagLog("NoesisHudHost: loaded '%s'", loadXamlPath.c_str());
-    if (Noesis::BaseComponent* mdxBackground = root_->FindName("GlueMdxBackground")) {
-        glueMdxBackground_ = Noesis::DynamicCast<War3UI::MdxSceneControl*>(mdxBackground);
-        HudDiagLog("NoesisHudHost: GlueMdxBackground found type='%s' mdx=%s",
+    HudDiagLog("AeroHudHost: loaded '%s'", loadXamlPath.c_str());
+    if (Aero::BaseComponent* mdxBackground = root_->FindName("GlueMdxBackground")) {
+        glueMdxBackground_ = Aero::DynamicCast<War3UI::MdxSceneControl*>(mdxBackground);
+        HudDiagLog("AeroHudHost: GlueMdxBackground found type='%s' mdx=%s",
                    mdxBackground->GetClassType()->GetName(),
                    glueMdxBackground_ ? "yes" : "no");
     } else {
         glueMdxBackground_ = nullptr;
-        HudDiagLog("NoesisHudHost: GlueMdxBackground not found");
+        HudDiagLog("AeroHudHost: GlueMdxBackground not found");
     }
 
-    view_ = Noesis::GUI::CreateView(root_);
+    view_ = Aero::GUI::CreateView(root_);
     if (!view_) {
-        HudDiagLog("NoesisHudHost: failed to create view");
+        HudDiagLog("AeroHudHost: failed to create view");
         return false;
     }
 
-    view_->SetFlags(Noesis::RenderFlags_PPAA | Noesis::RenderFlags_LCD);
+    view_->SetFlags(Aero::RenderFlags_PPAA | Aero::RenderFlags_LCD);
     view_->SetScale(dpiScale_);
     view_->SetSize((uint32_t)physicalWidth_, (uint32_t)physicalHeight_);
 
-    device_ = NoesisApp::GLFactory::CreateDevice(false);
+    device_ = AeroApp::GLFactory::CreateDevice(false);
     if (!device_) {
-        HudDiagLog("NoesisHudHost: failed to create GL render device");
+        HudDiagLog("AeroHudHost: failed to create GL render device");
         return false;
     }
 
@@ -885,7 +888,7 @@ bool NoesisHudHost::Initialize(const std::string& assetRoot, int width, int heig
     view_->Update(0.0);
     CacheRects();
     HudDiagLog(
-        "NoesisHudHost: ready root=%.1fx%.1f view=%dx%d",
+        "AeroHudHost: ready root=%.1fx%.1f view=%dx%d",
         (float)root_->GetActualWidth(), (float)root_->GetActualHeight(), physicalWidth_, physicalHeight_);
     return true;
 }
@@ -905,7 +908,7 @@ void NoesisHudHost::Shutdown() {
 
     if (guiInitialized_) {
         War3UI::MdxSceneControl::SetSharedContext(nullptr, 0);
-        Noesis::GUI::Shutdown();
+        Aero::GUI::Shutdown();
         guiInitialized_ = false;
     }
 }
@@ -930,7 +933,7 @@ void NoesisHudHost::Resize(int width, int height) {
     dpiScale_ = scale;
     view_->SetScale(dpiScale_);
     view_->SetSize((uint32_t)physicalWidth_, (uint32_t)physicalHeight_);
-    HudDiagLog("NoesisHudHost: SetSize view=%dx%d logical=%dx%d scale=%.2f",
+    HudDiagLog("AeroHudHost: SetSize view=%dx%d logical=%dx%d scale=%.2f",
                physicalWidth_, physicalHeight_, width_, height_, dpiScale_);
 }
 
@@ -950,8 +953,6 @@ void NoesisHudHost::Update(double time) {
     view_->Update(time);
     if (glueMdxBackground_) {
         glueMdxBackground_->RenderFrame((float)dt);
-    } else {
-        War3UI::MdxSceneControl::RenderActiveScenes((float)dt);
     }
     CacheRects();
 }
@@ -979,7 +980,7 @@ void NoesisHudHost::Render() {
     RestoreDefaultFramebufferForNoesis(physicalWidth_, physicalHeight_);
 
     if (logProbe) {
-        HudDiagLog("NoesisHudHost render probe: currentFb=%d swapFb=%u physical=%dx%d depthBits=%d stencilBits=%d preError=0x%x",
+        HudDiagLog("AeroHudHost render probe: currentFb=%d swapFb=%u physical=%dx%d depthBits=%d stencilBits=%d preError=0x%x",
                    CurrentFramebufferBinding(), sglue_swapchain().gl.framebuffer,
                    physicalWidth_, physicalHeight_,
                    GLInteger(GL_DEPTH_BITS_EXT), GLInteger(GL_STENCIL_BITS_EXT),
@@ -987,7 +988,7 @@ void NoesisHudHost::Render() {
     }
     renderer->Render();
     if (logProbe) {
-        HudDiagLog("NoesisHudHost render probe: postError=0x%x", DrainGLError());
+        HudDiagLog("AeroHudHost render probe: postError=0x%x", DrainGLError());
     }
     renderTreeReady_ = false;
     sg_reset_state_cache();
@@ -1001,15 +1002,15 @@ bool NoesisHudHost::HandleEvent(const sapp_event* e) {
 
     switch (e->type) {
     case SAPP_EVENTTYPE_MOUSE_DOWN: {
-        Noesis::MouseButton btn = Noesis::MouseButton_Left;
-        if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) btn = Noesis::MouseButton_Right;
-        else if (e->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) btn = Noesis::MouseButton_Middle;
+        Aero::MouseButton btn = Aero::MouseButton_Left;
+        if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) btn = Aero::MouseButton_Right;
+        else if (e->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) btn = Aero::MouseButton_Middle;
         return view_->MouseButtonDown(x, y, btn);
     }
     case SAPP_EVENTTYPE_MOUSE_UP: {
-        Noesis::MouseButton btn = Noesis::MouseButton_Left;
-        if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) btn = Noesis::MouseButton_Right;
-        else if (e->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) btn = Noesis::MouseButton_Middle;
+        Aero::MouseButton btn = Aero::MouseButton_Left;
+        if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) btn = Aero::MouseButton_Right;
+        else if (e->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) btn = Aero::MouseButton_Middle;
         return view_->MouseButtonUp(x, y, btn);
     }
     case SAPP_EVENTTYPE_MOUSE_MOVE:
@@ -1037,10 +1038,10 @@ void NoesisHudHost::SetResources(int gold, int lumber, int foodUsed, int foodCap
     lumber_ = lumber;
     foodUsed_ = foodUsed;
     foodCap_ = foodCap;
-    upkeepValue_ = "Upkeep NYI";
+    upkeepValue_ = "No Upkeep";
     timeValue_ = timeText;
     if (changed) {
-        HudDiagLog("NoesisHudHost: resources gold=%d lumber=%d food=%d/%d time=%s",
+        HudDiagLog("AeroHudHost: resources gold=%d lumber=%d food=%d/%d time=%s",
                    gold_, lumber_, foodUsed_, foodCap_, timeValue_.c_str());
     }
 }
@@ -1366,11 +1367,11 @@ bool NoesisHudHost::InvokeGameMenuActionForDebug(const std::string& actionName) 
         action = findActionByName("GameMenuButton" + actionName.substr(8));
     }
     if (action < 0) {
-        HudDiagLog("NoesisHudHost: debug game menu action '%s' not found", actionName.c_str());
+        HudDiagLog("AeroHudHost: debug game menu action '%s' not found", actionName.c_str());
         return false;
     }
     if (!IsGameMenuActionEnabled(action)) {
-        HudDiagLog("NoesisHudHost: debug game menu action '%s' is disabled", actionName.c_str());
+        HudDiagLog("AeroHudHost: debug game menu action '%s' is disabled", actionName.c_str());
         return false;
     }
 
@@ -1382,16 +1383,16 @@ bool NoesisHudHost::InvokeGameMenuActionForDebug(const std::string& actionName) 
 
     const int parent = GameMenuPopupParentAction(action);
     if (parent >= 0) {
-        HudDiagLog("NoesisHudHost: debug game menu action '%s' selected %s=%s",
+        HudDiagLog("AeroHudHost: debug game menu action '%s' selected %s=%s",
                    actionName.c_str(),
                    GameMenuActionElementName(parent),
                    GameMenuOptionCycleText(parent, gameMenuOptionCycleIndex_[parent]));
     } else if (IsGameMenuOptionPopupAction(action)) {
-        HudDiagLog("NoesisHudHost: debug game menu action '%s' popup %s",
+        HudDiagLog("AeroHudHost: debug game menu action '%s' popup %s",
                    actionName.c_str(),
                    gameMenuOptionPopupOpenAction_ == action ? "opened" : "closed");
     } else {
-        HudDiagLog("NoesisHudHost: debug game menu action '%s' invoked", actionName.c_str());
+        HudDiagLog("AeroHudHost: debug game menu action '%s' invoked", actionName.c_str());
     }
     return true;
 }
@@ -1399,11 +1400,11 @@ bool NoesisHudHost::InvokeGameMenuActionForDebug(const std::string& actionName) 
 bool NoesisHudHost::InvokeUpperButtonForDebug(const std::string& buttonName) {
     const int index = UpperButtonIndexForDebugName(buttonName);
     if (index < 0) {
-        HudDiagLog("NoesisHudHost: debug upper button '%s' not found", buttonName.c_str());
+        HudDiagLog("AeroHudHost: debug upper button '%s' not found", buttonName.c_str());
         return false;
     }
     if (!IsUpperButtonEnabled(index)) {
-        HudDiagLog("NoesisHudHost: debug upper button '%s' is disabled", UpperButtonDebugName(index));
+        HudDiagLog("AeroHudHost: debug upper button '%s' is disabled", UpperButtonDebugName(index));
         return false;
     }
 
@@ -1418,7 +1419,7 @@ bool NoesisHudHost::InvokeUpperButtonForDebug(const std::string& buttonName) {
     SetPressedUpperButton(-1);
     ApplyState();
 
-    HudDiagLog("NoesisHudHost: debug upper button '%s' invoked%s",
+    HudDiagLog("AeroHudHost: debug upper button '%s' invoked%s",
                UpperButtonDebugName(index),
                gameMenuOpen_ ? ", game menu open" : "");
     return true;
@@ -1444,7 +1445,7 @@ void NoesisHudHost::HandleGlueMenuAction(int action) {
     if (glueMenuControl_) {
         glueMenuControl_->HandleAction(action);
     } else {
-        HudDiagLog("NoesisHudHost: glue menu action %d ignored; GlueMenuControl is not loaded", action);
+        HudDiagLog("AeroHudHost: glue menu action %d ignored; GlueMenuControl is not loaded", action);
     }
 }
 
@@ -1452,7 +1453,7 @@ void NoesisHudHost::OpenGlueMenuDebugPage(const std::string& pageName) {
     if (glueMenuControl_) {
         glueMenuControl_->OpenDebugPage(pageName);
     } else {
-        HudDiagLog("NoesisHudHost: debug glue menu page '%s' ignored; GlueMenuControl is not loaded",
+        HudDiagLog("AeroHudHost: debug glue menu page '%s' ignored; GlueMenuControl is not loaded",
                    pageName.c_str());
     }
 }
@@ -1462,7 +1463,7 @@ bool NoesisHudHost::InvokeGlueMenuActionForDebug(const std::string& actionName) 
         return glueMenuControl_->InvokeActionForDebug(actionName);
     }
 
-    HudDiagLog("NoesisHudHost: debug glue menu action '%s' ignored; GlueMenuControl is not loaded",
+    HudDiagLog("AeroHudHost: debug glue menu action '%s' ignored; GlueMenuControl is not loaded",
                actionName.c_str());
     return false;
 }
@@ -1483,7 +1484,7 @@ void NoesisHudHost::HandleGameMenuAction(int action) {
     switch (action) {
     case kGameMenuPause:
         gameMenuPaused_ = !gameMenuPaused_;
-        HudDiagLog("NoesisHudHost: game menu Pause toggled %s (UI wired, simulation pause pending)",
+        HudDiagLog("AeroHudHost: game menu Pause toggled %s (UI wired, simulation pause pending)",
                    gameMenuPaused_ ? "on" : "off");
         break;
     case kGameMenuSaveGame:
@@ -1538,18 +1539,18 @@ void NoesisHudHost::HandleGameMenuAction(int action) {
         SetGameMenuPanel(GameMenuPanel::Main);
         break;
     case kGameMenuLoadGameLoad:
-        HudDiagLog("NoesisHudHost: game menu Load requested (UI wired, savegame loading pending)");
+        HudDiagLog("AeroHudHost: game menu Load requested (UI wired, savegame loading pending)");
         SetGameMenuPanel(GameMenuPanel::Main);
         break;
     case kGameMenuOverwriteConfirm:
-        HudDiagLog("NoesisHudHost: game menu Save overwrite requested (UI wired, savegame writing pending)");
+        HudDiagLog("AeroHudHost: game menu Save overwrite requested (UI wired, savegame writing pending)");
         SetGameMenuPanel(GameMenuPanel::SaveGame);
         break;
     case kGameMenuOverwriteCancel:
     case kGameMenuDeleteConfirm:
     case kGameMenuDeleteCancel:
         if (action == kGameMenuDeleteConfirm) {
-            HudDiagLog("NoesisHudHost: game menu Delete save requested (UI wired, savegame deletion pending)");
+            HudDiagLog("AeroHudHost: game menu Delete save requested (UI wired, savegame deletion pending)");
         }
         SetGameMenuPanel(GameMenuPanel::SaveGame);
         break;
@@ -1559,7 +1560,7 @@ void NoesisHudHost::HandleGameMenuAction(int action) {
         break;
     case kGameMenuTipsBack:
     case kGameMenuTipsNext:
-        HudDiagLog("NoesisHudHost: game menu Tips %s requested (UI wired, tip paging pending)",
+        HudDiagLog("AeroHudHost: game menu Tips %s requested (UI wired, tip paging pending)",
                    action == kGameMenuTipsBack ? "Back" : "Next");
         SetGameMenuPanel(GameMenuPanel::Tips);
         break;
@@ -1570,11 +1571,11 @@ void NoesisHudHost::HandleGameMenuAction(int action) {
         SetGameMenuPanel(GameMenuPanel::EndGame);
         break;
     case kGameMenuQuitMission:
-        HudDiagLog("NoesisHudHost: game menu Quit Mission requested (UI wired, gameplay action pending)");
+        HudDiagLog("AeroHudHost: game menu Quit Mission requested (UI wired, gameplay action pending)");
         CloseGameMenu();
         break;
     case kGameMenuConfirmExit:
-        HudDiagLog("NoesisHudHost: game menu Exit Program confirmed (UI wired, application exit suppressed)");
+        HudDiagLog("AeroHudHost: game menu Exit Program confirmed (UI wired, application exit suppressed)");
         CloseGameMenu();
         break;
     case kGameMenuOptionMouseScrollDisable:
@@ -1630,12 +1631,12 @@ void NoesisHudHost::HandleGameMenuAction(int action) {
     case kGameMenuOptionGammaSlider:
     case kGameMenuOptionSoundVolumeSlider:
     case kGameMenuOptionMusicVolumeSlider:
-        HudDiagLog("NoesisHudHost: game menu option slider action %d clicked (drag/value binding pending)", action);
+        HudDiagLog("AeroHudHost: game menu option slider action %d clicked (drag/value binding pending)", action);
         gameMenuOptionPopupOpenAction_ = -1;
         break;
     default:
         if (action >= 0) {
-            HudDiagLog("NoesisHudHost: game menu action %d is present but not enabled yet", action);
+            HudDiagLog("AeroHudHost: game menu action %d is present but not enabled yet", action);
         }
         break;
     }
@@ -1703,29 +1704,29 @@ ScreenRect NoesisHudHost::GetCommandRect(int index) const {
 
 void NoesisHudHost::CacheElements() {
     auto* rootElement = root_.GetPtr();
-    glueMenuControl_ = Noesis::DynamicCast<War3UI::GlueMenuControl*>(rootElement);
+    glueMenuControl_ = Aero::DynamicCast<War3UI::GlueMenuControl*>(rootElement);
     if (!glueMenuControl_) {
         glueMenuControl_ = FindAs<War3UI::GlueMenuControl>(rootElement, "GlueMenuControl");
     }
     if (glueMenuControl_) {
         glueMenuControl_->CacheElements();
     }
-    goldText_ = FindFirstAs<Noesis::TextBlock>(rootElement, "ResourceBarGoldText", "GoldText");
-    lumberText_ = FindFirstAs<Noesis::TextBlock>(rootElement, "ResourceBarLumberText", "LumberText");
-    foodText_ = FindFirstAs<Noesis::TextBlock>(rootElement, "ResourceBarSupplyText", "FoodText");
-    upkeepText_ = FindFirstAs<Noesis::TextBlock>(rootElement, "ResourceBarUpkeepText", "UpkeepText");
-    timeText_ = FindAs<Noesis::TextBlock>(rootElement, "TimeText");
-    timeOfDayIndicator_ = FindAs<Noesis::FrameworkElement>(rootElement, "TimeOfDayIndicator");
-    unitNameText_ = FindAs<Noesis::TextBlock>(rootElement, "UnitNameText");
-    unitLevelText_ = FindAs<Noesis::TextBlock>(rootElement, "UnitLevelText");
-    hpText_ = FindAs<Noesis::TextBlock>(rootElement, "HpText");
-    mpText_ = FindAs<Noesis::TextBlock>(rootElement, "MpText");
-    heroStatsText_ = FindAs<Noesis::TextBlock>(rootElement, "HeroStatsText");
-    heroStatsPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "HeroStatsPanel");
-    heroStrengthText_ = FindAs<Noesis::TextBlock>(rootElement, "HeroStrengthText");
-    heroAgilityText_ = FindAs<Noesis::TextBlock>(rootElement, "HeroAgilityText");
-    heroIntelligenceText_ = FindAs<Noesis::TextBlock>(rootElement, "HeroIntelligenceText");
-    infoStatsPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "InfoStatsPanel");
+    goldText_ = FindFirstAs<Aero::TextBlock>(rootElement, "ResourceBarGoldText", "GoldText");
+    lumberText_ = FindFirstAs<Aero::TextBlock>(rootElement, "ResourceBarLumberText", "LumberText");
+    foodText_ = FindFirstAs<Aero::TextBlock>(rootElement, "ResourceBarSupplyText", "FoodText");
+    upkeepText_ = FindFirstAs<Aero::TextBlock>(rootElement, "ResourceBarUpkeepText", "UpkeepText");
+    timeText_ = FindAs<Aero::TextBlock>(rootElement, "TimeText");
+    timeOfDayIndicator_ = FindAs<Aero::FrameworkElement>(rootElement, "TimeOfDayIndicator");
+    unitNameText_ = FindAs<Aero::TextBlock>(rootElement, "UnitNameText");
+    unitLevelText_ = FindAs<Aero::TextBlock>(rootElement, "UnitLevelText");
+    hpText_ = FindAs<Aero::TextBlock>(rootElement, "HpText");
+    mpText_ = FindAs<Aero::TextBlock>(rootElement, "MpText");
+    heroStatsText_ = FindAs<Aero::TextBlock>(rootElement, "HeroStatsText");
+    heroStatsPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "HeroStatsPanel");
+    heroStrengthText_ = FindAs<Aero::TextBlock>(rootElement, "HeroStrengthText");
+    heroAgilityText_ = FindAs<Aero::TextBlock>(rootElement, "HeroAgilityText");
+    heroIntelligenceText_ = FindAs<Aero::TextBlock>(rootElement, "HeroIntelligenceText");
+    infoStatsPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "InfoStatsPanel");
     const char* attackIconNames[] = {
         "InfoAttackIconDamageUnknown",
         "InfoAttackIconDamageNormal",
@@ -1745,7 +1746,7 @@ void NoesisHudHost::CacheElements() {
         "InfoAttackIconDamageHeroNeutral",
     };
     for (int i = 0; i < (int)infoAttackIcons_.size(); ++i) {
-        infoAttackIcons_[i] = FindAs<Noesis::Image>(rootElement, attackIconNames[i]);
+        infoAttackIcons_[i] = FindAs<Aero::Image>(rootElement, attackIconNames[i]);
     }
     const char* armorIconNames[] = {
         "InfoArmorIconArmorUnknown",
@@ -1768,107 +1769,107 @@ void NoesisHudHost::CacheElements() {
         "InfoArmorIconArmorNoneNeutral",
     };
     for (int i = 0; i < (int)infoArmorIcons_.size(); ++i) {
-        infoArmorIcons_[i] = FindAs<Noesis::Image>(rootElement, armorIconNames[i]);
+        infoArmorIcons_[i] = FindAs<Aero::Image>(rootElement, armorIconNames[i]);
     }
-    infoAttackText_ = FindAs<Noesis::TextBlock>(rootElement, "InfoAttackText");
-    infoArmorText_ = FindAs<Noesis::TextBlock>(rootElement, "InfoArmorText");
-    infoGoldText_ = FindAs<Noesis::TextBlock>(rootElement, "InfoGoldText");
-    infoFoodText_ = FindAs<Noesis::TextBlock>(rootElement, "InfoFoodText");
-    buffStatusBar_ = FindAs<Noesis::FrameworkElement>(rootElement, "BuffStatusBar");
-    buffStatusBarLabel_ = FindAs<Noesis::TextBlock>(rootElement, "BuffStatusBarLabel");
+    infoAttackText_ = FindAs<Aero::TextBlock>(rootElement, "InfoAttackText");
+    infoArmorText_ = FindAs<Aero::TextBlock>(rootElement, "InfoArmorText");
+    infoGoldText_ = FindAs<Aero::TextBlock>(rootElement, "InfoGoldText");
+    infoFoodText_ = FindAs<Aero::TextBlock>(rootElement, "InfoFoodText");
+    buffStatusBar_ = FindAs<Aero::FrameworkElement>(rootElement, "BuffStatusBar");
+    buffStatusBarLabel_ = FindAs<Aero::TextBlock>(rootElement, "BuffStatusBarLabel");
     for (int i = 0; i < (int)buffSlots_.size(); ++i) {
         char name[64];
         std::snprintf(name, sizeof(name), "BuffIcon%d", i);
-        buffSlots_[i] = FindAs<Noesis::Border>(rootElement, name);
+        buffSlots_[i] = FindAs<Aero::Border>(rootElement, name);
         std::snprintf(name, sizeof(name), "BuffIconImage%d", i);
-        buffIcons_[i] = FindAs<Noesis::Image>(rootElement, name);
+        buffIcons_[i] = FindAs<Aero::Image>(rootElement, name);
         std::snprintf(name, sizeof(name), "BuffIconText%d", i);
-        buffLabels_[i] = FindAs<Noesis::TextBlock>(rootElement, name);
+        buffLabels_[i] = FindAs<Aero::TextBlock>(rootElement, name);
         std::snprintf(name, sizeof(name), "BuffDuration%d", i);
-        buffDurations_[i] = FindAs<Noesis::TextBlock>(rootElement, name);
+        buffDurations_[i] = FindAs<Aero::TextBlock>(rootElement, name);
         std::snprintf(name, sizeof(name), "BuffStackBack%d", i);
-        buffStackBacks_[i] = FindAs<Noesis::Border>(rootElement, name);
+        buffStackBacks_[i] = FindAs<Aero::Border>(rootElement, name);
         std::snprintf(name, sizeof(name), "BuffStackText%d", i);
-        buffStacks_[i] = FindAs<Noesis::TextBlock>(rootElement, name);
+        buffStacks_[i] = FindAs<Aero::TextBlock>(rootElement, name);
     }
-    hpFill_ = FindAs<Noesis::Border>(rootElement, "HpFill");
-    mpFill_ = FindAs<Noesis::Border>(rootElement, "MpFill");
-    xpFill_ = FindAs<Noesis::Border>(rootElement, "XpFill");
-    tooltipPanel_ = FindAs<Noesis::Border>(rootElement, "TooltipPanel");
-    tooltipText_ = FindAs<Noesis::TextBlock>(rootElement, "TooltipText");
-    tooltipResourceRow_ = FindAs<Noesis::FrameworkElement>(rootElement, "TooltipResourceRow");
-    tooltipCostGroups_[0] = FindAs<Noesis::FrameworkElement>(rootElement, "TooltipGoldCost");
-    tooltipCostGroups_[1] = FindAs<Noesis::FrameworkElement>(rootElement, "TooltipLumberCost");
-    tooltipCostGroups_[2] = FindAs<Noesis::FrameworkElement>(rootElement, "TooltipStoneCost");
-    tooltipCostGroups_[3] = FindAs<Noesis::FrameworkElement>(rootElement, "TooltipManaCost");
-    tooltipCostGroups_[4] = FindAs<Noesis::FrameworkElement>(rootElement, "TooltipFoodCost");
-    tooltipCostTexts_[0] = FindAs<Noesis::TextBlock>(rootElement, "TooltipGoldCostText");
-    tooltipCostTexts_[1] = FindAs<Noesis::TextBlock>(rootElement, "TooltipLumberCostText");
-    tooltipCostTexts_[2] = FindAs<Noesis::TextBlock>(rootElement, "TooltipStoneCostText");
-    tooltipCostTexts_[3] = FindAs<Noesis::TextBlock>(rootElement, "TooltipManaCostText");
-    tooltipCostTexts_[4] = FindAs<Noesis::TextBlock>(rootElement, "TooltipFoodCostText");
-    chatPanel_ = FindAs<Noesis::Border>(rootElement, "ChatPanel");
-    chatLogText_ = FindAs<Noesis::TextBlock>(rootElement, "ChatLogText");
-    chatInput_ = FindAs<Noesis::TextBox>(rootElement, "ChatInputBox");
-    minimapViewport_ = FindAs<Noesis::FrameworkElement>(rootElement, "MinimapViewport");
-    minimapContentViewport_ = FindAs<Noesis::FrameworkElement>(rootElement, "MinimapContentViewport");
-    minimapButtons_[0] = FindAs<Noesis::FrameworkElement>(rootElement, "MiniMapSignalButton");
-    minimapButtons_[1] = FindAs<Noesis::FrameworkElement>(rootElement, "MiniMapTerrainButton");
-    minimapButtons_[2] = FindAs<Noesis::FrameworkElement>(rootElement, "MiniMapAllyButton");
-    minimapButtons_[3] = FindAs<Noesis::FrameworkElement>(rootElement, "MiniMapCreepButton");
-    minimapButtons_[4] = FindAs<Noesis::FrameworkElement>(rootElement, "MiniMapFormationButton");
-    minimapButtonPushed_[0] = FindAs<Noesis::Image>(rootElement, "MiniMapSignalButtonPushed");
-    minimapButtonPushed_[1] = FindAs<Noesis::Image>(rootElement, "MiniMapTerrainButtonPushed");
-    minimapButtonPushed_[2] = FindAs<Noesis::Image>(rootElement, "MiniMapAllyButtonPushed");
-    minimapButtonPushed_[3] = FindAs<Noesis::Image>(rootElement, "MiniMapCreepButtonPushed");
-    minimapButtonPushed_[4] = FindAs<Noesis::Image>(rootElement, "MiniMapFormationButtonPushed");
-    minimapButtonDisabled_[0] = FindAs<Noesis::Image>(rootElement, "MiniMapSignalButtonDisabled");
-    minimapButtonDisabled_[1] = FindAs<Noesis::Image>(rootElement, "MiniMapTerrainButtonDisabled");
-    minimapButtonDisabled_[2] = FindAs<Noesis::Image>(rootElement, "MiniMapAllyButtonDisabled");
-    minimapButtonDisabled_[3] = FindAs<Noesis::Image>(rootElement, "MiniMapCreepButtonDisabled");
-    minimapButtonDisabled_[4] = FindAs<Noesis::Image>(rootElement, "MiniMapFormationButtonDisabled");
-    minimapButtonInactive_[1] = FindAs<Noesis::Image>(rootElement, "MiniMapTerrainButtonInactive");
-    minimapButtonInactive_[2] = FindAs<Noesis::Image>(rootElement, "MiniMapAllyButtonInactive");
-    minimapButtonInactive_[3] = FindAs<Noesis::Image>(rootElement, "MiniMapCreepButtonInactive");
-    minimapButtonInactivePushed_[1] = FindAs<Noesis::Image>(rootElement, "MiniMapTerrainButtonInactivePushed");
-    minimapButtonInactivePushed_[2] = FindAs<Noesis::Image>(rootElement, "MiniMapAllyButtonInactivePushed");
-    minimapButtonInactivePushed_[3] = FindAs<Noesis::Image>(rootElement, "MiniMapCreepButtonInactivePushed");
-    minimapButtonInactiveDisabled_[1] = FindAs<Noesis::Image>(rootElement, "MiniMapTerrainButtonInactiveDisabled");
-    minimapButtonInactiveDisabled_[2] = FindAs<Noesis::Image>(rootElement, "MiniMapAllyButtonInactiveDisabled");
-    minimapButtonInactiveDisabled_[3] = FindAs<Noesis::Image>(rootElement, "MiniMapCreepButtonInactiveDisabled");
-    minimapButtonOff_[2] = FindAs<Noesis::Image>(rootElement, "MiniMapAllyButtonOff");
-    minimapButtonOff_[4] = FindAs<Noesis::Image>(rootElement, "MiniMapFormationButtonOff");
-    minimapButtonOffPushed_[2] = FindAs<Noesis::Image>(rootElement, "MiniMapAllyButtonOffPushed");
-    minimapButtonOffPushed_[4] = FindAs<Noesis::Image>(rootElement, "MiniMapFormationButtonOffPushed");
-    minimapButtonOffDisabled_[2] = FindAs<Noesis::Image>(rootElement, "MiniMapAllyButtonOffDisabled");
-    minimapButtonOffDisabled_[4] = FindAs<Noesis::Image>(rootElement, "MiniMapFormationButtonOffDisabled");
-    portraitViewport_ = FindAs<Noesis::FrameworkElement>(rootElement, "PortraitViewport");
-    portraitIcon_ = FindAs<Noesis::FrameworkElement>(rootElement, "PortraitIcon");
-    portraitImage_ = FindAs<Noesis::Image>(rootElement, "PortraitIcon");
-    consolePanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "ConsolePanel");
-    upperButtonBar_ = FindAs<Noesis::FrameworkElement>(rootElement, "UpperButtonBarFrame");
-    upperButtons_[0] = FindAs<Noesis::FrameworkElement>(rootElement, "UpperButtonBarQuestsButton");
-    upperButtons_[1] = FindAs<Noesis::FrameworkElement>(rootElement, "UpperButtonBarMenuButton");
-    upperButtons_[2] = FindAs<Noesis::FrameworkElement>(rootElement, "UpperButtonBarAlliesButton");
-    upperButtons_[3] = FindAs<Noesis::FrameworkElement>(rootElement, "UpperButtonBarChatButton");
-    upperButtonPushed_[0] = FindAs<Noesis::Image>(rootElement, "UpperButtonBarQuestsPushed");
-    upperButtonPushed_[1] = FindAs<Noesis::Image>(rootElement, "UpperButtonBarMenuPushed");
-    upperButtonPushed_[2] = FindAs<Noesis::Image>(rootElement, "UpperButtonBarAlliesPushed");
-    upperButtonPushed_[3] = FindAs<Noesis::Image>(rootElement, "UpperButtonBarChatPushed");
-    upperButtonHighlights_[0] = FindAs<Noesis::Image>(rootElement, "UpperButtonBarQuestsHighlight");
-    upperButtonHighlights_[1] = FindAs<Noesis::Image>(rootElement, "UpperButtonBarMenuHighlight");
-    upperButtonHighlights_[2] = FindAs<Noesis::Image>(rootElement, "UpperButtonBarAlliesHighlight");
-    upperButtonHighlights_[3] = FindAs<Noesis::Image>(rootElement, "UpperButtonBarChatHighlight");
-    upperButtonLabels_[0] = FindAs<Noesis::TextBlock>(rootElement, "UpperButtonBarQuestsText");
-    upperButtonLabels_[1] = FindAs<Noesis::TextBlock>(rootElement, "UpperButtonBarMenuText");
-    upperButtonLabels_[2] = FindAs<Noesis::TextBlock>(rootElement, "UpperButtonBarAlliesText");
-    upperButtonLabels_[3] = FindAs<Noesis::TextBlock>(rootElement, "UpperButtonBarChatText");
-    commandColumn_ = FindAs<Noesis::FrameworkElement>(rootElement, "CommandColumn");
-    inventoryCover_ = FindAs<Noesis::FrameworkElement>(rootElement, "InventoryCover");
-    inventoryPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "InventoryPanel");
-    inventoryGrid_ = FindAs<Noesis::FrameworkElement>(rootElement, "InventoryGrid");
-    commandCardPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "CommandCardPanel");
-    commandCardGrid_ = FindAs<Noesis::FrameworkElement>(rootElement, "CommandCardGrid");
+    hpFill_ = FindAs<Aero::Border>(rootElement, "HpFill");
+    mpFill_ = FindAs<Aero::Border>(rootElement, "MpFill");
+    xpFill_ = FindAs<Aero::Border>(rootElement, "XpFill");
+    tooltipPanel_ = FindAs<Aero::Border>(rootElement, "TooltipPanel");
+    tooltipText_ = FindAs<Aero::TextBlock>(rootElement, "TooltipText");
+    tooltipResourceRow_ = FindAs<Aero::FrameworkElement>(rootElement, "TooltipResourceRow");
+    tooltipCostGroups_[0] = FindAs<Aero::FrameworkElement>(rootElement, "TooltipGoldCost");
+    tooltipCostGroups_[1] = FindAs<Aero::FrameworkElement>(rootElement, "TooltipLumberCost");
+    tooltipCostGroups_[2] = FindAs<Aero::FrameworkElement>(rootElement, "TooltipStoneCost");
+    tooltipCostGroups_[3] = FindAs<Aero::FrameworkElement>(rootElement, "TooltipManaCost");
+    tooltipCostGroups_[4] = FindAs<Aero::FrameworkElement>(rootElement, "TooltipFoodCost");
+    tooltipCostTexts_[0] = FindAs<Aero::TextBlock>(rootElement, "TooltipGoldCostText");
+    tooltipCostTexts_[1] = FindAs<Aero::TextBlock>(rootElement, "TooltipLumberCostText");
+    tooltipCostTexts_[2] = FindAs<Aero::TextBlock>(rootElement, "TooltipStoneCostText");
+    tooltipCostTexts_[3] = FindAs<Aero::TextBlock>(rootElement, "TooltipManaCostText");
+    tooltipCostTexts_[4] = FindAs<Aero::TextBlock>(rootElement, "TooltipFoodCostText");
+    chatPanel_ = FindAs<Aero::Border>(rootElement, "ChatPanel");
+    chatLogText_ = FindAs<Aero::TextBlock>(rootElement, "ChatLogText");
+    chatInput_ = FindAs<Aero::TextBox>(rootElement, "ChatInputBox");
+    minimapViewport_ = FindAs<Aero::FrameworkElement>(rootElement, "MinimapViewport");
+    minimapContentViewport_ = FindAs<Aero::FrameworkElement>(rootElement, "MinimapContentViewport");
+    minimapButtons_[0] = FindAs<Aero::FrameworkElement>(rootElement, "MiniMapSignalButton");
+    minimapButtons_[1] = FindAs<Aero::FrameworkElement>(rootElement, "MiniMapTerrainButton");
+    minimapButtons_[2] = FindAs<Aero::FrameworkElement>(rootElement, "MiniMapAllyButton");
+    minimapButtons_[3] = FindAs<Aero::FrameworkElement>(rootElement, "MiniMapCreepButton");
+    minimapButtons_[4] = FindAs<Aero::FrameworkElement>(rootElement, "MiniMapFormationButton");
+    minimapButtonPushed_[0] = FindAs<Aero::Image>(rootElement, "MiniMapSignalButtonPushed");
+    minimapButtonPushed_[1] = FindAs<Aero::Image>(rootElement, "MiniMapTerrainButtonPushed");
+    minimapButtonPushed_[2] = FindAs<Aero::Image>(rootElement, "MiniMapAllyButtonPushed");
+    minimapButtonPushed_[3] = FindAs<Aero::Image>(rootElement, "MiniMapCreepButtonPushed");
+    minimapButtonPushed_[4] = FindAs<Aero::Image>(rootElement, "MiniMapFormationButtonPushed");
+    minimapButtonDisabled_[0] = FindAs<Aero::Image>(rootElement, "MiniMapSignalButtonDisabled");
+    minimapButtonDisabled_[1] = FindAs<Aero::Image>(rootElement, "MiniMapTerrainButtonDisabled");
+    minimapButtonDisabled_[2] = FindAs<Aero::Image>(rootElement, "MiniMapAllyButtonDisabled");
+    minimapButtonDisabled_[3] = FindAs<Aero::Image>(rootElement, "MiniMapCreepButtonDisabled");
+    minimapButtonDisabled_[4] = FindAs<Aero::Image>(rootElement, "MiniMapFormationButtonDisabled");
+    minimapButtonInactive_[1] = FindAs<Aero::Image>(rootElement, "MiniMapTerrainButtonInactive");
+    minimapButtonInactive_[2] = FindAs<Aero::Image>(rootElement, "MiniMapAllyButtonInactive");
+    minimapButtonInactive_[3] = FindAs<Aero::Image>(rootElement, "MiniMapCreepButtonInactive");
+    minimapButtonInactivePushed_[1] = FindAs<Aero::Image>(rootElement, "MiniMapTerrainButtonInactivePushed");
+    minimapButtonInactivePushed_[2] = FindAs<Aero::Image>(rootElement, "MiniMapAllyButtonInactivePushed");
+    minimapButtonInactivePushed_[3] = FindAs<Aero::Image>(rootElement, "MiniMapCreepButtonInactivePushed");
+    minimapButtonInactiveDisabled_[1] = FindAs<Aero::Image>(rootElement, "MiniMapTerrainButtonInactiveDisabled");
+    minimapButtonInactiveDisabled_[2] = FindAs<Aero::Image>(rootElement, "MiniMapAllyButtonInactiveDisabled");
+    minimapButtonInactiveDisabled_[3] = FindAs<Aero::Image>(rootElement, "MiniMapCreepButtonInactiveDisabled");
+    minimapButtonOff_[2] = FindAs<Aero::Image>(rootElement, "MiniMapAllyButtonOff");
+    minimapButtonOff_[4] = FindAs<Aero::Image>(rootElement, "MiniMapFormationButtonOff");
+    minimapButtonOffPushed_[2] = FindAs<Aero::Image>(rootElement, "MiniMapAllyButtonOffPushed");
+    minimapButtonOffPushed_[4] = FindAs<Aero::Image>(rootElement, "MiniMapFormationButtonOffPushed");
+    minimapButtonOffDisabled_[2] = FindAs<Aero::Image>(rootElement, "MiniMapAllyButtonOffDisabled");
+    minimapButtonOffDisabled_[4] = FindAs<Aero::Image>(rootElement, "MiniMapFormationButtonOffDisabled");
+    portraitViewport_ = FindAs<Aero::FrameworkElement>(rootElement, "PortraitViewport");
+    portraitIcon_ = FindAs<Aero::FrameworkElement>(rootElement, "PortraitIcon");
+    portraitImage_ = FindAs<Aero::Image>(rootElement, "PortraitIcon");
+    consolePanel_ = FindAs<Aero::FrameworkElement>(rootElement, "ConsolePanel");
+    upperButtonBar_ = FindAs<Aero::FrameworkElement>(rootElement, "UpperButtonBarFrame");
+    upperButtons_[0] = FindAs<Aero::FrameworkElement>(rootElement, "UpperButtonBarQuestsButton");
+    upperButtons_[1] = FindAs<Aero::FrameworkElement>(rootElement, "UpperButtonBarMenuButton");
+    upperButtons_[2] = FindAs<Aero::FrameworkElement>(rootElement, "UpperButtonBarAlliesButton");
+    upperButtons_[3] = FindAs<Aero::FrameworkElement>(rootElement, "UpperButtonBarChatButton");
+    upperButtonPushed_[0] = FindAs<Aero::Image>(rootElement, "UpperButtonBarQuestsPushed");
+    upperButtonPushed_[1] = FindAs<Aero::Image>(rootElement, "UpperButtonBarMenuPushed");
+    upperButtonPushed_[2] = FindAs<Aero::Image>(rootElement, "UpperButtonBarAlliesPushed");
+    upperButtonPushed_[3] = FindAs<Aero::Image>(rootElement, "UpperButtonBarChatPushed");
+    upperButtonHighlights_[0] = FindAs<Aero::Image>(rootElement, "UpperButtonBarQuestsHighlight");
+    upperButtonHighlights_[1] = FindAs<Aero::Image>(rootElement, "UpperButtonBarMenuHighlight");
+    upperButtonHighlights_[2] = FindAs<Aero::Image>(rootElement, "UpperButtonBarAlliesHighlight");
+    upperButtonHighlights_[3] = FindAs<Aero::Image>(rootElement, "UpperButtonBarChatHighlight");
+    upperButtonLabels_[0] = FindAs<Aero::TextBlock>(rootElement, "UpperButtonBarQuestsText");
+    upperButtonLabels_[1] = FindAs<Aero::TextBlock>(rootElement, "UpperButtonBarMenuText");
+    upperButtonLabels_[2] = FindAs<Aero::TextBlock>(rootElement, "UpperButtonBarAlliesText");
+    upperButtonLabels_[3] = FindAs<Aero::TextBlock>(rootElement, "UpperButtonBarChatText");
+    commandColumn_ = FindAs<Aero::FrameworkElement>(rootElement, "CommandColumn");
+    inventoryCover_ = FindAs<Aero::FrameworkElement>(rootElement, "InventoryCover");
+    inventoryPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "InventoryPanel");
+    inventoryGrid_ = FindAs<Aero::FrameworkElement>(rootElement, "InventoryGrid");
+    commandCardPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "CommandCardPanel");
+    commandCardGrid_ = FindAs<Aero::FrameworkElement>(rootElement, "CommandCardGrid");
 
     for (int i = 0; i < 12; ++i) {
         char buttonName[32];
@@ -1895,18 +1896,18 @@ void NoesisHudHost::CacheElements() {
         std::snprintf(numberBackName, sizeof(numberBackName), "CommandNumberBack%d", i);
         std::snprintf(numberName, sizeof(numberName), "CommandNumber%d", i);
         std::snprintf(autocastName, sizeof(autocastName), "CommandAutocast%d", i);
-        commandButtons_[i] = FindAs<Noesis::FrameworkElement>(rootElement, buttonName);
-        commandIcons_[i] = FindAs<Noesis::Image>(rootElement, iconName);
-        commandLabels_[i] = FindAs<Noesis::TextBlock>(rootElement, textName);
-        commandDisabledBacks_[i] = FindAs<Noesis::Border>(rootElement, disabledName);
-        commandHoverHighlights_[i] = FindAs<Noesis::Border>(rootElement, hoverName);
-        commandPressedBorders_[i] = FindAs<Noesis::Border>(rootElement, pressedName);
-        commandActiveHighlights_[i] = FindAs<Noesis::Border>(rootElement, activeName);
-        commandCooldownOverlays_[i] = FindAs<Noesis::Border>(rootElement, cooldownName);
-        commandCooldownLabels_[i] = FindAs<Noesis::TextBlock>(rootElement, cooldownTextName);
-        commandNumberBacks_[i] = FindAs<Noesis::Border>(rootElement, numberBackName);
-        commandNumberLabels_[i] = FindAs<Noesis::TextBlock>(rootElement, numberName);
-        commandAutocastOverlays_[i] = FindAs<Noesis::Border>(rootElement, autocastName);
+        commandButtons_[i] = FindAs<Aero::FrameworkElement>(rootElement, buttonName);
+        commandIcons_[i] = FindAs<Aero::Image>(rootElement, iconName);
+        commandLabels_[i] = FindAs<Aero::TextBlock>(rootElement, textName);
+        commandDisabledBacks_[i] = FindAs<Aero::Border>(rootElement, disabledName);
+        commandHoverHighlights_[i] = FindAs<Aero::Border>(rootElement, hoverName);
+        commandPressedBorders_[i] = FindAs<Aero::Border>(rootElement, pressedName);
+        commandActiveHighlights_[i] = FindAs<Aero::Border>(rootElement, activeName);
+        commandCooldownOverlays_[i] = FindAs<Aero::Border>(rootElement, cooldownName);
+        commandCooldownLabels_[i] = FindAs<Aero::TextBlock>(rootElement, cooldownTextName);
+        commandNumberBacks_[i] = FindAs<Aero::Border>(rootElement, numberBackName);
+        commandNumberLabels_[i] = FindAs<Aero::TextBlock>(rootElement, numberName);
+        commandAutocastOverlays_[i] = FindAs<Aero::Border>(rootElement, autocastName);
     }
 
     for (int i = 0; i < 12; ++i) {
@@ -1924,13 +1925,13 @@ void NoesisHudHost::CacheElements() {
         std::snprintf(hpName, sizeof(hpName), "MultiSelectHp%d", i);
         std::snprintf(mpName, sizeof(mpName), "MultiSelectMp%d", i);
         std::snprintf(levelName, sizeof(levelName), "MultiSelectLevel%d", i);
-        multiSelectSlots_[i] = FindAs<Noesis::Border>(rootElement, slotName);
-        multiSelectColors_[i] = FindAs<Noesis::Border>(rootElement, colorName);
-        multiSelectFocusHighlights_[i] = FindAs<Noesis::Border>(rootElement, focusName);
-        multiSelectHeroGlows_[i] = FindAs<Noesis::Border>(rootElement, heroGlowName);
-        multiSelectHpFills_[i] = FindAs<Noesis::Border>(rootElement, hpName);
-        multiSelectMpFills_[i] = FindAs<Noesis::Border>(rootElement, mpName);
-        multiSelectLevelLabels_[i] = FindAs<Noesis::TextBlock>(rootElement, levelName);
+        multiSelectSlots_[i] = FindAs<Aero::Border>(rootElement, slotName);
+        multiSelectColors_[i] = FindAs<Aero::Border>(rootElement, colorName);
+        multiSelectFocusHighlights_[i] = FindAs<Aero::Border>(rootElement, focusName);
+        multiSelectHeroGlows_[i] = FindAs<Aero::Border>(rootElement, heroGlowName);
+        multiSelectHpFills_[i] = FindAs<Aero::Border>(rootElement, hpName);
+        multiSelectMpFills_[i] = FindAs<Aero::Border>(rootElement, mpName);
+        multiSelectLevelLabels_[i] = FindAs<Aero::TextBlock>(rootElement, levelName);
     }
 
     for (int i = 0; i < 5; ++i) {
@@ -1940,13 +1941,13 @@ void NoesisHudHost::CacheElements() {
         std::snprintf(slotName, sizeof(slotName), "QueueSlot%d", i);
         std::snprintf(iconName, sizeof(iconName), "QueueIcon%d", i);
         std::snprintf(textName, sizeof(textName), "QueueText%d", i);
-        queueSlots_[i] = FindAs<Noesis::Border>(rootElement, slotName);
-        queueIcons_[i] = FindAs<Noesis::Image>(rootElement, iconName);
-        queueLabels_[i] = FindAs<Noesis::TextBlock>(rootElement, textName);
+        queueSlots_[i] = FindAs<Aero::Border>(rootElement, slotName);
+        queueIcons_[i] = FindAs<Aero::Image>(rootElement, iconName);
+        queueLabels_[i] = FindAs<Aero::TextBlock>(rootElement, textName);
     }
-    queueBackdrop_ = FindAs<Noesis::Border>(rootElement, "QueueBackdrop");
-    queueProgressTrack_ = FindAs<Noesis::FrameworkElement>(rootElement, "QueueProgressTrack");
-    queueProgressFill_ = FindAs<Noesis::Border>(rootElement, "QueueProgressFill");
+    queueBackdrop_ = FindAs<Aero::Border>(rootElement, "QueueBackdrop");
+    queueProgressTrack_ = FindAs<Aero::FrameworkElement>(rootElement, "QueueProgressTrack");
+    queueProgressFill_ = FindAs<Aero::Border>(rootElement, "QueueProgressFill");
 
     for (int i = 0; i < 6; ++i) {
         char slotName[32];
@@ -1959,39 +1960,39 @@ void NoesisHudHost::CacheElements() {
         std::snprintf(iconName, sizeof(iconName), "InventoryIcon%d", i);
         std::snprintf(textName, sizeof(textName), "InventoryText%d", i);
         std::snprintf(chargesName, sizeof(chargesName), "InventoryCharges%d", i);
-        inventorySlots_[i] = FindAs<Noesis::Border>(rootElement, slotName);
-        inventoryDisabledBacks_[i] = FindAs<Noesis::Border>(rootElement, chargesBackName);
-        inventoryIcons_[i] = FindAs<Noesis::Image>(rootElement, iconName);
-        inventoryLabels_[i] = FindAs<Noesis::TextBlock>(rootElement, textName);
+        inventorySlots_[i] = FindAs<Aero::Border>(rootElement, slotName);
+        inventoryDisabledBacks_[i] = FindAs<Aero::Border>(rootElement, chargesBackName);
+        inventoryIcons_[i] = FindAs<Aero::Image>(rootElement, iconName);
+        inventoryLabels_[i] = FindAs<Aero::TextBlock>(rootElement, textName);
         std::snprintf(chargesBackName, sizeof(chargesBackName), "InventoryChargesBack%d", i);
-        inventoryChargeBacks_[i] = FindAs<Noesis::Border>(rootElement, chargesBackName);
-        inventoryChargeLabels_[i] = FindAs<Noesis::TextBlock>(rootElement, chargesName);
+        inventoryChargeBacks_[i] = FindAs<Aero::Border>(rootElement, chargesBackName);
+        inventoryChargeLabels_[i] = FindAs<Aero::TextBlock>(rootElement, chargesName);
     }
 
-    gameMenuRoot_ = FindAs<Noesis::FrameworkElement>(rootElement, "SmashEscMenu");
-    gameMenuBackdrop_ = FindAs<Noesis::FrameworkElement>(rootElement, "EscMenuBackdrop");
-    gameMenuMainPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuMainPanel");
-    gameMenuEndGamePanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuEndGamePanel");
-    gameMenuConfirmQuitPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuConfirmQuitPanel");
-    gameMenuSaveGamePanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuSaveGamePanel");
-    gameMenuLoadGamePanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuLoadGamePanel");
-    gameMenuOverwriteConfirmPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuOverwriteConfirmPanel");
-    gameMenuDeleteConfirmPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuDeleteConfirmPanel");
-    gameMenuHelpPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuHelpPanel");
-    gameMenuTipsPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuTipsPanel");
-    gameMenuOptionsPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuOptionsPanel");
-    gameMenuOptionsListPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuOptionsListPanel");
-    gameMenuGameplayPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuGameplayPanel");
-    gameMenuVideoPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuVideoPanel");
-    gameMenuSoundPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuSoundPanel");
-    gameMenuNetworkPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuNetworkPanel");
-    gameMenuOptionsBottomPanel_ = FindAs<Noesis::FrameworkElement>(rootElement, "GameMenuOptionsBottomPanel");
-    gameMenuPauseText_ = FindAs<Noesis::TextBlock>(rootElement, "GameMenuPauseText");
+    gameMenuRoot_ = FindAs<Aero::FrameworkElement>(rootElement, "SmashEscMenu");
+    gameMenuBackdrop_ = FindAs<Aero::FrameworkElement>(rootElement, "EscMenuBackdrop");
+    gameMenuMainPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuMainPanel");
+    gameMenuEndGamePanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuEndGamePanel");
+    gameMenuConfirmQuitPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuConfirmQuitPanel");
+    gameMenuSaveGamePanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuSaveGamePanel");
+    gameMenuLoadGamePanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuLoadGamePanel");
+    gameMenuOverwriteConfirmPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuOverwriteConfirmPanel");
+    gameMenuDeleteConfirmPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuDeleteConfirmPanel");
+    gameMenuHelpPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuHelpPanel");
+    gameMenuTipsPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuTipsPanel");
+    gameMenuOptionsPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuOptionsPanel");
+    gameMenuOptionsListPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuOptionsListPanel");
+    gameMenuGameplayPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuGameplayPanel");
+    gameMenuVideoPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuVideoPanel");
+    gameMenuSoundPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuSoundPanel");
+    gameMenuNetworkPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuNetworkPanel");
+    gameMenuOptionsBottomPanel_ = FindAs<Aero::FrameworkElement>(rootElement, "GameMenuOptionsBottomPanel");
+    gameMenuPauseText_ = FindAs<Aero::TextBlock>(rootElement, "GameMenuPauseText");
 
     static_assert(kGameMenuActionElementNameCount == kGameMenuActionCount);
     for (int i = 0; i < kGameMenuActionCount; ++i) {
         const char* elementName = GameMenuActionElementName(i);
-        gameMenuButtons_[i] = FindAs<Noesis::FrameworkElement>(rootElement, elementName);
+        gameMenuButtons_[i] = FindAs<Aero::FrameworkElement>(rootElement, elementName);
         gameMenuButtonHighlights_[i] = nullptr;
         gameMenuButtonPressed_[i] = nullptr;
         gameMenuOptionDisabled_[i] = nullptr;
@@ -2004,40 +2005,40 @@ void NoesisHudHost::CacheElements() {
         char name[96];
         if (i <= kGameMenuTipsOK) {
             std::snprintf(name, sizeof(name), "GameMenuButtonHover%s", kGameMenuButtonSuffixes[i]);
-            gameMenuButtonHighlights_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuButtonHighlights_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
             std::snprintf(name, sizeof(name), "GameMenuButtonPressed%s", kGameMenuButtonSuffixes[i]);
-            gameMenuButtonPressed_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuButtonPressed_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
         } else if (IsGameMenuOptionCheckboxAction(i) || IsGameMenuOptionRadioAction(i)) {
             std::snprintf(name, sizeof(name), "%sPressed", elementName);
-            gameMenuButtonPressed_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuButtonPressed_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
         }
 
         if (IsGameMenuOptionCheckboxAction(i)) {
             std::snprintf(name, sizeof(name), "%sDisabled", elementName);
-            gameMenuOptionDisabled_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionDisabled_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
             std::snprintf(name, sizeof(name), "%sCheck", elementName);
-            gameMenuOptionChecked_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionChecked_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
             std::snprintf(name, sizeof(name), "%sDisabledCheck", elementName);
-            gameMenuOptionDisabledChecked_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionDisabledChecked_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
         } else if (IsGameMenuOptionRadioAction(i)) {
             std::snprintf(name, sizeof(name), "%sDisabled", elementName);
-            gameMenuOptionDisabled_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionDisabled_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
             std::snprintf(name, sizeof(name), "%sSelected", elementName);
-            gameMenuOptionChecked_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionChecked_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
             std::snprintf(name, sizeof(name), "%sDisabledSelected", elementName);
-            gameMenuOptionDisabledChecked_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionDisabledChecked_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
         } else if (IsGameMenuOptionSliderAction(i)) {
             std::snprintf(name, sizeof(name), "%sDisabledBorder", elementName);
-            gameMenuOptionDisabled_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionDisabled_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
             std::snprintf(name, sizeof(name), "%sThumb", elementName);
-            gameMenuOptionSliderThumbs_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionSliderThumbs_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
             std::snprintf(name, sizeof(name), "%sDisabledThumb", elementName);
-            gameMenuOptionDisabledChecked_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionDisabledChecked_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
         } else if (IsGameMenuOptionPopupAction(i)) {
             std::snprintf(name, sizeof(name), "%sValue", elementName);
-            gameMenuOptionValueTexts_[i] = FindAs<Noesis::TextBlock>(rootElement, name);
+            gameMenuOptionValueTexts_[i] = FindAs<Aero::TextBlock>(rootElement, name);
             std::snprintf(name, sizeof(name), "%sMenu", elementName);
-            gameMenuOptionPopupMenus_[i] = FindAs<Noesis::FrameworkElement>(rootElement, name);
+            gameMenuOptionPopupMenus_[i] = FindAs<Aero::FrameworkElement>(rootElement, name);
         }
     }
 
@@ -2307,12 +2308,12 @@ void NoesisHudHost::LogMissingElements() const {
     }
 
     if (missing.empty()) {
-        HudDiagLog("NoesisHudHost: all named HUD elements found");
+        HudDiagLog("AeroHudHost: all named HUD elements found");
         return;
     }
 
     std::ostringstream ss;
-    ss << "NoesisHudHost: missing " << missing.size() << " named elements:";
+    ss << "AeroHudHost: missing " << missing.size() << " named elements:";
     const size_t limit = std::min<size_t>(missing.size(), 48);
     for (size_t i = 0; i < limit; ++i) {
         ss << ' ' << missing[i];
@@ -2349,7 +2350,7 @@ void NoesisHudHost::CacheRects() {
         gameMenuButtonRects_[i] = GetElementRect(gameMenuButtons_[i]);
     }
     if (glueMenuControl_) {
-        glueMenuControl_->CacheRects([this](Noesis::FrameworkElement* element) {
+        glueMenuControl_->CacheRects([this](Aero::FrameworkElement* element) {
             return GetElementRect(element);
         });
     }
@@ -2357,17 +2358,17 @@ void NoesisHudHost::CacheRects() {
     if (!layoutLogged_ && root_) {
         layoutLogged_ = true;
         HudDiagLog(
-            "NoesisHudHost layout: physical=%dx%d logical=%dx%d scale=%.2f root=%.1fx%.1f minimap=%.1f,%.1f %.1fx%.1f",
+            "AeroHudHost layout: physical=%dx%d logical=%dx%d scale=%.2f root=%.1fx%.1f minimap=%.1f,%.1f %.1fx%.1f",
             physicalWidth_, physicalHeight_, width_, height_, dpiScale_,
             (float)root_->GetActualWidth(), (float)root_->GetActualHeight(),
             minimapRect_.x, minimapRect_.y, minimapRect_.w, minimapRect_.h);
     }
 }
 
-ScreenRect NoesisHudHost::GetElementRect(Noesis::FrameworkElement* element) const {
+ScreenRect NoesisHudHost::GetElementRect(Aero::FrameworkElement* element) const {
     if (!element) return {};
-    Noesis::Point p0 = element->PointToScreen(Noesis::Point(0.0f, 0.0f));
-    Noesis::Point p1 = element->PointToScreen(Noesis::Point(element->GetActualWidth(), element->GetActualHeight()));
+    Aero::Point p0 = element->PointToScreen(Aero::Point(0.0f, 0.0f));
+    Aero::Point p1 = element->PointToScreen(Aero::Point(element->GetActualWidth(), element->GetActualHeight()));
     const float scale = dpiScale_ > 0.0f ? dpiScale_ : 1.0f;
     if (!std::isfinite(p0.x) || !std::isfinite(p0.y) || !std::isfinite(p1.x) || !std::isfinite(p1.y)) {
         return {};
@@ -2474,7 +2475,7 @@ void NoesisHudHost::ApplyState() {
         return text;
     };
     if (heroStatsPanel_) {
-        heroStatsPanel_->SetVisibility(heroVisible_ ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        heroStatsPanel_->SetVisibility(heroVisible_ ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (heroStrengthText_) {
         heroStrengthText_->SetText(heroVisible_ ? statText(heroStrBase_, heroStrBonus_).c_str() : "");
@@ -2487,10 +2488,10 @@ void NoesisHudHost::ApplyState() {
     }
     if (heroStatsText_) {
         heroStatsText_->SetText("");
-        heroStatsText_->SetVisibility(Noesis::Visibility_Collapsed);
+        heroStatsText_->SetVisibility(Aero::Visibility_Collapsed);
     }
     if (infoStatsPanel_) {
-        infoStatsPanel_->SetVisibility(infoStats_.visible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        infoStatsPanel_->SetVisibility(infoStats_.visible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     const char* attackIconKeys[] = {
         "DamageUnknown", "DamageNormal", "DamageMelee", "DamagePierce",
@@ -2501,7 +2502,7 @@ void NoesisHudHost::ApplyState() {
     for (int i = 0; i < (int)infoAttackIcons_.size(); ++i) {
         if (infoAttackIcons_[i]) {
             const bool show = infoStats_.visible && infoStats_.attackIconKey == attackIconKeys[i];
-            infoAttackIcons_[i]->SetVisibility(show ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            infoAttackIcons_[i]->SetVisibility(show ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
     }
     const char* armorIconKeys[] = {
@@ -2513,7 +2514,7 @@ void NoesisHudHost::ApplyState() {
     for (int i = 0; i < (int)infoArmorIcons_.size(); ++i) {
         if (infoArmorIcons_[i]) {
             const bool show = infoStats_.visible && infoStats_.armorIconKey == armorIconKeys[i];
-            infoArmorIcons_[i]->SetVisibility(show ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            infoArmorIcons_[i]->SetVisibility(show ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
     }
     if (infoAttackText_) {
@@ -2529,7 +2530,7 @@ void NoesisHudHost::ApplyState() {
         infoFoodText_->SetText(infoStats_.visible ? infoStats_.foodText.c_str() : "");
     }
     if (buffStatusBar_) {
-        buffStatusBar_->SetVisibility(buffCount_ > 0 ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        buffStatusBar_->SetVisibility(buffCount_ > 0 ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (buffStatusBarLabel_) {
         buffStatusBarLabel_->SetText(buffCount_ > 0 ? "STATUS" : "");
@@ -2538,7 +2539,7 @@ void NoesisHudHost::ApplyState() {
         const HudBuffItem& buff = buffStates_[i];
         const bool visible = i < buffCount_ && buff.visible;
         if (buffSlots_[i]) {
-            buffSlots_[i]->SetVisibility(visible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            buffSlots_[i]->SetVisibility(visible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
             if (visible) {
                 buffSlots_[i]->SetBackground(MakeBrushFromArgb(buff.positive ? 0xCC22372A : 0xCC3B2020).GetPtr());
             }
@@ -2550,19 +2551,19 @@ void NoesisHudHost::ApplyState() {
                 if (iconUri.empty()) {
                     buffIcons_[i]->SetSource(nullptr);
                 } else {
-                    buffIcons_[i]->SetSource(Noesis::MakePtr<Noesis::BitmapImage>(Noesis::Uri(iconUri.c_str())));
+                    buffIcons_[i]->SetSource(Aero::MakePtr<Aero::BitmapImage>(Aero::Uri(iconUri.c_str())));
                 }
             }
             buffIcons_[i]->SetVisibility(visible && !buff.iconUri.empty()
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (buffLabels_[i]) {
             const bool showLabel = visible && buff.iconUri.empty();
             std::string label = buff.name;
             if (label.size() > 4) label.resize(4);
             buffLabels_[i]->SetText(showLabel ? label.c_str() : "");
-            buffLabels_[i]->SetVisibility(showLabel ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            buffLabels_[i]->SetVisibility(showLabel ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (buffDurations_[i]) {
             const bool showDuration = visible && buff.duration > 0.0f && buff.remaining > 0.0f;
@@ -2571,7 +2572,7 @@ void NoesisHudHost::ApplyState() {
         }
         const bool showStack = visible && buff.stackCount > 1;
         if (buffStackBacks_[i]) {
-            buffStackBacks_[i]->SetVisibility(showStack ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            buffStackBacks_[i]->SetVisibility(showStack ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (buffStacks_[i]) {
             buffStacks_[i]->SetText(showStack ? std::to_string(buff.stackCount).c_str() : "");
@@ -2584,12 +2585,12 @@ void NoesisHudHost::ApplyState() {
             if (portraitIconUri_.empty()) {
                 portraitImage_->SetSource(nullptr);
             } else {
-                portraitImage_->SetSource(Noesis::MakePtr<Noesis::BitmapImage>(Noesis::Uri(portraitIconUri_.c_str())));
+                portraitImage_->SetSource(Aero::MakePtr<Aero::BitmapImage>(Aero::Uri(portraitIconUri_.c_str())));
             }
         }
         portraitImage_->SetVisibility(portraitIconUri_.empty()
-            ? Noesis::Visibility_Collapsed
-            : Noesis::Visibility_Visible);
+            ? Aero::Visibility_Collapsed
+            : Aero::Visibility_Visible);
     }
 
     if (tooltipText_) tooltipText_->SetText(tooltipValue_.c_str());
@@ -2602,26 +2603,26 @@ void NoesisHudHost::ApplyState() {
             tooltipCostTexts_[i]->SetText(showCost ? std::to_string(tooltipCosts[i]).c_str() : "");
         }
         if (tooltipCostGroups_[i]) {
-            tooltipCostGroups_[i]->SetVisibility(showCost ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            tooltipCostGroups_[i]->SetVisibility(showCost ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
     }
     if (tooltipResourceRow_) {
-        tooltipResourceRow_->SetVisibility(anyTooltipCost ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        tooltipResourceRow_->SetVisibility(anyTooltipCost ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (tooltipPanel_) {
-        tooltipPanel_->SetVisibility(tooltipVisible_ ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        tooltipPanel_->SetVisibility(tooltipVisible_ ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         const float xScale = width_ > 0 ? (float)width_ / (float)kHudLayoutWidth : 1.0f;
         const float yScale = height_ > 0 ? (float)height_ / (float)kHudLayoutHeight : 1.0f;
         const float vx = xScale > 0.0f ? tooltipX_ / xScale : tooltipX_;
         const float vy = yScale > 0.0f ? tooltipY_ / yScale : tooltipY_;
         float tx = std::clamp(vx + 12.0f, 12.0f, (float)kHudLayoutWidth - 280.0f);
         float ty = std::clamp(vy - 86.0f, 12.0f, (float)kHudLayoutHeight - 120.0f);
-        Noesis::Canvas::SetLeft(tooltipPanel_, tx);
-        Noesis::Canvas::SetTop(tooltipPanel_, ty);
+        Aero::Canvas::SetLeft(tooltipPanel_, tx);
+        Aero::Canvas::SetTop(tooltipPanel_, ty);
     }
 
     if (chatPanel_) {
-        chatPanel_->SetVisibility(chatOpen_ ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        chatPanel_->SetVisibility(chatOpen_ ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (chatLogText_) {
         chatLogText_->SetText(chatJoinedText_.c_str());
@@ -2638,7 +2639,7 @@ void NoesisHudHost::ApplyState() {
     }
 
     if (gameMenuRoot_) {
-        gameMenuRoot_->SetVisibility(gameMenuOpen_ ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        gameMenuRoot_->SetVisibility(gameMenuOpen_ ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (gameMenuBackdrop_) {
         float backdropW = 553.0f;
@@ -2668,55 +2669,55 @@ void NoesisHudHost::ApplyState() {
         }
         gameMenuBackdrop_->SetWidth(backdropW);
         gameMenuBackdrop_->SetHeight(backdropH);
-        gameMenuBackdrop_->SetVisibility(gameMenuOpen_ ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        gameMenuBackdrop_->SetVisibility(gameMenuOpen_ ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (gameMenuMainPanel_) {
         gameMenuMainPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::Main
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuPauseText_) {
         gameMenuPauseText_->SetText(gameMenuPaused_ ? "RESUME GAME" : "PAUSE GAME");
     }
     if (gameMenuEndGamePanel_) {
         gameMenuEndGamePanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::EndGame
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuConfirmQuitPanel_) {
         gameMenuConfirmQuitPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::ConfirmQuit
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuSaveGamePanel_) {
         gameMenuSaveGamePanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::SaveGame
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuLoadGamePanel_) {
         gameMenuLoadGamePanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::LoadGame
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuOverwriteConfirmPanel_) {
         gameMenuOverwriteConfirmPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::SaveOverwriteConfirm
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuDeleteConfirmPanel_) {
         gameMenuDeleteConfirmPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::SaveDeleteConfirm
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuHelpPanel_) {
         gameMenuHelpPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::Help
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuTipsPanel_) {
         gameMenuTipsPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::Tips
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     const bool optionsPanelOpen = gameMenuOpen_ && (
         gameMenuPanel_ == GameMenuPanel::Options ||
@@ -2726,33 +2727,33 @@ void NoesisHudHost::ApplyState() {
         gameMenuPanel_ == GameMenuPanel::OptionsNetwork);
     if (gameMenuOptionsPanel_) {
         gameMenuOptionsPanel_->SetVisibility(optionsPanelOpen
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuOptionsListPanel_) {
         gameMenuOptionsListPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::Options
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuGameplayPanel_) {
         gameMenuGameplayPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::OptionsGameplay
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuVideoPanel_) {
         gameMenuVideoPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::OptionsVideo
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuSoundPanel_) {
         gameMenuSoundPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::OptionsSound
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuNetworkPanel_) {
         gameMenuNetworkPanel_->SetVisibility(gameMenuOpen_ && gameMenuPanel_ == GameMenuPanel::OptionsNetwork
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     if (gameMenuOptionsBottomPanel_) {
         const bool showOptionsBottom = gameMenuOpen_ && (
@@ -2761,22 +2762,22 @@ void NoesisHudHost::ApplyState() {
             gameMenuPanel_ == GameMenuPanel::OptionsSound ||
             gameMenuPanel_ == GameMenuPanel::OptionsNetwork);
         gameMenuOptionsBottomPanel_->SetVisibility(showOptionsBottom
-            ? Noesis::Visibility_Visible
-            : Noesis::Visibility_Collapsed);
+            ? Aero::Visibility_Visible
+            : Aero::Visibility_Collapsed);
     }
     for (int i = 0; i < kGameMenuActionCount; ++i) {
         const bool enabled = IsGameMenuActionEnabled(i);
         if (gameMenuButtonHighlights_[i]) {
             gameMenuButtonHighlights_[i]->SetVisibility(
                 gameMenuOpen_ && enabled && hoveredGameMenuAction_ == i && pressedGameMenuAction_ != i
-                    ? Noesis::Visibility_Visible
-                    : Noesis::Visibility_Collapsed);
+                    ? Aero::Visibility_Visible
+                    : Aero::Visibility_Collapsed);
         }
         if (gameMenuButtonPressed_[i]) {
             gameMenuButtonPressed_[i]->SetVisibility(
                 gameMenuOpen_ && enabled && pressedGameMenuAction_ == i
-                    ? Noesis::Visibility_Visible
-                    : Noesis::Visibility_Collapsed);
+                    ? Aero::Visibility_Visible
+                    : Aero::Visibility_Collapsed);
         }
 
         if (i <= kGameMenuTipsOK) continue;
@@ -2786,29 +2787,29 @@ void NoesisHudHost::ApplyState() {
         const bool showOption = optionsPanelOpen;
         if (gameMenuOptionDisabled_[i]) {
             gameMenuOptionDisabled_[i]->SetVisibility(showOption && !enabled
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (gameMenuOptionChecked_[i]) {
             gameMenuOptionChecked_[i]->SetVisibility(showOption && enabled && checked
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (gameMenuOptionDisabledChecked_[i]) {
             const bool showDisabledLayer = isSlider ? !enabled : (!enabled && checked);
             gameMenuOptionDisabledChecked_[i]->SetVisibility(showOption && showDisabledLayer
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (gameMenuOptionSliderThumbs_[i]) {
             gameMenuOptionSliderThumbs_[i]->SetVisibility(showOption && enabled
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (gameMenuOptionPopupMenus_[i]) {
             gameMenuOptionPopupMenus_[i]->SetVisibility(showOption && gameMenuOptionPopupOpenAction_ == i
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (gameMenuOptionValueTexts_[i]) {
             gameMenuOptionValueTexts_[i]->SetText(GameMenuOptionCycleText(i, gameMenuOptionCycleIndex_[i]));
@@ -2820,10 +2821,10 @@ void NoesisHudHost::ApplyState() {
         const bool pressed = enabled && pressedUpperButtonIndex_ == i;
         const bool hovered = enabled && hoveredUpperButtonIndex_ == i;
         if (upperButtonPushed_[i]) {
-            upperButtonPushed_[i]->SetVisibility(pressed ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            upperButtonPushed_[i]->SetVisibility(pressed ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (upperButtonHighlights_[i]) {
-            upperButtonHighlights_[i]->SetVisibility(hovered && !pressed ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            upperButtonHighlights_[i]->SetVisibility(hovered && !pressed ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (upperButtonLabels_[i]) {
             upperButtonLabels_[i]->SetOpacity(enabled ? 1.0f : 0.45f);
@@ -2837,33 +2838,33 @@ void NoesisHudHost::ApplyState() {
         const bool off = (i == 4 && mode == 1) || mode == 2;
         if (minimapButtonPushed_[i]) {
             minimapButtonPushed_[i]->SetVisibility(pressed && !inactive && !off
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (minimapButtonDisabled_[i]) {
-            minimapButtonDisabled_[i]->SetVisibility(Noesis::Visibility_Collapsed);
+            minimapButtonDisabled_[i]->SetVisibility(Aero::Visibility_Collapsed);
         }
         if (minimapButtonInactive_[i]) {
-            minimapButtonInactive_[i]->SetVisibility(inactive ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            minimapButtonInactive_[i]->SetVisibility(inactive ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (minimapButtonInactivePushed_[i]) {
             minimapButtonInactivePushed_[i]->SetVisibility(pressed && inactive
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (minimapButtonInactiveDisabled_[i]) {
-            minimapButtonInactiveDisabled_[i]->SetVisibility(Noesis::Visibility_Collapsed);
+            minimapButtonInactiveDisabled_[i]->SetVisibility(Aero::Visibility_Collapsed);
         }
         if (minimapButtonOff_[i]) {
-            minimapButtonOff_[i]->SetVisibility(off ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            minimapButtonOff_[i]->SetVisibility(off ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (minimapButtonOffPushed_[i]) {
             minimapButtonOffPushed_[i]->SetVisibility(pressed && off
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (minimapButtonOffDisabled_[i]) {
-            minimapButtonOffDisabled_[i]->SetVisibility(Noesis::Visibility_Collapsed);
+            minimapButtonOffDisabled_[i]->SetVisibility(Aero::Visibility_Collapsed);
         }
     }
 
@@ -2872,8 +2873,8 @@ void NoesisHudHost::ApplyState() {
         if (commandLabels_[i]) {
             commandLabels_[i]->SetText(commandStates_[i].label.c_str());
             commandLabels_[i]->SetVisibility(commandVisible && !commandStates_[i].label.empty()
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (commandIcons_[i]) {
             const std::string& iconUri = commandStates_[i].iconUri;
@@ -2882,36 +2883,36 @@ void NoesisHudHost::ApplyState() {
                 if (iconUri.empty()) {
                     commandIcons_[i]->SetSource(nullptr);
                 } else {
-                    commandIcons_[i]->SetSource(Noesis::MakePtr<Noesis::BitmapImage>(Noesis::Uri(iconUri.c_str())));
+                    commandIcons_[i]->SetSource(Aero::MakePtr<Aero::BitmapImage>(Aero::Uri(iconUri.c_str())));
                 }
             }
             commandIcons_[i]->SetOpacity(commandStates_[i].enabled ? 1.0f : 0.42f);
             commandIcons_[i]->SetVisibility(commandVisible && !iconUri.empty()
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (commandButtons_[i]) {
             commandButtons_[i]->SetVisibility(commandVisible
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
             commandButtons_[i]->SetOpacity(1.0f);
         }
         if (commandDisabledBacks_[i]) {
             const bool showDisabled = commandVisible && !commandStates_[i].enabled;
-            commandDisabledBacks_[i]->SetVisibility(showDisabled ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            commandDisabledBacks_[i]->SetVisibility(showDisabled ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (commandHoverHighlights_[i]) {
             const bool showHover = commandVisible && commandStates_[i].enabled && hoveredCommandIndex_ == i;
-            commandHoverHighlights_[i]->SetVisibility(showHover ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            commandHoverHighlights_[i]->SetVisibility(showHover ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (commandPressedBorders_[i]) {
             const bool showPressed = commandVisible && commandStates_[i].enabled && pressedCommandIndex_ == i;
-            commandPressedBorders_[i]->SetVisibility(showPressed ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            commandPressedBorders_[i]->SetVisibility(showPressed ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (commandActiveHighlights_[i]) {
             commandActiveHighlights_[i]->SetVisibility(commandVisible && commandStates_[i].active
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         const bool showCooldown = commandVisible
             && commandStates_[i].cooldownRemaining > 0.0f
@@ -2925,7 +2926,7 @@ void NoesisHudHost::ApplyState() {
                 buttonHeight = 50.0f;
             }
             commandCooldownOverlays_[i]->SetHeight(buttonHeight * cooldownRatio);
-            commandCooldownOverlays_[i]->SetVisibility(showCooldown ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            commandCooldownOverlays_[i]->SetVisibility(showCooldown ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (commandCooldownLabels_[i]) {
             if (showCooldown) {
@@ -2934,18 +2935,18 @@ void NoesisHudHost::ApplyState() {
             } else {
                 commandCooldownLabels_[i]->SetText("");
             }
-            commandCooldownLabels_[i]->SetVisibility(showCooldown ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            commandCooldownLabels_[i]->SetVisibility(showCooldown ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         const bool showNumber = commandVisible && commandStates_[i].numberOverlay >= 0;
         if (commandNumberLabels_[i]) {
             commandNumberLabels_[i]->SetText(showNumber ? std::to_string(commandStates_[i].numberOverlay).c_str() : "");
         }
         if (commandNumberBacks_[i]) {
-            commandNumberBacks_[i]->SetVisibility(showNumber ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            commandNumberBacks_[i]->SetVisibility(showNumber ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (commandAutocastOverlays_[i]) {
             const bool showAutocast = commandVisible && commandStates_[i].autocastOrderId != 0;
-            commandAutocastOverlays_[i]->SetVisibility(showAutocast ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            commandAutocastOverlays_[i]->SetVisibility(showAutocast ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
             commandAutocastOverlays_[i]->SetOpacity(commandStates_[i].autocastActive ? 1.0f : 0.55f);
         }
     }
@@ -2955,14 +2956,14 @@ void NoesisHudHost::ApplyState() {
         const MultiSelectUnitInfo& unit = multiSelectStates_[i];
         const bool focused = visible && unit.handleId == multiSelectPrimaryHandle_;
         if (multiSelectSlots_[i]) {
-            multiSelectSlots_[i]->SetVisibility(visible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            multiSelectSlots_[i]->SetVisibility(visible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
             multiSelectSlots_[i]->SetOpacity(focused ? 1.0f : 0.72f);
         }
         if (multiSelectFocusHighlights_[i]) {
-            multiSelectFocusHighlights_[i]->SetVisibility(focused ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            multiSelectFocusHighlights_[i]->SetVisibility(focused ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (multiSelectHeroGlows_[i]) {
-            multiSelectHeroGlows_[i]->SetVisibility(visible && unit.isHero ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            multiSelectHeroGlows_[i]->SetVisibility(visible && unit.isHero ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
             multiSelectHeroGlows_[i]->SetOpacity(focused ? 1.0f : 0.68f);
         }
         if (!visible) continue;
@@ -2983,14 +2984,14 @@ void NoesisHudHost::ApplyState() {
         }
         if (multiSelectLevelLabels_[i]) {
             multiSelectLevelLabels_[i]->SetText(unit.isHero ? std::to_string(std::max(1, unit.level)).c_str() : "");
-            multiSelectLevelLabels_[i]->SetVisibility(unit.isHero ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            multiSelectLevelLabels_[i]->SetVisibility(unit.isHero ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
     }
 
     for (int i = 0; i < 5; ++i) {
         const HudQueueItem& item = queueStates_[i];
         if (queueSlots_[i]) {
-            queueSlots_[i]->SetVisibility(item.visible ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            queueSlots_[i]->SetVisibility(item.visible ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
             queueSlots_[i]->SetOpacity(i == 0 ? 1.0f : 0.78f);
         }
         if (queueIcons_[i]) {
@@ -3000,17 +3001,17 @@ void NoesisHudHost::ApplyState() {
                 if (iconUri.empty()) {
                     queueIcons_[i]->SetSource(nullptr);
                 } else {
-                    queueIcons_[i]->SetSource(Noesis::MakePtr<Noesis::BitmapImage>(Noesis::Uri(iconUri.c_str())));
+                    queueIcons_[i]->SetSource(Aero::MakePtr<Aero::BitmapImage>(Aero::Uri(iconUri.c_str())));
                 }
             }
             queueIcons_[i]->SetVisibility(item.visible && !item.iconUri.empty()
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         if (queueLabels_[i]) {
             const bool showLabel = item.visible && item.iconUri.empty();
             queueLabels_[i]->SetText(showLabel ? item.label.c_str() : "");
-            queueLabels_[i]->SetVisibility(showLabel ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            queueLabels_[i]->SetVisibility(showLabel ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
     }
     if (queueBackdrop_) {
@@ -3021,7 +3022,7 @@ void NoesisHudHost::ApplyState() {
                 break;
             }
         }
-        queueBackdrop_->SetVisibility(showQueueBackdrop ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        queueBackdrop_->SetVisibility(showQueueBackdrop ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
     if (queueProgressFill_) {
         const float trackWidth = queueProgressTrack_ ? (float)queueProgressTrack_->GetActualWidth() : 116.0f;
@@ -3029,10 +3030,10 @@ void NoesisHudHost::ApplyState() {
     }
 
     if (inventoryCover_) {
-        inventoryCover_->SetVisibility(inventoryAvailable_ ? Noesis::Visibility_Collapsed : Noesis::Visibility_Visible);
+        inventoryCover_->SetVisibility(inventoryAvailable_ ? Aero::Visibility_Collapsed : Aero::Visibility_Visible);
     }
     if (inventoryPanel_) {
-        inventoryPanel_->SetVisibility(inventoryAvailable_ ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+        inventoryPanel_->SetVisibility(inventoryAvailable_ ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
     }
 
     for (int i = 0; i < 6; ++i) {
@@ -3041,19 +3042,19 @@ void NoesisHudHost::ApplyState() {
         if (inventorySlots_[i]) {
             const double opacity = item.enabled ? 1.0 : 0.58;
             inventorySlots_[i]->SetOpacity(1.0);
-            inventorySlots_[i]->SetVisibility(showSlot ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            inventorySlots_[i]->SetVisibility(showSlot ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
             if (inventoryDisabledBacks_[i]) {
                 inventoryDisabledBacks_[i]->SetOpacity(opacity);
             }
         }
         if (inventoryDisabledBacks_[i]) {
             const bool disabled = showSlot && !item.enabled;
-            inventoryDisabledBacks_[i]->SetVisibility(disabled ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            inventoryDisabledBacks_[i]->SetVisibility(disabled ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (inventoryLabels_[i]) {
             const bool showLabel = showSlot && item.occupied && item.iconUri.empty() && !item.label.empty();
             inventoryLabels_[i]->SetText(showLabel ? item.label.c_str() : "");
-            inventoryLabels_[i]->SetVisibility(showLabel ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            inventoryLabels_[i]->SetVisibility(showLabel ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
         if (inventoryIcons_[i]) {
             const std::string& iconUri = item.iconUri;
@@ -3062,19 +3063,19 @@ void NoesisHudHost::ApplyState() {
                 if (iconUri.empty()) {
                     inventoryIcons_[i]->SetSource(nullptr);
                 } else {
-                    inventoryIcons_[i]->SetSource(Noesis::MakePtr<Noesis::BitmapImage>(Noesis::Uri(iconUri.c_str())));
+                    inventoryIcons_[i]->SetSource(Aero::MakePtr<Aero::BitmapImage>(Aero::Uri(iconUri.c_str())));
                 }
             }
             inventoryIcons_[i]->SetVisibility(showSlot && item.occupied && !iconUri.empty()
-                ? Noesis::Visibility_Visible
-                : Noesis::Visibility_Collapsed);
+                ? Aero::Visibility_Visible
+                : Aero::Visibility_Collapsed);
         }
         const bool showCharges = showSlot && item.occupied && item.charges > 1;
         if (inventoryChargeLabels_[i]) {
             inventoryChargeLabels_[i]->SetText(showCharges ? std::to_string(item.charges).c_str() : "");
         }
         if (inventoryChargeBacks_[i]) {
-            inventoryChargeBacks_[i]->SetVisibility(showCharges ? Noesis::Visibility_Visible : Noesis::Visibility_Collapsed);
+            inventoryChargeBacks_[i]->SetVisibility(showCharges ? Aero::Visibility_Visible : Aero::Visibility_Collapsed);
         }
     }
 }

@@ -568,12 +568,14 @@ void JassNatives::RegisterConfigNatives() {
     RegisterMathNatives();
     RegisterConversionNatives();
     RegisterRandomNatives();
+    RegisterGroupNatives();
     RegisterConfigPlayerNatives();
     std::cout << "JassNatives: registered config natives" << std::endl;
 }
 
 void JassNatives::RegisterCommonNatives() {
     RegisterHandleNatives();
+    RegisterConversionNatives();
     RegisterTimerNatives();
     RegisterGroupNatives();
     RegisterForceNatives();
@@ -783,7 +785,8 @@ void JassNatives::RegisterConversionNatives() {
         "ConvertDamageType", "ConvertWeaponType", "ConvertDefenseType",
         "ConvertArmorType", "ConvertOriginFrameType", "ConvertFramePointType",
         "ConvertTextureTileFlag", "ConvertCamDistanceSetting", "ConvertItemType",
-        "ConvertBuff", "ConvertEffectType", "ConvertUnitType", "ConvertHeroStat"
+        "ConvertBuff", "ConvertEffectType", "ConvertUnitType", "ConvertHeroStat",
+        "ConvertPlayerColor", "ConvertPlayerSlotState"
     };
     for (auto name : convertNames) vm_.RegisterNative(name, convertPassthrough);
 
@@ -2071,6 +2074,19 @@ void JassNatives::RegisterPlayerNatives() {
     });
     vm_.RegisterNative("GetPlayerName", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Str("Player"); });
     vm_.RegisterNative("SetPlayerName", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("GetPlayerController", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetPlayerSlotState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        const int playerId = ResolvePlayerId(data, args[0].intVal);
+        if (sim && sim->GetPlayer(playerId)) return JassValue::Int(1);
+        if (playerId >= 0 && playerId < (int)data->playerMapConfig.size() &&
+            data->playerMapConfig[playerId].slotActive) {
+            return JassValue::Int(1);
+        }
+        return JassValue::Int(0);
+    });
     vm_.RegisterNative("GetPlayerState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Int(0);
         int playerId = ResolvePlayerId(data, args[0].intVal);
@@ -3133,6 +3149,15 @@ void JassNatives::RegisterSoundNatives() {
         data->sounds[id] = s;
         return JassValue::Int(data->AllocHandle(JassHandleInfo::SOUND, id));
     });
+    vm_.RegisterNative("CreateMIDISound", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        auto s = std::make_shared<JassSound>();
+        if (!args.empty()) {
+            s->label = args[0].strVal;
+        }
+        int id = data->nextSoundId++;
+        data->sounds[id] = s;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::SOUND, id));
+    });
     vm_.RegisterNative("KillSoundWhenDone", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("SetSoundVolume", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
@@ -3430,6 +3455,7 @@ void JassNatives::RegisterCameraNatives() {
     vm_.RegisterNative("GetCameraBoundMinY", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Real(0); });
     vm_.RegisterNative("GetCameraBoundMaxX", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Real(0); });
     vm_.RegisterNative("GetCameraBoundMaxY", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Real(0); });
+    vm_.RegisterNative("GetCameraMargin", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Real(0); });
     vm_.RegisterNative("GetCameraField", [data = data_](const std::vector<JassValue>&) -> JassValue {
         return JassValue::Real(data->camGetField ? data->camGetField() : 0);
     });
@@ -3455,6 +3481,21 @@ void JassNatives::RegisterGameNatives() {
     vm_.RegisterNative("BJDebugMsg", [](const std::vector<JassValue>& args) -> JassValue {
         if (!args.empty()) std::cout << "[JASS] " << args[0].strVal << std::endl;
         return JassValue::Null();
+    });
+    vm_.RegisterNative("GetGameSpeed", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(2);
+    });
+    vm_.RegisterNative("GetGameTypeSelected", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("VersionGet", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(1);
+    });
+    vm_.RegisterNative("IsFogEnabled", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("IsFogMaskEnabled", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Bool(true);
     });
     vm_.RegisterNative("DisplayTextToPlayer", [](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() >= 4) std::cout << "[JASS->P" << args[0].intVal << "] " << args[3].strVal << std::endl;
@@ -3880,9 +3921,62 @@ void JassNatives::RegisterGameNatives() {
 void JassNatives::RegisterConfigPlayerNatives() {
     RegisterTimerNatives(); // maps use timers in config
 
+    vm_.RegisterNative("Player", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        const int playerId = std::max(0, std::min(23, args[0].intVal));
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::PLAYER, playerId));
+    });
+
+    vm_.RegisterNative("GetLocalPlayer", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::PLAYER, 0));
+    });
+
+    vm_.RegisterNative("GetPlayerId", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(-1);
+        return JassValue::Int(ResolvePlayerId(data, args[0].intVal));
+    });
+
+    vm_.RegisterNative("GetPlayerController", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(0);
+    });
+
+    vm_.RegisterNative("GetPlayerSlotState", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        const int playerId = ResolvePlayerId(data, args[0].intVal);
+        if (playerId >= 0 && playerId < (int)data->playerMapConfig.size() &&
+            data->playerMapConfig[playerId].slotActive) {
+            return JassValue::Int(1);
+        }
+        return JassValue::Int(0);
+    });
+
+    vm_.RegisterNative("GetGameSpeed", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(2);
+    });
+
+    vm_.RegisterNative("GetGameTypeSelected", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Bool(true);
+    });
+
+    vm_.RegisterNative("VersionGet", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(1);
+    });
+
+    vm_.RegisterNative("IsFogEnabled", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Bool(true);
+    });
+
+    vm_.RegisterNative("IsFogMaskEnabled", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Bool(true);
+    });
+
+    vm_.RegisterNative("GetCameraMargin", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Real(0.0f);
+    });
+
     vm_.RegisterNative("SetPlayerName", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
-        int p = args[0].intVal;
+        int p = ResolvePlayerId(data, args[0].intVal);
         if (p >= 0 && p < 24) {
             data->playerMapConfig[p].slotActive = true;
         }
@@ -3927,10 +4021,20 @@ void JassNatives::RegisterConfigPlayerNatives() {
 
     vm_.RegisterNative("SetPlayerStartLocation", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
-        int playerIdx = args[0].intVal;
+        int playerIdx = ResolvePlayerId(data, args[0].intVal);
         int locIdx = args[1].intVal;
         if (playerIdx >= 0 && playerIdx < 24) {
             data->playerMapConfig[playerIdx].startLocationIndex = locIdx;
+            data->playerMapConfig[playerIdx].slotActive = true;
+        }
+        return JassValue::Null();
+    });
+
+    vm_.RegisterNative("SetPlayerSlotAvailable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        const int playerIdx = ResolvePlayerId(data, args[0].intVal);
+        if (playerIdx >= 0 && playerIdx < (int)data->playerMapConfig.size()) {
+            data->playerMapConfig[playerIdx].slotActive = (args[1].intVal != 0);
         }
         return JassValue::Null();
     });

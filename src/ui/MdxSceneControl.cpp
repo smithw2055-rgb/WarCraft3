@@ -32,19 +32,19 @@ int TextureExtent(float value) {
     return std::max(1, (int)(value + 0.5f));
 }
 
-Noesis::Size FillOrFallback(const Noesis::Size& size) {
+Aero::Size FillOrFallback(const Aero::Size& size) {
     const bool finiteW = std::isfinite(size.width);
     const bool finiteH = std::isfinite(size.height);
     if (finiteW && finiteH) {
         return size;
     }
     if (finiteW) {
-        return Noesis::Size(size.width, 720.0f);
+        return Aero::Size(size.width, 720.0f);
     }
     if (finiteH) {
-        return Noesis::Size(1280.0f, size.height);
+        return Aero::Size(1280.0f, size.height);
     }
-    return Noesis::Size(1280.0f, 720.0f);
+    return Aero::Size(1280.0f, 720.0f);
 }
 
 } // namespace
@@ -71,27 +71,27 @@ void MdxSceneControl::RenderActiveScenes(float dt) {
 }
 
 const char* MdxSceneControl::GetSceneKey() const {
-    return GetValue<Noesis::String>(SceneKeyProperty).Str();
+    return GetValue<Aero::String>(SceneKeyProperty).Str();
 }
 
 void MdxSceneControl::SetSceneKey(const char* value) {
-    SetValue<Noesis::String>(SceneKeyProperty, value ? value : "");
+    SetValue<Aero::String>(SceneKeyProperty, value ? value : "");
 }
 
 const char* MdxSceneControl::GetModelPath() const {
-    return GetValue<Noesis::String>(ModelPathProperty).Str();
+    return GetValue<Aero::String>(ModelPathProperty).Str();
 }
 
 void MdxSceneControl::SetModelPath(const char* value) {
-    SetValue<Noesis::String>(ModelPathProperty, value ? value : "");
+    SetValue<Aero::String>(ModelPathProperty, value ? value : "");
 }
 
 const char* MdxSceneControl::GetSequence() const {
-    return GetValue<Noesis::String>(SequenceProperty).Str();
+    return GetValue<Aero::String>(SequenceProperty).Str();
 }
 
 void MdxSceneControl::SetSequence(const char* value) {
-    SetValue<Noesis::String>(SequenceProperty, value ? value : "");
+    SetValue<Aero::String>(SequenceProperty, value ? value : "");
 }
 
 bool MdxSceneControl::GetAutoPlay() const {
@@ -110,12 +110,12 @@ void MdxSceneControl::SetUseModelCamera(bool value) {
     SetValue<bool>(UseModelCameraProperty, value);
 }
 
-Noesis::Stretch MdxSceneControl::GetStretch() const {
-    return GetValue<Noesis::Stretch>(StretchProperty);
+Aero::Stretch MdxSceneControl::GetStretch() const {
+    return GetValue<Aero::Stretch>(StretchProperty);
 }
 
-void MdxSceneControl::SetStretch(Noesis::Stretch value) {
-    SetValue<Noesis::Stretch>(StretchProperty, value);
+void MdxSceneControl::SetStretch(Aero::Stretch value) {
+    SetValue<Aero::Stretch>(StretchProperty, value);
 }
 
 bool MdxSceneControl::GetIsActive() const {
@@ -126,12 +126,12 @@ void MdxSceneControl::SetIsActive(bool value) {
     SetValue<bool>(IsActiveProperty, value);
 }
 
-void MdxSceneControl::OnRender(Noesis::DrawingContext* context) {
+void MdxSceneControl::OnRender(Aero::DrawingContext* context) {
     if (!GetIsActive() || context == nullptr) {
         return;
     }
 
-    const Noesis::Size renderSize((float)GetActualWidth(), (float)GetActualHeight());
+    const Aero::Size renderSize((float)GetActualWidth(), (float)GetActualHeight());
     if (renderSize.width <= 0.0f || renderSize.height <= 0.0f) {
         return;
     }
@@ -142,11 +142,11 @@ void MdxSceneControl::OnRender(Noesis::DrawingContext* context) {
     }
 }
 
-Noesis::Size MdxSceneControl::MeasureOverride(const Noesis::Size& availableSize) {
+Aero::Size MdxSceneControl::MeasureOverride(const Aero::Size& availableSize) {
     return FillOrFallback(availableSize);
 }
 
-Noesis::Size MdxSceneControl::ArrangeOverride(const Noesis::Size& finalSize) {
+Aero::Size MdxSceneControl::ArrangeOverride(const Aero::Size& finalSize) {
     return FillOrFallback(finalSize);
 }
 
@@ -183,7 +183,7 @@ void MdxSceneControl::EnsureTextureSource(int width, int height) {
     height = std::max(1, height);
     renderer_.Resize(width, height);
     if (textureSource_ == nullptr) {
-        textureSource_ = *new Noesis::DynamicTextureSource((uint32_t)width, (uint32_t)height,
+        textureSource_ = *new Aero::DynamicTextureSource((uint32_t)width, (uint32_t)height,
             &MdxSceneControl::TextureRenderCallback, this);
     } else if (textureWidth_ != width || textureHeight_ != height) {
         textureSource_->Resize((uint32_t)width, (uint32_t)height);
@@ -205,29 +205,29 @@ void MdxSceneControl::RenderFrame(float dt) {
     InvalidateVisual();
 }
 
-Noesis::Rect MdxSceneControl::ComputeImageRect(const Noesis::Size& arrangeSize) const {
+Aero::Rect MdxSceneControl::ComputeImageRect(const Aero::Size& arrangeSize) const {
     if (textureWidth_ <= 0 || textureHeight_ <= 0) {
-        return Noesis::Rect(arrangeSize);
+        return Aero::Rect(arrangeSize);
     }
 
-    const Noesis::Size contentSize((float)textureWidth_, (float)textureHeight_);
-    const Noesis::Point scale = Noesis::Viewbox::GetStretchScale(contentSize, arrangeSize,
-        GetStretch(), Noesis::StretchDirection_Both);
+    const Aero::Size contentSize((float)textureWidth_, (float)textureHeight_);
+    const Aero::Point scale = Aero::Viewbox::GetStretchScale(contentSize, arrangeSize,
+        GetStretch(), Aero::StretchDirection_Both);
     const float width = contentSize.width * scale.x;
     const float height = contentSize.height * scale.y;
     const float x = (arrangeSize.width - width) * 0.5f;
     const float y = (arrangeSize.height - height) * 0.5f;
-    return Noesis::Rect(x, y, width, height);
+    return Aero::Rect(x, y, width, height);
 }
 
-Noesis::Texture* MdxSceneControl::TextureRenderCallback(Noesis::RenderDevice*, void* user) {
+Aero::Texture* MdxSceneControl::TextureRenderCallback(Aero::RenderDevice*, void* user) {
     MdxSceneControl* control = static_cast<MdxSceneControl*>(user);
     return control != nullptr ? control->renderer_.GetTexture() : nullptr;
 }
 
-void MdxSceneControl::OnScenePropertyChanged(Noesis::DependencyObject* d,
-    const Noesis::DependencyPropertyChangedEventArgs&) {
-    MdxSceneControl* control = Noesis::DynamicCast<MdxSceneControl*>(d);
+void MdxSceneControl::OnScenePropertyChanged(Aero::DependencyObject* d,
+    const Aero::DependencyPropertyChangedEventArgs&) {
+    MdxSceneControl* control = Aero::DynamicCast<MdxSceneControl*>(d);
     if (control != nullptr) {
         control->MarkRendererDirty();
     }
@@ -237,42 +237,42 @@ NS_BEGIN_COLD_REGION
 
 NS_IMPLEMENT_REFLECTION(MdxSceneControl, "War3UI.MdxSceneControl")
 {
-    Noesis::UIElementData* data = NsMeta<Noesis::UIElementData>(Noesis::TypeOf<SelfClass>());
+    Aero::UIElementData* data = NsMeta<Aero::UIElementData>(Aero::TypeOf<SelfClass>());
     const uint32_t affectsMeasureRender =
-        Noesis::FrameworkPropertyMetadataOptions_AffectsMeasure |
-        Noesis::FrameworkPropertyMetadataOptions_AffectsRender;
+        Aero::FrameworkPropertyMetadataOptions_AffectsMeasure |
+        Aero::FrameworkPropertyMetadataOptions_AffectsRender;
 
-    data->RegisterProperty<Noesis::String>(SceneKeyProperty, "SceneKey",
-        Noesis::FrameworkPropertyMetadata::Create(Noesis::String(),
-            affectsMeasureRender, Noesis::PropertyChangedCallback(OnScenePropertyChanged)));
-    data->RegisterProperty<Noesis::String>(ModelPathProperty, "ModelPath",
-        Noesis::FrameworkPropertyMetadata::Create(Noesis::String(),
-            affectsMeasureRender, Noesis::PropertyChangedCallback(OnScenePropertyChanged)));
-    data->RegisterProperty<Noesis::String>(SequenceProperty, "Sequence",
-        Noesis::FrameworkPropertyMetadata::Create(Noesis::String("Stand"),
-            affectsMeasureRender, Noesis::PropertyChangedCallback(OnScenePropertyChanged)));
+    data->RegisterProperty<Aero::String>(SceneKeyProperty, "SceneKey",
+        Aero::FrameworkPropertyMetadata::Create(Aero::String(),
+            affectsMeasureRender, Aero::PropertyChangedCallback(OnScenePropertyChanged)));
+    data->RegisterProperty<Aero::String>(ModelPathProperty, "ModelPath",
+        Aero::FrameworkPropertyMetadata::Create(Aero::String(),
+            affectsMeasureRender, Aero::PropertyChangedCallback(OnScenePropertyChanged)));
+    data->RegisterProperty<Aero::String>(SequenceProperty, "Sequence",
+        Aero::FrameworkPropertyMetadata::Create(Aero::String("Stand"),
+            affectsMeasureRender, Aero::PropertyChangedCallback(OnScenePropertyChanged)));
     data->RegisterProperty<bool>(AutoPlayProperty, "AutoPlay",
-        Noesis::FrameworkPropertyMetadata::Create(true,
-            affectsMeasureRender, Noesis::PropertyChangedCallback(OnScenePropertyChanged)));
+        Aero::FrameworkPropertyMetadata::Create(true,
+            affectsMeasureRender, Aero::PropertyChangedCallback(OnScenePropertyChanged)));
     data->RegisterProperty<bool>(UseModelCameraProperty, "UseModelCamera",
-        Noesis::FrameworkPropertyMetadata::Create(true,
-            affectsMeasureRender, Noesis::PropertyChangedCallback(OnScenePropertyChanged)));
-    data->RegisterProperty<Noesis::Stretch>(StretchProperty, "Stretch",
-        Noesis::FrameworkPropertyMetadata::Create(Noesis::Stretch_Uniform,
-            affectsMeasureRender, Noesis::PropertyChangedCallback(OnScenePropertyChanged)));
+        Aero::FrameworkPropertyMetadata::Create(true,
+            affectsMeasureRender, Aero::PropertyChangedCallback(OnScenePropertyChanged)));
+    data->RegisterProperty<Aero::Stretch>(StretchProperty, "Stretch",
+        Aero::FrameworkPropertyMetadata::Create(Aero::Stretch_Uniform,
+            affectsMeasureRender, Aero::PropertyChangedCallback(OnScenePropertyChanged)));
     data->RegisterProperty<bool>(IsActiveProperty, "IsActive",
-        Noesis::FrameworkPropertyMetadata::Create(true,
-            affectsMeasureRender, Noesis::PropertyChangedCallback(OnScenePropertyChanged)));
+        Aero::FrameworkPropertyMetadata::Create(true,
+            affectsMeasureRender, Aero::PropertyChangedCallback(OnScenePropertyChanged)));
 }
 
 NS_END_COLD_REGION
 
-const Noesis::DependencyProperty* MdxSceneControl::SceneKeyProperty;
-const Noesis::DependencyProperty* MdxSceneControl::ModelPathProperty;
-const Noesis::DependencyProperty* MdxSceneControl::SequenceProperty;
-const Noesis::DependencyProperty* MdxSceneControl::AutoPlayProperty;
-const Noesis::DependencyProperty* MdxSceneControl::UseModelCameraProperty;
-const Noesis::DependencyProperty* MdxSceneControl::StretchProperty;
-const Noesis::DependencyProperty* MdxSceneControl::IsActiveProperty;
+const Aero::DependencyProperty* MdxSceneControl::SceneKeyProperty;
+const Aero::DependencyProperty* MdxSceneControl::ModelPathProperty;
+const Aero::DependencyProperty* MdxSceneControl::SequenceProperty;
+const Aero::DependencyProperty* MdxSceneControl::AutoPlayProperty;
+const Aero::DependencyProperty* MdxSceneControl::UseModelCameraProperty;
+const Aero::DependencyProperty* MdxSceneControl::StretchProperty;
+const Aero::DependencyProperty* MdxSceneControl::IsActiveProperty;
 
 } // namespace War3UI

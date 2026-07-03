@@ -8,6 +8,7 @@ public:
     void SetTarget(float tx, float ty, float tz);
     void SetDistance(float dist) { distance_ = dist; targetDistance_ = dist; }
     void SetMaxDistance(float dist) { maxDistance_ = dist; }
+    void SetAngles(float yaw, float pitch) { yaw_ = yaw; targetYaw_ = yaw; pitch_ = pitch; targetPitch_ = pitch; }
     void Orbit(float deltaYaw, float deltaPitch);
     void Zoom(float delta);
     void Pan(float dx, float dz);
