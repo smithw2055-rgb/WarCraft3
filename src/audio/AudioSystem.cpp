@@ -151,6 +151,19 @@ int AudioSystem::Play3D(const std::string& name, float x, float y, float z, floa
     return playFromSource(it->second, volume, x, y, z, true);
 }
 
+int AudioSystem::Play3DPath(const std::string& mpqPath, float x, float y, float z, float volume) {
+    if (!engine_ || mpqPath.empty()) return -1;
+    auto it = soundCache_.find(mpqPath);
+    if (it == soundCache_.end()) {
+        if (!LoadSound(mpqPath, mpqPath, mpq_)) {
+            return -1;
+        }
+        it = soundCache_.find(mpqPath);
+        if (it == soundCache_.end()) return -1;
+    }
+    return playFromSource(it->second, volume, x, y, z, true);
+}
+
 void AudioSystem::Stop(int soundId) {
     for (size_t i = 0; i < activeSounds_.size(); i++) {
         if (activeSounds_[i].id == soundId) {

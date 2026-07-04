@@ -10,6 +10,13 @@
 static const uint32_t TAG_KGTR = MAKE_TAG('K','G','T','R');
 static const uint32_t TAG_KGRT = MAKE_TAG('K','G','R','T');
 static const uint32_t TAG_KGSC = MAKE_TAG('K','G','S','C');
+static const uint32_t TAG_KGAO = MAKE_TAG('K','G','A','O');
+static const uint32_t TAG_KLAV = MAKE_TAG('K','L','A','V');
+static const uint32_t TAG_KATV = MAKE_TAG('K','A','T','V');
+static const uint32_t TAG_KPEV = MAKE_TAG('K','P','E','V');
+static const uint32_t TAG_KP2V = MAKE_TAG('K','P','2','V');
+static const uint32_t TAG_KRVS = MAKE_TAG('K','R','V','S');
+static const uint32_t TAG_KEVT = MAKE_TAG('K','E','V','T');
 static const uint32_t NODE_DONT_INHERIT_TRANSLATION = 0x1;
 static const uint32_t NODE_DONT_INHERIT_SCALING = 0x2;
 static const uint32_t NODE_DONT_INHERIT_ROTATION = 0x4;
@@ -30,6 +37,28 @@ static void MdxAnimatorFlush() {
     }
 }
 
+static bool IsFiniteFloat(float value) {
+    return std::isfinite(value);
+}
+
+static bool IsFiniteVec3(const Vec3& value) {
+    return IsFiniteFloat(value.x) && IsFiniteFloat(value.y) && IsFiniteFloat(value.z);
+}
+
+static bool IsFiniteVec4(const Vec4& value) {
+    return IsFiniteFloat(value.x) && IsFiniteFloat(value.y)
+        && IsFiniteFloat(value.z) && IsFiniteFloat(value.w);
+}
+
+static bool IsFiniteMat4(const Mat4& value) {
+    for (float component : value.m) {
+        if (!IsFiniteFloat(component)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static Mat4 RotateY(float radians) {
     Mat4 r = Mat4::Identity();
     float c = std::cos(radians);
@@ -42,8 +71,11 @@ static Mat4 RotateY(float radians) {
 }
 
 static Vec4 NormalizeQuat(const Vec4& q) {
+    if (!IsFiniteVec4(q)) {
+        return {0,0,0,1};
+    }
     float len = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
-    if (len < 1e-7f) return {0,0,0,1};
+    if (!std::isfinite(len) || len < 1e-7f) return {0,0,0,1};
     return {q.x / len, q.y / len, q.z / len, q.w / len};
 }
 
@@ -67,6 +99,244 @@ static const MdxTimeline* findTimeline(const std::vector<MdxTimeline>& timelines
     return nullptr;
 }
 
+static bool timelineHasKeyValues(const MdxTimeline& timeline, int key, int elemCount) {
+    if (key < 0 || elemCount < 1) {
+        return false;
+    }
+    return timeline.values.size() >= ((size_t)key + 1u) * (size_t)elemCount;
+}
+
+static float timelineValueOrDefault(const MdxTimeline& timeline, int key, int elem, int elemCount,
+                                    float defaultValue) {
+    if (key < 0 || elem < 0 || elem >= elemCount || elemCount < 1) {
+        return defaultValue;
+    }
+    const size_t index = (size_t)key * (size_t)elemCount + (size_t)elem;
+    return index < timeline.values.size() ? timeline.values[index] : defaultValue;
+}
+
+static bool timelineHasTangents(const MdxTimeline& timeline, int keyA, int keyB, int elemCount) {
+    if (keyA < 0 || keyB < 0 || elemCount < 1) {
+        return false;
+    }
+    const size_t needed = std::max(((size_t)keyA + 1u) * (size_t)elemCount,
+                                   ((size_t)keyB + 1u) * (size_t)elemCount);
+    return timeline.inTans.size() >= needed && timeline.outTans.size() >= needed;
+}
+
+static float interpolateTimelineValue(const MdxTimeline& timeline, int elem, int elemCount,
+                                      int keyA, int keyB, float t) {
+    const float a = timelineValueOrDefault(timeline, keyA, elem, elemCount, 0.0f);
+    const float b = timelineValueOrDefault(timeline, keyB, elem, elemCount, a);
+    switch (timeline.interpolationType) {
+    case MdxInterpolation::None:
+        return a;
+    case MdxInterpolation::Linear:
+        return a + (b - a) * t;
+    case MdxInterpolation::Hermite: {
+        if (!timelineHasTangents(timeline, keyA, keyB, elemCount)) {
+            return a + (b - a) * t;
+        }
+        const float outTan = timeline.outTans[(size_t)keyA * elemCount + elem];
+        const float inTan = timeline.inTans[(size_t)keyB * elemCount + elem];
+        const float t2 = t * t;
+        const float t3 = t2 * t;
+        return (2.0f * t3 - 3.0f * t2 + 1.0f) * a
+            + (-2.0f * t3 + 3.0f * t2) * b
+            + (t3 - 2.0f * t2 + t) * outTan
+            + (t3 - t2) * inTan;
+    }
+    case MdxInterpolation::Bezier: {
+        if (!timelineHasTangents(timeline, keyA, keyB, elemCount)) {
+            return a + (b - a) * t;
+        }
+        const float outTan = timeline.outTans[(size_t)keyA * elemCount + elem];
+        const float inTan = timeline.inTans[(size_t)keyB * elemCount + elem];
+        const float mt = 1.0f - t;
+        return mt * mt * mt * a
+            + 3.0f * mt * mt * t * outTan
+            + 3.0f * mt * t * t * inTan
+            + t * t * t * b;
+    }
+    default:
+        return a;
+    }
+}
+
+static bool sampleGlobalTimelineLooped(const MdxTimeline& timeline, uint32_t frame,
+                                       uint32_t duration, float* out, int elemCount) {
+    if (!out || timeline.frames.empty() || elemCount < 1 || duration == 0) {
+        return false;
+    }
+    if (timeline.frames.size() == 1) {
+        if (!timelineHasKeyValues(timeline, 0, elemCount)) {
+            return false;
+        }
+        for (int elem = 0; elem < elemCount; ++elem) {
+            out[elem] = timelineValueOrDefault(timeline, 0, elem, elemCount, 0.0f);
+        }
+        return true;
+    }
+    if (!timelineHasKeyValues(timeline, (int)timeline.frames.size() - 1, elemCount)) {
+        return false;
+    }
+
+    const int lastIndex = (int)timeline.frames.size() - 1;
+    int keyA = lastIndex;
+    int keyB = 0;
+    if (frame >= timeline.frames[0] && frame < timeline.frames[(size_t)lastIndex]) {
+        for (int i = 1; i <= lastIndex; ++i) {
+            if (timeline.frames[(size_t)i] > frame) {
+                keyA = i - 1;
+                keyB = i;
+                break;
+            }
+        }
+    }
+
+    uint32_t startFrame = timeline.frames[(size_t)keyA];
+    const uint32_t endFrame = timeline.frames[(size_t)keyB];
+    int64_t timeBetweenFrames = (int64_t)endFrame - (int64_t)startFrame;
+    if (timeBetweenFrames < 0) {
+        timeBetweenFrames += duration;
+        if (frame < startFrame) {
+            startFrame = endFrame;
+        }
+    }
+    const float t = timeBetweenFrames == 0
+        ? 0.0f
+        : ((float)((int64_t)frame - (int64_t)startFrame) / (float)timeBetweenFrames);
+
+    for (int elem = 0; elem < elemCount; ++elem) {
+        out[elem] = interpolateTimelineValue(timeline, elem, elemCount, keyA, keyB, t);
+    }
+    return true;
+}
+
+static bool sampleTimelineForAnimator(const MdxTimeline& timeline,
+                                      const std::vector<uint32_t>* globalSequences,
+                                      const MdxSequence* currentSequence,
+                                      uint32_t sequenceFrame,
+                                      float elapsedMs,
+                                      float* out,
+                                      int elemCount,
+                                      float defaultVal) {
+    if (timeline.globalSequenceId >= 0 && globalSequences
+        && timeline.globalSequenceId < (int)globalSequences->size()) {
+        const uint32_t duration = (*globalSequences)[(size_t)timeline.globalSequenceId];
+        if (duration > 0) {
+            const uint32_t elapsed = (uint32_t)std::max(0.0f, elapsedMs);
+            return sampleGlobalTimelineLooped(timeline, elapsed % duration, duration, out, elemCount);
+        }
+    }
+    if (!currentSequence) {
+        return MdxSampleTimeline(timeline, sequenceFrame, out, elemCount, defaultVal);
+    }
+
+    MdxTimeline sequenceTimeline;
+    sequenceTimeline.tag = timeline.tag;
+    sequenceTimeline.interpolationType = timeline.interpolationType;
+    sequenceTimeline.globalSequenceId = timeline.globalSequenceId;
+
+    const bool needsTangents = timeline.interpolationType == MdxInterpolation::Hermite
+        || timeline.interpolationType == MdxInterpolation::Bezier;
+    for (size_t i = 0; i < timeline.frames.size(); ++i) {
+        const uint32_t keyFrame = timeline.frames[i];
+        if (keyFrame < currentSequence->startFrame || keyFrame > currentSequence->endFrame) {
+            continue;
+        }
+        const size_t valueOffset = i * (size_t)elemCount;
+        if (timeline.values.size() < valueOffset + (size_t)elemCount) {
+            continue;
+        }
+        sequenceTimeline.frames.push_back(keyFrame);
+        for (int elem = 0; elem < elemCount; ++elem) {
+            sequenceTimeline.values.push_back(timeline.values[valueOffset + (size_t)elem]);
+        }
+        if (needsTangents
+            && timeline.inTans.size() >= valueOffset + (size_t)elemCount
+            && timeline.outTans.size() >= valueOffset + (size_t)elemCount) {
+            for (int elem = 0; elem < elemCount; ++elem) {
+                sequenceTimeline.inTans.push_back(timeline.inTans[valueOffset + (size_t)elem]);
+                sequenceTimeline.outTans.push_back(timeline.outTans[valueOffset + (size_t)elem]);
+            }
+        }
+    }
+
+    if (sequenceTimeline.frames.empty()) {
+        for (int elem = 0; elem < elemCount; ++elem) {
+            out[elem] = defaultVal;
+        }
+        return false;
+    }
+
+    return MdxSampleTimeline(sequenceTimeline, sequenceFrame, out, elemCount, defaultVal);
+}
+
+static bool sampleVisibilityTimelineForAnimator(const MdxTimeline& timeline,
+                                                const std::vector<uint32_t>* globalSequences,
+                                                const MdxSequence* currentSequence,
+                                                uint32_t sequenceFrame,
+                                                float elapsedMs,
+                                                float* out) {
+    if (!out || timeline.frames.empty() || timeline.values.empty()) {
+        return false;
+    }
+    MdxTimeline steppedTimeline = timeline;
+    steppedTimeline.interpolationType = MdxInterpolation::None;
+    if (timeline.globalSequenceId >= 0) {
+        return sampleTimelineForAnimator(steppedTimeline, globalSequences, currentSequence,
+                                         sequenceFrame, elapsedMs, out, 1, 1.0f);
+    }
+
+    if (currentSequence) {
+        bool found = false;
+        size_t key = 0;
+        for (size_t i = 0; i < timeline.frames.size(); ++i) {
+            const uint32_t keyFrame = timeline.frames[i];
+            if (keyFrame < currentSequence->startFrame || keyFrame > currentSequence->endFrame) {
+                continue;
+            }
+            if (!found || keyFrame <= sequenceFrame) {
+                key = i;
+                found = true;
+            }
+        }
+        if (!found) {
+            out[0] = 1.0f;
+            return false;
+        }
+        out[0] = timelineValueOrDefault(steppedTimeline, (int)key, 0, 1, 1.0f);
+        return true;
+    }
+
+    size_t key = 0;
+    for (size_t i = 1; i < timeline.frames.size(); ++i) {
+        if (timeline.frames[i] > sequenceFrame) {
+            break;
+        }
+        key = i;
+    }
+    out[0] = timelineValueOrDefault(steppedTimeline, (int)key, 0, 1, 1.0f);
+    return true;
+}
+
+static int eventKeyAtFrame(const MdxTimeline& timeline, uint32_t frame, uint32_t start, uint32_t end) {
+    if (timeline.frames.empty() || frame < start || frame > end) {
+        return -1;
+    }
+    for (int i = (int)timeline.frames.size() - 1; i >= 0; --i) {
+        const uint32_t keyFrame = timeline.frames[(size_t)i];
+        if (keyFrame < start) {
+            return -1;
+        }
+        if (keyFrame <= frame) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 MdxAnimator::MdxAnimator() = default;
 
 int MdxAnimator::GetBoneIndexForObjectId(int objectId) const {
@@ -76,6 +346,41 @@ int MdxAnimator::GetBoneIndexForObjectId(int objectId) const {
         }
     }
     return -1;
+}
+
+bool MdxAnimator::IsObjectVisible(int objectId) const {
+    for (const auto& node : nodes_) {
+        if (node.objectId == objectId) {
+            return node.worldVisible;
+        }
+    }
+    return false;
+}
+
+bool MdxAnimator::GetObjectWorldTransformYUp(int objectId, Mat4& outMatrix, Vec3* outScale) const {
+    for (const auto& node : nodes_) {
+        if (node.objectId == objectId) {
+            ConvertMatrixToYUp(node.worldMatrix, outMatrix);
+            if (!IsFiniteMat4(outMatrix)) {
+                outMatrix = Mat4::Identity();
+                return false;
+            }
+            if (outScale) {
+                *outScale = node.worldScale;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+bool MdxAnimator::GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const {
+    Mat4 matrix;
+    if (!GetObjectWorldTransformYUp(objectId, matrix)) {
+        return false;
+    }
+    outPosition = {matrix.m[12], matrix.m[13], matrix.m[14]};
+    return IsFiniteVec3(outPosition);
 }
 
 MdxAnimator::~MdxAnimator() {
@@ -102,8 +407,12 @@ void MdxAnimator::ConvertMatrixToYUp(const Mat4& mdxMat, Mat4& out) {
 
 void MdxAnimator::Init(const MdxModel& model) {
     sequences_ = &model.sequences;
+    globalSequences_ = &model.globalSequences;
     pivotPoints_ = &model.pivotPoints;
+    elapsedMs_ = 0.0f;
     BuildSkeleton(model);
+    BuildEventTracks(model);
+    triggeredEvents_.clear();
     MdxAnimatorLog( "MdxAnimator::Init skeleton nodes=%zu boneCount=%d\n", nodes_.size(), boneCount_);
     if (!nodes_.empty()) {
         MdxAnimatorLog( "MdxAnimator::Init sample frame 0\n");
@@ -114,6 +423,31 @@ void MdxAnimator::Init(const MdxModel& model) {
     }
     MdxAnimatorLog( "MdxAnimator::Init end\n");
     MdxAnimatorFlush();
+}
+
+void MdxAnimator::BuildEventTracks(const MdxModel& model) {
+    eventTracks_.clear();
+    for (const MdxEventObject& eventObject : model.eventObjects) {
+        const MdxTimeline* eventTrack = findTimeline(eventObject.timelines, TAG_KEVT);
+        if (!eventTrack || eventTrack->frames.empty()) {
+            continue;
+        }
+        EventTrackState state;
+        state.objectId = eventObject.objectId;
+        state.name = eventObject.name;
+        state.type = eventObject.type;
+        state.id = eventObject.id;
+        state.flags = eventObject.flags;
+        state.timeline = eventTrack;
+        eventTracks_.push_back(std::move(state));
+    }
+}
+
+void MdxAnimator::ResetEventEmitters() {
+    for (EventTrackState& eventTrack : eventTracks_) {
+        eventTrack.lastEmissionKey = -1;
+    }
+    triggeredEvents_.clear();
 }
 
 void MdxAnimator::BuildSkeleton(const MdxModel& model) {
@@ -135,6 +469,8 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         int pivotIndex;
         uint32_t flags;
         const std::vector<MdxTimeline>* timelines;
+        const MdxGeosetAnim* visibilityGeosetAnim;
+        uint32_t visibilityTimelineTag;
     };
     std::vector<Entry> entries;
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton after entries ctor\n");
@@ -152,7 +488,9 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         return false;
     };
     auto addEntry = [&](int objectId, int parentId, uint32_t flags,
-                        const std::vector<MdxTimeline>* timelines) {
+                        const std::vector<MdxTimeline>* timelines,
+                        const MdxGeosetAnim* visibilityGeosetAnim = nullptr,
+                        uint32_t visibilityTimelineTag = 0) {
         if (objectId < 0 || timelines == nullptr) {
             return;
         }
@@ -166,33 +504,47 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         if (objectId < (int)model.pivotPoints.size()) {
             pivotIndex = objectId;
         }
-        entries.push_back({objectId, parentId, pivotIndex, flags, timelines});
+        entries.push_back({objectId, parentId, pivotIndex, flags, timelines,
+                           visibilityGeosetAnim, visibilityTimelineTag});
+    };
+    auto findGeosetAnimForBone = [&](const MdxNode& bone) -> const MdxGeosetAnim* {
+        if (bone.geosetId >= 0) {
+            for (const MdxGeosetAnim& geosetAnim : model.geosetAnims) {
+                if (geosetAnim.geosetId == bone.geosetId) {
+                    return &geosetAnim;
+                }
+            }
+        }
+        if (bone.geosetAnimationId >= 0 && bone.geosetAnimationId < (int)model.geosetAnims.size()) {
+            return &model.geosetAnims[(size_t)bone.geosetAnimationId];
+        }
+        return nullptr;
     };
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton before add loops\n");
 
     for (const auto& b : model.bones) {
         MdxAnimatorLog( "MdxAnimator::BuildSkeleton bone objectId=%d parentId=%d name=%s\n",
             b.objectId, b.parentId, b.name.c_str());
-        addEntry(b.objectId, b.parentId, b.flags, &b.timelines);
+        addEntry(b.objectId, b.parentId, b.flags, &b.timelines, findGeosetAnimForBone(b));
     }
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton after bones\n");
     for (const auto& h : model.helpers) {
         addEntry(h.objectId, h.parentId, h.flags, &h.timelines);
     }
     for (const auto& attachment : model.attachments) {
-        addEntry(attachment.objectId, attachment.parentId, attachment.flags, &attachment.timelines);
+        addEntry(attachment.objectId, attachment.parentId, attachment.flags, &attachment.timelines, nullptr, TAG_KATV);
     }
     for (const auto& light : model.lights) {
-        addEntry(light.objectId, light.parentId, light.flags, &light.timelines);
+        addEntry(light.objectId, light.parentId, light.flags, &light.timelines, nullptr, TAG_KLAV);
     }
     for (const auto& emitter : model.particleEmitters1) {
-        addEntry(emitter.objectId, emitter.parentId, emitter.flags, &emitter.timelines);
+        addEntry(emitter.objectId, emitter.parentId, emitter.flags, &emitter.timelines, nullptr, TAG_KPEV);
     }
     for (const auto& emitter : model.particleEmitters2) {
-        addEntry(emitter.objectId, emitter.parentId, (uint32_t)emitter.flags, &emitter.timelines);
+        addEntry(emitter.objectId, emitter.parentId, (uint32_t)emitter.flags, &emitter.timelines, nullptr, TAG_KP2V);
     }
     for (const auto& ribbon : model.ribbonEmitters) {
-        addEntry(ribbon.objectId, ribbon.parentId, ribbon.flags, &ribbon.timelines);
+        addEntry(ribbon.objectId, ribbon.parentId, ribbon.flags, &ribbon.timelines, nullptr, TAG_KRVS);
     }
     for (const auto& eventObject : model.eventObjects) {
         addEntry(eventObject.objectId, eventObject.parentId, eventObject.flags, &eventObject.timelines);
@@ -253,6 +605,8 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         n.pivotIndex = e.pivotIndex;
         n.flags = e.flags;
         n.timelines = e.timelines;
+        n.visibilityGeosetAnim = e.visibilityGeosetAnim;
+        n.visibilityTimelineTag = e.visibilityTimelineTag;
         objectIdToNodeIndex.push_back({e.objectId, (int)i});
         builtNodeOrder[i] = (int)i;
     }
@@ -302,6 +656,7 @@ bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
     sequenceState_.speed = speed;
     sequenceState_.loop = loop;
     sequenceState_.finished = false;
+    ResetEventEmitters();
     if (!nodes_.empty()) {
         SampleAnimations(sequenceState_.currentFrame);
         needsBoneUpload_ = true;
@@ -333,6 +688,7 @@ float MdxAnimator::GetSequenceProgress() const {
 }
 
 bool MdxAnimator::SetFrameByRatio(float ratio) {
+    triggeredEvents_.clear();
     if (sequenceState_.sequenceIndex < 0 || !sequences_) return false;
 
     const auto& seq = (*sequences_)[sequenceState_.sequenceIndex];
@@ -361,6 +717,7 @@ bool MdxAnimator::SetFrameByRatio(float ratio) {
 }
 
 void MdxAnimator::Update(float dt) {
+    triggeredEvents_.clear();
     if (sequenceState_.sequenceIndex < 0) {
         return;
     }
@@ -373,19 +730,27 @@ void MdxAnimator::Update(float dt) {
     if (range == 0) return;
 
     float advance = dt * 1000.0f * sequenceState_.speed;
+    if (advance > 0.0f && std::isfinite(advance)) {
+        elapsedMs_ += advance;
+    }
     sequenceState_.frameTime += advance;
     int intAdv = (int)sequenceState_.frameTime;
     sequenceState_.frameTime -= (float)intAdv;
     sequenceState_.currentFrame += intAdv;
 
+    bool resetEvents = false;
     if (sequenceState_.currentFrame >= end) {
         if (sequenceState_.loop) {
             uint32_t over = sequenceState_.currentFrame - end;
             sequenceState_.currentFrame = start + (over % range);
+            resetEvents = true;
         } else {
             sequenceState_.currentFrame = end;
             sequenceState_.finished = true;
         }
+    }
+    if (resetEvents) {
+        ResetEventEmitters();
     }
 
     if (!nodes_.empty()) {
@@ -393,26 +758,124 @@ void MdxAnimator::Update(float dt) {
         needsBoneUpload_ = true;
         UpdateSkeleton();
     }
+    UpdateEventEmitters();
+}
+
+void MdxAnimator::UpdateEventEmitters() {
+    if (!sequences_ || sequenceState_.sequenceIndex < 0
+        || sequenceState_.sequenceIndex >= (int)sequences_->size()) {
+        return;
+    }
+    const MdxSequence& sequence = (*sequences_)[(size_t)sequenceState_.sequenceIndex];
+    for (EventTrackState& eventTrack : eventTracks_) {
+        if (!eventTrack.timeline) {
+            continue;
+        }
+
+        uint32_t sampleFrame = sequenceState_.currentFrame;
+        uint32_t start = sequence.startFrame;
+        uint32_t end = sequence.endFrame;
+        if (eventTrack.timeline->globalSequenceId >= 0 && globalSequences_
+            && eventTrack.timeline->globalSequenceId < (int)globalSequences_->size()) {
+            const uint32_t duration = (*globalSequences_)[(size_t)eventTrack.timeline->globalSequenceId];
+            if (duration == 0) {
+                continue;
+            }
+            sampleFrame = (uint32_t)std::max(0.0f, elapsedMs_) % duration;
+            start = 0;
+            end = duration;
+        }
+
+        const int keyframeIndex = eventKeyAtFrame(*eventTrack.timeline, sampleFrame, start, end);
+        if (keyframeIndex < 0 || keyframeIndex == eventTrack.lastEmissionKey) {
+            eventTrack.lastEmissionKey = keyframeIndex;
+            continue;
+        }
+
+        MdxEventTrigger trigger;
+        trigger.objectId = eventTrack.objectId;
+        trigger.name = eventTrack.name;
+        trigger.type = eventTrack.type;
+        trigger.id = eventTrack.id;
+        trigger.flags = eventTrack.flags;
+        trigger.keyframeIndex = keyframeIndex;
+        trigger.frame = eventTrack.timeline->frames[(size_t)keyframeIndex];
+        Mat4 localTransform;
+        if (GetObjectWorldTransformYUp(trigger.objectId, localTransform, &trigger.localScale)) {
+            trigger.hasLocalTransform = true;
+            trigger.localTransform = localTransform;
+            trigger.localPosition = {localTransform.m[12], localTransform.m[13], localTransform.m[14]};
+        }
+        triggeredEvents_.push_back(std::move(trigger));
+        eventTrack.lastEmissionKey = keyframeIndex;
+    }
 }
 
 void MdxAnimator::SampleAnimations(uint32_t frame) {
-    for (auto& node : nodes_) {
-        if (!node.timelines || node.timelines->empty()) continue;
+    const MdxSequence* currentSequence = nullptr;
+    if (sequences_ && sequenceState_.sequenceIndex >= 0
+        && sequenceState_.sequenceIndex < (int)sequences_->size()) {
+        currentSequence = &(*sequences_)[(size_t)sequenceState_.sequenceIndex];
+    }
 
-        float tmp[4];
+    for (auto& node : nodes_) {
+        float tmp[4] = {};
         const MdxTimeline* tl;
 
+        node.localTranslation = {0, 0, 0};
+        node.localRotation = {0, 0, 0, 1};
+        node.localScale = {1, 1, 1};
+        node.localVisibility = 1.0f;
+
+        if (node.visibilityGeosetAnim) {
+            node.localVisibility = node.visibilityGeosetAnim->alpha;
+            for (const MdxTimeline& timeline : node.visibilityGeosetAnim->timelines) {
+                if (timeline.tag == TAG_KGAO
+                    && sampleTimelineForAnimator(timeline, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 1,
+                                                 node.visibilityGeosetAnim->alpha)) {
+                    node.localVisibility = std::isfinite(tmp[0]) ? tmp[0] : node.visibilityGeosetAnim->alpha;
+                    break;
+                }
+            }
+        }
+
+        if (!node.timelines || node.timelines->empty()) continue;
+
         tl = findTimeline(*node.timelines, TAG_KGTR);
-        if (tl && !tl->frames.empty() && MdxSampleTimeline(*tl, frame, tmp, 3))
-            node.localTranslation = {tmp[0], tmp[1], tmp[2]};
+        if (tl && !tl->frames.empty()
+            && sampleTimelineForAnimator(*tl, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 3, 0.0f)) {
+            Vec3 sampled = {tmp[0], tmp[1], tmp[2]};
+            if (IsFiniteVec3(sampled)) {
+                node.localTranslation = sampled;
+            }
+        }
 
         tl = findTimeline(*node.timelines, TAG_KGRT);
-        if (tl && !tl->frames.empty() && MdxSampleTimeline(*tl, frame, tmp, 4))
-            node.localRotation = {tmp[0], tmp[1], tmp[2], tmp[3]};
+        if (tl && !tl->frames.empty()
+            && sampleTimelineForAnimator(*tl, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 4, 0.0f)) {
+            Vec4 sampled = NormalizeQuat({tmp[0], tmp[1], tmp[2], tmp[3]});
+            if (IsFiniteVec4(sampled)) {
+                node.localRotation = sampled;
+            }
+        }
 
         tl = findTimeline(*node.timelines, TAG_KGSC);
-        if (tl && !tl->frames.empty() && MdxSampleTimeline(*tl, frame, tmp, 3))
-            node.localScale = {tmp[0], tmp[1], tmp[2]};
+        if (tl && !tl->frames.empty()
+            && sampleTimelineForAnimator(*tl, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 3, 1.0f)) {
+            Vec3 sampled = {tmp[0], tmp[1], tmp[2]};
+            if (IsFiniteVec3(sampled)) {
+                node.localScale = sampled;
+            }
+        }
+
+        if (!node.visibilityGeosetAnim && node.visibilityTimelineTag != 0) {
+            tl = findTimeline(*node.timelines, node.visibilityTimelineTag);
+            if (tl && !tl->frames.empty()) {
+                if (sampleVisibilityTimelineForAnimator(*tl, globalSequences_, currentSequence, frame, elapsedMs_, tmp)) {
+                    node.localVisibility = std::isfinite(tmp[0]) ? tmp[0] : 1.0f;
+                }
+            }
+        }
     }
 }
 
@@ -422,22 +885,29 @@ void MdxAnimator::UpdateSkeleton() {
     for (int idx : nodeOrder_) {
         auto& node = nodes_[idx];
         const MdxAnimNode* parent = (node.parentIndex >= 0) ? &nodes_[node.parentIndex] : nullptr;
+        node.worldVisible = (!parent || parent->worldVisible) && node.localVisibility > 0.0f;
 
-        Vec3 computedScale = node.localScale;
+        const Vec3 localScale = IsFiniteVec3(node.localScale) ? node.localScale : Vec3{1, 1, 1};
+        Vec3 computedScale = localScale;
         if ((node.flags & NODE_DONT_INHERIT_SCALING) && parent) {
-            computedScale.x = parent->inverseWorldScale.x * node.localScale.x;
-            computedScale.y = parent->inverseWorldScale.y * node.localScale.y;
-            computedScale.z = parent->inverseWorldScale.z * node.localScale.z;
-            node.worldScale = node.localScale;
+            computedScale.x = parent->inverseWorldScale.x * localScale.x;
+            computedScale.y = parent->inverseWorldScale.y * localScale.y;
+            computedScale.z = parent->inverseWorldScale.z * localScale.z;
+            node.worldScale = localScale;
         } else if (parent) {
-            node.worldScale.x = parent->worldScale.x * node.localScale.x;
-            node.worldScale.y = parent->worldScale.y * node.localScale.y;
-            node.worldScale.z = parent->worldScale.z * node.localScale.z;
+            node.worldScale.x = parent->worldScale.x * localScale.x;
+            node.worldScale.y = parent->worldScale.y * localScale.y;
+            node.worldScale.z = parent->worldScale.z * localScale.z;
         } else {
-            node.worldScale = node.localScale;
+            node.worldScale = localScale;
         }
 
-        Vec4 computedRotation = node.localRotation;
+        if (!IsFiniteVec3(computedScale)) {
+            computedScale = {1, 1, 1};
+            node.worldScale = computedScale;
+        }
+
+        Vec4 computedRotation = NormalizeQuat(node.localRotation);
         if ((node.flags & NODE_DONT_INHERIT_ROTATION) && parent) {
             computedRotation = MulQuat(parent->inverseWorldRotation, computedRotation);
         }
@@ -452,14 +922,16 @@ void MdxAnimator::UpdateSkeleton() {
         if (node.pivotIndex >= 0 && node.pivotIndex < (int)pivotPoints_->size()) {
             const auto& piv = (*pivotPoints_)[node.pivotIndex];
             pivot = {piv[0], piv[1], piv[2]};
-            hasPivot = true;
-            local = Mat4::Translate(-pivot.x, -pivot.y, -pivot.z);
+            if (IsFiniteVec3(pivot)) {
+                hasPivot = true;
+                local = Mat4::Translate(-pivot.x, -pivot.y, -pivot.z);
+            }
         }
 
         // S * R * T (applied right-to-left: first -pivot, then scale, then rotate, then translate)
         local = Mat4::Scale(computedScale.x, computedScale.y, computedScale.z) * local;
         local = Mat4::FromQuaternion(computedRotation) * local;
-        Vec3 finalTranslation = node.localTranslation;
+        Vec3 finalTranslation = IsFiniteVec3(node.localTranslation) ? node.localTranslation : Vec3{0, 0, 0};
         if (hasPivot) {
             finalTranslation = finalTranslation + pivot;
         }
@@ -476,6 +948,9 @@ void MdxAnimator::UpdateSkeleton() {
         if (node.parentIndex >= 0)
             local = nodes_[node.parentIndex].worldMatrix * local;
 
+        if (!IsFiniteMat4(local)) {
+            local = Mat4::Identity();
+        }
         node.worldMatrix = local;
         node.worldRotation = parent ? MulQuat(parent->worldRotation, computedRotation) : NormalizeQuat(computedRotation);
         node.inverseWorldRotation = InverseQuat(node.worldRotation);
@@ -502,7 +977,7 @@ void MdxAnimator::UpdateSkeleton() {
                     yup = billboard * yup;
                 }
             }
-            boneMatrices_[node.boneIndex] = yup;
+            boneMatrices_[node.boneIndex] = IsFiniteMat4(yup) ? yup : Mat4::Identity();
         }
     }
     MdxAnimatorLog( "MdxAnimator::UpdateSkeleton matrices ready\n");
@@ -515,6 +990,7 @@ void MdxAnimator::UploadBoneTexture() {
     if (!needsBoneUpload_) return;
     needsBoneUpload_ = false;
     if (boneMatrices_.empty()) return;
+    if (!Renderer::IsActive()) return;
 
     int texWidth = boneCount_ * 4;
     std::vector<float> texData((size_t)texWidth * 4, 0.0f);

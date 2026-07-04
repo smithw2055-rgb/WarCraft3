@@ -2,6 +2,7 @@
 #include "shader.h"
 #include "renderer.h"
 #include "replaceable_ids.h"
+#include "mdx_sequence_select.h"
 #include "asset/BLP.h"
 #include "asset/DDS.h"
 #include "asset/stb_image.h"
@@ -89,17 +90,47 @@ static uint32_t TimelineFrameForModel(const MdxTimeline& timeline, const MdxMode
     return sequenceFrame;
 }
 
+static bool TimelineHasKeyValues(const MdxTimeline& timeline, int key, int elemCount) {
+    if (key < 0 || elemCount < 1) {
+        return false;
+    }
+    const size_t end = ((size_t)key + 1u) * (size_t)elemCount;
+    return timeline.values.size() >= end;
+}
+
+static float TimelineValueOrDefault(const MdxTimeline& timeline, int key, int elem, int elemCount,
+                                    float defaultValue) {
+    if (key < 0 || elem < 0 || elem >= elemCount || elemCount < 1) {
+        return defaultValue;
+    }
+    const size_t index = (size_t)key * (size_t)elemCount + (size_t)elem;
+    if (index >= timeline.values.size()) {
+        return defaultValue;
+    }
+    return timeline.values[index];
+}
+
+static bool TimelineHasTangents(const MdxTimeline& timeline, int keyA, int keyB, int elemCount) {
+    if (keyA < 0 || keyB < 0 || elemCount < 1) {
+        return false;
+    }
+    const size_t neededA = ((size_t)keyA + 1u) * (size_t)elemCount;
+    const size_t neededB = ((size_t)keyB + 1u) * (size_t)elemCount;
+    const size_t needed = std::max(neededA, neededB);
+    return timeline.inTans.size() >= needed && timeline.outTans.size() >= needed;
+}
+
 static float InterpolateTimelineValue(const MdxTimeline& timeline, int elem, int elemCount,
                                       int keyA, int keyB, float t) {
-    const float a = timeline.values[(size_t)keyA * elemCount + elem];
-    const float b = timeline.values[(size_t)keyB * elemCount + elem];
+    const float a = TimelineValueOrDefault(timeline, keyA, elem, elemCount, 0.0f);
+    const float b = TimelineValueOrDefault(timeline, keyB, elem, elemCount, a);
     switch (timeline.interpolationType) {
     case MdxInterpolation::None:
         return a;
     case MdxInterpolation::Linear:
         return a + (b - a) * t;
     case MdxInterpolation::Hermite: {
-        if (timeline.inTans.empty() || timeline.outTans.empty()) {
+        if (!TimelineHasTangents(timeline, keyA, keyB, elemCount)) {
             return a + (b - a) * t;
         }
         const float outTan = timeline.outTans[(size_t)keyA * elemCount + elem];
@@ -112,7 +143,7 @@ static float InterpolateTimelineValue(const MdxTimeline& timeline, int elem, int
             + (t3 - t2) * inTan;
     }
     case MdxInterpolation::Bezier: {
-        if (timeline.inTans.empty() || timeline.outTans.empty()) {
+        if (!TimelineHasTangents(timeline, keyA, keyB, elemCount)) {
             return a + (b - a) * t;
         }
         const float outTan = timeline.outTans[(size_t)keyA * elemCount + elem];
@@ -130,14 +161,18 @@ static float InterpolateTimelineValue(const MdxTimeline& timeline, int elem, int
 
 static bool SampleGlobalTimelineLooped(const MdxTimeline& timeline, uint32_t frame,
                                        uint32_t duration, float* out, int elemCount) {
-    if (timeline.frames.empty() || elemCount < 1 || duration == 0) {
+    if (!out || timeline.frames.empty() || elemCount < 1 || duration == 0) {
         return false;
     }
     if (timeline.frames.size() == 1) {
         for (int elem = 0; elem < elemCount; ++elem) {
-            out[elem] = timeline.values[elem];
+            out[elem] = TimelineValueOrDefault(timeline, 0, elem, elemCount, 0.0f);
         }
-        return true;
+        return TimelineHasKeyValues(timeline, 0, elemCount);
+    }
+
+    if (!TimelineHasKeyValues(timeline, (int)timeline.frames.size() - 1, elemCount)) {
+        return false;
     }
 
     const int lastIndex = (int)timeline.frames.size() - 1;
@@ -399,32 +434,7 @@ static bool IsBetterSequenceSelectionScore(const SequenceSelectionScore& candida
 static int FindBestSequenceIndexByPrimaryAndTags(const MdxModel& model,
                                                  const char* primaryToken,
                                                  const std::vector<std::string>& secondaryTags) {
-    const std::string primary = primaryToken ? ToLowerCopy(std::string(primaryToken)) : std::string();
-    const auto requestedTags = NormalizeKnownSecondaryTags(secondaryTags);
-    bool foundCandidate = false;
-    SequenceSelectionScore bestScore;
-    for (int i = 0; i < (int)model.sequences.size(); ++i) {
-        const auto& sequence = model.sequences[(size_t)i];
-        if (!SequenceHasPrimaryToken(sequence, primary)) {
-            continue;
-        }
-
-        const auto candidateTags = ExtractKnownSequenceSecondaryTags(sequence.name);
-        SequenceSelectionScore candidateScore;
-        candidateScore.exactRequested = candidateTags == requestedTags;
-        candidateScore.matchRank = ComputeRequestedSecondaryTagMatchRank(requestedTags, candidateTags);
-        candidateScore.positiveMatch = candidateScore.matchRank > 0;
-        candidateScore.secondaryCount = (int)candidateTags.size();
-        candidateScore.exactBase = GetSequenceBaseNameLower(sequence.name) == primary;
-        candidateScore.ordinalRank = ComputeSecondaryTagOrdinalRank(candidateTags);
-        candidateScore.index = i;
-
-        if (!foundCandidate || IsBetterSequenceSelectionScore(candidateScore, bestScore)) {
-            bestScore = candidateScore;
-            foundCandidate = true;
-        }
-    }
-    return foundCandidate ? bestScore.index : -1;
+    return MdxSelectSequenceIndexByPrimaryAndTags(model, primaryToken, secondaryTags);
 }
 
 static int FindSequenceByBaseName(const MdxModel& model, const char* baseName) {
@@ -685,6 +695,11 @@ MdxViewer::MdxViewer()
     , cachedBoneTexId_{0}
     , particles_{}
     , hasParticles_{false}
+    , eventEffectResolver_{}
+    , eventEffectResolverLoaded_{false}
+    , resolvedEventEffects_{}
+    , triggeredEventCount_{0}
+    , resolvedEventEffectCount_{0}
     , pendingStandSequenceAfterCurrent_{false}
     , sharedSource_{nullptr} {
 }
@@ -819,7 +834,7 @@ void MdxViewer::InitSharedShader() {
                 vec2 uv = vUV;
                 uv += uUvTransRot.xy;
                 uv = quat_transform(uUvTransRot.zw, uv - 0.5) + 0.5;
-                uv = uTexFlags.z * (uv - 0.5) + 0.5;
+                uv = uTexFlags.zw * (uv - 0.5) + 0.5;
                 if (uTexFlags.x > 0.5) color = texture(uTexture, uv) * uDebugColor;
                 if (uTexFlags.y == 1.0 && color.a < 0.75) discard;
                 if (uTexFlags.y >= 5.0 && color.a < 0.02) discard;
@@ -945,7 +960,7 @@ void MdxViewer::InitSharedShader() {
                 vec2 uv = vUV;
                 uv += uUvTransRot.xy;
                 uv = quat_transform(uUvTransRot.zw, uv - 0.5) + 0.5;
-                uv = uTexFlags.z * (uv - 0.5) + 0.5;
+                uv = uTexFlags.zw * (uv - 0.5) + 0.5;
                 if (uTexFlags.x > 0.5) color = texture(uTexture, uv) * uDebugColor;
                 if (uTexFlags.y == 1.0 && color.a < 0.75) discard;
                 if (uTexFlags.y >= 5.0 && color.a < 0.02) discard;
@@ -1084,7 +1099,7 @@ void MdxViewer::InitSharedShader() {
         pd.colors[0].blend.enabled = false;
         // Vertex: pos(3f) + norm(3f) + uv(2f) + boneIdx(8ub) + boneWt(8f) + boneCount(1f)
         // Stride = 12 + 12 + 8 + 8 + 32 + 4 = 76 bytes
-        pd.layout.buffers[0].stride = sizeof(VertexSkinned);
+        pd.layout.buffers[0].stride = sizeof(MdxSkinnedVertex);
         pd.layout.attrs[0] = {0, 0, SG_VERTEXFORMAT_FLOAT3};          // aPos
         pd.layout.attrs[1] = {0, 12, SG_VERTEXFORMAT_FLOAT3};         // aNorm
         pd.layout.attrs[2] = {0, 24, SG_VERTEXFORMAT_FLOAT2};         // aUV
@@ -1828,6 +1843,14 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
         hasParticles_ = false;
     }
 
+    triggeredEventCount_ = 0;
+    resolvedEventEffectCount_ = 0;
+    resolvedEventEffects_.clear();
+    eventEffectResolverLoaded_ = false;
+    if (mpq && !sourceModel.eventObjects.empty()) {
+        eventEffectResolverLoaded_ = eventEffectResolver_.Load(*mpq);
+    }
+
     std::cout << "MdxViewer: " << name_ << " loaded (batches=" << batches_.size()
               << ", animated=" << hasAnimations_ << ", particles=" << hasParticles_ << ")" << std::endl;
     if (ToLowerCopy(name_).find("peasant") != std::string::npos) {
@@ -2031,7 +2054,7 @@ bool MdxViewer::PlaySpellSequenceWithTags(const std::vector<std::string>& second
     if (!initializedAnimator_ || !modelSource_) {
         return false;
     }
-    const int sequenceIndex = FindBestSequenceIndexByPrimaryAndTags(*modelSource_, "spell", secondaryTags);
+    const int sequenceIndex = MdxSelectSpellSequenceIndex(*modelSource_, secondaryTags);
     if (sequenceIndex < 0) {
         return false;
     }
@@ -2189,6 +2212,44 @@ bool MdxViewer::PlaySequenceByIndex(int index, bool loop, float speed, bool queu
     return played;
 }
 
+bool MdxViewer::PlaySequenceByPrimaryAndTags(const char* primaryTag,
+                                             const std::vector<std::string>& secondaryTags,
+                                             bool loop,
+                                             float speed,
+                                             bool queueStandAfterCurrent,
+                                             bool restartIfSame) {
+    pendingStandSequenceAfterCurrent_ = queueStandAfterCurrent && !loop;
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+
+    const int sequenceIndex = MdxSelectSequenceIndexByPrimaryAndTags(
+        *modelSource_, (primaryTag && primaryTag[0]) ? primaryTag : nullptr, secondaryTags);
+    if (sequenceIndex < 0) {
+        pendingStandSequenceAfterCurrent_ = false;
+        return false;
+    }
+    if (!restartIfSame && animator_.GetCurrentSequence() == sequenceIndex) {
+        return true;
+    }
+
+    const bool played = SetSequencePreservingWalk(sequenceIndex, loop, speed);
+    if (!played) {
+        pendingStandSequenceAfterCurrent_ = false;
+    }
+    return played;
+}
+
+bool MdxViewer::IsPlayingSequenceByPrimaryAndTags(const char* primaryTag,
+                                                  const std::vector<std::string>& secondaryTags) const {
+    if (!initializedAnimator_ || !modelSource_) {
+        return false;
+    }
+    const int sequenceIndex = MdxSelectSequenceIndexByPrimaryAndTags(
+        *modelSource_, (primaryTag && primaryTag[0]) ? primaryTag : nullptr, secondaryTags);
+    return sequenceIndex >= 0 && animator_.GetCurrentSequence() == sequenceIndex;
+}
+
 bool MdxViewer::SetCurrentSequenceFrameByRatio(float ratio) {
     if (!initializedAnimator_) {
         return false;
@@ -2230,96 +2291,16 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
     (void)model; (void)mpq;
     (void)geosetIdx;
 
-    int vc = (int)geo.vertices.size() / 3;
-    if (vc == 0) return;
-    const bool hasCompactSkin = geo.skin.size() >= size_t(vc * 4);
-
-    // Build per-vertex bone data
-    std::vector<VertexSkinned> verts(vc);
-
-    // Reforged SKIN data carries explicit per-vertex weights. Classic MDX stores
-    // a matrix group per vertex group instead; Warsmash averages across the
-    // referenced matrices, so we mirror that behavior here.
-    for (int i = 0; i < vc; i++) {
-        float mx = geo.vertices[i*3];
-        float my = geo.vertices[i*3+1];
-        float mz = geo.vertices[i*3+2];
-        // Y-up conversion
-        verts[i].px = mx;  verts[i].py = mz;  verts[i].pz = -my;
-        if (!geo.normals.empty()) {
-            verts[i].nx = geo.normals[i*3];
-            verts[i].ny = geo.normals[i*3+2];
-            verts[i].nz = -geo.normals[i*3+1];
-        } else {
-            verts[i].nx = 0; verts[i].ny = 1; verts[i].nz = 0;
-        }
-        if (uvSource && uvSource->size() >= size_t(i * 2 + 2)) {
-            verts[i].tu = (*uvSource)[i*2];
-            verts[i].tv = (*uvSource)[i*2+1];
-        } else {
-            verts[i].tu = 0; verts[i].tv = 0;
-        }
-
-        // Bone data
-        memset(verts[i].boneIndices, 0, 8);
-        verts[i].boneWeights[0] = 1.0f;
-        for (int b = 1; b < 8; ++b) {
-            verts[i].boneWeights[b] = 0.0f;
-        }
-        verts[i].boneCount = 1;
-
-        if (hasCompactSkin) {
-            float totalWeight = 0.0f;
-            int influenceCount = 0;
-            for (int b = 0; b < 4; ++b) {
-                const uint16_t skinEntry = geo.skin[i * 4 + b];
-                const int objectId = (int)(skinEntry >> 8);
-                const float weight = float(skinEntry & 0xFF) / 255.0f;
-                if (weight <= 0.0f) continue;
-
-                int boneIndex = animator_.GetBoneIndexForObjectId(objectId);
-                if (boneIndex < 0 || boneIndex >= 256) continue;
-
-                verts[i].boneIndices[influenceCount] = (uint8_t)boneIndex;
-                verts[i].boneWeights[influenceCount] = weight;
-                totalWeight += weight;
-                ++influenceCount;
-            }
-            if (influenceCount > 0 && totalWeight > 0.0f) {
-                for (int b = 0; b < influenceCount; ++b) {
-                    verts[i].boneWeights[b] /= totalWeight;
-                }
-                verts[i].boneCount = (float)influenceCount;
-            }
-        } else if (i < (int)geo.vertexGroups.size()) {
-            int groupIdx = geo.vertexGroups[i];
-            if (groupIdx >= 0 && groupIdx < (int)geo.matrixGroups.size()) {
-                int groupStart = 0;
-                for (int mg = 0; mg < groupIdx; mg++)
-                    groupStart += (int)geo.matrixGroups[mg];
-                int groupBoneCount = (int)geo.matrixGroups[groupIdx];
-                int influenceCount = 0;
-                for (int b = 0; b < groupBoneCount && influenceCount < 8; ++b) {
-                    int mi = groupStart + b;
-                    if (mi < (int)geo.matrixIndices.size()) {
-                        int objectId = (int)geo.matrixIndices[mi];
-                        int boneIndex = animator_.GetBoneIndexForObjectId(objectId);
-                        if (boneIndex >= 0 && boneIndex < 256) {
-                            verts[i].boneIndices[influenceCount] = (uint8_t)boneIndex;
-                            ++influenceCount;
-                        }
-                    }
-                }
-                if (influenceCount > 0) {
-                    const float weight = 1.0f / (float)influenceCount;
-                    for (int b = 0; b < influenceCount; ++b) {
-                        verts[i].boneWeights[b] = weight;
-                    }
-                    verts[i].boneCount = (float)influenceCount;
-                }
-            }
-        }
+    std::vector<MdxSkinnedVertex> verts;
+    if (!MdxBuildSkinnedVertices(
+            geo,
+            uvSource,
+            [this](int objectId) { return animator_.GetBoneIndexForObjectId(objectId); },
+            verts,
+            nullptr)) {
+        return;
     }
+    const int vc = (int)verts.size();
 
     bool invalidGeometry = false;
     const char* invalidReason = "";
@@ -2365,7 +2346,7 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
 
     sg_buffer_desc vbd = {};
     vbd.usage.vertex_buffer = true; vbd.usage.immutable = true;
-    vbd.data.ptr = verts.data(); vbd.data.size = verts.size() * sizeof(VertexSkinned);
+    vbd.data.ptr = verts.data(); vbd.data.size = verts.size() * sizeof(MdxSkinnedVertex);
     batch.vbo = sg_make_buffer(&vbd);
 
     sg_buffer_desc ibd = {};
@@ -2380,6 +2361,7 @@ void MdxViewer::Update(float dt) {
     elapsedMs_ += std::max(0.0f, dt) * 1000.0f;
     if (initializedAnimator_) {
         animator_.Update(dt);
+        ProcessTriggeredEvents();
         if (pendingStandSequenceAfterCurrent_ && animator_.IsSequenceFinished()) {
             PlayStandSequence();
         }
@@ -2388,7 +2370,10 @@ void MdxViewer::Update(float dt) {
         UpdateAnimatedStates();
     }
     if (hasParticles_)
-        particles_.Update(dt, particles_.GetWorldOffset());
+        particles_.Update(dt, particles_.GetWorldOffset(), modelSource_,
+                          initializedAnimator_ ? &animator_ : nullptr,
+                          initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
+                          elapsedMs_);
 }
 
 void MdxViewer::Update(float dt, const Mat4& view) {
@@ -2399,6 +2384,7 @@ void MdxViewer::Update(float dt, const Mat4& view) {
     }
     if (initializedAnimator_) {
         animator_.Update(dt);
+        ProcessTriggeredEvents();
         if (pendingStandSequenceAfterCurrent_ && animator_.IsSequenceFinished()) {
             PlayStandSequence();
         }
@@ -2407,7 +2393,35 @@ void MdxViewer::Update(float dt, const Mat4& view) {
         UpdateAnimatedStates();
     }
     if (hasParticles_)
-        particles_.Update(dt, particles_.GetWorldOffset());
+        particles_.Update(dt, particles_.GetWorldOffset(), modelSource_,
+                          initializedAnimator_ ? &animator_ : nullptr,
+                          initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
+                          elapsedMs_);
+}
+
+void MdxViewer::ProcessTriggeredEvents() {
+    resolvedEventEffects_.clear();
+    const std::vector<MdxEventTrigger>& triggeredEvents = animator_.GetTriggeredEvents();
+    if (triggeredEvents.empty()) {
+        return;
+    }
+
+    triggeredEventCount_ += (int)triggeredEvents.size();
+    if (!eventEffectResolverLoaded_) {
+        return;
+    }
+
+    for (const MdxEventTrigger& trigger : triggeredEvents) {
+        MdxEventEffect effect = eventEffectResolver_.Resolve(trigger);
+        if (effect.resolved) {
+            effect.hasLocalTransform = trigger.hasLocalTransform;
+            effect.localTransform = trigger.localTransform;
+            effect.localPosition = trigger.localPosition;
+            effect.localScale = trigger.localScale;
+            ++resolvedEventEffectCount_;
+            resolvedEventEffects_.push_back(std::move(effect));
+        }
+    }
 }
 
 void MdxViewer::InitializeAnimatedStates() {
@@ -2495,9 +2509,7 @@ void MdxViewer::UpdateAnimatedStates() {
                 }
                 else if (timeline.tag == TAG_KGAC
                     && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, sampled, 3, 1.0f)) {
-                    state.color[0] = sampled[0];
-                    state.color[1] = sampled[1];
-                    state.color[2] = sampled[2];
+                    MdxConvertAnimatedColorBgrToRgb(sampled, state.color);
                 }
             }
             break;
@@ -2650,7 +2662,7 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
     fsU.texFlags[0] = 0.0f;
     fsU.texFlags[1] = 0.0f;
     fsU.texFlags[2] = 1.0f;
-    fsU.texFlags[3] = 0.0f;
+    fsU.texFlags[3] = 1.0f;
     fsU.fogColor[0] = fogColor_[0];
     fsU.fogColor[1] = fogColor_[1];
     fsU.fogColor[2] = fogColor_[2];
@@ -2730,6 +2742,7 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
         fsU.uvTransRot[2] = 0.0f;
         fsU.uvTransRot[3] = 1.0f;
         fsU.texFlags[2] = 1.0f;
+        fsU.texFlags[3] = 1.0f;
         if (modelSource_
             && batch.textureAnimationId >= 0
             && batch.textureAnimationId < (int)modelSource_->texAnims.size()) {
@@ -2751,7 +2764,8 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
             if (const MdxTimeline* tl = FindTimeline(texAnim.timelines, TAG_KTAS)) {
                 float sampled[3] = {1.0f, 1.0f, 1.0f};
                 if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 3, 1.0f)) {
-                    fsU.texFlags[2] = sampled[0];
+                    fsU.texFlags[2] = std::isfinite(sampled[0]) ? sampled[0] : 1.0f;
+                    fsU.texFlags[3] = std::isfinite(sampled[1]) ? sampled[1] : 1.0f;
                 }
             }
         }

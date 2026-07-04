@@ -3,7 +3,9 @@
 #include "model/mdx.h"
 #include "render/math.h"
 #include "render/mdx_animator.h"
+#include "render/mdx_event_effects.h"
 #include "render/mdx_particles.h"
+#include "render/mdx_skinning.h"
 #include "resource/mpq_storm.h"
 #include <string>
 #include <vector>
@@ -66,12 +68,23 @@ public:
                             bool queueStandAfterCurrent = false);
     bool PlaySequenceByIndex(int index, bool loop, float speed = 1.0f,
                              bool queueStandAfterCurrent = false);
+    bool PlaySequenceByPrimaryAndTags(const char* primaryTag,
+                                      const std::vector<std::string>& secondaryTags,
+                                      bool loop,
+                                      float speed = 1.0f,
+                                      bool queueStandAfterCurrent = false,
+                                      bool restartIfSame = true);
+    bool IsPlayingSequenceByPrimaryAndTags(const char* primaryTag,
+                                           const std::vector<std::string>& secondaryTags) const;
     bool SetCurrentSequenceFrameByRatio(float ratio);
     bool IsPlayingSequenceWithToken(const char* token) const;
     bool IsCurrentSequenceFinished() const;
     bool IsCurrentSequenceLooping() const;
     bool GetSequenceName(int index, std::string& outName) const;
     float GetAnimationSpeedScale() const { return animationSpeedScale_; }
+    int GetTriggeredEventCount() const { return triggeredEventCount_; }
+    int GetResolvedEventEffectCount() const { return resolvedEventEffectCount_; }
+    const std::vector<MdxEventEffect>& GetResolvedEventEffects() const { return resolvedEventEffects_; }
     void DebugLogState(const char* tag) const;
     void SetFog(const float color[3], float start, float end);
     void DisableFog();
@@ -88,15 +101,6 @@ private:
         float px, py, pz;
         float nx, ny, nz;
         float tu, tv;
-    };
-
-    struct VertexSkinned {
-        float px, py, pz;
-        float nx, ny, nz;
-        float tu, tv;
-        uint8_t boneIndices[8];
-        float boneWeights[8];
-        float boneCount;
     };
 
     struct Batch {
@@ -145,6 +149,7 @@ private:
     void Release();
     void InitializeAnimatedStates();
     void UpdateAnimatedStates();
+    void ProcessTriggeredEvents();
     bool SetSequencePreservingWalk(int sequenceIndex, bool loop, float speed);
 
     // Build skinned vertex buffer from geoset data
@@ -205,6 +210,11 @@ private:
     // Particle system
     MdxParticleSystem particles_;
     bool hasParticles_ = false;
+    MdxEventEffectResolver eventEffectResolver_;
+    bool eventEffectResolverLoaded_ = false;
+    std::vector<MdxEventEffect> resolvedEventEffects_;
+    int triggeredEventCount_ = 0;
+    int resolvedEventEffectCount_ = 0;
     bool pendingStandSequenceAfterCurrent_ = false;
     bool currentSequenceIsWalk_ = false;
     float lastWalkSequenceProgress_ = -1.0f;

@@ -8,6 +8,7 @@
 #include <stack>
 #include <variant>
 #include <iostream>
+#include <unordered_set>
 
 // JASS value type
 struct JassValue {
@@ -46,8 +47,13 @@ public:
 
     bool IsValid() const { return !programs_.empty(); }
     const std::vector<std::string>& GetErrors() const { return errors_; }
+    const std::unordered_map<std::string, int>& GetNativeDeclarations() const { return nativeDeclarations_; }
+    const std::unordered_map<std::string, int>& GetFunctionCallCounts() const { return functionCallCounts_; }
+    const std::unordered_map<std::string, NativeFunc>& GetRegisteredNatives() const { return natives_; }
+    std::unordered_set<std::string> GetFunctionNames() const;
 
 private:
+    void CollectScriptStats(const AstNode* node);
     JassValue ExecuteNode(const AstNode* node);
     JassValue ExecuteFunction(const AstNode* func, const std::vector<JassValue>& args);
 
@@ -60,6 +66,8 @@ private:
     std::unordered_map<std::string, JassValue> globals_;
     std::unordered_map<std::string, NativeFunc> natives_;
     std::unordered_map<std::string, const AstNode*> functions_;
+    std::unordered_map<std::string, int> nativeDeclarations_;
+    std::unordered_map<std::string, int> functionCallCounts_;
     std::stack<Scope> callStack_;
     std::vector<std::string> errors_;
     const AstNode* returnNode_ = nullptr;

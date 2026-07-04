@@ -1,13 +1,20 @@
 #include "game_controller.h"
 #include "../render/renderer.h"
+#include "../render/mdx_event_splat.h"
 #include "../render/picking.h"
 #include "../render/unit_selection_geom.h"
 #include "../ecs/animation_utils.h"
+#include "../ecs/ability_factory.h"
 #include "../ecs/unit_text_utils.h"
 #include "../ecs/orders/order.h"
 #include "../ecs/widget.h"
 #include "../ecs/destructable.h"
 #include "../ecs/item.h"
+#include "../ecs/abilities/ability_build.h"
+#include "../ecs/abilities/ability_gold_mine.h"
+#include "../ecs/abilities/ability_harvest.h"
+#include "../ecs/abilities/ability_queue.h"
+#include "../core/map_path_resolver.h"
 #include "../core/path_utils.h"
 #include "../platform/platform.h"
 #include "../debug/move_debug.h"
@@ -22,9 +29,12 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -425,30 +435,211 @@ static ScreenRect FallbackMinimapRect(int screenW, int screenH) {
     return ScreenRect{20.0f, (float)screenH - h - 24.0f, w, h};
 }
 
+static Vec4 MdxEventSplatTint(const std::array<std::array<float, 4>, 3>& colors,
+                              const std::array<float, 3>& intervalTimes,
+                              int intervalCount,
+                              float lifeSpanValue,
+                              float lifeRemaining) {
+    auto normalizeColor = [](const std::array<float, 4>& color) {
+        auto channel = [](float value) {
+            if (!std::isfinite(value)) {
+                return 1.0f;
+            }
+            return std::clamp(value / 255.0f, 0.0f, 1.0f);
+        };
+        return Vec4(channel(color[0]), channel(color[1]), channel(color[2]), channel(color[3]));
+    };
+    auto lerp = [](const Vec4& a, const Vec4& b, float t) {
+        t = std::clamp(t, 0.0f, 1.0f);
+        return Vec4(a.x + (b.x - a.x) * t,
+                    a.y + (b.y - a.y) * t,
+                    a.z + (b.z - a.z) * t,
+                    a.w + (b.w - a.w) * t);
+    };
+
+    const Vec4 start = normalizeColor(colors[0]);
+    const Vec4 middle = normalizeColor(colors[1]);
+    const Vec4 end = normalizeColor(colors[2]);
+    const float lifeSpan = std::max(lifeSpanValue, 0.0001f);
+    const float age = std::clamp(lifeSpan - lifeRemaining, 0.0f, lifeSpan);
+
+    if (intervalCount >= 3) {
+        const float birth = std::max(0.0f, intervalTimes[0]);
+        const float pause = std::max(0.0f, intervalTimes[1]);
+        const float decay = std::max(0.0f, intervalTimes[2]);
+        if (birth > 0.0001f && age < birth) {
+            return lerp(start, middle, age / birth);
+        }
+        if (age < birth + pause || decay <= 0.0001f) {
+            return middle;
+        }
+        return lerp(middle, end, (age - birth - pause) / decay);
+    }
+
+    if (intervalCount >= 2) {
+        const float sustain = std::max(0.0f, intervalTimes[0]);
+        const float decay = std::max(0.0f, intervalTimes[1]);
+        if (sustain > 0.0001f && age < sustain) {
+            return lerp(start, middle, age / sustain);
+        }
+        if (decay <= 0.0001f) {
+            return middle;
+        }
+        return lerp(middle, end, (age - sustain) / decay);
+    }
+
+    return start;
+}
+
+static float MdxEventSplatCell(const std::array<std::array<float, 3>, 2>& uvIntervals,
+                               const std::array<float, 3>& intervalTimes,
+                               int intervalCount,
+                               int columns,
+                               int rows,
+                               float lifeSpanValue,
+                               float lifeRemaining) {
+    if (columns <= 1 && rows <= 1) {
+        return 0.0f;
+    }
+    const float lifeSpan = std::max(lifeSpanValue, 0.0001f);
+    const float age = std::clamp(lifeSpan - lifeRemaining, 0.0f, lifeSpan);
+    int intervalIndex = 0;
+    float factor = 0.0f;
+    if (intervalCount >= 2) {
+        const float sustain = std::max(0.0f, intervalTimes[0]);
+        const float decay = std::max(0.0f, intervalTimes[1]);
+        if (sustain > 0.0001f && age < sustain) {
+            factor = age / sustain;
+            intervalIndex = 0;
+        } else {
+            factor = decay > 0.0001f ? (age - sustain) / decay : 1.0f;
+            intervalIndex = 1;
+        }
+    }
+
+    const auto& interval = uvIntervals[intervalIndex];
+    const float start = interval[0];
+    const float end = interval[1];
+    const float repeat = interval[2];
+    const float spriteCount = end - start;
+    const float maxCell = (float)std::max(0, columns * rows - 1);
+    if (spriteCount > 0.0f) {
+        const float advanced = std::fmod(std::floor(spriteCount * repeat * std::clamp(factor, 0.0f, 1.0f)),
+                                         spriteCount);
+        return std::clamp(start + advanced, 0.0f, maxCell);
+    }
+    return std::clamp(start, 0.0f, maxCell);
+}
+
+static Vec4 MdxEventSplatUvRect(const std::array<std::array<float, 3>, 2>& uvIntervals,
+                                const std::array<float, 3>& intervalTimes,
+                                int intervalCount,
+                                int columns,
+                                int rows,
+                                float lifeSpanValue,
+                                float lifeRemaining) {
+    columns = std::max(1, columns);
+    rows = std::max(1, rows);
+    const float cell = MdxEventSplatCell(uvIntervals, intervalTimes, intervalCount,
+                                         columns, rows, lifeSpanValue, lifeRemaining);
+    const float left = std::floor(std::fmod(cell, (float)columns)) / (float)columns;
+    const float top = std::floor(cell / (float)columns) / (float)rows;
+    return Vec4(left, top, left + (1.0f / (float)columns), top + (1.0f / (float)rows));
+}
+
+static SplatModel::BlendMode MdxEventSplatBlendMode(int blendMode) {
+    switch (blendMode) {
+    case 1:
+        return SplatModel::BlendMode::AdditiveAlpha;
+    case 2:
+        return SplatModel::BlendMode::Modulate;
+    case 3:
+        return SplatModel::BlendMode::Modulate2x;
+    case 4:
+        return SplatModel::BlendMode::Blend;
+    case 0:
+    default:
+        return SplatModel::BlendMode::Blend;
+    }
+}
+
 // --- Helpers (animation / visual) ---
+
+static bool CurrentAnimationRequestMatchesViewer(MdxViewer* viewer,
+                                                 const animation_utils::PendingUnitAnimation& request) {
+    if (!viewer || !viewer->GetAnimator()) return false;
+    if (request.useTags) {
+        return viewer->IsPlayingSequenceByPrimaryAndTags(request.primaryTag.c_str(), request.secondaryTags);
+    }
+    const int currentSequence = viewer->GetAnimator()->GetCurrentSequence();
+    if (request.useSequenceIndex) {
+        return currentSequence == request.sequenceIndex;
+    }
+    if (request.sequenceName.empty()) {
+        return false;
+    }
+    std::string currentName;
+    if (!viewer->GetSequenceName(currentSequence, currentName)) {
+        return false;
+    }
+    const std::string requested = LowerAscii(request.sequenceName);
+    const std::string current = LowerAscii(currentName);
+    return current.find(requested) != std::string::npos;
+}
 
 static bool ApplyAnimationRequestToViewer(int handleId,
                                           MdxViewer* viewer,
                                           const animation_utils::PendingUnitAnimation& request,
                                           GameController* g) {
     if (!viewer || !viewer->GetAnimator()) return false;
+    if (!request.force && CurrentAnimationRequestMatchesViewer(viewer, request)) return true;
 
     bool loop = false;
     bool queueStandAfterCurrent = true;
     std::string lowerName;
-    if (animation_utils::GetRequestedAnimationLowerName(viewer, request, lowerName)) {
+    if (request.useTags) {
+        lowerName = request.primaryTag;
+        for (const std::string& tag : request.secondaryTags) {
+            lowerName += " ";
+            lowerName += tag;
+        }
+        animation_utils::ClassifyScriptedAnimationName(lowerName, loop, queueStandAfterCurrent);
+    } else if (animation_utils::GetRequestedAnimationLowerName(viewer, request, lowerName)) {
         animation_utils::ClassifyScriptedAnimationName(lowerName, loop, queueStandAfterCurrent);
     }
 
     bool played = false;
-    if (request.useSequenceIndex) {
-        played = viewer->PlaySequenceByIndex(request.sequenceIndex, loop, 1.0f, queueStandAfterCurrent);
+    const float speedRatio = std::clamp(request.speedRatio, 0.1f, 4.0f);
+    if (request.useTags) {
+        if (!request.force && viewer->IsPlayingSequenceByPrimaryAndTags(request.primaryTag.c_str(), request.secondaryTags)) {
+            played = true;
+        } else if (request.durationSeconds > 0.0f) {
+            if (request.primaryTag == "attack") {
+                played = viewer->PlayAttackSequenceWithTagsAndDuration(request.secondaryTags, request.durationSeconds);
+            } else if (request.primaryTag == "spell" || request.primaryTag.empty()) {
+                played = viewer->PlaySpellSequenceWithTags(request.secondaryTags, request.durationSeconds);
+            } else if (request.primaryTag == "channel") {
+                played = viewer->PlayChannelSequenceWithTags(request.secondaryTags, request.durationSeconds);
+            } else if (request.primaryTag == "decay") {
+                played = viewer->PlayDecaySequenceWithTags(request.secondaryTags, request.durationSeconds);
+            } else if (request.primaryTag == "dissipate") {
+                played = viewer->PlayDissipateSequence(request.durationSeconds);
+            }
+        }
+        if (!played) {
+            played = viewer->PlaySequenceByPrimaryAndTags(request.primaryTag.c_str(), request.secondaryTags,
+                                                         loop, speedRatio, queueStandAfterCurrent, request.force);
+        }
+    } else if (request.useSequenceIndex) {
+        played = viewer->PlaySequenceByIndex(request.sequenceIndex, loop, speedRatio, queueStandAfterCurrent);
     } else if (!request.sequenceName.empty()) {
-        played = viewer->PlaySequenceByName(request.sequenceName.c_str(), loop, 1.0f, queueStandAfterCurrent);
+        played = viewer->PlaySequenceByName(request.sequenceName.c_str(), loop, speedRatio, queueStandAfterCurrent);
     }
 
     if (played) {
-        g->simUnitScriptedAnimations[handleId] = {request, loop, queueStandAfterCurrent};
+        auto storedRequest = request;
+        storedRequest.force = false;
+        g->simUnitScriptedAnimations[handleId] = {storedRequest, loop, queueStandAfterCurrent};
     }
     return played;
 }
@@ -459,6 +650,32 @@ static void ApplyPendingUnitAnimation(int handleId, MdxViewer* viewer, GameContr
     if (pendingIt == g->simUnitPendingAnimations.end()) return;
     ApplyAnimationRequestToViewer(handleId, viewer, pendingIt->second, g);
     g->simUnitPendingAnimations.erase(pendingIt);
+}
+
+static void QueueUnitAnimationRequest(int handleId,
+                                      const animation_utils::PendingUnitAnimation& request,
+                                      GameController* g) {
+    if (!g) return;
+    g->simUnitQueuedAnimations[handleId].push_back(request);
+}
+
+static bool ApplyNextQueuedUnitAnimation(int handleId, MdxViewer* viewer, GameController* g) {
+    if (!viewer || !viewer->GetAnimator() || !g) return false;
+    auto queuedIt = g->simUnitQueuedAnimations.find(handleId);
+    if (queuedIt == g->simUnitQueuedAnimations.end() || queuedIt->second.empty()) {
+        return false;
+    }
+    auto request = queuedIt->second.front();
+    queuedIt->second.pop_front();
+    if (queuedIt->second.empty()) {
+        g->simUnitQueuedAnimations.erase(queuedIt);
+    }
+    if (ApplyAnimationRequestToViewer(handleId, viewer, request, g)) {
+        g->simUnitPendingAnimations.erase(handleId);
+        return true;
+    }
+    g->simUnitPendingAnimations[handleId] = std::move(request);
+    return false;
 }
 
 namespace {
@@ -552,6 +769,125 @@ void PrintTopJassParserErrors(const std::unordered_map<std::string, int>& parser
     }
 }
 
+std::string JassDiagnosticCategory(const std::string& name) {
+    const std::string lower = LowerAscii(name);
+    if (lower.find("ability") != std::string::npos || lower.find("abil") != std::string::npos) {
+        return "ability";
+    }
+    if (lower.find("triggerregister") != std::string::npos || lower.find("event") != std::string::npos) {
+        return "trigger_event";
+    }
+    if (lower.find("camera") != std::string::npos || lower.find("cinematic") != std::string::npos) {
+        return "camera_cinematic";
+    }
+    if (lower.find("timer") != std::string::npos) {
+        return "timer";
+    }
+    if (lower.find("destruct") != std::string::npos) {
+        return "destructable";
+    }
+    if (lower.find("item") != std::string::npos) {
+        return "item";
+    }
+    if (lower.find("unit") != std::string::npos || lower.find("corpse") != std::string::npos) {
+        return "unit";
+    }
+    if (lower.find("sound") != std::string::npos || lower.find("music") != std::string::npos) {
+        return "sound";
+    }
+    if (lower.rfind("create", 0) == 0 || lower.find("create") != std::string::npos) {
+        return "create";
+    }
+    return "other";
+}
+
+void PrintTopJassStaticEntries(const char* prefix,
+                               const std::unordered_map<std::string, int>& entries,
+                               size_t limit) {
+    std::vector<std::pair<std::string, int>> sorted(entries.begin(), entries.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+    const size_t count = std::min(limit, sorted.size());
+    for (size_t i = 0; i < count; ++i) {
+        std::cout << "  " << prefix << " " << sorted[i].first
+                  << " count=" << sorted[i].second
+                  << " category=" << JassDiagnosticCategory(sorted[i].first) << std::endl;
+    }
+    if (sorted.size() > count) {
+        std::cout << "  " << prefix << "_more=" << (sorted.size() - count) << std::endl;
+    }
+}
+
+void PrintJassStaticDiagnosticsForVm(const char* phase, const JassVM& vm) {
+    std::unordered_set<std::string> registered;
+    registered.reserve(vm.GetRegisteredNatives().size());
+    for (const auto& entry : vm.GetRegisteredNatives()) {
+        registered.insert(entry.first);
+    }
+    std::unordered_set<std::string> functions = vm.GetFunctionNames();
+
+    std::unordered_map<std::string, int> unsupportedCalls;
+    int totalCalls = 0;
+    for (const auto& entry : vm.GetFunctionCallCounts()) {
+        totalCalls += entry.second;
+        if (registered.count(entry.first) == 0 && functions.count(entry.first) == 0) {
+            unsupportedCalls[entry.first] += entry.second;
+        }
+    }
+
+    std::unordered_map<std::string, int> unsupportedNativeDecls;
+    for (const auto& entry : vm.GetNativeDeclarations()) {
+        if (registered.count(entry.first) == 0) {
+            unsupportedNativeDecls[entry.first] += entry.second;
+        }
+    }
+
+    std::unordered_map<std::string, int> callCategories;
+    std::unordered_map<std::string, int> declCategories;
+    int totalUnsupportedCalls = 0;
+    int totalUnsupportedDecls = 0;
+    for (const auto& entry : unsupportedCalls) {
+        callCategories[JassDiagnosticCategory(entry.first)] += entry.second;
+        totalUnsupportedCalls += entry.second;
+    }
+    for (const auto& entry : unsupportedNativeDecls) {
+        declCategories[JassDiagnosticCategory(entry.first)] += entry.second;
+        totalUnsupportedDecls += entry.second;
+    }
+
+    std::cout << "jass_static phase=" << phase
+              << " declared_natives=" << vm.GetNativeDeclarations().size()
+              << " registered_natives=" << registered.size()
+              << " function_defs=" << functions.size()
+              << " function_call_names=" << vm.GetFunctionCallCounts().size()
+              << " function_calls=" << totalCalls << std::endl;
+    std::cout << "jass_static_unsupported phase=" << phase
+              << " call_unique=" << unsupportedCalls.size()
+              << " call_total=" << totalUnsupportedCalls
+              << " native_decl_unique=" << unsupportedNativeDecls.size()
+              << " native_decl_total=" << totalUnsupportedDecls << std::endl;
+
+    std::vector<std::string> categories = {
+        "ability", "trigger_event", "camera_cinematic", "unit", "item",
+        "destructable", "create", "timer", "sound", "other"
+    };
+    for (const auto& category : categories) {
+        const int callCount = callCategories.count(category) ? callCategories[category] : 0;
+        const int declCount = declCategories.count(category) ? declCategories[category] : 0;
+        if (callCount || declCount) {
+            std::cout << "  jass_static_category phase=" << phase
+                      << " category=" << category
+                      << " unsupported_calls=" << callCount
+                      << " unsupported_native_decls=" << declCount << std::endl;
+        }
+    }
+
+    PrintTopJassStaticEntries("unsupported_static_call", unsupportedCalls, 25);
+    PrintTopJassStaticEntries("unsupported_native_decl", unsupportedNativeDecls, 25);
+}
+
 void PlayResolvedUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController* g) {
     if (!unit || !viewer) return;
 
@@ -573,12 +909,20 @@ void PlayResolvedUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController* g
     const auto scriptIt = g->simUnitScriptedAnimations.find(handleId);
     if (scriptIt != g->simUnitScriptedAnimations.end()) {
         const auto& state = scriptIt->second;
+        if (CurrentAnimationRequestMatchesViewer(viewer, state.request)) {
+            return;
+        }
         bool applied = false;
-        if (state.request.useSequenceIndex) {
-            applied = viewer->PlaySequenceByIndex(state.request.sequenceIndex, state.loop, 1.0f,
+        const float speedRatio = std::clamp(state.request.speedRatio, 0.1f, 4.0f);
+        if (state.request.useTags) {
+            applied = viewer->PlaySequenceByPrimaryAndTags(
+                state.request.primaryTag.c_str(), state.request.secondaryTags, state.loop, speedRatio,
+                state.queueStandAfterCurrent, state.request.force);
+        } else if (state.request.useSequenceIndex) {
+            applied = viewer->PlaySequenceByIndex(state.request.sequenceIndex, state.loop, speedRatio,
                                                   state.queueStandAfterCurrent);
         } else if (!state.request.sequenceName.empty()) {
-            applied = viewer->PlaySequenceByName(state.request.sequenceName.c_str(), state.loop, 1.0f,
+            applied = viewer->PlaySequenceByName(state.request.sequenceName.c_str(), state.loop, speedRatio,
                                                   state.queueStandAfterCurrent);
         }
         if (applied) {
@@ -682,7 +1026,6 @@ void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController*
 
     bool needsResolve = posChanged || (isMoving != wasMoving);
     if (g->simUnitPendingAnimations.count(handleId)) needsResolve = true;
-    if (g->simUnitQueuedAnimations.count(handleId)) needsResolve = true;
 
     if (needsResolve) {
         PlayResolvedUnitAnimation(unit, viewer, g);
@@ -690,10 +1033,9 @@ void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController*
 
     // Handle queued animations
     const auto queuedIt = g->simUnitQueuedAnimations.find(handleId);
-    if (queuedIt != g->simUnitQueuedAnimations.end()) {
+    if (queuedIt != g->simUnitQueuedAnimations.end() && !queuedIt->second.empty()) {
         if (!viewer->IsCurrentSequenceLooping() && viewer->IsCurrentSequenceFinished()) {
-            ApplyAnimationRequestToViewer(handleId, viewer, queuedIt->second, g);
-            g->simUnitQueuedAnimations.erase(queuedIt);
+            ApplyNextQueuedUnitAnimation(handleId, viewer, g);
         }
     }
 
@@ -757,6 +1099,9 @@ void GameController::ParseArgs(int argc, char* argv[]) {
             dumpUnsupported_ = true;
             if (exitAfterFrame_ < 0) exitAfterFrame_ = 1;
             mapPath_ = arg + 15;
+        } else if (std::strcmp(arg, "--debug-gameplay-smoke") == 0) {
+            debugGameplaySmoke_ = true;
+            dumpUnsupported_ = true;
         } else if (std::strcmp(arg, "--overview-camera") == 0) {
             overviewCamera_ = true;
         } else if (std::strcmp(arg, "--scene-kind") == 0 && i + 1 < argc) {
@@ -896,6 +1241,9 @@ bool GameController::Initialize() {
             std::cerr << "UI-only mode: MainUI init failed" << std::endl;
             return false;
         }
+        ui_.SetGlueMapLaunchCallback([this](const std::string& path, int localPlayer) {
+            HandleGlueMapLaunchRequest(path, localPlayer);
+        });
         if (debugUiGlueMenu_) {
             std::vector<War3UI::GlueCampaignListItem> campaigns = LoadUiOnlyGlueCampaigns(mpq_, config_.gameVersion);
             ui_.SetGlueMenuCampaignsForUiOnly(campaigns);
@@ -937,6 +1285,13 @@ bool GameController::Initialize() {
                 }
             }
         }
+        if (pendingGlueMapLaunch_) {
+            if (!StartPendingGlueMapLaunch(1280, 720)) {
+                return false;
+            }
+            initialized_ = true;
+            return true;
+        }
         state_ = GameState::IN_GAME;
         pendingState_ = GameState::IN_GAME;
         stateTransition_ = false;
@@ -966,11 +1321,9 @@ bool GameController::Initialize() {
         else if (!mapFiles.empty())
             mapPath_ = mapFiles[0].string();
     } else {
-        fs::path mapFilePath(mapPath_);
-        if (mapFilePath.is_relative()) {
-            fs::path resolved = resourcesDir / mapFilePath;
-            if (fs::exists(resolved))
-                mapPath_ = resolved.string();
+        std::string resolvedMapPath;
+        if (ResolveMapPathForLoad(resourcesDir, mpq_, mapPath_, resolvedMapPath)) {
+            mapPath_ = resolvedMapPath;
         }
     }
 
@@ -1003,6 +1356,9 @@ bool GameController::Initialize() {
             std::cerr << "GameController: MainUI init failed" << std::endl;
             return false;
         }
+        ui_.SetGlueMapLaunchCallback([this](const std::string& path, int localPlayer) {
+            HandleGlueMapLaunchRequest(path, localPlayer);
+        });
     } else {
         std::cout << "GameController: HUD init skipped (--hide-hud)" << std::endl;
     }
@@ -1031,6 +1387,117 @@ void GameController::OpenDataSources() {
             if (fs::exists(p)) mpq_.Open(p.string());
         }
     }
+}
+
+void GameController::HandleGlueMapLaunchRequest(const std::string& mapPath, int localPlayerIndex) {
+    fs::path projectRoot = PROJECT_SOURCE_DIR;
+    fs::path resourcesDir = projectRoot / "resources";
+
+    std::string resolvedPath;
+    const bool resolved = ResolveMapPathForLoad(resourcesDir, mpq_, mapPath, resolvedPath);
+    std::ostringstream launchLog;
+    launchLog << "GlueMapLaunch: requested path='" << mapPath
+              << "' localPlayer=" << localPlayerIndex
+              << " resolved=" << (resolved ? "yes" : "no");
+    if (resolved) {
+        launchLog << " resolvedPath='" << resolvedPath << "'";
+    }
+    MoveDebugLogLine(launchLog.str());
+
+    if (!resolved) {
+        return;
+    }
+
+    config_.localPlayerIndex = localPlayerIndex;
+    if (uiOnlyMode_) {
+        pendingGlueMapLaunch_ = true;
+        pendingGlueMapLaunchRequestedPath_ = mapPath;
+        pendingGlueMapLaunchResolvedPath_ = resolvedPath;
+        pendingGlueMapLaunchLocalPlayer_ = localPlayerIndex;
+        MoveDebugLogLine("GlueMapLaunch: queued pending UI-only launch");
+        return;
+    }
+
+    if (mapConfigInitialized_ || loadingInitialized_ || simulationInitialized_) {
+        MoveDebugLogLine("GlueMapLaunch: runtime map switch requested after initialization; deferred hot-switch support pending");
+        return;
+    }
+
+    mapPath_ = resolvedPath;
+    if (fs::exists(mapPath_)) {
+        mpq_.Open(mapPath_);
+    }
+    TransitionTo(GameState::MAP_CONFIG);
+    MoveDebugLogLine("GlueMapLaunch: queued map load path='" + mapPath_ + "'");
+}
+
+bool GameController::StartPendingGlueMapLaunch(int screenW, int screenH) {
+    if (!pendingGlueMapLaunch_) {
+        return false;
+    }
+
+    const std::string requestedPath = pendingGlueMapLaunchRequestedPath_;
+    const std::string resolvedPath = pendingGlueMapLaunchResolvedPath_;
+    const int localPlayerIndex = pendingGlueMapLaunchLocalPlayer_;
+    pendingGlueMapLaunch_ = false;
+    pendingGlueMapLaunchRequestedPath_.clear();
+    pendingGlueMapLaunchResolvedPath_.clear();
+
+    if (resolvedPath.empty() || !fs::exists(resolvedPath)) {
+        MoveDebugLogLine("GlueMapLaunch: pending launch aborted; resolved map missing path='" + resolvedPath + "'");
+        return false;
+    }
+
+    MoveDebugLogLine("GlueMapLaunch: starting runtime map launch requested='" + requestedPath
+                     + "' resolved='" + resolvedPath + "'");
+
+    uiOnlyMode_ = false;
+    debugUiGlueMenu_ = false;
+    mapPath_ = resolvedPath;
+    config_.localPlayerIndex = localPlayerIndex;
+
+    if (fs::exists(mapPath_)) {
+        mpq_.Open(mapPath_);
+    }
+
+    if (!debugHudGameMode_) {
+        scene_.Init(mpq_);
+        splatMeta_.Load(mpq_);
+    }
+
+    if (!debugHudGameMode_) {
+        audio_.Init();
+    }
+    if (!debugHudGameMode_ && audio_.IsValid() && mpq_.ArchiveCount() > 0) {
+        audio_.SetMpqManager(&mpq_);
+        audio_.LoadSound("ui_click", "UI\\Mouse\\HumanClick1.wav", &mpq_);
+        audio_.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &mpq_);
+    }
+
+    hideHud_ = false;
+    if (!ui_.SwitchNoesisXaml(&mpq_, screenW, screenH, "assets/ui/Hud.xaml", config_.gameVersion)) {
+        hideHud_ = true;
+        MoveDebugLogLine("GlueMapLaunch: HUD reload failed; continuing map launch with HUD hidden");
+    } else {
+        MoveDebugLogLine("GlueMapLaunch: HUD reloaded for gameplay");
+        ui_.SetGlueMapLaunchCallback([this](const std::string& path, int localPlayer) {
+            HandleGlueMapLaunchRequest(path, localPlayer);
+        });
+    }
+
+    state_ = GameState::BOOTSTRAP;
+    pendingState_ = GameState::BOOTSTRAP;
+    stateTransition_ = false;
+    mapConfigInitialized_ = false;
+    loadingInitialized_ = false;
+    loadingFailed_ = false;
+    loadingFailureReason_.clear();
+    simulationInitialized_ = false;
+    terrainLoaded_ = false;
+    glueMapLaunchInProgress_ = true;
+    TransitionTo(GameState::MAP_CONFIG);
+    MoveDebugLogLine("GlueMapLaunch: runtime map launch queued path='" + mapPath_ + "'");
+    return true;
 }
 
 void GameController::ReadMapFile(const std::string& mapPath, const std::string& fileName,
@@ -1128,7 +1595,7 @@ void GameController::InitLoading() {
         mpq_, simulation_, unitData_, destructableData_,
         itemData_, upgradeData_, scene_, texturedTerrain_, tileset_, map_, w3i_, wpm_);
     mapLoader_->SetConfigData(configEnv_ ? configEnv_->GetData() : nullptr);
-    mapLoader_->SetLoadRenderAssets(!debugHudGameMode_ && !diagnoseMapOnly_);
+    mapLoader_->SetLoadRenderAssets(!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_);
     mapLoader_->CreateTasks(mapPath_, 0);
     loadingProgress_ = 0.0f;
     loadingInitialized_ = true;
@@ -1159,7 +1626,7 @@ void GameController::InitInGame() {
                   << loadingFailureReason_ << std::endl;
         return;
     }
-    if (!debugHudGameMode_ && !diagnoseMapOnly_ && !texturedTerrain_.IsValid()) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_ && !texturedTerrain_.IsValid()) {
         loadingFailed_ = true;
         loadingFailureReason_ = "Terrain was not built";
         std::cerr << "InitInGame: " << loadingFailureReason_ << std::endl;
@@ -1184,7 +1651,7 @@ void GameController::InitInGame() {
         simulation_.Update();
         simulationInitialized_ = true;
         ui_.SetSimulation(&simulation_);
-        if (!debugHudGameMode_ && !diagnoseMapOnly_) {
+        if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
             for (auto* unit : simulation_.GetUnits()) {
                 if (EnsureSimulationUnitVisual(unit))
                     visualUnitCreated++;
@@ -1206,7 +1673,7 @@ void GameController::InitInGame() {
 
     terrainLoaded_ = texturedTerrain_.IsValid();
 
-    if (!debugHudGameMode_ && !diagnoseMapOnly_) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
         minimap_.Generate(texturedTerrain_, tileset_, map_, w3i_, &mpq_);
 
         Vec3 center = texturedTerrain_.GetCenter();
@@ -1260,9 +1727,25 @@ void GameController::InitInGame() {
         DumpUnsupportedDiagnostics();
     }
 
+    if (debugGameplaySmoke_) {
+        RunGameplaySmoke();
+        std::cout << "GameplaySmoke: complete; requesting quit." << std::endl;
+        sapp_request_quit();
+    }
+
     if (diagnoseMapOnly_) {
         std::cout << "Diagnose-map complete; requesting quit." << std::endl;
         sapp_request_quit();
+    }
+
+    if (glueMapLaunchInProgress_) {
+        std::ostringstream done;
+        done << "GlueMapLaunch: entered map path='" << mapPath_
+             << "' terrain=" << (texturedTerrain_.IsValid() ? "yes" : "no")
+             << " units=" << simulation_.GetUnits().size()
+             << " players=" << simulation_.GetPlayerCount();
+        MoveDebugLogLine(done.str());
+        glueMapLaunchInProgress_ = false;
     }
 
     std::cout << "Initialization complete. Starting render loop..." << std::endl;
@@ -1316,6 +1799,12 @@ void GameController::DumpUnsupportedDiagnostics() {
               << " other_errors=" << otherErrors << std::endl;
     PrintTopJassUnknowns(unknownFunctions);
     PrintTopJassParserErrors(parserErrorCounts);
+    if (configEnv_) {
+        PrintJassStaticDiagnosticsForVm("config", configEnv_->GetVM());
+    }
+    if (commonEnv_) {
+        PrintJassStaticDiagnosticsForVm("common", commonEnv_->GetVM());
+    }
     std::cout << "=== End Map Diagnostics ===" << std::endl;
 }
 
@@ -1360,7 +1849,7 @@ void GameController::RunSyncInit() {
         return;
     }
     terrainLoaded_ = texturedTerrain_.IsValid();
-    if (!debugHudGameMode_ && !diagnoseMapOnly_ && !terrainLoaded_) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_ && !terrainLoaded_) {
         loadingFailed_ = true;
         loadingFailureReason_ = "Terrain was not built";
         std::cerr << "RunSyncInit: " << loadingFailureReason_ << std::endl;
@@ -1368,7 +1857,7 @@ void GameController::RunSyncInit() {
         stateTransition_ = false;
         return;
     }
-    if (!debugHudGameMode_ && !diagnoseMapOnly_) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
         scene_.PrintLoadStats();
     }
     InitInGame();
@@ -1406,7 +1895,9 @@ void GameController::WireJassCallbacks() {
     jassData->camGetEyeZ = [this]() -> float { return camera_.GetPosition().z; };
 
     jassData->unitSetAnimation = [this](int simHandle, const std::string& animName) {
-        animation_utils::PendingUnitAnimation request{animName, -1, false};
+        animation_utils::PendingUnitAnimation request;
+        request.sequenceName = animName;
+        request.speedRatio = 1.0f;
         simUnitQueuedAnimations.erase(simHandle);
         auto it = simUnitToVisualIdx.find(simHandle);
         if (it != simUnitToVisualIdx.end()) {
@@ -1419,14 +1910,17 @@ void GameController::WireJassCallbacks() {
         simUnitPendingAnimations[simHandle] = request;
     };
     jassData->unitQueueAnimation = [this](int simHandle, const std::string& animName) {
-        animation_utils::PendingUnitAnimation request{animName, -1, false};
+        animation_utils::PendingUnitAnimation request;
+        request.sequenceName = animName;
+        request.speedRatio = 1.0f;
         auto it = simUnitToVisualIdx.find(simHandle);
         if (it != simUnitToVisualIdx.end()) {
             auto* viewer = scene_.GetViewer(it->second);
             if (viewer && viewer->GetAnimator()) {
-                bool shouldQueue = !viewer->IsCurrentSequenceLooping() && !viewer->IsCurrentSequenceFinished();
+                bool shouldQueue = !viewer->IsCurrentSequenceFinished();
                 if (shouldQueue) {
-                    simUnitQueuedAnimations[simHandle] = request;
+                    QueueUnitAnimationRequest(simHandle, request, this);
+                    return;
                 } else if (ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
                     simUnitPendingAnimations.erase(simHandle);
                     return;
@@ -1437,7 +1931,10 @@ void GameController::WireJassCallbacks() {
         }
     };
     jassData->unitSetAnimationByIndex = [this](int simHandle, int index) {
-        animation_utils::PendingUnitAnimation request{"", index, true};
+        animation_utils::PendingUnitAnimation request;
+        request.sequenceIndex = index;
+        request.useSequenceIndex = true;
+        request.speedRatio = 1.0f;
         simUnitQueuedAnimations.erase(simHandle);
         auto it = simUnitToVisualIdx.find(simHandle);
         if (it != simUnitToVisualIdx.end()) {
@@ -1445,6 +1942,74 @@ void GameController::WireJassCallbacks() {
             if (viewer && ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
                 simUnitPendingAnimations.erase(simHandle);
                 return;
+            }
+        }
+        simUnitPendingAnimations[simHandle] = request;
+    };
+    jassData->unitSetAnimationByIndexEx = [this](int simHandle, int index, float speedRatio) {
+        animation_utils::PendingUnitAnimation request;
+        request.sequenceIndex = index;
+        request.useSequenceIndex = true;
+        request.speedRatio = speedRatio;
+        simUnitQueuedAnimations.erase(simHandle);
+        auto it = simUnitToVisualIdx.find(simHandle);
+        if (it != simUnitToVisualIdx.end()) {
+            auto* viewer = scene_.GetViewer(it->second);
+            if (viewer && ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
+                simUnitPendingAnimations.erase(simHandle);
+                return;
+            }
+        }
+        simUnitPendingAnimations[simHandle] = request;
+    };
+    jassData->unitSetAnimationByTags = [this](int simHandle,
+                                              const std::string& primaryTag,
+                                              const std::vector<std::string>& secondaryTags,
+                                              float speedRatio,
+                                              float durationSeconds,
+                                              bool force) {
+        animation_utils::PendingUnitAnimation request;
+        request.primaryTag = primaryTag;
+        request.secondaryTags = secondaryTags;
+        request.useTags = true;
+        request.force = force;
+        request.speedRatio = speedRatio;
+        request.durationSeconds = durationSeconds;
+        if (force) {
+            simUnitQueuedAnimations.erase(simHandle);
+            simUnitScriptedAnimations.erase(simHandle);
+        }
+        auto it = simUnitToVisualIdx.find(simHandle);
+        if (it != simUnitToVisualIdx.end()) {
+            auto* viewer = scene_.GetViewer(it->second);
+            if (viewer && ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
+                simUnitPendingAnimations.erase(simHandle);
+                return;
+            }
+        }
+        simUnitPendingAnimations[simHandle] = request;
+    };
+    jassData->unitQueueAnimationByTags = [this](int simHandle,
+                                                const std::string& primaryTag,
+                                                const std::vector<std::string>& secondaryTags) {
+        animation_utils::PendingUnitAnimation request;
+        request.primaryTag = primaryTag;
+        request.secondaryTags = secondaryTags;
+        request.useTags = true;
+        request.speedRatio = 1.0f;
+        auto it = simUnitToVisualIdx.find(simHandle);
+        if (it != simUnitToVisualIdx.end()) {
+            auto* viewer = scene_.GetViewer(it->second);
+            if (viewer && viewer->GetAnimator()) {
+                const bool shouldQueue = !viewer->IsCurrentSequenceFinished();
+                if (shouldQueue) {
+                    QueueUnitAnimationRequest(simHandle, request, this);
+                    return;
+                }
+                if (ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
+                    simUnitPendingAnimations.erase(simHandle);
+                    return;
+                }
             }
         }
         simUnitPendingAnimations[simHandle] = request;
@@ -1464,6 +2029,57 @@ void GameController::WireJassCallbacks() {
                 activeTags.end());
             if (activeTags.empty()) simUnitAnimationPropertyTags.erase(simHandle);
         }
+        simUnitVisualAnimationModes.erase(simHandle);
+    };
+    jassData->unitSetAnimationSecondaryTag = [this](int simHandle, const std::string& tag, bool add) -> bool {
+        std::vector<std::string> tags{tag};
+        auto& activeTags = simUnitAnimationPropertyTags[simHandle];
+        bool changed = false;
+        if (add) {
+            if (std::find(activeTags.begin(), activeTags.end(), tag) == activeTags.end()) {
+                activeTags.push_back(tag);
+                changed = true;
+            }
+        } else {
+            const auto oldSize = activeTags.size();
+            activeTags.erase(std::remove(activeTags.begin(), activeTags.end(), tag), activeTags.end());
+            changed = activeTags.size() != oldSize;
+            if (activeTags.empty()) simUnitAnimationPropertyTags.erase(simHandle);
+        }
+        if (changed) simUnitVisualAnimationModes.erase(simHandle);
+        return changed;
+    };
+    jassData->unitForceResetAnimation = [this](int simHandle) {
+        simUnitPendingAnimations.erase(simHandle);
+        auto it = simUnitToVisualIdx.find(simHandle);
+        if (it != simUnitToVisualIdx.end()) {
+            auto* viewer = scene_.GetViewer(it->second);
+            if (viewer && ApplyNextQueuedUnitAnimation(simHandle, viewer, this)) {
+                simUnitVisualAnimationModes.erase(simHandle);
+                return;
+            }
+            const auto scriptIt = simUnitScriptedAnimations.find(simHandle);
+            if (viewer && scriptIt != simUnitScriptedAnimations.end()) {
+                auto request = scriptIt->second.request;
+                request.force = true;
+                simUnitScriptedAnimations.erase(scriptIt);
+                if (ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
+                    simUnitVisualAnimationModes.erase(simHandle);
+                    return;
+                }
+            }
+        } else {
+            auto queuedIt = simUnitQueuedAnimations.find(simHandle);
+            if (queuedIt != simUnitQueuedAnimations.end() && !queuedIt->second.empty()) {
+                simUnitPendingAnimations[simHandle] = queuedIt->second.front();
+                queuedIt->second.pop_front();
+                if (queuedIt->second.empty()) {
+                    simUnitQueuedAnimations.erase(queuedIt);
+                }
+                return;
+            }
+        }
+        simUnitScriptedAnimations.erase(simHandle);
         simUnitVisualAnimationModes.erase(simHandle);
     };
     jassData->unitClearAnimations = [this](int simHandle) {
@@ -1518,6 +2134,15 @@ void GameController::WireJassCallbacks() {
 
 void GameController::Update(int screenW, int screenH, float dt) {
     if (uiOnlyMode_) {
+        if (pendingGlueMapLaunch_ && StartPendingGlueMapLaunch(screenW, screenH)) {
+            // Continue into the normal state machine in this frame.
+        } else {
+            frameCount_++;
+            return;
+        }
+    }
+
+    if (uiOnlyMode_) {
         frameCount_++;
         return;
     }
@@ -1550,13 +2175,13 @@ void GameController::UpdateLoading(float dt) {
             return;
         }
         terrainLoaded_ = texturedTerrain_.IsValid();
-        if (!debugHudGameMode_ && !diagnoseMapOnly_ && !terrainLoaded_) {
+        if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_ && !terrainLoaded_) {
             loadingFailed_ = true;
             loadingFailureReason_ = "Terrain was not built";
             std::cerr << "UpdateLoading: " << loadingFailureReason_ << std::endl;
             return;
         }
-        if (!debugHudGameMode_ && !diagnoseMapOnly_) {
+        if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
             scene_.PrintLoadStats();
         }
         TransitionTo(GameState::IN_GAME);
@@ -1616,11 +2241,20 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
     if (texturedTerrain_.IsValid()) dayNight_.Apply(texturedTerrain_);
     if (ui_.GetResourceBar()) ui_.GetResourceBar()->SetTimeOfDay(dayNight_.GetTimeOfDay());
 
+    for (auto it = activeEventSplats_.begin(); it != activeEventSplats_.end(); ) {
+        it->lifeRemaining -= dt;
+        if (it->lifeRemaining <= 0.0f) {
+            it = activeEventSplats_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     // Simulation step
     StepSimulation(dt);
 
     // After sim step, sync visuals
-    if (!debugHudGameMode_ && !diagnoseMapOnly_) {
+    if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
         SyncAndReconcileVisuals();
         RefreshRuntimeUnitSplats();
     }
@@ -1644,7 +2278,7 @@ void GameController::StepSimulation(float dt) {
     }
 
     if (ranSimulationStep) {
-        if (!debugHudGameMode_ && !diagnoseMapOnly_) {
+        if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
             SyncAndReconcileVisuals();
         }
         RefreshSelectionUi(false);
@@ -1832,6 +2466,73 @@ void GameController::Render(int screenW, int screenH) {
             scene_.SetDebugRenderRange(debugSceneRenderStart_, debugSceneRenderCount_);
             scene_.SetDebugRenderKind(debugSceneRenderKind_);
             scene_.RenderAll(view, proj, dt);
+            for (const SceneEventEffect& eventEffect : scene_.GetFrameEventEffects()) {
+                if (audio_.IsValid() && !eventEffect.effect.soundPaths.empty()) {
+                    audio_.Play3DPath(eventEffect.effect.soundPaths.front(),
+                                      eventEffect.x, eventEffect.y, eventEffect.z,
+                                      eventEffect.effect.volume);
+                }
+                if (!eventEffect.effect.texturePath.empty()) {
+                    ActiveEventSplat splat;
+                    splat.key = "mdx_event_" + std::to_string(nextEventSplatId_++);
+                    splat.texturePath = eventEffect.effect.texturePath;
+                    splat.x = eventEffect.x;
+                    splat.y = eventEffect.z;
+                    const float scale = eventEffect.effect.scale > 0.0f ? eventEffect.effect.scale : 1.0f;
+                    splat.halfSize = std::max(16.0f, scale * 64.0f);
+                    if (eventEffect.hasWorldTransform) {
+                        MdxEventSplatMesh mesh = BuildMdxEventSplatMeshFromTransform(
+                            eventEffect.worldTransform, splat.halfSize, 8.0f);
+                        splat.meshVertices = std::move(mesh.vertices);
+                        splat.meshIndices = std::move(mesh.indices);
+                    }
+                    splat.lifeRemaining = eventEffect.effect.lifeSpan > 0.0f
+                        ? eventEffect.effect.lifeSpan
+                        : 0.5f;
+                    splat.lifeSpan = splat.lifeRemaining;
+                    splat.colors = eventEffect.effect.colors;
+                    splat.intervalTimes = eventEffect.effect.intervalTimes;
+                    splat.uvIntervals = eventEffect.effect.uvIntervals;
+                    splat.intervalCount = eventEffect.effect.intervalCount;
+                    splat.columns = eventEffect.effect.columns;
+                    splat.rows = eventEffect.effect.rows;
+                    splat.blendMode = eventEffect.effect.blendMode;
+                    splat.unshaded = eventEffect.effect.unshaded;
+                    splat.highPriority = true;
+                    activeEventSplats_.push_back(std::move(splat));
+                }
+                if (!eventEffect.effect.modelPath.empty()) {
+                    const float spawnPos[3] = {eventEffect.x, eventEffect.y, eventEffect.z};
+                    float spawnScale = eventEffect.effect.scale > 0.0f
+                        ? eventEffect.effect.scale
+                        : 1.0f;
+                    if (!eventEffect.hasWorldTransform && eventEffect.effect.hasLocalTransform) {
+                        const Vec3& localScale = eventEffect.effect.localScale;
+                        const float nodeScale = (std::fabs(localScale.x)
+                            + std::fabs(localScale.y)
+                            + std::fabs(localScale.z)) / 3.0f;
+                        if (std::isfinite(nodeScale) && nodeScale > 0.0f) {
+                            spawnScale *= nodeScale;
+                        }
+                    }
+                    const float fallbackLife = eventEffect.effect.lifeSpan > 0.0f
+                        ? eventEffect.effect.lifeSpan
+                        : 1.0f;
+                    if (eventEffect.hasWorldTransform) {
+                        Mat4 spawnTransform = eventEffect.worldTransform;
+                        if (spawnScale > 0.0f && std::isfinite(spawnScale)
+                            && std::fabs(spawnScale - 1.0f) > 0.0001f) {
+                            spawnTransform = spawnTransform
+                                * Mat4::Scale(spawnScale, spawnScale, spawnScale);
+                        }
+                        scene_.AddTransientModelWithSceneMatrix(
+                            eventEffect.effect.modelPath, spawnTransform, 0, fallbackLife);
+                    } else {
+                        scene_.AddTransientModelAtScenePosition(
+                            eventEffect.effect.modelPath, spawnPos, 0.0f, spawnScale, 0, fallbackLife);
+                    }
+                }
+            }
     }
 
     ScreenRect minimapRect = hideHud_ ? ScreenRect{} : ui_.GetMinimapRect();
@@ -2209,6 +2910,8 @@ void GameController::OnMouseDown(const sapp_event* ev) {
             minimap_.ScreenToWorld(ev->mouse_x, ev->mouse_y, sapp_width(), sapp_height(), &wx, &wy);
             float gh = texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(wx, wy) : 0.0f;
             camera_.SetTarget(wx, gh + 100.0f, wy);
+        } else if (ui_.GetPendingCommand() >= 0 && IssuePendingCommandAtScreenPoint(ev->mouse_x, ev->mouse_y)) {
+            return;
         } else if (simulationInitialized_ && !simulation_.GetUnits().empty()) {
             selectionPressActive_ = true;
         }
@@ -2230,24 +2933,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {
 
                 int pendingCmd = ui_.GetPendingCommand();
                 if (pendingCmd >= 0) {
-                    const auto pendingMode = ui_.GetPendingCommandMode();
-                    ui_.ClearPendingCommand();
-                    auto terrainH = [&](float x, float z) {
-                        return texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, z) : 0.0f;
-                    };
-                    Vec3 wPos = picking::ScreenToWorld(ev->mouse_x, ev->mouse_y, view, proj, winW, winH,
-                                                       texturedTerrain_.IsValid(), texturedTerrain_.GetRadius(), terrainH);
-                    for (auto* su : selUnits) {
-                        if (!su) continue;
-                        if (pendingMode == MainUI::PendingCommandMode::POINT_ONLY) {
-                            su->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
-                        } else if (targetWidget) {
-                            su->IssueOrder(std::make_unique<COrderTargetWidget>(pendingCmd, targetWidget));
-                        } else {
-                            su->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
-                        }
-                    }
-                    issuedOrder = true;
+                    issuedOrder = IssuePendingCommandAtScreenPoint(ev->mouse_x, ev->mouse_y);
                 } else if (targetWidget) {
                     for (auto* su : selUnits) {
                         if (!su) continue;
@@ -2283,6 +2969,61 @@ void GameController::OnMouseDown(const sapp_event* ev) {
     } else {
         sapp_lock_mouse(true);
     }
+}
+
+bool GameController::IssuePendingCommandAtScreenPoint(float screenX, float screenY) {
+    if (!simulationInitialized_ || selectedUnitHandles_.empty()) {
+        return false;
+    }
+
+    const int pendingCmd = ui_.GetPendingCommand();
+    if (pendingCmd < 0) {
+        return false;
+    }
+
+    std::vector<CUnit*> selUnits = GetSelectedSimulationUnits();
+    if (selUnits.empty()) {
+        ui_.ClearPendingCommand();
+        return false;
+    }
+
+    int winW = sapp_width(), winH = sapp_height();
+    float aspect = (winH > 0) ? (float)winW / winH : 1.0f;
+    Mat4 view = camera_.GetViewMatrix();
+    Mat4 proj = camera_.GetProjectionMatrix(aspect);
+    CUnit* targetUnit = PickSimulationUnitAtScreenPoint(screenX, screenY,
+        view, proj, winW, winH, selectedUnitHandle_, false, true);
+    CDestructable* targetDest = targetUnit ? nullptr
+        : PickSimulationDestructableAtScreenPoint(screenX, screenY, view, proj, winW, winH);
+    CWidget* targetWidget = targetUnit ? static_cast<CWidget*>(targetUnit)
+        : static_cast<CWidget*>(targetDest);
+
+    auto terrainH = [&](float x, float z) {
+        return texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, z) : 0.0f;
+    };
+    Vec3 wPos = picking::ScreenToWorld(screenX, screenY, view, proj, winW, winH,
+                                       texturedTerrain_.IsValid(), texturedTerrain_.GetRadius(), terrainH);
+
+    const auto pendingMode = ui_.GetPendingCommandMode();
+    ui_.CompletePendingCommand();
+    for (auto* su : selUnits) {
+        if (!su) continue;
+        if (pendingMode == MainUI::PendingCommandMode::POINT_ONLY) {
+            su->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
+        } else if (targetWidget) {
+            su->IssueOrder(std::make_unique<COrderTargetWidget>(pendingCmd, targetWidget));
+        } else {
+            su->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
+        }
+    }
+
+    RefreshSelectionUi(true);
+    std::cout << "PendingCommand: issued order=" << pendingCmd
+              << " mode=" << static_cast<int>(pendingMode)
+              << " units=" << selUnits.size()
+              << " target=" << (targetWidget ? "widget" : "point")
+              << std::endl;
+    return true;
 }
 
 void GameController::OnMouseUp(const sapp_event* ev) {
@@ -2452,6 +3193,69 @@ static bool FindPlayerTownHallPosition(CSimulation& sim, int playerIndex, float&
     return false;
 }
 
+static CUnit* FindGameplaySmokeWorker(CSimulation& sim, int playerIndex) {
+    CUnit* fallback = nullptr;
+    for (auto* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->IsHidden() || unit->GetPlayerIndex() != playerIndex) continue;
+        if (unit->GetAbility(War3ID("Ahar"))) {
+            if (unit->GetTypeId() == War3ID("hpea")) return unit;
+            if (!fallback) fallback = unit;
+        }
+    }
+    return fallback;
+}
+
+static CUnit* FindNearestGoldMine(CSimulation& sim, const CUnit* worker) {
+    if (!worker) return nullptr;
+    CUnit* best = nullptr;
+    double bestDistSq = std::numeric_limits<double>::max();
+    for (auto* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead()) continue;
+        if (!unit->GetAbility(War3ID("Agld"))) continue;
+        const double distSq = unit->DistanceSquared(worker->GetX(), worker->GetY());
+        if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            best = unit;
+        }
+    }
+    return best;
+}
+
+static CUnit* FindPlayerDropoff(CSimulation& sim, int playerIndex) {
+    CUnit* fallback = nullptr;
+    for (auto* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex) continue;
+        if (unit->GetAbility(War3ID("Aret"))) {
+            if (IsHumanTownHallType(unit->GetTypeId())) return unit;
+            if (!fallback) fallback = unit;
+        }
+    }
+    return fallback;
+}
+
+static bool FindGameplaySmokeBuildSite(CSimulation& sim, const CUnit* anchor, War3ID buildingTypeId,
+                                       float& outX, float& outY) {
+    if (!anchor) return false;
+
+    const float offsets[][2] = {
+        {384.0f, 0.0f}, {-384.0f, 0.0f}, {0.0f, 384.0f}, {0.0f, -384.0f},
+        {384.0f, 384.0f}, {-384.0f, 384.0f}, {384.0f, -384.0f}, {-384.0f, -384.0f},
+        {512.0f, 0.0f}, {0.0f, 512.0f}, {-512.0f, 0.0f}, {0.0f, -512.0f}
+    };
+
+    for (const auto& offset : offsets) {
+        float x = anchor->GetX() + offset[0];
+        float y = anchor->GetY() + offset[1];
+        CAbilityBuild::RoundBuildPosition(x, y);
+        if (!CAbilityBuild::IsBuildLocationObstructed(sim, x, y, anchor->GetPlayerIndex(), buildingTypeId)) {
+            outX = x;
+            outY = y;
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool FindPlayerStartLocationPosition(const JassNativesData* data, int playerIndex, float& outX, float& outY) {
     if (!data) return false;
     if (playerIndex < 0 || playerIndex >= (int)data->playerMapConfig.size()) return false;
@@ -2546,7 +3350,7 @@ void GameController::EnsureHumanMeleeStartsFromMapConfig() {
 
 void GameController::FlushStartupSimulationState() {
     if (!simulationInitialized_) return;
-    if (!diagnoseMapOnly_) {
+    if (!diagnoseMapOnly_ && !debugGameplaySmoke_) {
         SyncAndReconcileVisuals();
     }
     if (!jassNatives_) return;
@@ -2556,7 +3360,7 @@ void GameController::FlushStartupSimulationState() {
         simulation_.Update();
         int timers = jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
         int pumped = jassNatives_->PumpQueuedThreads(1024);
-        if (!diagnoseMapOnly_) {
+        if (!diagnoseMapOnly_ && !debugGameplaySmoke_) {
             SyncAndReconcileVisuals();
         }
         if (timers == 0 && pumped == 0 && simulation_.GetUnits().size() == before) break;
@@ -2565,6 +3369,54 @@ void GameController::FlushStartupSimulationState() {
 
 void GameController::RefreshRuntimeUnitSplats() {
     splatMeta_.RefreshRuntimeSplats(texturedTerrain_, simulationInitialized_, simulation_, selectedUnitHandlesSet_);
+    AddActiveEventSplatsToTerrain();
+}
+
+void GameController::AddActiveEventSplatsToTerrain() {
+    if (!texturedTerrain_.IsValid()) {
+        return;
+    }
+    for (const ActiveEventSplat& splat : activeEventSplats_) {
+        const Vec4 tint = MdxEventSplatTint(splat.colors, splat.intervalTimes, splat.intervalCount,
+                                            splat.lifeSpan, splat.lifeRemaining);
+        const Vec4 uvRect = MdxEventSplatUvRect(splat.uvIntervals, splat.intervalTimes, splat.intervalCount,
+                                                splat.columns, splat.rows, splat.lifeSpan, splat.lifeRemaining);
+        const SplatModel::BlendMode blendMode = MdxEventSplatBlendMode(splat.blendMode);
+        if (!splat.meshVertices.empty() && !splat.meshIndices.empty()) {
+            std::vector<SplatModel::MeshVertex> vertices = splat.meshVertices;
+            for (auto& vertex : vertices) {
+                vertex.u = uvRect.x + vertex.u * (uvRect.z - uvRect.x);
+                vertex.v = uvRect.y + vertex.v * (uvRect.w - uvRect.y);
+                vertex.tint = tint;
+            }
+            texturedTerrain_.AddRuntimeSplatMesh(
+                splat.key,
+                splat.texturePath,
+                vertices,
+                splat.meshIndices,
+                splat.highPriority,
+                false,
+                blendMode,
+                splat.unshaded);
+        } else {
+            texturedTerrain_.AddRuntimeSplatRect(
+                splat.key,
+                splat.texturePath,
+                splat.x - splat.halfSize,
+                splat.y - splat.halfSize,
+                splat.x + splat.halfSize,
+                splat.y + splat.halfSize,
+                8.0f,
+                splat.highPriority,
+                false,
+                false,
+                0.0f,
+                tint,
+                uvRect,
+                blendMode,
+                splat.unshaded);
+        }
+    }
 }
 
 // --- Unit visual ---
@@ -2761,6 +3613,365 @@ void GameController::DebugSelectFirstUnitForHud() {
               << unit_text_utils::DescribeUnitType(selected->GetTypeId(), unitData_)
               << " handle=" << selected->GetHandleId()
               << " player=" << selected->GetPlayerIndex() << std::endl;
+}
+
+void GameController::RunGameplaySmoke() {
+    if (!simulationInitialized_) {
+        std::cout << "GameplaySmoke: result=fail reason=simulation_not_initialized" << std::endl;
+        return;
+    }
+
+    const int playerIndex = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+    CUnit* worker = FindGameplaySmokeWorker(simulation_, playerIndex);
+    CUnit* dropoff = FindPlayerDropoff(simulation_, playerIndex);
+    CUnit* mine = FindNearestGoldMine(simulation_, worker);
+    CPlayer* player = simulation_.GetPlayer(playerIndex);
+    auto* harvest = worker ? dynamic_cast<CAbilityHarvest*>(worker->GetAbility(War3ID("Ahar"))) : nullptr;
+
+    if (!worker || !dropoff || !mine || !player || !harvest) {
+        std::cout << "GameplaySmoke: result=fail"
+                  << " worker=" << (worker ? "yes" : "no")
+                  << " dropoff=" << (dropoff ? "yes" : "no")
+                  << " mine=" << (mine ? "yes" : "no")
+                  << " player=" << (player ? "yes" : "no")
+                  << " harvestAbility=" << (harvest ? "yes" : "no")
+                  << std::endl;
+        return;
+    }
+
+    auto pumpTicks = [&](int maxTicks, const std::function<bool()>& done) {
+        for (int i = 0; i < maxTicks; ++i) {
+            simulation_.Update();
+            if (jassNatives_) {
+                jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
+                jassNatives_->PumpQueuedThreads(128);
+            }
+            if (done && done()) return i + 1;
+        }
+        return maxTicks;
+    };
+
+    auto issuePendingFromUi = [&](CWidget* targetWidget, float x, float y) {
+        const int pendingCmd = ui_.GetPendingCommand();
+        const auto pendingMode = ui_.GetPendingCommandMode();
+        if (pendingCmd < 0) {
+            return false;
+        }
+        ui_.CompletePendingCommand();
+        bool issued = false;
+        for (auto* unit : GetSelectedSimulationUnits()) {
+            if (!unit) continue;
+            if (pendingMode != MainUI::PendingCommandMode::POINT_ONLY && targetWidget) {
+                unit->IssueOrder(std::make_unique<COrderTargetWidget>(pendingCmd, targetWidget));
+            } else {
+                unit->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, x, y));
+            }
+            issued = true;
+        }
+        return issued;
+    };
+
+    SetSelectedUnits({worker}, worker->GetHandleId(), true);
+    const bool uiHarvestInitial = ui_.IsCommandOrderEnabled(OrderIds::HARVEST);
+
+    const float moveStartX = worker->GetX();
+    const float moveStartY = worker->GetY();
+    worker->ClearOrders();
+    const bool uiMoveClicked = ui_.InvokeCommandOrderForDiagnostics(OrderIds::MOVE);
+    const bool uiMoveIssued = issuePendingFromUi(nullptr, moveStartX + 256.0f, moveStartY);
+    const int moveTicks = pumpTicks(120, [&]() {
+        const float dx = worker->GetX() - moveStartX;
+        const float dy = worker->GetY() - moveStartY;
+        return std::sqrt(dx * dx + dy * dy) > 32.0f;
+    });
+    const float moveDx = worker->GetX() - moveStartX;
+    const float moveDy = worker->GetY() - moveStartY;
+    const bool movePass = uiMoveClicked && uiMoveIssued && std::sqrt(moveDx * moveDx + moveDy * moveDy) > 32.0f;
+    std::cout << "GameplaySmoke: move=" << (movePass ? "pass" : "fail")
+              << " ticks=" << moveTicks
+              << " uiClicked=" << (uiMoveClicked ? "yes" : "no")
+              << " uiIssued=" << (uiMoveIssued ? "yes" : "no")
+              << " start=(" << moveStartX << "," << moveStartY << ")"
+              << " end=(" << worker->GetX() << "," << worker->GetY() << ")"
+              << std::endl;
+
+    worker->ClearOrders();
+    worker->SetHidden(false);
+    worker->SetInvulnerable(false);
+    harvest->ClearCarried();
+    worker->SetPosition(mine->GetX() + 96.0f, mine->GetY());
+    const int mineGoldBefore = dynamic_cast<CAbilityGoldMine*>(mine->GetAbility(War3ID("Agld")))
+        ? dynamic_cast<CAbilityGoldMine*>(mine->GetAbility(War3ID("Agld")))->GetGold()
+        : 0;
+    const bool uiHarvestClicked = ui_.InvokeCommandOrderForDiagnostics(OrderIds::HARVEST);
+    const bool uiHarvestIssued = issuePendingFromUi(mine, mine->GetX(), mine->GetY());
+    const int harvestTicks = pumpTicks(420, [&]() {
+        return harvest->GetCarriedAmount() > 0;
+    });
+    const bool harvestPass = uiHarvestClicked && uiHarvestIssued && harvest->GetCarriedAmount() > 0;
+    RefreshSelectionUi(true);
+    const bool uiReturnAfterHarvest = ui_.IsCommandOrderEnabled(OrderIds::RETURN_RESOURCES);
+    std::cout << "GameplaySmoke: harvest=" << (harvestPass ? "pass" : "fail")
+              << " ticks=" << harvestTicks
+              << " uiClicked=" << (uiHarvestClicked ? "yes" : "no")
+              << " uiIssued=" << (uiHarvestIssued ? "yes" : "no")
+              << " carried=" << harvest->GetCarriedAmount()
+              << " type=" << static_cast<int>(harvest->GetCarriedResourceType())
+              << " mineGoldBefore=" << mineGoldBefore
+              << std::endl;
+
+    const int goldBeforeReturn = player->GetGold();
+    worker->ClearOrders();
+    worker->SetHidden(false);
+    worker->SetInvulnerable(false);
+    worker->SetPosition(dropoff->GetX() + 96.0f, dropoff->GetY());
+    const bool uiReturnClicked = ui_.InvokeCommandOrderForDiagnostics(OrderIds::RETURN_RESOURCES);
+    const bool uiReturnIssued = issuePendingFromUi(dropoff, dropoff->GetX(), dropoff->GetY());
+    const int returnTicks = pumpTicks(180, [&]() {
+        return player->GetGold() > goldBeforeReturn && harvest->GetCarriedAmount() == 0;
+    });
+    const bool returnPass = uiReturnClicked && uiReturnIssued
+        && player->GetGold() > goldBeforeReturn && harvest->GetCarriedAmount() == 0;
+    std::cout << "GameplaySmoke: return=" << (returnPass ? "pass" : "fail")
+              << " ticks=" << returnTicks
+              << " uiClicked=" << (uiReturnClicked ? "yes" : "no")
+              << " uiIssued=" << (uiReturnIssued ? "yes" : "no")
+              << " goldBefore=" << goldBeforeReturn
+              << " goldAfter=" << player->GetGold()
+              << " carried=" << harvest->GetCarriedAmount()
+              << std::endl;
+
+    auto* queueAbility = dynamic_cast<CAbilityQueue*>(dropoff->GetAbility(War3ID("Aque")));
+    SetSelectedUnits({dropoff}, dropoff->GetHandleId(), true);
+    const bool uiTrainBeforeQueue = ui_.IsCommandOrderEnabled((int)War3ID("hpea").value);
+    const int peasantsBeforeTrain = CountPlayerUnitsOfType(simulation_, playerIndex, War3ID("hpea"));
+    const int goldBeforeTrain = player->GetGold();
+    const int lumberBeforeTrain = player->GetLumber();
+    const int foodBeforeTrain = player->GetFoodUsed();
+    bool trainQueued = false;
+    bool trainCompleted = false;
+    int trainTicks = 0;
+    bool uiTrainClicked = false;
+    if (queueAbility && queueAbility->GetTrainedUnits().count(War3ID("hpea")) > 0) {
+        uiTrainClicked = ui_.InvokeCommandOrderForDiagnostics((int)War3ID("hpea").value);
+        trainTicks = pumpTicks(900, [&]() {
+            trainQueued = trainQueued || queueAbility->GetQueueCount() > 0;
+            trainCompleted = CountPlayerUnitsOfType(simulation_, playerIndex, War3ID("hpea")) > peasantsBeforeTrain;
+            return trainCompleted;
+        });
+    }
+    const int peasantsAfterTrain = CountPlayerUnitsOfType(simulation_, playerIndex, War3ID("hpea"));
+    const bool trainPass = queueAbility
+        && uiTrainClicked
+        && trainQueued
+        && trainCompleted
+        && peasantsAfterTrain > peasantsBeforeTrain
+        && player->GetGold() < goldBeforeTrain
+        && player->GetFoodUsed() > foodBeforeTrain;
+    std::cout << "GameplaySmoke: train=" << (trainPass ? "pass" : "fail")
+              << " ticks=" << trainTicks
+              << " queueAbility=" << (queueAbility ? "yes" : "no")
+              << " uiClicked=" << (uiTrainClicked ? "yes" : "no")
+              << " queued=" << (trainQueued ? "yes" : "no")
+              << " peasantsBefore=" << peasantsBeforeTrain
+              << " peasantsAfter=" << peasantsAfterTrain
+              << " goldBefore=" << goldBeforeTrain
+              << " goldAfter=" << player->GetGold()
+              << " lumberBefore=" << lumberBeforeTrain
+              << " lumberAfter=" << player->GetLumber()
+              << " foodBefore=" << foodBeforeTrain
+              << " foodAfter=" << player->GetFoodUsed()
+              << std::endl;
+
+    const War3ID farmId("hhou");
+    float buildX = 0.0f;
+    float buildY = 0.0f;
+    const bool buildSiteFound = FindGameplaySmokeBuildSite(simulation_, dropoff, farmId, buildX, buildY);
+    const auto* farmType = unitData_.GetUnitType(farmId);
+    const float farmCollision = farmType ? std::max(0.0f, farmType->GetCollisionSize()) : 64.0f;
+    const float workerCollision = std::max(0.0f, worker->GetCollisionSize());
+    const float builderOffset = std::min(124.0f, std::max(96.0f, farmCollision + workerCollision + 16.0f));
+    const int farmsBeforeBuild = CountPlayerUnitsOfType(simulation_, playerIndex, farmId);
+    const int goldBeforeBuild = player->GetGold();
+    const int lumberBeforeBuild = player->GetLumber();
+    const int foodCapBeforeBuild = player->GetFoodCap();
+    bool uiBuildMenuClicked = false;
+    bool uiFarmEnabled = false;
+    bool uiFarmClicked = false;
+    bool uiFarmIssued = false;
+    bool buildStarted = false;
+    bool buildCompleted = false;
+    int buildTicks = 0;
+    int builtFarmHandle = -1;
+
+    if (buildSiteFound) {
+        worker->ClearOrders();
+        worker->SetHidden(false);
+        worker->SetInvulnerable(false);
+        worker->SetPosition(buildX - builderOffset, buildY);
+        SetSelectedUnits({worker}, worker->GetHandleId(), true);
+        uiBuildMenuClicked = ui_.InvokeCommandOrderForDiagnostics(OrderIds::HUMAN_BUILD);
+        uiFarmEnabled = ui_.IsCommandOrderEnabled((int)farmId.value);
+        uiFarmClicked = ui_.InvokeCommandOrderForDiagnostics((int)farmId.value);
+        uiFarmIssued = issuePendingFromUi(nullptr, buildX, buildY);
+        buildTicks = pumpTicks(1400, [&]() {
+            for (auto* unit : simulation_.GetUnits()) {
+                if (!unit || unit->GetPlayerIndex() != playerIndex || unit->GetTypeId() != farmId) continue;
+                if (unit->GetHandleId() == worker->GetHandleId()) continue;
+                if (unit->GetHandleId() != builtFarmHandle && unit->GetHandleId() >= 0) {
+                    builtFarmHandle = unit->GetHandleId();
+                }
+                if (unit->IsConstructing()) {
+                    buildStarted = true;
+                }
+                if (!unit->IsConstructing() && unit->GetHandleId() == builtFarmHandle) {
+                    buildCompleted = true;
+                    return true;
+                }
+            }
+            return false;
+        });
+    }
+
+    const int farmsAfterBuild = CountPlayerUnitsOfType(simulation_, playerIndex, farmId);
+    const bool buildPass = buildSiteFound
+        && uiBuildMenuClicked
+        && uiFarmEnabled
+        && uiFarmClicked
+        && uiFarmIssued
+        && buildStarted
+        && buildCompleted
+        && farmsAfterBuild > farmsBeforeBuild
+        && player->GetGold() < goldBeforeBuild
+        && player->GetLumber() <= lumberBeforeBuild
+        && player->GetFoodCap() > foodCapBeforeBuild;
+    std::cout << "GameplaySmoke: build=" << (buildPass ? "pass" : "fail")
+              << " ticks=" << buildTicks
+              << " siteFound=" << (buildSiteFound ? "yes" : "no")
+              << " uiBuildMenuClicked=" << (uiBuildMenuClicked ? "yes" : "no")
+              << " farmButton=" << (uiFarmEnabled ? "enabled" : "disabled")
+              << " uiFarmClicked=" << (uiFarmClicked ? "yes" : "no")
+              << " uiIssued=" << (uiFarmIssued ? "yes" : "no")
+              << " started=" << (buildStarted ? "yes" : "no")
+              << " completed=" << (buildCompleted ? "yes" : "no")
+              << " farmsBefore=" << farmsBeforeBuild
+              << " farmsAfter=" << farmsAfterBuild
+              << " goldBefore=" << goldBeforeBuild
+              << " goldAfter=" << player->GetGold()
+              << " lumberBefore=" << lumberBeforeBuild
+              << " lumberAfter=" << player->GetLumber()
+              << " foodCapBefore=" << foodCapBeforeBuild
+              << " foodCapAfter=" << player->GetFoodCap()
+              << " site=(" << buildX << "," << buildY << ")"
+              << std::endl;
+
+    const int enemyPlayerIndex = (playerIndex == 0) ? 1 : 0;
+    CUnit* attackTarget = simulation_.CreateUnit(War3ID("hpea"), enemyPlayerIndex,
+                                                 worker->GetX() + 96.0f, worker->GetY(), 180.0f);
+    if (attackTarget) {
+        simulation_.Update();
+        attackTarget->SetLife(simulation_, 6.0f);
+    }
+
+    bool uiAttackEnabled = false;
+    bool uiAttackClicked = false;
+    bool uiAttackIssued = false;
+    bool attackDamaged = false;
+    bool attackKilled = false;
+    bool deadSelectionCleared = false;
+    int attackTicks = 0;
+    const int attackTargetHandle = attackTarget ? attackTarget->GetHandleId() : -1;
+    const float attackTargetLifeBefore = attackTarget ? attackTarget->GetLife() : 0.0f;
+    if (attackTarget) {
+        worker->ClearOrders();
+        worker->SetHidden(false);
+        worker->SetInvulnerable(false);
+        worker->SetPosition(attackTarget->GetX() - 96.0f, attackTarget->GetY());
+        SetSelectedUnits({worker}, worker->GetHandleId(), true);
+        uiAttackEnabled = ui_.IsCommandOrderEnabled(OrderIds::ATTACK);
+        uiAttackClicked = ui_.InvokeCommandOrderForDiagnostics(OrderIds::ATTACK);
+        uiAttackIssued = issuePendingFromUi(attackTarget, attackTarget->GetX(), attackTarget->GetY());
+        attackTicks = pumpTicks(240, [&]() {
+            CUnit* target = simulation_.GetUnit(attackTargetHandle);
+            if (!target) return false;
+            attackDamaged = attackDamaged || target->GetLife() < attackTargetLifeBefore;
+            attackKilled = target->IsDead();
+            return attackKilled;
+        });
+        CUnit* target = simulation_.GetUnit(attackTargetHandle);
+        if (target && target->IsDead()) {
+            SetSelectedUnits({target}, target->GetHandleId(), true);
+            deadSelectionCleared = selectedUnitHandles_.empty() && selectedUnitHandle_ < 0;
+        }
+    }
+
+    const bool attackPass = attackTarget
+        && uiAttackEnabled
+        && uiAttackClicked
+        && uiAttackIssued
+        && attackDamaged
+        && attackKilled
+        && deadSelectionCleared;
+    std::cout << "GameplaySmoke: attack=" << (attackPass ? "pass" : "fail")
+              << " ticks=" << attackTicks
+              << " target=" << (attackTarget ? "yes" : "no")
+              << " uiAttackButton=" << (uiAttackEnabled ? "enabled" : "disabled")
+              << " uiClicked=" << (uiAttackClicked ? "yes" : "no")
+              << " uiIssued=" << (uiAttackIssued ? "yes" : "no")
+              << " damaged=" << (attackDamaged ? "yes" : "no")
+              << " killed=" << (attackKilled ? "yes" : "no")
+              << " deadSelectionCleared=" << (deadSelectionCleared ? "yes" : "no")
+              << " targetHandle=" << attackTargetHandle
+              << " lifeBefore=" << attackTargetLifeBefore
+              << " lifeAfter=" << (attackTarget ? attackTarget->GetLife() : 0.0f)
+              << std::endl;
+
+    const War3ID dynamicAbilityId("AHds");
+    const bool dynamicAbsentBefore = worker->GetAbility(dynamicAbilityId) == nullptr;
+    bool dynamicAdded = false;
+    bool dynamicLevelSet = false;
+    bool dynamicRemoved = false;
+    if (dynamicAbsentBefore) {
+        auto ability = AbilityFactory::CreateAbility(simulation_.AllocateHandleId(), dynamicAbilityId);
+        if (ability) {
+            worker->AddAbility(simulation_, std::move(ability));
+            if (auto* added = worker->GetAbility(dynamicAbilityId)) {
+                dynamicAdded = true;
+                added->SetLevel(2);
+                dynamicLevelSet = added->GetLevel() == 2;
+            }
+            dynamicRemoved = worker->RemoveAbility(simulation_, dynamicAbilityId);
+        }
+    }
+    const bool dynamicAbilityPass = dynamicAbsentBefore && dynamicAdded && dynamicLevelSet && dynamicRemoved
+        && worker->GetAbility(dynamicAbilityId) == nullptr;
+    std::cout << "GameplaySmoke: abilityDynamic=" << (dynamicAbilityPass ? "pass" : "fail")
+              << " ability=" << dynamicAbilityId.ToString()
+              << " absentBefore=" << (dynamicAbsentBefore ? "yes" : "no")
+              << " added=" << (dynamicAdded ? "yes" : "no")
+              << " levelSet=" << (dynamicLevelSet ? "yes" : "no")
+              << " removed=" << (dynamicRemoved ? "yes" : "no")
+              << std::endl;
+
+    std::cout << "GameplaySmoke: ui="
+              << ((uiHarvestInitial && uiReturnAfterHarvest && uiTrainBeforeQueue && uiAttackEnabled) ? "pass" : "fail")
+              << " harvestButton=" << (uiHarvestInitial ? "enabled" : "disabled")
+              << " returnButton=" << (uiReturnAfterHarvest ? "enabled" : "disabled")
+              << " trainPeasantButton=" << (uiTrainBeforeQueue ? "enabled" : "disabled")
+              << " attackButton=" << (uiAttackEnabled ? "enabled" : "disabled")
+              << std::endl;
+
+    std::cout << "GameplaySmoke: result="
+              << ((movePass && harvestPass && returnPass && trainPass
+                   && buildPass
+                   && attackPass
+                   && dynamicAbilityPass
+                   && uiHarvestInitial && uiReturnAfterHarvest && uiTrainBeforeQueue) ? "pass" : "fail")
+              << " worker=" << unit_text_utils::DescribeUnitType(worker->GetTypeId(), unitData_)
+              << " workerHandle=" << worker->GetHandleId()
+              << " mineHandle=" << mine->GetHandleId()
+              << " dropoffHandle=" << dropoff->GetHandleId()
+              << std::endl;
 }
 
 static std::vector<MultiSelectUnitInfo> BuildMultiSelectionInfo(const std::vector<CUnit*>& units) {

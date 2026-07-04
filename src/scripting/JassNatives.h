@@ -8,6 +8,7 @@
 #include <functional>
 #include <array>
 #include <deque>
+#include <unordered_set>
 
 // Forward declaration (avoid circular include)
 class CSimulation;
@@ -114,11 +115,18 @@ struct JassEffect {
     float x = 0, y = 0, z = 0;
 };
 
+struct JassAbilityHandle {
+    War3ID code;
+    int level = 1;
+    int unitSimId = -1;
+};
+
 struct JassHandleInfo {
     enum Type {
         UNIT, PLAYER, TRIGGER, TIMER, LOCATION, GROUP, FORCE,
         ITEM, DESTRUCTABLE, RECT, REGION, SOUND, TEXT_TAG,
-        EFFECT, LIGHTNING, WEATHER, FOG_MODIFIER, QUEST, CAMERA_SETUP
+        EFFECT, LIGHTNING, WEATHER, FOG_MODIFIER, QUEST, CAMERA_SETUP, ABILITY,
+        PRIMARY_TAG, SECONDARY_TAG, PRIMARY_TAGS, SECONDARY_TAGS
     };
     Type type;
     int id;
@@ -163,6 +171,7 @@ public:
     int nextForceId = 0x05000000;
 
     std::unordered_map<int, CItem*> items;
+    std::unordered_map<int, int> unitUserData;
 
     std::unordered_map<int, std::shared_ptr<JassLocation>> locations;
     int nextLocId = 0x06000000;
@@ -181,6 +190,14 @@ public:
 
     std::unordered_map<int, std::shared_ptr<JassEffect>> effects;
     int nextEffectId = 0x0B000000;
+
+    std::unordered_map<int, std::shared_ptr<JassAbilityHandle>> abilities;
+    int nextAbilityId = 0x0D000000;
+
+    std::unordered_map<int, std::unordered_set<int>> primaryTagSets;
+    std::unordered_map<int, std::unordered_set<int>> secondaryTagSets;
+    int nextPrimaryTagSetId = 0x0E000000;
+    int nextSecondaryTagSetId = 0x0F000000;
 
     std::unordered_map<int, std::shared_ptr<JassTimer>> timerCallbacks;
     int nextTimerCallbackId = 0x0C000000;
@@ -242,12 +259,18 @@ public:
     std::function<void(int,const std::string&)> unitSetAnimation;
     std::function<void(int,const std::string&)> unitQueueAnimation;
     std::function<void(int,int)> unitSetAnimationByIndex;
+    std::function<void(int,int,float)> unitSetAnimationByIndexEx;
+    std::function<void(int,const std::string&,const std::vector<std::string>&,float,float,bool)> unitSetAnimationByTags;
+    std::function<void(int,const std::string&,const std::vector<std::string>&)> unitQueueAnimationByTags;
     std::function<void(int,const std::string&,bool)> unitAddAnimationProperties;
+    std::function<bool(int,const std::string&,bool)> unitSetAnimationSecondaryTag;
+    std::function<void(int)> unitForceResetAnimation;
     std::function<void(int)> unitClearAnimations;
 
     // Camera field enum mapping
     int GetCameraFieldId(const std::string& name) const;
 };
+
 
 struct JassQueuedContext {
     int currentTriggerId = -1;

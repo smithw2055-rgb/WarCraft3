@@ -22,8 +22,22 @@ struct PlacedModel {
     std::string debugKind;
     bool visible = true;
     bool smoothMotion = false;
+    bool transient = false;
+    float transientAge = 0.0f;
+    float transientMaxAge = 1.0f;
+    bool useCustomModelMatrix = false;
+    Mat4 customModelMatrix = Mat4::Identity();
     std::unique_ptr<MdxViewer> ownedViewer;
     MdxViewer* viewer = nullptr; // shared, not owned
+};
+
+struct SceneEventEffect {
+    MdxEventEffect effect;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    bool hasWorldTransform = false;
+    Mat4 worldTransform = Mat4::Identity();
 };
 
 class SceneManager {
@@ -46,9 +60,15 @@ public:
     int AddUnit(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
                  int player, int hitpoints, int flags, uint32_t skinId = 0,
                  bool playBirthAnimation = false);
+    int AddTransientModelAtScenePosition(const std::string& path, const float pos[3],
+                                         float angle, float scale, int player = 0,
+                                         float fallbackLifeSeconds = 1.0f);
+    int AddTransientModelWithSceneMatrix(const std::string& path, const Mat4& modelMatrix,
+                                         int player = 0, float fallbackLifeSeconds = 1.0f);
 
     // Render all placed models
     void RenderAll(const Mat4& view, const Mat4& proj, float dt);
+    const std::vector<SceneEventEffect>& GetFrameEventEffects() const { return frameEventEffects_; }
     void SetDebugRenderRange(int start, int count);
     void SetDebugRenderKind(const std::string& kind);
 
@@ -101,6 +121,7 @@ private:
     std::unordered_map<uint32_t, std::string> doodadDirs_;
     std::unordered_map<uint32_t, std::string> doodadFiles_;
     LoadStats loadStats_;
+    std::vector<SceneEventEffect> frameEventEffects_;
     int debugRenderStart_ = 0;
     int debugRenderCount_ = -1;
     std::string debugRenderKind_;

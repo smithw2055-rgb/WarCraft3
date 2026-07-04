@@ -114,6 +114,39 @@ HudResourceCosts UpgradeCosts(const CUpgradeType* upgrade) {
     return costs;
 }
 
+int UpgradeGoldCostAtLevel(const CUpgradeType* upgrade, int currentLevel) {
+    if (!upgrade) return 0;
+    if (currentLevel >= 0 && currentLevel < (int)upgrade->goldPerLevel.size()) {
+        return upgrade->goldPerLevel[currentLevel];
+    }
+    return upgrade->goldCost;
+}
+
+int UpgradeLumberCostAtLevel(const CUpgradeType* upgrade, int currentLevel) {
+    if (!upgrade) return 0;
+    if (currentLevel >= 0 && currentLevel < (int)upgrade->lumberPerLevel.size()) {
+        return upgrade->lumberPerLevel[currentLevel];
+    }
+    return upgrade->lumberCost;
+}
+
+HudResourceCosts UpgradeCostsAtLevel(const CUpgradeType* upgrade, int currentLevel) {
+    HudResourceCosts costs;
+    if (upgrade) {
+        costs.gold = UpgradeGoldCostAtLevel(upgrade, currentLevel);
+        costs.lumber = UpgradeLumberCostAtLevel(upgrade, currentLevel);
+    }
+    return costs;
+}
+
+bool PlayerCanAfford(const CPlayer* player, const HudResourceCosts& costs) {
+    if (!player) return false;
+    if (player->GetGold() < costs.gold) return false;
+    if (player->GetLumber() < costs.lumber) return false;
+    if (costs.food > 0 && player->GetFoodUsed() + costs.food > player->GetFoodCap()) return false;
+    return true;
+}
+
 std::string AttackDamageText(const CUnitType* unitType) {
     if (!unitType) return {};
     const auto& attacks = unitType->GetAttacks();
@@ -316,6 +349,23 @@ bool MainUI::Init(MpqManager* mpq, int screenW, int screenH,
     return true;
 }
 
+bool MainUI::SwitchNoesisXaml(MpqManager* mpq, int screenW, int screenH,
+                              const std::string& hudXamlPath, int gameVersion) {
+    mpq_ = mpq;
+    if (mpq_) {
+        abilityData_ = CAbilityData::LoadFromMpq(*mpq_);
+        std::vector<uint8_t> buf;
+        if (mpq_->ReadFile("Units\\UnitAbilities.slk", buf)) {
+            unitAbilitiesSlk_.Load(buf.data(), buf.size());
+        }
+    }
+    if (!hudHost_) {
+        hudHost_ = std::make_unique<NoesisHudHost>();
+        return hudHost_->Initialize(PROJECT_SOURCE_DIR, screenW, screenH, hudXamlPath, mpq_, gameVersion);
+    }
+    return hudHost_->ReloadXaml(hudXamlPath, mpq_, gameVersion);
+}
+
 void MainUI::Shutdown() {
     hudHost_.reset();
     textures_.clear();
@@ -395,6 +445,36 @@ int MainUI::FindNextOpenCommandSlot() const {
     return -1;
 }
 
+int MainUI::FindCommandSlotByOrderId(int orderId) const {
+    for (int i = 0; i < kCommandCount; ++i) {
+        if (commandSlots_[i].visible && commandSlots_[i].orderId == orderId) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool MainUI::IsCommandSlotEnabled(int slotIndex) const {
+    if (slotIndex < 0 || slotIndex >= kCommandCount) {
+        return false;
+    }
+    const CommandSlot& slot = commandSlots_[slotIndex];
+    return slot.visible && slot.enabled;
+}
+
+bool MainUI::IsCommandOrderEnabled(int orderId) const {
+    return IsCommandSlotEnabled(FindCommandSlotByOrderId(orderId));
+}
+
+bool MainUI::InvokeCommandOrderForDiagnostics(int orderId) {
+    const int slot = FindCommandSlotByOrderId(orderId);
+    if (!IsCommandSlotEnabled(slot)) {
+        return false;
+    }
+    HandleCommandButtonClick(slot);
+    return true;
+}
+
 void MainUI::Update(int screenW, int screenH) {
     gameUI_.Update(screenW, screenH);
     if (rootFrame_) {
@@ -407,6 +487,9 @@ void MainUI::Update(int screenW, int screenH) {
             playerLumber_ = player->GetLumber();
             playerFoodUsed_ = player->GetFoodUsed();
             playerFoodCap_ = player->GetFoodCap();
+        }
+        if (selectedUnitHandle_ >= 0) {
+            PopulateCommandCardForUnit(simulation_->GetUnit(selectedUnitHandle_));
         }
     }
 
@@ -1254,13 +1337,15 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                     label = ShortLabel(structureType->GetName());
                     iconPath = structureType->GetIconPath();
                 }
+                const CPlayer* player = simulation_ ? simulation_->GetPlayer(unit->GetPlayerIndex()) : nullptr;
+                const HudResourceCosts costs = UnitTypeCosts(structureType);
                 std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(structureId.value), CommandClickMode::POINT_ONLY,
-                                 !ability->IsDisabled(), icon ? std::string() : label,
+                                 !ability->IsDisabled() && PlayerCanAfford(player, costs), icon ? std::string() : label,
                                  icon, iconPath.empty() ? std::string()
                                                         : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
                                  structureType ? structureType->GetName() : structureId.ToString(),
-                                 UnitTypeCosts(structureType));
+                                 costs);
             }
             return;
         }
@@ -1324,13 +1409,16 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                     label = ShortLabel(trainedType->GetName());
                     iconPath = trainedType->GetIconPath();
                 }
+                const CPlayer* player = simulation_ ? simulation_->GetPlayer(unit->GetPlayerIndex()) : nullptr;
+                const HudResourceCosts costs = UnitTypeCosts(trainedType);
+                const bool canQueue = queueAbility->GetQueueCount() < CAbilityQueue::MAX_QUEUE;
                 std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(trainedId.value), CommandClickMode::IMMEDIATE,
-                                 !ability->IsDisabled(), icon ? std::string() : label,
+                                 !ability->IsDisabled() && canQueue && PlayerCanAfford(player, costs), icon ? std::string() : label,
                                  icon, iconPath.empty() ? std::string()
                                                         : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
                                  trainedType ? trainedType->GetName() : trainedId.ToString(),
-                                 UnitTypeCosts(trainedType));
+                                 costs);
             }
 
             std::vector<War3ID> researches(queueAbility->GetResearches().begin(), queueAbility->GetResearches().end());
@@ -1351,13 +1439,18 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                     label = ShortLabel(upgrade->name);
                     iconPath = upgrade->iconPath;
                 }
+                const CPlayer* player = simulation_ ? simulation_->GetPlayer(unit->GetPlayerIndex()) : nullptr;
+                const int currentLevel = player ? player->GetTechLevel(researchId) : 0;
+                const HudResourceCosts costs = UpgradeCostsAtLevel(upgrade, currentLevel);
+                const bool canQueue = queueAbility->GetQueueCount() < CAbilityQueue::MAX_QUEUE;
+                const bool notMaxed = !upgrade || currentLevel < upgrade->maxLevel;
                 std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(researchId.value), CommandClickMode::IMMEDIATE,
-                                 !ability->IsDisabled(), icon ? std::string() : label,
+                                 !ability->IsDisabled() && canQueue && notMaxed && PlayerCanAfford(player, costs), icon ? std::string() : label,
                                  icon, iconPath.empty() ? std::string()
                                                         : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
                                  upgrade ? upgrade->name : researchId.ToString(),
-                                 UpgradeCosts(upgrade));
+                                 costs);
             }
 
             if (queueAbility->GetQueueCount() > 0 && !commandSlots_[SlotIndex(2, 3)].visible) {
@@ -1384,13 +1477,15 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                     label = ShortLabel(upgradeType->GetName());
                     iconPath = upgradeType->GetIconPath();
                 }
+                const CPlayer* player = simulation_ ? simulation_->GetPlayer(unit->GetPlayerIndex()) : nullptr;
+                const HudResourceCosts costs = UnitTypeCosts(upgradeType);
                 std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(upgradeId.value), CommandClickMode::IMMEDIATE,
-                                 !ability->IsDisabled(), icon ? std::string() : label,
+                                 !ability->IsDisabled() && PlayerCanAfford(player, costs), icon ? std::string() : label,
                                  icon, iconPath.empty() ? std::string()
                                                         : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
                                  upgradeType ? upgradeType->GetName() : upgradeId.ToString(),
-                                 UnitTypeCosts(upgradeType));
+                                 costs);
             }
             continue;
         }
@@ -1552,6 +1647,12 @@ void MainUI::SetGlueMenuMapsForUiOnly(const std::vector<War3UI::GlueMapListItem>
 void MainUI::SetGlueMenuCampaignsForUiOnly(const std::vector<War3UI::GlueCampaignListItem>& campaigns) {
     if (hudHost_) {
         hudHost_->SetGlueMenuCampaigns(campaigns);
+    }
+}
+
+void MainUI::SetGlueMapLaunchCallback(War3UI::GlueMapLaunchCallback cb) {
+    if (hudHost_) {
+        hudHost_->SetGlueMapLaunchCallback(std::move(cb));
     }
 }
 

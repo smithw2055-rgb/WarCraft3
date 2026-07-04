@@ -278,10 +278,10 @@ static std::string BuildWaterFragment() {
 static std::string BuildUberSplatVertex() {
     return
         "#version 410 core\n"
-        "in vec3 vPosition;\nin vec2 vUV;\nin float vAbsoluteHeight;\nin vec4 vHeightClampRect;\nin vec4 vCornerHeights;\nin float vUseCornerHeightOverride;\n"
+        "in vec3 vPosition;\nin vec2 vUV;\nin float vAbsoluteHeight;\nin vec4 vHeightClampRect;\nin vec4 vCornerHeights;\nin float vUseCornerHeightOverride;\nin vec4 vTint;\n"
         "uniform mat4 MVP;\nuniform sampler2D u_heightMap;\nuniform sampler2D u_waterHeightMap;\n"
         "uniform vec2 u_centerOffset;\nuniform vec2 u_mapSize;\nuniform float u_waterHeightOffset;\n"
-        "out vec2 UV;\nout vec2 vShadowUv;\nout vec2 vTerrainCellCoord;\n"
+        "out vec2 UV;\nout vec2 vShadowUv;\nout vec2 vTerrainCellCoord;\nout vec4 vTintColor;\n"
         "void main() {\n"
         "    vec2 worldPos = vPosition.xy;\n"
         "    vec2 tilePos = (worldPos - u_centerOffset) / 128.0;\n"
@@ -305,6 +305,7 @@ static std::string BuildUberSplatVertex() {
         "    gl_Position = MVP * vec4(worldPos.x, finalHeight, worldPos.y, 1.0);\n"
         "    UV = vUV;\n    vShadowUv = texCoord;\n"
         "    vTerrainCellCoord = tilePos;\n"
+        "    vTintColor = vTint;\n"
         "}";
 }
 
@@ -312,7 +313,7 @@ static std::string BuildUberSplatFragment(int textureCount) {
     std::ostringstream ss;
     ss << "#version 410 core\n"
        << SamplerDeclarations(textureCount)
-       << "in vec2 UV;\nin vec2 vShadowUv;\nin vec2 vTerrainCellCoord;\nout vec4 color;\n"
+       << "in vec2 UV;\nin vec2 vShadowUv;\nin vec2 vTerrainCellCoord;\nin vec4 vTintColor;\nout vec4 color;\n"
        << "uniform sampler2D diffuseTexture;\nuniform sampler2D u_shadowMap;\nuniform sampler2D u_fogOfWarMap;\n"
        << "uniform usampler2D u_terrainTextureList;\n"
        << "uniform vec2 u_shadowScale;\nuniform vec4 u_fogColor;\nuniform vec4 u_fogParams;\nuniform vec4 u_splatParams;\n"
@@ -337,11 +338,14 @@ static std::string BuildUberSplatFragment(int textureCount) {
        << "        vec4 terrainColor = sample_terrain_color(vTerrainCellCoord);\n"
        << "        color = vec4(terrainColor.rgb, mask.a * terrainColor.a);\n"
        << "    }\n"
-       << "    vec2 shadowUv = clamp(vShadowUv * u_shadowScale, vec2(0.0), vec2(1.0));\n"
-       << "    float shadow = texture(u_shadowMap, shadowUv).r;\n"
-       << "    float fogOfWar = texture(u_fogOfWarMap, vShadowUv).r;\n"
-       << "    color.rgb *= (1.0 - clamp(shadow + fogOfWar, 0.0, 1.0));\n"
-       << "    color.a *= (1.0 - fogOfWar);\n"
+       << "    color *= vTintColor;\n"
+       << "    if (u_splatParams.y < 0.5) {\n"
+       << "        vec2 shadowUv = clamp(vShadowUv * u_shadowScale, vec2(0.0), vec2(1.0));\n"
+       << "        float shadow = texture(u_shadowMap, shadowUv).r;\n"
+       << "        float fogOfWar = texture(u_fogOfWarMap, vShadowUv).r;\n"
+       << "        color.rgb *= (1.0 - clamp(shadow + fogOfWar, 0.0, 1.0));\n"
+       << "        color.a *= (1.0 - fogOfWar);\n"
+       << "    }\n"
        << ShaderUtils::FogSystem(false, nullptr) << "}";
     return ss.str();
 }
@@ -580,6 +584,7 @@ sg_shader TerrainShaders::CreateUberSplatShader(int textureCount) {
     desc.attrs[3].glsl_name = "vHeightClampRect";
     desc.attrs[4].glsl_name = "vCornerHeights";
     desc.attrs[5].glsl_name = "vUseCornerHeightOverride";
+    desc.attrs[6].glsl_name = "vTint";
 
     sg_shader s = sg_make_shader(&desc);
     if (sg_query_shader_state(s) != SG_RESOURCESTATE_VALID) s = {0};

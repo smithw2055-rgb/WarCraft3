@@ -8,6 +8,7 @@
 #include <NsRender/RenderDevice.h>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,7 @@ public:
 
     bool Initialize(const std::string& assetRoot, int width, int height, const std::string& xamlPath,
                     MpqManager* mpq = nullptr, int gameVersion = 0);
+    bool ReloadXaml(const std::string& xamlPath, MpqManager* mpq = nullptr, int gameVersion = 0);
     void Shutdown();
     void Resize(int width, int height);
     void Update(double time);
@@ -84,6 +86,7 @@ public:
     bool InvokeGlueMenuActionForDebug(const std::string& actionName);
     void SetGlueMenuMaps(const std::vector<War3UI::GlueMapListItem>& maps);
     void SetGlueMenuCampaigns(const std::vector<War3UI::GlueCampaignListItem>& campaigns);
+    void SetGlueMapLaunchCallback(War3UI::GlueMapLaunchCallback cb);
 
     ScreenRect GetMinimapRect() const { return minimapRect_; }
     ScreenRect GetPortraitRect() const { return portraitRect_; }
@@ -257,6 +260,7 @@ private:
     std::array<Aero::FrameworkElement*, kGameMenuActionCount> gameMenuOptionPopupMenus_{};
     std::array<Aero::TextBlock*, kGameMenuActionCount> gameMenuOptionValueTexts_{};
     War3UI::GlueMenuControl* glueMenuControl_ = nullptr;
+    War3UI::GlueMapLaunchCallback glueMapLaunchCallback_;
     War3UI::MdxSceneControl* glueMdxBackground_ = nullptr;
 
     int width_ = 0;

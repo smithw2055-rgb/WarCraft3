@@ -78,6 +78,13 @@ static War3ID BuildRaceAbilityCode(CBuildRace race) {
     }
 }
 
+static bool IsTownHallReturnResourceType(War3ID typeId) {
+    return typeId == War3ID("htow") || typeId == War3ID("hkee") || typeId == War3ID("hcas")
+        || typeId == War3ID("ogre") || typeId == War3ID("ostr") || typeId == War3ID("ofrt")
+        || typeId == War3ID("unpl") || typeId == War3ID("unp1") || typeId == War3ID("unp2")
+        || typeId == War3ID("etol") || typeId == War3ID("etoa") || typeId == War3ID("etoe");
+}
+
 static void ApplyItemTypeData(CItem& item, CSimulation& simulation) {
     const CItemData* itemData = simulation.GetItemData();
     if (!itemData) {
@@ -207,12 +214,16 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
         }
 
         // Check if building is a town hall (has return resources)
+        bool hasReturnResources = IsTownHallReturnResourceType(typeId);
         for (auto& abilityCode : unitType->GetAbilityList()) {
             if (abilityCode == War3ID("Aret")) {
-                abilityHandle = handleIdAlloc_.CreateId();
-                unit->AddAbility(*this, std::make_unique<CAbilityReturnResources>(abilityHandle));
+                hasReturnResources = true;
                 break;
             }
+        }
+        if (hasReturnResources) {
+            abilityHandle = handleIdAlloc_.CreateId();
+            unit->AddAbility(*this, std::make_unique<CAbilityReturnResources>(abilityHandle));
         }
     }
 

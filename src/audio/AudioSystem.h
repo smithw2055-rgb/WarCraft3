@@ -33,6 +33,7 @@ public:
 
     int Play2D(const std::string& name, float volume = 1.0f);
     int Play3D(const std::string& name, float x, float y, float z, float volume = 1.0f);
+    int Play3DPath(const std::string& mpqPath, float x, float y, float z, float volume = 1.0f);
 
     void Stop(int soundId);
     void StopAll();

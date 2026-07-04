@@ -33,10 +33,11 @@ void CAbilityBuild::OnRemove(CSimulation& game, CUnit* unit) {
 }
 
 bool CAbilityBuild::CheckCanTargetPoint(CSimulation& game, CUnit* unit, int orderId, float x, float y) const {
-    (void)game; (void)unit; (void)orderId; (void)x; (void)y;
+    (void)game; (void)unit; (void)x; (void)y;
     if (IsDisabled()) return false;
-    // The actual building type validation happens in Begin()
-    return true;
+
+    War3ID buildingTypeId(static_cast<uint32_t>(orderId));
+    return buildableStructures_.count(buildingTypeId) > 0;
 }
 
 bool CAbilityBuild::CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const {

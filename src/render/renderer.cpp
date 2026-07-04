@@ -43,12 +43,12 @@ bool Initialize() {
     sg_desc setup_desc = {};
     setup_desc.environment = sglue_environment();
     setup_desc.logger.func = slog_func;
-    setup_desc.pipeline_pool_size = 256;
-    setup_desc.shader_pool_size = 64;
-    setup_desc.image_pool_size = 1024;
-    setup_desc.buffer_pool_size = 1024;
-    setup_desc.view_pool_size = 2048;
-    setup_desc.sampler_pool_size = 1024;
+    setup_desc.pipeline_pool_size = 512;
+    setup_desc.shader_pool_size = 128;
+    setup_desc.image_pool_size = 4096;
+    setup_desc.buffer_pool_size = 4096;
+    setup_desc.view_pool_size = 16384;
+    setup_desc.sampler_pool_size = 4096;
     sg_setup(&setup_desc);
     if (!sg_isvalid()) {
         std::cerr << "Renderer: sg_setup failed!" << std::endl;

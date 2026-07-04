@@ -26,8 +26,14 @@ namespace animation_utils {
 
 struct PendingUnitAnimation {
     std::string sequenceName;
+    std::string primaryTag;
+    std::vector<std::string> secondaryTags;
     int sequenceIndex = -1;
     bool useSequenceIndex = false;
+    bool useTags = false;
+    bool force = true;
+    float speedRatio = 1.0f;
+    float durationSeconds = 0.0f;
 };
 
 enum class UnitVisualAnimationMode : uint8_t {

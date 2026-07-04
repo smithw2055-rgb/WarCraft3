@@ -25,6 +25,7 @@ bool JassVM::LoadScript(const std::string& source) {
     if (program) {
         programs_.push_back(std::move(program));
         auto* loadedProgram = programs_.back().get();
+        CollectScriptStats(loadedProgram);
         for (auto& child : loadedProgram->children) {
             if (child->type == AstNodeType::FUNCTION_DECL) {
                 functions_[child->text] = child.get();
@@ -82,6 +83,29 @@ bool JassVM::LoadScriptFromMemory(const std::string& name, const uint8_t* data, 
 
 void JassVM::RegisterNative(const std::string& name, NativeFunc func) {
     natives_[name] = std::move(func);
+}
+
+std::unordered_set<std::string> JassVM::GetFunctionNames() const {
+    std::unordered_set<std::string> names;
+    names.reserve(functions_.size());
+    for (const auto& entry : functions_) {
+        names.insert(entry.first);
+    }
+    return names;
+}
+
+void JassVM::CollectScriptStats(const AstNode* node) {
+    if (!node) {
+        return;
+    }
+    if (node->type == AstNodeType::NATIVE_DECL) {
+        nativeDeclarations_[node->text]++;
+    } else if (node->type == AstNodeType::FUNC_CALL) {
+        functionCallCounts_[node->text]++;
+    }
+    for (const auto& child : node->children) {
+        CollectScriptStats(child.get());
+    }
 }
 
 void JassVM::SetGlobal(const std::string& name, const JassValue& val) {

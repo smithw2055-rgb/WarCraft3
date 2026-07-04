@@ -5,9 +5,13 @@
 #include <vector>
 #include <random>
 
+class MdxAnimator;
+class MpqManager;
+
 struct Particle {
     Vec3 position;
     Vec3 velocity;
+    float gravity;
     float life;
     float maxLife;
     float size;
@@ -18,6 +22,8 @@ struct Particle {
 
 struct ParticleEmitterState {
     const MdxParticleEmitter2* emitterData = nullptr;
+    MdxParticleEmitter2Sample sample;
+    int lastEmissionKey = -1;
     float emissionAccum = 0.0f;
     std::vector<Particle> particles;
     sg_buffer instanceBuffer = {0};
@@ -43,6 +49,8 @@ public:
 
     void Init(const MdxModel& model, class MpqManager* mpq);
     void Update(float dt, const Vec3& worldOffset = Vec3{0,0,0});
+    void Update(float dt, const Vec3& worldOffset, const MdxModel* model, const MdxAnimator* animator,
+                uint32_t frame, float elapsedMs);
     void Render(const Mat4& view, const Mat4& proj);
     void SetWorldOffset(const Vec3& offset) { worldOffset_ = offset; }
     const Vec3& GetWorldOffset() const { return worldOffset_; }
@@ -57,7 +65,7 @@ public:
     static void ReleaseSharedParticleResources();
 
 private:
-    void EmitParticle(ParticleEmitterState& state, float dt);
+    void EmitParticle(ParticleEmitterState& state, const MdxParticleEmitter2Sample& sample, int count);
     void UpdateParticle(Particle& p, float dt, const MdxParticleEmitter2& data);
     Vec3 RandomDirectionInCone(float latitude, std::mt19937& rng, std::uniform_real_distribution<float>& dist01);
 
@@ -75,5 +83,3 @@ private:
     std::uniform_real_distribution<float> dist01_;
     Vec3 worldOffset_ = {0, 0, 0};
 };
-
-class MpqManager;

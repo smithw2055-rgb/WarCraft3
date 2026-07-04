@@ -6,6 +6,13 @@
 
 class SplatModel {
 public:
+    enum class BlendMode {
+        Blend,
+        AdditiveAlpha,
+        Modulate,
+        Modulate2x
+    };
+
     struct MeshVertex {
         float worldX = 0.0f;
         float worldY = 0.0f;
@@ -24,6 +31,7 @@ public:
         float cornerHeightBR = 0.0f;
         float cornerHeightTL = 0.0f;
         float cornerHeightTR = 0.0f;
+        Vec4 tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f);
     };
 
     SplatModel();
@@ -39,7 +47,9 @@ public:
                       float clampMaxTileX = 0.0f, float clampMaxTileY = 0.0f,
                       bool useCornerHeightOverride = false,
                       float cornerHeightBL = 0.0f, float cornerHeightBR = 0.0f,
-                      float cornerHeightTL = 0.0f, float cornerHeightTR = 0.0f);
+                      float cornerHeightTL = 0.0f, float cornerHeightTR = 0.0f,
+                      const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f),
+                      const Vec4& uvRect = Vec4(0.0f, 0.0f, 1.0f, 1.0f));
     void AddMesh(const std::vector<MeshVertex>& vertices, const std::vector<uint32_t>& indices);
     void RemoveSplat(int index);
     void ClearGeometry();
@@ -55,6 +65,8 @@ public:
     void SetHighPriority(bool v) { highPriority_ = v; }
     void SetUseTerrainColorMask(bool v) { terrainColorMask_ = v; }
     void SetNoDepthTest(bool v);
+    void SetBlendMode(BlendMode mode);
+    void SetUnshaded(bool v) { unshaded_ = v; }
 
 private:
     struct SplatInstance {
@@ -75,6 +87,8 @@ private:
         float cornerHeightBR = 0.0f;
         float cornerHeightTL = 0.0f;
         float cornerHeightTR = 0.0f;
+        Vec4 tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f);
+        Vec4 uvRect = Vec4(0.0f, 0.0f, 1.0f, 1.0f);
     };
 
     struct BatchGPU {
@@ -97,6 +111,8 @@ private:
     bool highPriority_ = false;
     bool terrainColorMask_ = false;
     bool noDepthTest_ = false;
+    bool unshaded_ = false;
+    BlendMode blendMode_ = BlendMode::Blend;
     std::vector<SplatInstance> instances_;
     std::vector<MeshInstance> meshInstances_;
     std::vector<BatchGPU> batches_;

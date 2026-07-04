@@ -62,6 +62,7 @@ public:
     // Add/remove abilities
     void AddAbility(CSimulation& game, std::unique_ptr<CAbility> ability);
     void RemoveAbility(CSimulation& game, int abilityHandleId);
+    bool RemoveAbility(CSimulation& game, War3ID abilityCode);
     CAbility* GetAbility(War3ID code) const;
     const std::vector<CAbility*>& GetAbilities() const { return abilities_; }
 

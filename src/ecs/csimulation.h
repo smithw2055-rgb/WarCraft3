@@ -40,6 +40,7 @@ public:
 
     // Unit management
     virtual CUnit* CreateUnit(War3ID typeId, int playerIndex, float x, float y, float facing);
+    int AllocateHandleId() { return handleIdAlloc_.CreateId(); }
     CUnit* GetUnit(int handleId) const;
     virtual void RemoveUnit(CUnit* unit);
     const std::vector<CUnit*>& GetUnits() const { return units_; }

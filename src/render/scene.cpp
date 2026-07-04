@@ -4,6 +4,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <sstream>
 #include <unordered_set>
@@ -41,6 +42,61 @@ static void PushUniquePath(std::vector<std::string>& paths, const std::string& p
     if (std::find(paths.begin(), paths.end(), path) == paths.end()) {
         paths.push_back(path);
     }
+}
+
+static std::string NormalizeModelPathWithExtension(const std::string& path) {
+    std::string normalized = path;
+    if (normalized.empty()) {
+        return normalized;
+    }
+    for (char& c : normalized) {
+        if (c == '/') {
+            c = '\\';
+        }
+    }
+    if (normalized.size() <= 4) {
+        return normalized + ".mdx";
+    }
+    std::string tail = normalized.substr(normalized.size() - 4);
+    std::transform(tail.begin(), tail.end(), tail.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    if (tail == ".mdl") {
+        normalized.resize(normalized.size() - 4);
+        normalized += ".mdx";
+    }
+    else if (tail != ".mdx") {
+        normalized += ".mdx";
+    }
+    return normalized;
+}
+
+static Vec3 TransformInstanceLocalPoint(const PlacedModel& inst, const Vec3& localPosition) {
+    const float c = std::cos(inst.renderAngle);
+    const float s = std::sin(inst.renderAngle);
+    const float lx = localPosition.x * inst.scale[0];
+    const float ly = localPosition.y * inst.scale[1];
+    const float lz = localPosition.z * inst.scale[2];
+    return {
+        inst.renderPos[0] + c * lx + s * lz,
+        inst.renderPos[1] + ly,
+        inst.renderPos[2] - s * lx + c * lz
+    };
+}
+
+static Mat4 BuildInstanceModelMatrix(const PlacedModel& inst) {
+    Mat4 model = Mat4::Identity();
+    const float c = std::cos(inst.renderAngle);
+    const float s = std::sin(inst.renderAngle);
+    model.m[0] = c * inst.scale[0];
+    model.m[2] = -s * inst.scale[0];
+    model.m[5] = inst.scale[1];
+    model.m[8] = s * inst.scale[2];
+    model.m[10] = c * inst.scale[2];
+    model.m[12] = inst.renderPos[0];
+    model.m[13] = inst.renderPos[1];
+    model.m[14] = inst.renderPos[2];
+    return model;
 }
 
 namespace {
@@ -897,6 +953,82 @@ int SceneManager::AddUnit(uint32_t war3ID, const float pos[3], float angle,
     return instanceIndex;
 }
 
+int SceneManager::AddTransientModelAtScenePosition(const std::string& path, const float pos[3],
+                                                   float angle, float scale, int player,
+                                                   float fallbackLifeSeconds) {
+    const std::string modelPath = NormalizeModelPathWithExtension(path);
+    std::unique_ptr<MdxViewer> uniqueViewer = CreateUnitViewer(modelPath);
+    if (!uniqueViewer) {
+        loadStats_.missReasons["event-spawn-model-miss"]++;
+        return -1;
+    }
+
+    auto* inst = new PlacedModel();
+    inst->pos[0] = pos[0];
+    inst->pos[1] = pos[1];
+    inst->pos[2] = pos[2];
+    inst->renderPos[0] = pos[0];
+    inst->renderPos[1] = pos[1];
+    inst->renderPos[2] = pos[2];
+    inst->angle = angle;
+    inst->renderAngle = angle;
+    inst->scale[0] = scale;
+    inst->scale[1] = scale;
+    inst->scale[2] = scale;
+    inst->player = player;
+    inst->debugKind = "event-spawn";
+    inst->visible = true;
+    inst->smoothMotion = false;
+    inst->transient = true;
+    inst->transientAge = 0.0f;
+    inst->transientMaxAge = std::max(0.1f, fallbackLifeSeconds);
+    inst->ownedViewer = std::move(uniqueViewer);
+    inst->viewer = inst->ownedViewer.get();
+    if (inst->viewer) {
+        inst->viewer->PlaySequenceByIndex(0, false);
+    }
+
+    const int instanceIndex = (int)instances_.size();
+    instances_.push_back(inst);
+    return instanceIndex;
+}
+
+int SceneManager::AddTransientModelWithSceneMatrix(const std::string& path, const Mat4& modelMatrix,
+                                                   int player, float fallbackLifeSeconds) {
+    const std::string modelPath = NormalizeModelPathWithExtension(path);
+    std::unique_ptr<MdxViewer> uniqueViewer = CreateUnitViewer(modelPath);
+    if (!uniqueViewer) {
+        loadStats_.missReasons["event-spawn-model-miss"]++;
+        return -1;
+    }
+
+    auto* inst = new PlacedModel();
+    inst->pos[0] = modelMatrix.m[12];
+    inst->pos[1] = modelMatrix.m[13];
+    inst->pos[2] = modelMatrix.m[14];
+    inst->renderPos[0] = inst->pos[0];
+    inst->renderPos[1] = inst->pos[1];
+    inst->renderPos[2] = inst->pos[2];
+    inst->player = player;
+    inst->debugKind = "event-spawn";
+    inst->visible = true;
+    inst->smoothMotion = false;
+    inst->transient = true;
+    inst->transientAge = 0.0f;
+    inst->transientMaxAge = std::max(0.1f, fallbackLifeSeconds);
+    inst->useCustomModelMatrix = true;
+    inst->customModelMatrix = modelMatrix;
+    inst->ownedViewer = std::move(uniqueViewer);
+    inst->viewer = inst->ownedViewer.get();
+    if (inst->viewer) {
+        inst->viewer->PlaySequenceByIndex(0, false);
+    }
+
+    const int instanceIndex = (int)instances_.size();
+    instances_.push_back(inst);
+    return instanceIndex;
+}
+
 bool SceneManager::UpdateInstancePosition(int index, const float pos[3], float angle,
                                           float movementSpeed, float turnRate,
                                           bool smoothMotion) {
@@ -928,6 +1060,8 @@ void SceneManager::SetDebugRenderKind(const std::string& kind) {
 }
 
 void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
+    frameEventEffects_.clear();
+
     auto normalizeAngleDegrees = [](float angle) {
         while (angle < 0.0f) angle += 360.0f;
         while (angle >= 360.0f) angle -= 360.0f;
@@ -980,6 +1114,31 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
         if (inst->visible && inst->viewer) {
             if (updatedViewers.insert(inst->viewer).second) {
                 inst->viewer->Update(dt, view);
+                for (const MdxEventEffect& effect : inst->viewer->GetResolvedEventEffects()) {
+                    SceneEventEffect eventEffect;
+                    eventEffect.effect = effect;
+                    const Vec3 eventPos = effect.hasLocalTransform
+                        ? TransformInstanceLocalPoint(*inst, effect.localPosition)
+                        : Vec3{inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
+                    eventEffect.x = eventPos.x;
+                    eventEffect.y = eventPos.y;
+                    eventEffect.z = eventPos.z;
+                    if (effect.hasLocalTransform) {
+                        eventEffect.hasWorldTransform = true;
+                        eventEffect.worldTransform = BuildInstanceModelMatrix(*inst) * effect.localTransform;
+                    }
+                    frameEventEffects_.push_back(std::move(eventEffect));
+                }
+            }
+            if (inst->transient) {
+                inst->transientAge += std::max(0.0f, dt);
+                const bool sequenceFinished = inst->viewer->HasAnimations()
+                    && inst->viewer->IsCurrentSequenceFinished();
+                if (sequenceFinished || inst->transientAge >= inst->transientMaxAge) {
+                    inst->visible = false;
+                    inst->ownedViewer.reset();
+                    inst->viewer = nullptr;
+                }
             }
         }
     }
@@ -1022,9 +1181,13 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
         auto* inst = instances_[index];
         if (!debugRenderKind_.empty() && inst->debugKind != debugRenderKind_) continue;
         if (inst->visible && inst->viewer) {
-            Vec3 p = {inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
-            float s = (inst->scale[0] + inst->scale[1] + inst->scale[2]) / 3.0f;
-            inst->viewer->RenderAt(p, view, proj, s, inst->player, inst->renderAngle);
+            if (inst->useCustomModelMatrix) {
+                inst->viewer->RenderWithModelMatrix(inst->customModelMatrix, view, proj, inst->player);
+            } else {
+                Vec3 p = {inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
+                float s = (inst->scale[0] + inst->scale[1] + inst->scale[2]) / 3.0f;
+                inst->viewer->RenderAt(p, view, proj, s, inst->player, inst->renderAngle);
+            }
         }
     }
 }

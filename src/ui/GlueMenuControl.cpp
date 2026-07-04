@@ -1087,6 +1087,10 @@ void GlueMenuControl::SetCampaigns(const std::vector<GlueCampaignListItem>& camp
     ApplyState();
 }
 
+void GlueMenuControl::SetMapLaunchCallback(GlueMapLaunchCallback cb) {
+    mapLaunchCallback_ = std::move(cb);
+}
+
 bool GlueMenuControl::IsActionVisible(int action) const {
     switch (action) {
     case kGlueMenuSinglePlayer:
@@ -1331,25 +1335,36 @@ void GlueMenuControl::HandleAction(int action) {
     case kGlueMenuCampaignMission12: {
         const int missionIndex = CampaignMissionActionToIndex(action);
         selectedCampaignMissionIndex_ = std::max(0, missionIndex);
+        std::string launchMapPath;
         if (!campaigns_.empty()
             && selectedCampaignIndex_ >= 0
             && selectedCampaignIndex_ < (int)campaigns_.size()
             && missionIndex < (int)campaigns_[selectedCampaignIndex_].missions.size()) {
             const GlueCampaignListItem& campaign = campaigns_[selectedCampaignIndex_];
             const GlueCampaignMission& mission = campaign.missions[missionIndex];
-            GlueDiagLog("GlueMenuControl: Campaign mission selected campaign='%s' campaignName='%s' mission='%s' missionName='%s' map='%s' localPlayer=0 (launch pending)",
+            launchMapPath = NonEmptyOr(mission.mapPath, "Maps\\Campaign\\Prologue01.w3m");
+            GlueDiagLog("GlueMenuControl: Campaign mission selected campaign='%s' campaignName='%s' mission='%s' missionName='%s' map='%s' localPlayer=0",
                         NonEmptyOr(campaign.header, "PROLOGUE"),
                         NonEmptyOr(campaign.name, "EXODUS OF THE HORDE"),
                         NonEmptyOr(mission.header, "01"),
                         NonEmptyOr(mission.name, "CHASING VISIONS"),
-                        NonEmptyOr(mission.mapPath, "Campaigns\\Prologue01.w3m"));
+                        launchMapPath.c_str());
         } else {
             const char* fallbackMission = missionIndex == 1 ? "02 DEPARTURES" : "01 CHASING VISIONS";
-            const char* fallbackMap = missionIndex == 1 ? "Campaigns\\Prologue02.w3m" : "Campaigns\\Prologue01.w3m";
-            GlueDiagLog("GlueMenuControl: Campaign mission selected campaign='%s' mission='%s' map='%s' localPlayer=0 (launch pending)",
+            const char* fallbackMap = missionIndex == 1 ? "Maps\\Campaign\\Prologue02.w3m" : "Maps\\Campaign\\Prologue01.w3m";
+            launchMapPath = fallbackMap;
+            GlueDiagLog("GlueMenuControl: Campaign mission selected campaign='%s' mission='%s' map='%s' localPlayer=0",
                         campaignMissionHeaderText_ ? campaignMissionHeaderText_->GetText() : "PROLOGUE",
                         fallbackMission,
                         fallbackMap);
+        }
+        if (mapLaunchCallback_ && !launchMapPath.empty()) {
+            GlueDiagLog("GlueMenuControl: requesting map launch path='%s' localPlayer=0 source=campaign",
+                        launchMapPath.c_str());
+            mapLaunchCallback_(launchMapPath, 0);
+        } else {
+            GlueDiagLog("GlueMenuControl: map launch callback unavailable for path='%s'",
+                        launchMapPath.c_str());
         }
         break;
     }
@@ -1393,7 +1408,7 @@ void GlueMenuControl::HandleAction(int action) {
             }
             slots << "/" << ClampPick(kGlueRaceLabels, 5, playerSlotRaceIndices_[i]);
         }
-        GlueDiagLog("GlueMenuControl: Play Game selected map='%s' path='%s' index=%d label='%s' mapSlots=%d visibleSlots=%d localPlayer=0 slots=[%s] options={teamsTogether=%s fixedTeams=%s fullSharedControl=%s} (launch pending)",
+        GlueDiagLog("GlueMenuControl: Play Game selected map='%s' path='%s' index=%d label='%s' mapSlots=%d visibleSlots=%d localPlayer=0 slots=[%s] options={teamsTogether=%s fixedTeams=%s fullSharedControl=%s}",
                     mapName.c_str(),
                     mapPath.c_str(),
                     selectedIndex,
@@ -1404,6 +1419,14 @@ void GlueMenuControl::HandleAction(int action) {
                     OnOff(advancedTeamsTogether_),
                     OnOff(advancedFixedTeams_),
                     OnOff(advancedFullSharedControl_));
+        if (mapLaunchCallback_ && !mapPath.empty()) {
+            GlueDiagLog("GlueMenuControl: requesting map launch path='%s' localPlayer=0 source=custom-game",
+                        mapPath.c_str());
+            mapLaunchCallback_(mapPath, 0);
+        } else {
+            GlueDiagLog("GlueMenuControl: map launch callback unavailable for path='%s'",
+                        mapPath.c_str());
+        }
         break;
     }
     case kGlueMenuMapInfo:
@@ -1784,9 +1807,9 @@ void GlueMenuControl::ApplyCampaignData() {
     if (campaignSummaryMapText_) {
         std::string firstMap = "First Map: ";
         if (campaign && !campaign->missions.empty()) {
-            firstMap += NonEmptyOr(campaign->missions.front().mapPath, "Campaigns\\Prologue01.w3m");
+            firstMap += NonEmptyOr(campaign->missions.front().mapPath, "Maps\\Campaign\\Prologue01.w3m");
         } else {
-            firstMap += "Campaigns\\Prologue01.w3m";
+            firstMap += "Maps\\Campaign\\Prologue01.w3m";
         }
         campaignSummaryMapText_->SetText(firstMap.c_str());
     }
@@ -1800,12 +1823,12 @@ void GlueMenuControl::ApplyCampaignData() {
     }
     if (campaignMissionMapText_) {
         if (selectedMission) {
-            const std::string mapLabel = std::string("Map: ") + NonEmptyOr(selectedMission->mapPath, "Campaigns\\Prologue01.w3m");
+            const std::string mapLabel = std::string("Map: ") + NonEmptyOr(selectedMission->mapPath, "Maps\\Campaign\\Prologue01.w3m");
             campaignMissionMapText_->SetText(mapLabel.c_str());
         } else {
             campaignMissionMapText_->SetText(selectedCampaignMissionIndex_ == 1
-                ? "Map: Campaigns\\Prologue02.w3m"
-                : "Map: Campaigns\\Prologue01.w3m");
+                ? "Map: Maps\\Campaign\\Prologue02.w3m"
+                : "Map: Maps\\Campaign\\Prologue01.w3m");
         }
     }
 

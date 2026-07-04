@@ -1,9 +1,12 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
 namespace War3UI {
+
+using GlueMapLaunchCallback = std::function<void(const std::string&, int)>;
 
 struct GlueMapListItem {
     std::string path;

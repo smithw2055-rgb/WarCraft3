@@ -1,4 +1,5 @@
 #include "mdx_particles.h"
+#include "mdx_animator.h"
 #include "shader.h"
 #include "resource/mpq_storm.h"
 #include "renderer.h"
@@ -10,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <algorithm>
 
 sg_shader MdxParticleSystem::sharedParticleShader_ = {0};
 sg_pipeline MdxParticleSystem::sharedParticlePipeline_ = {0};
@@ -47,6 +49,14 @@ static sg_image LoadTex(MpqManager* mpq, const std::string& path) {
     sg_image tex = makeImg(w, h, pixels, (size_t)(w * h * 4));
     stbi_image_free(pixels);
     return tex;
+}
+
+static Vec3 TransformPoint(const Mat4& matrix, const Vec3& point) {
+    return Vec3{
+        matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
+        matrix.m[1] * point.x + matrix.m[5] * point.y + matrix.m[9] * point.z + matrix.m[13],
+        matrix.m[2] * point.x + matrix.m[6] * point.y + matrix.m[10] * point.z + matrix.m[14]
+    };
 }
 
 MdxParticleSystem::MdxParticleSystem()
@@ -132,11 +142,11 @@ Vec3 MdxParticleSystem::RandomDirectionInCone(float latitude, std::mt19937& rng,
     return Vec3{std::cos(theta) * sp, std::cos(phi), std::sin(theta) * sp};
 }
 
-void MdxParticleSystem::EmitParticle(ParticleEmitterState& state, float dt) {
+void MdxParticleSystem::EmitParticle(ParticleEmitterState& state, const MdxParticleEmitter2Sample& sample, int count) {
     const auto& data = *state.emitterData;
-    state.emissionAccum += data.emissionRate * dt;
-    int count = (int)state.emissionAccum;
-    state.emissionAccum -= (float)count;
+    if (count <= 0) {
+        return;
+    }
 
     for (int i = 0; i < count; i++) {
         if ((int)state.particles.size() >= state.instanceCapacity) break;
@@ -144,8 +154,8 @@ void MdxParticleSystem::EmitParticle(ParticleEmitterState& state, float dt) {
         Particle p;
 
         // Randomize emission position within emitter width/length
-        float halfW = data.width * 0.5f;
-        float halfL = data.length * 0.5f;
+        float halfW = sample.width * 0.5f;
+        float halfL = sample.length * 0.5f;
         p.position = Vec3{
             (dist01_(rng_) - 0.5f) * 2.0f * halfW,
             0.0f,
@@ -153,19 +163,21 @@ void MdxParticleSystem::EmitParticle(ParticleEmitterState& state, float dt) {
         };
 
         // Velocity: random direction in cone
-        Vec3 dir = RandomDirectionInCone(data.latitude * 3.14159265f / 180.0f, rng_, dist01_);
+        Vec3 dir = RandomDirectionInCone(sample.latitude * 3.14159265f / 180.0f, rng_, dist01_);
 
-        float speedVar = data.speed * (1.0f + (dist01_(rng_) - 0.5f) * 2.0f * data.variation);
+        float speedVar = sample.speed * (1.0f + (dist01_(rng_) - 0.5f) * 2.0f * sample.variation);
         p.velocity = Vec3{dir.x * speedVar, dir.y * speedVar, dir.z * speedVar};
-        p.velocity.y -= data.gravity * 0.5f * dt;
+        p.gravity = sample.gravity;
 
         p.life = data.lifeSpan;
         p.maxLife = data.lifeSpan;
         p.size = data.segmentScaling[0];
 
         // Random texture cell
-        float col = (float)((int)(dist01_(rng_) * data.columns));
-        float row = (float)((int)(dist01_(rng_) * data.rows));
+        const unsigned columns = std::max(1u, data.columns);
+        const unsigned rows = std::max(1u, data.rows);
+        float col = (float)((int)(dist01_(rng_) * columns));
+        float row = (float)((int)(dist01_(rng_) * rows));
         p.texRow = row;
         p.texCol = col;
 
@@ -182,7 +194,7 @@ void MdxParticleSystem::UpdateParticle(Particle& p, float dt, const MdxParticleE
     if (p.life <= 0.0f) return;
 
     // Apply gravity
-    p.velocity.y -= data.gravity * dt;
+    p.velocity.y -= p.gravity * dt;
     // Update position
     p.position.x += p.velocity.x * dt;
     p.position.y += p.velocity.y * dt;
@@ -214,16 +226,45 @@ void MdxParticleSystem::UpdateParticle(Particle& p, float dt, const MdxParticleE
 }
 
 void MdxParticleSystem::Update(float dt, const Vec3& worldOffset) {
+    Update(dt, worldOffset, nullptr, nullptr, 0, 0.0f);
+}
+
+void MdxParticleSystem::Update(float dt, const Vec3& worldOffset, const MdxModel* model,
+                               const MdxAnimator* animator, uint32_t frame, float elapsedMs) {
     worldOffset_ = worldOffset;
     for (auto& state : emitters_) {
         auto& particles = state.particles;
         const auto& data = *state.emitterData;
+        MdxParticleEmitter2Sample sample;
+        MdxSampleParticleEmitter2(data, model, frame, elapsedMs, sample,
+                                  animator ? animator->GetCurrentSequence() : -1);
+        const bool emitterVisible = !animator || animator->IsObjectVisible(data.objectId);
 
         size_t oldCount = particles.size();
-        EmitParticle(state, dt);
+        if (emitterVisible && sample.visibility > 0.0f && sample.emissionRate > 0.0f) {
+            if (data.squirt != 0) {
+                if (sample.emissionRateKey >= 0 && sample.emissionRateKey != state.lastEmissionKey) {
+                    state.emissionAccum += sample.emissionRate;
+                }
+                state.lastEmissionKey = sample.emissionRateKey;
+            } else {
+                state.emissionAccum += sample.emissionRate * dt;
+            }
+        }
+        int emitCount = (int)state.emissionAccum;
+        state.emissionAccum -= (float)emitCount;
+        EmitParticle(state, sample, emitCount);
 
-        // Apply world offset to newly emitted particles
+        Mat4 emitterTransform = Mat4::Identity();
+        const bool hasEmitterTransform = animator
+            && animator->GetObjectWorldTransformYUp(data.objectId, emitterTransform);
+        const bool modelSpace = (data.flags & 0x80000) != 0;
+
+        // Apply emitter node transform and instance world offset to newly emitted particles.
         for (size_t i = oldCount; i < particles.size(); i++) {
+            if (hasEmitterTransform && !modelSpace) {
+                particles[i].position = TransformPoint(emitterTransform, particles[i].position);
+            }
             particles[i].position.x += worldOffset_.x;
             particles[i].position.y += worldOffset_.y;
             particles[i].position.z += worldOffset_.z;

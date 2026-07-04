@@ -1503,7 +1503,11 @@ void TexturedTerrain::ClearRuntimeSplats() {
 void TexturedTerrain::AddRuntimeSplatRect(const std::string& key, const std::string& texturePath,
                                           float x0, float y0, float x1, float y1, float zOffset,
                                           bool highPriority, bool noDepthTest,
-                                          bool absoluteHeight, float absoluteHeightValue) {
+                                          bool absoluteHeight, float absoluteHeightValue,
+                                          const Vec4& tint,
+                                          const Vec4& uvRect,
+                                          SplatModel::BlendMode blendMode,
+                                          bool unshaded) {
     if (key.empty() || texturePath.empty()) {
         return;
     }
@@ -1517,10 +1521,38 @@ void TexturedTerrain::AddRuntimeSplatRect(const std::string& key, const std::str
 
     splat->SetHighPriority(highPriority);
     splat->SetNoDepthTest(noDepthTest);
+    splat->SetBlendMode(blendMode);
+    splat->SetUnshaded(unshaded);
     splat->AddSplatRect(x0, y0, x1, y1, zOffset,
                         absoluteHeight, absoluteHeightValue,
                         false, 0.0f, 0.0f, 0.0f, 0.0f,
-                        false, 0.0f, 0.0f, 0.0f, 0.0f);
+                        false, 0.0f, 0.0f, 0.0f, 0.0f,
+                        tint,
+                        uvRect);
+}
+
+void TexturedTerrain::AddRuntimeSplatMesh(const std::string& key, const std::string& texturePath,
+                                          const std::vector<SplatModel::MeshVertex>& vertices,
+                                          const std::vector<uint32_t>& indices,
+                                          bool highPriority, bool noDepthTest,
+                                          SplatModel::BlendMode blendMode,
+                                          bool unshaded) {
+    if (key.empty() || texturePath.empty() || vertices.empty() || indices.empty()) {
+        return;
+    }
+
+    const std::string runtimeKey = "__runtime__:" + key;
+    runtimeUberSplatKeys_.insert(runtimeKey);
+    auto* splat = GetOrCreateUberSplatModelForKey(runtimeKey, texturePath, highPriority, false);
+    if (!splat) {
+        return;
+    }
+
+    splat->SetHighPriority(highPriority);
+    splat->SetNoDepthTest(noDepthTest);
+    splat->SetBlendMode(blendMode);
+    splat->SetUnshaded(unshaded);
+    splat->AddMesh(vertices, indices);
 }
 
 MdxViewer* TexturedTerrain::GetOrLoadCliffModel(const std::string& path) {

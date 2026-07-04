@@ -16,6 +16,7 @@ struct SplatVertex {
     float clampMinTileX, clampMinTileY, clampMaxTileX, clampMaxTileY;
     float cornerHeightBL, cornerHeightBR, cornerHeightTL, cornerHeightTR;
     float useCornerHeightOverride;
+    float tintR, tintG, tintB, tintA;
 };
 }
 
@@ -73,7 +74,9 @@ void SplatModel::AddSplatRect(float x0, float y0, float x1, float y1, float zOff
                               float clampMaxTileX, float clampMaxTileY,
                               bool useCornerHeightOverride,
                               float cornerHeightBL, float cornerHeightBR,
-                              float cornerHeightTL, float cornerHeightTR) {
+                              float cornerHeightTL, float cornerHeightTR,
+                              const Vec4& tint,
+                              const Vec4& uvRect) {
     SplatInstance inst;
     inst.x0 = std::min(x0, x1);
     inst.y0 = std::min(y0, y1);
@@ -92,6 +95,8 @@ void SplatModel::AddSplatRect(float x0, float y0, float x1, float y1, float zOff
     inst.cornerHeightBR = cornerHeightBR;
     inst.cornerHeightTL = cornerHeightTL;
     inst.cornerHeightTR = cornerHeightTR;
+    inst.tint = tint;
+    inst.uvRect = uvRect;
     instances_.push_back(inst);
     dirty_ = true;
 }
@@ -131,6 +136,18 @@ void SplatModel::SetNoDepthTest(bool v) {
     }
 
     noDepthTest_ = v;
+    if (Renderer::IsActive() && sg_query_pipeline_state(pipeline_) == SG_RESOURCESTATE_VALID) {
+        sg_destroy_pipeline(pipeline_);
+    }
+    pipeline_ = {};
+}
+
+void SplatModel::SetBlendMode(BlendMode mode) {
+    if (blendMode_ == mode) {
+        return;
+    }
+
+    blendMode_ = mode;
     if (Renderer::IsActive() && sg_query_pipeline_state(pipeline_) == SG_RESOURCESTATE_VALID) {
         sg_destroy_pipeline(pipeline_);
     }
@@ -196,8 +213,10 @@ void SplatModel::RebuildBatches(float centerOffset[2], int mapCols, int mapRows)
                 vtx.px = worldX;
                 vtx.py = worldY;
                 vtx.pz = inst.zOffset;
-                vtx.u = (worldX - inst.x0) / width;
-                vtx.v = 1.0f - ((worldY - inst.y0) / height);
+                const float localU = (worldX - inst.x0) / width;
+                const float localV = 1.0f - ((worldY - inst.y0) / height);
+                vtx.u = inst.uvRect.x + localU * (inst.uvRect.z - inst.uvRect.x);
+                vtx.v = inst.uvRect.y + localV * (inst.uvRect.w - inst.uvRect.y);
                 vtx.absoluteHeight = inst.absoluteHeight ? inst.absoluteHeightValue : kAbsoluteHeightSentinel;
                 vtx.clampMinTileX = inst.clampMinTileX;
                 vtx.clampMinTileY = inst.clampMinTileY;
@@ -208,6 +227,10 @@ void SplatModel::RebuildBatches(float centerOffset[2], int mapCols, int mapRows)
                 vtx.cornerHeightTL = inst.cornerHeightTL;
                 vtx.cornerHeightTR = inst.cornerHeightTR;
                 vtx.useCornerHeightOverride = inst.useCornerHeightOverride ? 1.0f : 0.0f;
+                vtx.tintR = inst.tint.x;
+                vtx.tintG = inst.tint.y;
+                vtx.tintB = inst.tint.z;
+                vtx.tintA = inst.tint.w;
                 vertices.push_back(vtx);
             };
 
@@ -247,8 +270,10 @@ void SplatModel::RebuildBatches(float centerOffset[2], int mapCols, int mapRows)
                 vtx.px = worldX;
                 vtx.py = worldY;
                 vtx.pz = inst.zOffset;
-                vtx.u = (worldX - inst.x0) / width;
-                vtx.v = 1.0f - ((worldY - inst.y0) / height);
+                const float localU = (worldX - inst.x0) / width;
+                const float localV = 1.0f - ((worldY - inst.y0) / height);
+                vtx.u = inst.uvRect.x + localU * (inst.uvRect.z - inst.uvRect.x);
+                vtx.v = inst.uvRect.y + localV * (inst.uvRect.w - inst.uvRect.y);
                 vtx.absoluteHeight = inst.absoluteHeight ? inst.absoluteHeightValue : kAbsoluteHeightSentinel;
                 if (inst.clampHeightToRect) {
                     vtx.clampMinTileX = inst.clampMinTileX;
@@ -266,6 +291,10 @@ void SplatModel::RebuildBatches(float centerOffset[2], int mapCols, int mapRows)
                 vtx.cornerHeightTL = inst.cornerHeightTL;
                 vtx.cornerHeightTR = inst.cornerHeightTR;
                 vtx.useCornerHeightOverride = inst.useCornerHeightOverride ? 1.0f : 0.0f;
+                vtx.tintR = inst.tint.x;
+                vtx.tintG = inst.tint.y;
+                vtx.tintB = inst.tint.z;
+                vtx.tintA = inst.tint.w;
                 vertices.push_back(vtx);
             }
         }
@@ -319,6 +348,10 @@ void SplatModel::RebuildBatches(float centerOffset[2], int mapCols, int mapRows)
             vtx.cornerHeightTL = src.cornerHeightTL;
             vtx.cornerHeightTR = src.cornerHeightTR;
             vtx.useCornerHeightOverride = src.useCornerHeightOverride ? 1.0f : 0.0f;
+            vtx.tintR = src.tint.x;
+            vtx.tintG = src.tint.y;
+            vtx.tintB = src.tint.z;
+            vtx.tintA = src.tint.w;
             vertices.push_back(vtx);
         }
 
@@ -371,10 +404,33 @@ void SplatModel::Render(sg_shader uberSplatShader, const Mat4& mvp, float center
         pd.depth.write_enabled = false;
         pd.cull_mode = SG_CULLMODE_NONE;
         pd.colors[0].blend.enabled = true;
-        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pd.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-        pd.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        switch (blendMode_) {
+        case BlendMode::AdditiveAlpha:
+            pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+            pd.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_SRC_ALPHA;
+            pd.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+            break;
+        case BlendMode::Modulate:
+            pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ZERO;
+            pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_SRC_COLOR;
+            pd.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ZERO;
+            pd.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_SRC_COLOR;
+            break;
+        case BlendMode::Modulate2x:
+            pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_DST_COLOR;
+            pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_SRC_COLOR;
+            pd.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_DST_COLOR;
+            pd.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_SRC_COLOR;
+            break;
+        case BlendMode::Blend:
+        default:
+            pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            pd.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            pd.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            break;
+        }
         pd.layout.buffers[0].stride = sizeof(SplatVertex);
         pd.layout.attrs[0].buffer_index = 0;
         pd.layout.attrs[0].offset = 0;
@@ -394,6 +450,9 @@ void SplatModel::Render(sg_shader uberSplatShader, const Mat4& mvp, float center
         pd.layout.attrs[5].buffer_index = 0;
         pd.layout.attrs[5].offset = 56;
         pd.layout.attrs[5].format = SG_VERTEXFORMAT_FLOAT;
+        pd.layout.attrs[6].buffer_index = 0;
+        pd.layout.attrs[6].offset = 60;
+        pd.layout.attrs[6].format = SG_VERTEXFORMAT_FLOAT4;
         pipeline_ = sg_make_pipeline(&pd);
     }
 
@@ -437,6 +496,7 @@ void SplatModel::Render(sg_shader uberSplatShader, const Mat4& mvp, float center
     fsU.splatParams[0] =
         (terrainColorMask_ && terrainTextureListView.id && groundTextureViews && groundTextureCount > 0)
         ? 1.0f : 0.0f;
+    fsU.splatParams[1] = unshaded_ ? 1.0f : 0.0f;
     sg_apply_uniforms(1, sg_rng(fsU));
 
     for (const auto& batch : batches_) {

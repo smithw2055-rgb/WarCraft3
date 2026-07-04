@@ -80,6 +80,16 @@ struct MdxParticleEmitter1 {
     std::vector<MdxTimeline> timelines;
 };
 
+struct MdxParticleEmitter1Sample {
+    float emissionRate = 0.0f;
+    float gravity = 0.0f;
+    float longitude = 0.0f;
+    float latitude = 0.0f;
+    float lifeSpan = 0.0f;
+    float speed = 0.0f;
+    float visibility = 1.0f;
+};
+
 // ---- ParticleEmitter2 ----
 struct MdxParticleEmitter2 {
     std::string name;
@@ -114,6 +124,18 @@ struct MdxParticleEmitter2 {
     std::vector<MdxTimeline> timelines;
 };
 
+struct MdxParticleEmitter2Sample {
+    float speed = 0.0f;
+    float variation = 0.0f;
+    float latitude = 0.0f;
+    float gravity = 0.0f;
+    float emissionRate = 0.0f;
+    float length = 0.0f;
+    float width = 0.0f;
+    float visibility = 1.0f;
+    int emissionRateKey = -1;
+};
+
 // ---- Ribbon emitter ----
 struct MdxRibbonEmitter {
     std::string name;
@@ -128,7 +150,7 @@ struct MdxRibbonEmitter {
     float lifeSpan = 0;
     float emissionRate = 0;
     int textureSlot = 0;
-    int gravity = 0;
+    float gravity = 0.0f;
     unsigned rows = 1;
     unsigned columns = 1;
     int priorityPlane = 0;
@@ -281,6 +303,22 @@ struct MdxModel {
 // Evaluate a timeline at a given frame (normalized to [0,1] between surrounding keys)
 // Returns true if data exists and writes to `out`; false if timeline is empty.
 bool MdxSampleTimeline(const MdxTimeline& tl, uint32_t frame, float* out, int elemCount, float defaultVal = 0.0f);
+bool MdxSampleParticleEmitter1(const MdxParticleEmitter1& emitter,
+                               const MdxModel* model,
+                               uint32_t frame,
+                               float elapsedMs,
+                               MdxParticleEmitter1Sample& out,
+                               int sequenceIndex = -1);
+bool MdxSampleParticleEmitter2(const MdxParticleEmitter2& emitter,
+                               const MdxModel* model,
+                               uint32_t frame,
+                               float elapsedMs,
+                               MdxParticleEmitter2Sample& out,
+                               int sequenceIndex = -1);
+
+// Geoset animation color timelines (KGAC) are stored as BGR; convert them for
+// renderer-facing RGB color uniforms.
+void MdxConvertAnimatedColorBgrToRgb(const float bgr[3], float rgb[3]);
 
 // ---- MDX file loading ----
 bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out);

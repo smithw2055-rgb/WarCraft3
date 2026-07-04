@@ -54,8 +54,8 @@ public:
     War3ID GetAlias() const { return alias_; }
     void SetAlias(War3ID alias) { alias_ = alias; }
     CAbilityCategory GetCategory() const { return category_; }
-    virtual int GetLevel() const { return 1; }
-    virtual void SetLevel(int) {}
+    virtual int GetLevel() const { return level_; }
+    virtual void SetLevel(int level) { level_ = level; }
 
     // State
     bool IsDisabled() const { return disabled_ != 0; }
@@ -100,6 +100,7 @@ protected:
     War3ID code_;
     War3ID alias_;
     CAbilityCategory category_;
+    int level_ = 1;
     uint8_t disabled_ = 0;
     bool physical_ = false;
     bool permanent_ = false;

@@ -193,6 +193,16 @@ void CUnit::RemoveAbility(CSimulation& game, int abilityHandleId) {
     }
 }
 
+bool CUnit::RemoveAbility(CSimulation& game, War3ID abilityCode) {
+    CAbility* ability = GetAbility(abilityCode);
+    if (!ability) {
+        return false;
+    }
+    const int handleId = ability->GetHandleId();
+    RemoveAbility(game, handleId);
+    return GetAbility(abilityCode) == nullptr;
+}
+
 CAbility* CUnit::GetAbility(War3ID code) const {
     for (auto* ab : abilities_) {
         if (ab && (ab->GetCode() == code || ab->GetAlias() == code)) {

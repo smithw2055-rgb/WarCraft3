@@ -49,6 +49,23 @@ static float RF32(const uint8_t* p) { float v; memcpy(&v, p, 4); return v; }
 #define T_UVAS MAKE_TAG('U','V','A','S')
 #define T_UVBS MAKE_TAG('U','V','B','S')
 
+static constexpr uint32_t TAG_KEVT = MAKE_TAG('K','E','V','T');
+static constexpr uint32_t TAG_KPES = MAKE_TAG('K','P','E','S');
+static constexpr uint32_t TAG_KPEL = MAKE_TAG('K','P','E','L');
+static constexpr uint32_t TAG_KPEG = MAKE_TAG('K','P','E','G');
+static constexpr uint32_t TAG_KPLN = MAKE_TAG('K','P','L','N');
+static constexpr uint32_t TAG_KPLT = MAKE_TAG('K','P','L','T');
+static constexpr uint32_t TAG_KPEE = MAKE_TAG('K','P','E','E');
+static constexpr uint32_t TAG_KPEV = MAKE_TAG('K','P','E','V');
+static constexpr uint32_t TAG_KP2S = MAKE_TAG('K','P','2','S');
+static constexpr uint32_t TAG_KP2R = MAKE_TAG('K','P','2','R');
+static constexpr uint32_t TAG_KP2L = MAKE_TAG('K','P','2','L');
+static constexpr uint32_t TAG_KP2G = MAKE_TAG('K','P','2','G');
+static constexpr uint32_t TAG_KP2E = MAKE_TAG('K','P','2','E');
+static constexpr uint32_t TAG_KP2N = MAKE_TAG('K','P','2','N');
+static constexpr uint32_t TAG_KP2W = MAKE_TAG('K','P','2','W');
+static constexpr uint32_t TAG_KP2V = MAKE_TAG('K','P','2','V');
+
 struct MdxReader {
     const uint8_t* d;
     size_t sz;
@@ -94,9 +111,15 @@ static int TimelineElemSize(uint32_t tag) {
         case MAKE_TAG('K','G','S','C'): return 3; // scale
         case MAKE_TAG('K','T','A','S'): return 3; // tex anim scale
         case MAKE_TAG('K','T','A','T'): return 3; // tex anim translation
+        case MAKE_TAG('K','G','A','C'): return 3; // geoset anim color (BGR)
+        case MAKE_TAG('K','L','A','C'): return 3; // light color
+        case MAKE_TAG('K','L','B','C'): return 3; // light ambient color
+        case MAKE_TAG('K','P','P','C'): return 3; // popcorn emitter color
+        case MAKE_TAG('K','R','C','O'): return 3; // ribbon emitter color
+        case MAKE_TAG('K','F','C','3'): return 3; // layer fresnel color
         case MAKE_TAG('K','G','R','T'): return 4; // rotation (quaternion)
         case MAKE_TAG('K','T','A','R'): return 4; // tex anim rotation
-        case MAKE_TAG('K','E','V','T'): return 1; // event trigger (uint32)
+        case TAG_KEVT: return 1; // event trigger keyframes
         default: return 1;                          // scalar (float)
     }
 }
@@ -104,7 +127,8 @@ static int TimelineElemSize(uint32_t tag) {
 static bool IsIntegerTimeline(uint32_t tag) {
     switch (tag) {
         case MAKE_TAG('K','M','T','F'): // material texture id
-        case MAKE_TAG('K','E','V','T'): // event trigger
+        case MAKE_TAG('K','R','T','X'): // ribbon texture slot
+        case MAKE_TAG('K','F','T','C'): // layer fresnel team color
             return true;
         default:
             return false;
@@ -119,6 +143,21 @@ static bool IsTangential(MdxInterpolation interp) {
 static void ReadTimeline(MdxReader& r, MdxTimeline& tl) {
     tl.tag = r.tag();
     uint32_t kfCount = r.u32();
+
+    if (tl.tag == TAG_KEVT) {
+        tl.interpolationType = MdxInterpolation::None;
+        tl.globalSequenceId = r.s32();
+        if (kfCount > 100000) {
+            r.skip((size_t)kfCount * 4);
+            return;
+        }
+        tl.frames.resize(kfCount);
+        for (uint32_t i = 0; i < kfCount; i++) {
+            tl.frames[i] = r.u32();
+        }
+        return;
+    }
+
     tl.interpolationType = (MdxInterpolation)r.u32();
     tl.globalSequenceId = r.s32();
 
@@ -324,7 +363,7 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                     layer.textureAnimationId = r.s32();
                     layer.coordId = r.s32();
                     layer.alpha = r.f32();
-                    // Remaining bytes in layer may contain KMLT (alpha) and KMTF (texture swap) timelines
+                    // Remaining bytes in layer may contain KMTA (alpha) and KMTF (texture swap) timelines
                     size_t layerDataEnd = dataStart + layerSize - 4;
                     ReadTimelines(r, layerDataEnd, layer.timelines);
                     r.off = layerDataEnd;
@@ -490,7 +529,7 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 r.readFloatArray(ga.color.data(), 3);
                 ga.geosetId = r.s32();
 
-                // Remaining bytes are timelines (KGAL, KGAC)
+                // Remaining bytes are timelines (KGAO, KGAC)
                 ReadTimelines(r, entryEndLocal, ga.timelines);
                 out.geosetAnims.push_back(std::move(ga));
             }
@@ -733,7 +772,7 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 rb.rows = r.u32();
                 rb.columns = r.u32();
                 rb.priorityPlane = r.s32();
-                rb.gravity = (int)r.f32();
+                rb.gravity = r.f32();
                 ReadTimelines(r, entryEndLocal, rb.timelines);
                 r.off = entryEndLocal;
                 out.ribbonEmitters.push_back(std::move(rb));
@@ -746,13 +785,12 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
         case T_EVTS: {
             while (r.off + 4 <= chunkEnd) {
                 size_t entryStart = r.off;
-                uint32_t entrySize = r.u32();
-                if (entrySize < 100 || entryStart + entrySize > chunkEnd) break;
-                size_t entryEndLocal = entryStart + entrySize;
+                uint32_t genericSize = R32(r.d + r.off);
+                if (genericSize < 96 || entryStart + genericSize > chunkEnd) break;
 
                 MdxEventObject ev;
                 MdxNode genericNode;
-                ReadNodeGeneric(r, genericNode);
+                ReadSizedGenericObject(r, chunkEnd, genericNode, ev.timelines);
                 ev.name = genericNode.name;
                 ev.objectId = genericNode.objectId;
                 ev.parentId = genericNode.parentId;
@@ -760,11 +798,14 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 // Parse type from name prefix
                 if (ev.name.size() >= 3) {
                     ev.type = ev.name.substr(0, 3);
-                    if (ev.name.size() > 3)
-                        ev.id = ev.name.substr(3);
+                    if (ev.name.size() > 4)
+                        ev.id = ev.name.substr(4);
                 }
-                // Event objects have a KEVT timeline (keyframe trigger)
-                ReadTimelines(r, entryEndLocal, ev.timelines);
+                if (r.off + 12 <= chunkEnd && r.peekTag() == TAG_KEVT) {
+                    MdxTimeline eventTrack;
+                    ReadTimeline(r, eventTrack);
+                    ev.timelines.push_back(std::move(eventTrack));
+                }
                 out.eventObjects.push_back(std::move(ev));
             }
             r.off = chunkEnd;
@@ -838,7 +879,8 @@ struct SampleHelper {
     static float interpValue(const float* values, int elemIdx, int elemCount,
                               int keyA, int keyB, float t,
                               MdxInterpolation interp,
-                              const float* inTans, const float* outTans) {
+                              const float* inTans, const float* outTans,
+                              bool hasTangents) {
         float a = values[keyA * elemCount + elemIdx];
         float b = values[keyB * elemCount + elemIdx];
 
@@ -848,11 +890,17 @@ struct SampleHelper {
         case MdxInterpolation::Linear:
             return lerp(a, b, t);
         case MdxInterpolation::Hermite: {
+            if (!hasTangents) {
+                return lerp(a, b, t);
+            }
             float outTan = outTans[keyA * elemCount + elemIdx];
             float inTan = inTans[keyB * elemCount + elemIdx];
             return hermite(a, outTan, b, inTan, t);
         }
         case MdxInterpolation::Bezier: {
+            if (!hasTangents) {
+                return lerp(a, b, t);
+            }
             float outTan = outTans[keyA * elemCount + elemIdx];
             float inTan = inTans[keyB * elemCount + elemIdx];
             return bezier(a, outTan, b, inTan, t);
@@ -864,7 +912,28 @@ struct SampleHelper {
 };
 
 bool MdxSampleTimeline(const MdxTimeline& tl, uint32_t frame, float* out, int elemCount, float defaultVal) {
-    if (tl.frames.empty() || elemCount < 1) return false;
+    if (!out || tl.frames.empty() || elemCount < 1) return false;
+
+    const size_t keyCount = tl.frames.size();
+    const size_t valuesNeeded = keyCount * (size_t)elemCount;
+    if (tl.values.size() < valuesNeeded) {
+        for (int i = 0; i < elemCount; i++) out[i] = defaultVal;
+        return false;
+    }
+
+    if (frame <= tl.frames.front() || keyCount == 1) {
+        for (int i = 0; i < elemCount; i++) {
+            out[i] = tl.values[(size_t)i];
+        }
+        return true;
+    }
+    if (frame >= tl.frames.back()) {
+        const size_t lastValue = (keyCount - 1u) * (size_t)elemCount;
+        for (int i = 0; i < elemCount; i++) {
+            out[i] = tl.values[lastValue + (size_t)i];
+        }
+        return true;
+    }
 
     int keyA = SampleHelper::findKey(tl.frames, frame);
     if (keyA < 0) {
@@ -882,12 +951,353 @@ bool MdxSampleTimeline(const MdxTimeline& tl, uint32_t frame, float* out, int el
         t = (float)(frame - tl.frames[keyA]) / (float)(tl.frames[keyB] - tl.frames[keyA]);
     }
 
+    const bool needsTangents = tl.interpolationType == MdxInterpolation::Hermite
+        || tl.interpolationType == MdxInterpolation::Bezier;
+    const bool hasTangents = !needsTangents
+        || (tl.inTans.size() >= valuesNeeded && tl.outTans.size() >= valuesNeeded);
+
     for (int i = 0; i < elemCount; i++) {
         out[i] = SampleHelper::interpValue(
             tl.values.data(), i, elemCount, keyA, keyB, t,
             tl.interpolationType,
             tl.inTans.empty() ? nullptr : tl.inTans.data(),
-            tl.outTans.empty() ? nullptr : tl.outTans.data());
+            tl.outTans.empty() ? nullptr : tl.outTans.data(),
+            hasTangents);
     }
     return true;
+}
+
+static bool MdxSampleGlobalTimelineLooped(const MdxTimeline& tl, uint32_t frame, uint32_t duration,
+                                          float* out, int elemCount, float defaultVal) {
+    if (!out || tl.frames.empty() || elemCount < 1 || duration == 0) {
+        return false;
+    }
+
+    const size_t keyCount = tl.frames.size();
+    const size_t valuesNeeded = keyCount * (size_t)elemCount;
+    if (tl.values.size() < valuesNeeded) {
+        for (int i = 0; i < elemCount; i++) out[i] = defaultVal;
+        return false;
+    }
+    if (keyCount == 1) {
+        for (int i = 0; i < elemCount; i++) out[i] = tl.values[(size_t)i];
+        return true;
+    }
+
+    const int lastIndex = (int)keyCount - 1;
+    int keyA = lastIndex;
+    int keyB = 0;
+    if (frame >= tl.frames.front() && frame < tl.frames.back()) {
+        for (int i = 1; i <= lastIndex; ++i) {
+            if (tl.frames[(size_t)i] > frame) {
+                keyA = i - 1;
+                keyB = i;
+                break;
+            }
+        }
+    }
+
+    uint32_t startFrame = tl.frames[(size_t)keyA];
+    const uint32_t endFrame = tl.frames[(size_t)keyB];
+    int64_t span = (int64_t)endFrame - (int64_t)startFrame;
+    if (span < 0) {
+        span += duration;
+        if (frame < startFrame) {
+            startFrame = endFrame;
+        }
+    }
+    const float t = span == 0
+        ? 0.0f
+        : (float)((int64_t)frame - (int64_t)startFrame) / (float)span;
+
+    const bool needsTangents = tl.interpolationType == MdxInterpolation::Hermite
+        || tl.interpolationType == MdxInterpolation::Bezier;
+    const bool hasTangents = !needsTangents
+        || (tl.inTans.size() >= valuesNeeded && tl.outTans.size() >= valuesNeeded);
+
+    for (int i = 0; i < elemCount; i++) {
+        out[i] = SampleHelper::interpValue(
+            tl.values.data(), i, elemCount, keyA, keyB, t,
+            tl.interpolationType,
+            tl.inTans.empty() ? nullptr : tl.inTans.data(),
+            tl.outTans.empty() ? nullptr : tl.outTans.data(),
+            hasTangents);
+    }
+    return true;
+}
+
+static const MdxSequence* MdxResolveSequence(const MdxModel* model, int sequenceIndex) {
+    if (!model || sequenceIndex < 0 || sequenceIndex >= (int)model->sequences.size()) {
+        return nullptr;
+    }
+    return &model->sequences[(size_t)sequenceIndex];
+}
+
+static bool MdxBuildSequenceTimeline(const MdxTimeline& source,
+                                     const MdxSequence* sequence,
+                                     int elemCount,
+                                     MdxTimeline& out) {
+    if (!sequence || elemCount < 1) {
+        return false;
+    }
+
+    out.tag = source.tag;
+    out.interpolationType = source.interpolationType;
+    out.globalSequenceId = source.globalSequenceId;
+
+    const bool needsTangents = source.interpolationType == MdxInterpolation::Hermite
+        || source.interpolationType == MdxInterpolation::Bezier;
+    for (size_t i = 0; i < source.frames.size(); ++i) {
+        const uint32_t keyFrame = source.frames[i];
+        if (keyFrame < sequence->startFrame || keyFrame > sequence->endFrame) {
+            continue;
+        }
+
+        const size_t valueOffset = i * (size_t)elemCount;
+        if (source.values.size() < valueOffset + (size_t)elemCount) {
+            continue;
+        }
+
+        out.frames.push_back(keyFrame);
+        for (int elem = 0; elem < elemCount; ++elem) {
+            out.values.push_back(source.values[valueOffset + (size_t)elem]);
+        }
+
+        if (needsTangents
+            && source.inTans.size() >= valueOffset + (size_t)elemCount
+            && source.outTans.size() >= valueOffset + (size_t)elemCount) {
+            for (int elem = 0; elem < elemCount; ++elem) {
+                out.inTans.push_back(source.inTans[valueOffset + (size_t)elem]);
+                out.outTans.push_back(source.outTans[valueOffset + (size_t)elem]);
+            }
+        }
+    }
+
+    return !out.frames.empty();
+}
+
+static bool MdxSampleTimelineForModel(const MdxTimeline& tl, const MdxModel* model,
+                                      uint32_t frame, float elapsedMs,
+                                      float* out, int elemCount, float defaultVal,
+                                      int sequenceIndex) {
+    if (tl.globalSequenceId >= 0 && model
+        && tl.globalSequenceId < (int)model->globalSequences.size()) {
+        const uint32_t duration = model->globalSequences[(size_t)tl.globalSequenceId];
+        if (duration > 0) {
+            const uint32_t globalFrame = (uint32_t)std::max(0.0f, elapsedMs) % duration;
+            return MdxSampleGlobalTimelineLooped(tl, globalFrame, duration, out, elemCount, defaultVal);
+        }
+    }
+
+    if (const MdxSequence* sequence = MdxResolveSequence(model, sequenceIndex)) {
+        MdxTimeline sequenceTimeline;
+        if (!MdxBuildSequenceTimeline(tl, sequence, elemCount, sequenceTimeline)) {
+            if (out) {
+                for (int i = 0; i < elemCount; ++i) {
+                    out[i] = defaultVal;
+                }
+            }
+            return false;
+        }
+        return MdxSampleTimeline(sequenceTimeline, frame, out, elemCount, defaultVal);
+    }
+
+    return MdxSampleTimeline(tl, frame, out, elemCount, defaultVal);
+}
+
+static int MdxTimelineKeyAtOrBeforeFrame(const MdxTimeline& tl, const MdxModel* model,
+                                         uint32_t frame, float elapsedMs,
+                                         int sequenceIndex) {
+    if (tl.frames.empty()) {
+        return -1;
+    }
+    uint32_t sampleFrame = frame;
+    const bool global = tl.globalSequenceId >= 0 && model
+        && tl.globalSequenceId < (int)model->globalSequences.size()
+        && model->globalSequences[(size_t)tl.globalSequenceId] > 0;
+    if (global) {
+        const uint32_t duration = model->globalSequences[(size_t)tl.globalSequenceId];
+        sampleFrame = (uint32_t)std::max(0.0f, elapsedMs) % duration;
+    }
+
+    const MdxSequence* sequence = global ? nullptr : MdxResolveSequence(model, sequenceIndex);
+    if (sequence) {
+        int firstInSequence = -1;
+        int best = -1;
+        for (int i = 0; i < (int)tl.frames.size(); ++i) {
+            const uint32_t keyFrame = tl.frames[(size_t)i];
+            if (keyFrame < sequence->startFrame || keyFrame > sequence->endFrame) {
+                continue;
+            }
+            if (firstInSequence < 0) {
+                firstInSequence = i;
+            }
+            if (keyFrame <= sampleFrame) {
+                best = i;
+            }
+        }
+        return best >= 0 ? best : firstInSequence;
+    }
+
+    if (sampleFrame < tl.frames.front()) {
+        return global ? (int)tl.frames.size() - 1 : 0;
+    }
+    for (int i = (int)tl.frames.size() - 1; i >= 0; --i) {
+        if (sampleFrame >= tl.frames[(size_t)i]) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+static bool MdxSampleSteppedScalarTimelineForModel(const MdxTimeline& tl, const MdxModel* model,
+                                                   uint32_t frame, float elapsedMs,
+                                                   float& out, float defaultValue,
+                                                   int sequenceIndex) {
+    const int key = MdxTimelineKeyAtOrBeforeFrame(tl, model, frame, elapsedMs, sequenceIndex);
+    if (key < 0 || (size_t)key >= tl.values.size()) {
+        out = defaultValue;
+        return false;
+    }
+    out = tl.values[(size_t)key];
+    return true;
+}
+
+bool MdxSampleParticleEmitter1(const MdxParticleEmitter1& emitter,
+                               const MdxModel* model,
+                               uint32_t frame,
+                               float elapsedMs,
+                               MdxParticleEmitter1Sample& out,
+                               int sequenceIndex) {
+    out.emissionRate = emitter.emissionRate;
+    out.gravity = emitter.gravity;
+    out.longitude = emitter.longitude;
+    out.latitude = emitter.latitude;
+    out.lifeSpan = emitter.lifeSpan;
+    out.speed = emitter.speed;
+    out.visibility = 1.0f;
+
+    auto sampleScalar = [&](uint32_t tag, float defaultValue, float& value) {
+        for (const MdxTimeline& timeline : emitter.timelines) {
+            if (timeline.tag != tag) {
+                continue;
+            }
+            float sampled = defaultValue;
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, &sampled, 1,
+                                          defaultValue, sequenceIndex)) {
+                value = sampled;
+                return true;
+            }
+            return false;
+        }
+        return false;
+    };
+
+    auto sampleSteppedScalar = [&](uint32_t tag, float defaultValue, float& value) {
+        for (const MdxTimeline& timeline : emitter.timelines) {
+            if (timeline.tag != tag) {
+                continue;
+            }
+            float sampled = defaultValue;
+            if (MdxSampleSteppedScalarTimelineForModel(timeline, model, frame, elapsedMs,
+                                                       sampled, defaultValue, sequenceIndex)) {
+                value = sampled;
+                return true;
+            }
+            return false;
+        }
+        return false;
+    };
+
+    bool sampledAny = false;
+    sampledAny = sampleScalar(TAG_KPEE, emitter.emissionRate, out.emissionRate) || sampledAny;
+    sampledAny = sampleScalar(TAG_KPEG, emitter.gravity, out.gravity) || sampledAny;
+    sampledAny = sampleScalar(TAG_KPLN, emitter.longitude, out.longitude) || sampledAny;
+    sampledAny = sampleScalar(TAG_KPLT, emitter.latitude, out.latitude) || sampledAny;
+    sampledAny = sampleScalar(TAG_KPEL, emitter.lifeSpan, out.lifeSpan) || sampledAny;
+    sampledAny = sampleScalar(TAG_KPES, emitter.speed, out.speed) || sampledAny;
+    sampledAny = sampleSteppedScalar(TAG_KPEV, 1.0f, out.visibility) || sampledAny;
+    return sampledAny;
+}
+
+bool MdxSampleParticleEmitter2(const MdxParticleEmitter2& emitter,
+                               const MdxModel* model,
+                               uint32_t frame,
+                               float elapsedMs,
+                               MdxParticleEmitter2Sample& out,
+                               int sequenceIndex) {
+    out.speed = emitter.speed;
+    out.variation = emitter.variation;
+    out.latitude = emitter.latitude;
+    out.gravity = emitter.gravity;
+    out.emissionRate = emitter.emissionRate;
+    out.length = emitter.length;
+    out.width = emitter.width;
+    out.visibility = 1.0f;
+    out.emissionRateKey = -1;
+
+    auto sampleScalar = [&](uint32_t tag, float defaultValue, float& value) {
+        for (const MdxTimeline& timeline : emitter.timelines) {
+            if (timeline.tag != tag) {
+                continue;
+            }
+            float sampled = defaultValue;
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, &sampled, 1,
+                                          defaultValue, sequenceIndex)) {
+                value = sampled;
+                return true;
+            }
+            return false;
+        }
+        return false;
+    };
+
+    auto sampleSteppedScalar = [&](uint32_t tag, float defaultValue, float& value) {
+        for (const MdxTimeline& timeline : emitter.timelines) {
+            if (timeline.tag != tag) {
+                continue;
+            }
+            float sampled = defaultValue;
+            if (MdxSampleSteppedScalarTimelineForModel(timeline, model, frame, elapsedMs,
+                                                       sampled, defaultValue, sequenceIndex)) {
+                value = sampled;
+                return true;
+            }
+            return false;
+        }
+        return false;
+    };
+
+    bool sampledAny = false;
+    sampledAny = sampleScalar(TAG_KP2S, emitter.speed, out.speed) || sampledAny;
+    sampledAny = sampleScalar(TAG_KP2R, emitter.variation, out.variation) || sampledAny;
+    sampledAny = sampleScalar(TAG_KP2L, emitter.latitude, out.latitude) || sampledAny;
+    sampledAny = sampleScalar(TAG_KP2G, emitter.gravity, out.gravity) || sampledAny;
+    sampledAny = sampleScalar(TAG_KP2E, emitter.emissionRate, out.emissionRate) || sampledAny;
+    sampledAny = sampleScalar(TAG_KP2N, emitter.length, out.length) || sampledAny;
+    sampledAny = sampleScalar(TAG_KP2W, emitter.width, out.width) || sampledAny;
+    sampledAny = sampleSteppedScalar(TAG_KP2V, 1.0f, out.visibility) || sampledAny;
+
+    for (const MdxTimeline& timeline : emitter.timelines) {
+        if (timeline.tag == TAG_KP2E) {
+            out.emissionRateKey = MdxTimelineKeyAtOrBeforeFrame(timeline, model, frame, elapsedMs, sequenceIndex);
+            break;
+        }
+    }
+    return sampledAny;
+}
+
+void MdxConvertAnimatedColorBgrToRgb(const float bgr[3], float rgb[3]) {
+    if (!rgb) {
+        return;
+    }
+    if (!bgr) {
+        rgb[0] = 1.0f;
+        rgb[1] = 1.0f;
+        rgb[2] = 1.0f;
+        return;
+    }
+    rgb[0] = bgr[2];
+    rgb[1] = bgr[1];
+    rgb[2] = bgr[0];
 }

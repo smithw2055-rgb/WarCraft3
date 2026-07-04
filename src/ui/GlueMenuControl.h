@@ -25,13 +25,13 @@ public:
     static constexpr int kActionCount = 92;
 
     using RectResolver = std::function<ScreenRect(Aero::FrameworkElement*)>;
-
     void CacheElements();
     void LogMissingElements() const;
     void CacheRects(const RectResolver& resolveRect);
     void ApplyState();
     void SetMaps(const std::vector<GlueMapListItem>& maps);
     void SetCampaigns(const std::vector<GlueCampaignListItem>& campaigns);
+    void SetMapLaunchCallback(GlueMapLaunchCallback cb);
 
     bool IsActionVisible(int action) const;
     int HitButton(float x, float y) const;
@@ -166,6 +166,7 @@ private:
     std::vector<std::string> allMapDescriptions_;
     std::vector<int> allMapPlayerSlotCounts_;
     std::vector<GlueCampaignListItem> campaigns_;
+    GlueMapLaunchCallback mapLaunchCallback_;
 
     Page page_ = Page::MainMenu;
     bool quitConfirmOpen_ = false;

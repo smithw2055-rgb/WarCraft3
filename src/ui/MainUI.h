@@ -117,6 +117,8 @@ public:
 
     bool Init(MpqManager* mpq, int screenW, int screenH,
               const std::string& hudXamlPath = "assets/ui/Hud.xaml", int gameVersion = 0);
+    bool SwitchNoesisXaml(MpqManager* mpq, int screenW, int screenH,
+                          const std::string& hudXamlPath, int gameVersion = 0);
     void Shutdown();
     void Update(int screenW, int screenH);
     void RenderNoesisOffscreen();
@@ -144,6 +146,7 @@ public:
     bool InvokeGlueMenuActionForUiOnly(const std::string& actionName);
     void SetGlueMenuMapsForUiOnly(const std::vector<War3UI::GlueMapListItem>& maps);
     void SetGlueMenuCampaignsForUiOnly(const std::vector<War3UI::GlueCampaignListItem>& campaigns);
+    void SetGlueMapLaunchCallback(War3UI::GlueMapLaunchCallback cb);
     void SetResourcesForUiOnly(int gold, int lumber, int foodUsed, int foodCap, const std::string& timeText);
     void SetSimulation(CSimulation* sim) { simulation_ = sim; }
     void SetSelectedUnit(int handleId);
@@ -202,6 +205,14 @@ public:
         pendingCommandOrderId_ = -1;
         pendingCommandMode_ = PendingCommandMode::NONE;
     }
+    void CompletePendingCommand() {
+        ClearPendingCommand();
+        activeSubmenuOrderId_ = 0;
+    }
+    int FindCommandSlotByOrderId(int orderId) const;
+    bool IsCommandSlotEnabled(int slotIndex) const;
+    bool IsCommandOrderEnabled(int orderId) const;
+    bool InvokeCommandOrderForDiagnostics(int orderId);
     ScreenRect GetMinimapRect() const;
     ScreenRect GetPortraitRect() const;
     int HitMultiSelection(float x, float y) const;

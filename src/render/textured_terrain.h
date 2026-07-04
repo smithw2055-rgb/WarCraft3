@@ -102,7 +102,17 @@ public:
     void AddRuntimeSplatRect(const std::string& key, const std::string& texturePath,
                              float x0, float y0, float x1, float y1, float zOffset,
                              bool highPriority, bool noDepthTest,
-                             bool absoluteHeight = false, float absoluteHeightValue = 0.0f);
+                             bool absoluteHeight = false, float absoluteHeightValue = 0.0f,
+                             const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f),
+                             const Vec4& uvRect = Vec4(0.0f, 0.0f, 1.0f, 1.0f),
+                             SplatModel::BlendMode blendMode = SplatModel::BlendMode::Blend,
+                             bool unshaded = false);
+    void AddRuntimeSplatMesh(const std::string& key, const std::string& texturePath,
+                             const std::vector<SplatModel::MeshVertex>& vertices,
+                             const std::vector<uint32_t>& indices,
+                             bool highPriority, bool noDepthTest,
+                             SplatModel::BlendMode blendMode = SplatModel::BlendMode::Blend,
+                             bool unshaded = false);
 
     void Render(const Mat4& view, const Mat4& proj, float time = 0);
 

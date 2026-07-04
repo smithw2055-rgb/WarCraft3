@@ -512,9 +512,12 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
 
         const int goldCost = GetMergedInt(unitBalanceTxt, unitBalance, sid, "goldcost", 0);
         const int lumberCost = GetMergedInt(unitBalanceTxt, unitBalance, sid, "lumbercost", 0);
-        const int foodUsed = GetMergedInt(unitBalanceTxt, unitBalance, sid, "foodUsed", 0);
-        const int foodMade = GetMergedInt(unitBalanceTxt, unitBalance, sid, "foodMade", 0);
-        const int buildTime = GetMergedInt(unitBalanceTxt, unitBalance, sid, "buildTime", 0);
+        const int foodUsed = GetMergedInt(unitBalanceTxt, unitBalance, sid, "foodUsed",
+            GetMergedInt(unitBalanceTxt, unitBalance, sid, "fused", 0));
+        const int foodMade = GetMergedInt(unitBalanceTxt, unitBalance, sid, "foodMade",
+            GetMergedInt(unitBalanceTxt, unitBalance, sid, "fmade", 0));
+        const int buildTime = GetMergedInt(unitBalanceTxt, unitBalance, sid, "buildTime",
+            GetMergedInt(unitBalanceTxt, unitBalance, sid, "bldtm", 0));
         const int level = GetMergedInt(unitBalanceTxt, unitBalance, sid, "level", 0);
         const bool hero = GetMergedInt(unitBalanceTxt, unitBalance, sid, "isHero", 0) != 0;
 

@@ -893,6 +893,87 @@ bool NoesisHudHost::Initialize(const std::string& assetRoot, int width, int heig
     return true;
 }
 
+bool NoesisHudHost::ReloadXaml(const std::string& xamlPath, MpqManager* mpq, int gameVersion) {
+    if (!guiInitialized_) {
+        return Initialize(assetRoot_, physicalWidth_, physicalHeight_, xamlPath, mpq, gameVersion);
+    }
+
+    std::string resolvedXamlPath = xamlPath.empty() ? "assets/ui/Hud.xaml" : xamlPath;
+    std::replace(resolvedXamlPath.begin(), resolvedXamlPath.end(), '\\', '/');
+    if (resolvedXamlPath == "assets/noesis/Hud.xaml" || resolvedXamlPath == "./assets/noesis/Hud.xaml") {
+        resolvedXamlPath = "assets/ui/Hud.xaml";
+    }
+
+    HudDiagLog("AeroHudHost: reloading xaml='%s'", resolvedXamlPath.c_str());
+
+    if (initialized_ && view_) {
+        view_->GetRenderer()->Shutdown();
+    }
+    initialized_ = false;
+    glueMenuControl_ = nullptr;
+    glueMdxBackground_ = nullptr;
+    hasLastUpdateTime_ = false;
+    lastUpdateTime_ = 0.0;
+    device_.Reset();
+    root_.Reset();
+    view_.Reset();
+
+    War3UI::MdxSceneControl::SetSharedContext(mpq, gameVersion);
+
+    std::string loadXamlPath = resolvedXamlPath;
+    if (!ComposeXamlForNoesis(assetRoot_, resolvedXamlPath, loadXamlPath)) {
+        HudDiagLog("AeroHudHost: failed to compose reload '%s'", resolvedXamlPath.c_str());
+        return false;
+    }
+    if (loadXamlPath == resolvedXamlPath) {
+        HudDiagLog("AeroHudHost: reloading '%s' without composition", resolvedXamlPath.c_str());
+    } else {
+        HudDiagLog("AeroHudHost: recomposed '%s' -> '%s'", resolvedXamlPath.c_str(), loadXamlPath.c_str());
+    }
+
+    root_ = Aero::GUI::LoadXaml<Aero::UserControl>(loadXamlPath.c_str());
+    if (!root_) {
+        HudDiagLog("AeroHudHost: failed to reload '%s'", loadXamlPath.c_str());
+        return false;
+    }
+    HudDiagLog("AeroHudHost: reloaded '%s'", loadXamlPath.c_str());
+    if (Aero::BaseComponent* mdxBackground = root_->FindName("GlueMdxBackground")) {
+        glueMdxBackground_ = Aero::DynamicCast<War3UI::MdxSceneControl*>(mdxBackground);
+        HudDiagLog("AeroHudHost: GlueMdxBackground found after reload type='%s' mdx=%s",
+                   mdxBackground->GetClassType()->GetName(),
+                   glueMdxBackground_ ? "yes" : "no");
+    } else {
+        glueMdxBackground_ = nullptr;
+        HudDiagLog("AeroHudHost: GlueMdxBackground not found after reload");
+    }
+
+    view_ = Aero::GUI::CreateView(root_);
+    if (!view_) {
+        HudDiagLog("AeroHudHost: failed to create reload view");
+        return false;
+    }
+    view_->SetFlags(Aero::RenderFlags_PPAA | Aero::RenderFlags_LCD);
+    view_->SetScale(dpiScale_);
+    view_->SetSize((uint32_t)physicalWidth_, (uint32_t)physicalHeight_);
+
+    device_ = AeroApp::GLFactory::CreateDevice(false);
+    if (!device_) {
+        HudDiagLog("AeroHudHost: failed to create reload GL render device");
+        return false;
+    }
+
+    view_->GetRenderer()->Init(device_.GetPtr());
+    CacheElements();
+    LogMissingElements();
+    initialized_ = true;
+    ApplyState();
+    view_->Update(0.0);
+    CacheRects();
+    HudDiagLog("AeroHudHost: reload ready root=%.1fx%.1f view=%dx%d",
+               (float)root_->GetActualWidth(), (float)root_->GetActualHeight(), physicalWidth_, physicalHeight_);
+    return true;
+}
+
 void NoesisHudHost::Shutdown() {
     if (initialized_ && view_) {
         view_->GetRenderer()->Shutdown();
@@ -1480,6 +1561,13 @@ void NoesisHudHost::SetGlueMenuCampaigns(const std::vector<War3UI::GlueCampaignL
     }
 }
 
+void NoesisHudHost::SetGlueMapLaunchCallback(War3UI::GlueMapLaunchCallback cb) {
+    glueMapLaunchCallback_ = std::move(cb);
+    if (glueMenuControl_) {
+        glueMenuControl_->SetMapLaunchCallback(glueMapLaunchCallback_);
+    }
+}
+
 void NoesisHudHost::HandleGameMenuAction(int action) {
     switch (action) {
     case kGameMenuPause:
@@ -1710,6 +1798,7 @@ void NoesisHudHost::CacheElements() {
     }
     if (glueMenuControl_) {
         glueMenuControl_->CacheElements();
+        glueMenuControl_->SetMapLaunchCallback(glueMapLaunchCallback_);
     }
     goldText_ = FindFirstAs<Aero::TextBlock>(rootElement, "ResourceBarGoldText", "GoldText");
     lumberText_ = FindFirstAs<Aero::TextBlock>(rootElement, "ResourceBarLumberText", "LumberText");

@@ -32,8 +32,10 @@
 #include "../scripting/jass_config_env.h"
 #include "../scripting/jass_common_env.h"
 #include "../map/map_loader.h"
+#include <array>
 #include <string>
 #include <vector>
+#include <deque>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -104,7 +106,7 @@ public:
     std::unordered_map<int, bool> simUnitVisualConstructionStates;
     std::unordered_map<int, std::vector<std::string>> simUnitVisualPropertyTags;
     std::unordered_map<int, animation_utils::ScriptedUnitAnimationState> simUnitScriptedAnimations;
-    std::unordered_map<int, animation_utils::PendingUnitAnimation> simUnitQueuedAnimations;
+    std::unordered_map<int, std::deque<animation_utils::PendingUnitAnimation>> simUnitQueuedAnimations;
     std::unordered_map<int, std::vector<std::string>> simUnitAnimationPropertyTags;
     std::unordered_set<int> simUnitVisualRegistrationFailed;
     std::unordered_map<int, int> simItemToVisualIdx;
@@ -179,9 +181,12 @@ private:
     CDestructable* PickSimulationDestructableAtScreenPoint(float screenX, float screenY,
                                                            const Mat4& view, const Mat4& proj,
                                                            int screenW, int screenH);
+    bool IssuePendingCommandAtScreenPoint(float screenX, float screenY);
 
     // --- Init helpers ---
     void OpenDataSources();
+    void HandleGlueMapLaunchRequest(const std::string& mapPath, int localPlayerIndex);
+    bool StartPendingGlueMapLaunch(int screenW, int screenH);
     void LoadCommonJassFiles(JassVM& vm);
     void ReadMapFile(const std::string& mapPath, const std::string& fileName,
                      std::vector<uint8_t>& out);
@@ -192,7 +197,9 @@ private:
     void FlushStartupSimulationState();
     void FocusCameraAndMinimapOnInitialSpawn();
     void RefreshRuntimeUnitSplats();
+    void AddActiveEventSplatsToTerrain();
     void DebugSelectFirstUnitForHud();
+    void RunGameplaySmoke();
 
     // --- Core state ---
     GameState state_ = GameState::BOOTSTRAP;
@@ -208,6 +215,7 @@ private:
     bool terrainOnly_ = false;
     bool dumpUnsupported_ = false;
     bool diagnoseMapOnly_ = false;
+    bool debugGameplaySmoke_ = false;
     int debugSceneRenderStart_ = 0;
     int debugSceneRenderCount_ = -1;
     std::string debugSceneRenderKind_;
@@ -226,6 +234,11 @@ private:
     std::string debugUiGlueMenuPage_;
     std::vector<std::string> debugUiGlueMenuActions_;
     std::string hudXamlPath_ = "assets/ui/Hud.xaml";
+    bool pendingGlueMapLaunch_ = false;
+    std::string pendingGlueMapLaunchRequestedPath_;
+    std::string pendingGlueMapLaunchResolvedPath_;
+    int pendingGlueMapLaunchLocalPlayer_ = 0;
+    bool glueMapLaunchInProgress_ = false;
     float simulationAccumulator_ = 0.0f;
     float lastTime_ = 0.0f;
 
@@ -271,6 +284,35 @@ private:
 
     // Splat metadata
     SplatMetadataStore splatMeta_;
+    struct ActiveEventSplat {
+        std::string key;
+        std::string texturePath;
+        float x = 0.0f;
+        float y = 0.0f;
+        float halfSize = 64.0f;
+        float lifeRemaining = 0.5f;
+        float lifeSpan = 0.5f;
+        std::array<std::array<float, 4>, 3> colors = {{
+            {{255.0f, 255.0f, 255.0f, 255.0f}},
+            {{255.0f, 255.0f, 255.0f, 255.0f}},
+            {{255.0f, 255.0f, 255.0f, 0.0f}}
+        }};
+        std::array<float, 3> intervalTimes = {{0.0f, 0.0f, 0.0f}};
+        std::array<std::array<float, 3>, 2> uvIntervals = {{
+            {{0.0f, 0.0f, 0.0f}},
+            {{0.0f, 0.0f, 0.0f}}
+        }};
+        int intervalCount = 0;
+        int columns = 1;
+        int rows = 1;
+        int blendMode = 0;
+        bool unshaded = false;
+        bool highPriority = true;
+        std::vector<SplatModel::MeshVertex> meshVertices;
+        std::vector<uint32_t> meshIndices;
+    };
+    std::vector<ActiveEventSplat> activeEventSplats_;
+    int nextEventSplatId_ = 1;
 
     // Resources
     MpqManager mpq_;
