@@ -16,6 +16,14 @@ void DayNightCycle::Update(float dt) {
     Compute(timeOfDay_);
 }
 
+void DayNightCycle::SetMapFog(bool enabled, float r, float g, float b, float density) {
+    mapFogEnabled_ = enabled;
+    mapFogColor_[0] = r;
+    mapFogColor_[1] = g;
+    mapFogColor_[2] = b;
+    mapFogDensity_ = density < 0.0f ? 0.0f : density;
+}
+
 void DayNightCycle::Compute(float time) {
     // Sun angle: 0 at midnight, rotates 360° per day
     // At noon (0.5): sun is directly overhead or slightly angled
@@ -147,8 +155,13 @@ void DayNightCycle::Apply(TexturedTerrain& terrain) {
 
     lm.SetLights(lights);
 
-    // Update terrain fog color
-    terrain.SetFog(fogColor_, 4000.0f, 12000.0f);
+    // Update terrain fog: map terrain-fog overrides the sky fog when set.
+    if (mapFogEnabled_) {
+        const float far = 12000.0f / (1.0f + mapFogDensity_);
+        terrain.SetFog(mapFogColor_, 4000.0f, far);
+    } else {
+        terrain.SetFog(fogColor_, 4000.0f, 12000.0f);
+    }
 
     // Update renderer clear color (sky)
     Renderer::SetClearColor(clearColor_);

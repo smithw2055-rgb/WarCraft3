@@ -1578,6 +1578,15 @@ void GameController::InitMapConfig() {
     W3ILoadFromMpq(mapPath_, w3i_);
     W3IPrint(w3i_);
 
+    // Map terrain fog (ref useTerrainFog): w3i colors are 0-255 bytes.
+    if (w3i_.useTerrainFog) {
+        dayNight_.SetMapFog(true,
+            w3i_.fogColor[0] / 255.0f, w3i_.fogColor[1] / 255.0f,
+            w3i_.fogColor[2] / 255.0f, w3i_.fogDensity);
+    } else {
+        dayNight_.SetMapFog(false, 0.5f, 0.5f, 0.5f, 0.0f);
+    }
+
     configEnv_ = std::make_unique<JassConfigEnv>();
     if (configEnv_->Init(mpq_, mapPath_, config_.jassFileList)) {
         configEnv_->Config();
