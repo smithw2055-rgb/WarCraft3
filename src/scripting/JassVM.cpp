@@ -5,6 +5,21 @@
 
 JassVM::JassVM() {}
 
+static bool JassValueToBool(const JassValue& value) {
+    switch (value.type) {
+        case JassValue::BOOLEAN:
+            return value.boolVal;
+        case JassValue::INTEGER:
+            return value.intVal != 0;
+        case JassValue::REAL:
+            return value.realVal != 0.0f;
+        case JassValue::STRING:
+            return !value.strVal.empty();
+        default:
+            return false;
+    }
+}
+
 bool JassVM::LoadScript(const std::string& source) {
     auto started = std::chrono::steady_clock::now();
     JassLexer lexer(source);
@@ -135,17 +150,243 @@ JassValue JassVM::CallFunction(const std::string& funcName) {
     return ExecuteFunction(it->second, {});
 }
 
+bool JassVM::PushThreadFrame(ThreadState& state, const std::string& functionName, const std::vector<JassValue>& args) {
+    auto it = functions_.find(functionName);
+    if (it == functions_.end()) {
+        return false;
+    }
+    const AstNode* func = it->second;
+    if (func->children.empty()) {
+        return false;
+    }
+    ThreadFrame frame;
+    frame.function = func;
+    frame.block = func->children[0].get();
+    frame.statementIndex = 0;
+    frame.callScope = true;
+    for (size_t i = 0; i < func->parameters.size() && i < args.size(); ++i) {
+        frame.scope.locals[func->parameters[i].first] = args[i];
+    }
+    state.frames.push_back(std::move(frame));
+    return true;
+}
+
+bool JassVM::PushBlockFrame(ThreadState& state, const AstNode* block, bool loop) {
+    if (!block) {
+        return false;
+    }
+    ThreadFrame frame;
+    frame.block = block;
+    frame.statementIndex = 0;
+    frame.callScope = false;
+    frame.loop = loop;
+    state.frames.push_back(std::move(frame));
+    return true;
+}
+
+void JassVM::PopCurrentFunctionFrames(ThreadState& state) {
+    while (!state.frames.empty()) {
+        const bool wasCallScope = state.frames.back().callScope;
+        state.frames.pop_back();
+        if (wasCallScope) {
+            break;
+        }
+    }
+}
+
+void JassVM::SyncCallStackFromThread(const ThreadState& state) {
+    callStack_.clear();
+    callStack_.reserve(state.frames.size());
+    for (const ThreadFrame& frame : state.frames) {
+        if (frame.callScope) {
+            callStack_.push_back(frame.scope);
+        }
+    }
+}
+
+void JassVM::SyncThreadFromCallStack(ThreadState& state) {
+    size_t scopeIndex = 0;
+    for (ThreadFrame& frame : state.frames) {
+        if (!frame.callScope) {
+            continue;
+        }
+        if (scopeIndex >= callStack_.size()) {
+            break;
+        }
+        frame.scope = callStack_[scopeIndex++];
+    }
+}
+
+JassVM::ThreadRunResult JassVM::RunThread(ThreadState& state, const std::string& functionName) {
+    ThreadRunResult result;
+    if (state.completed) {
+        result.completed = true;
+        return result;
+    }
+    if (!state.started) {
+        state.functionName = functionName;
+        state.started = true;
+        if (!PushThreadFrame(state, functionName)) {
+            state.completed = true;
+            result.completed = true;
+            return result;
+        }
+    }
+
+    while (!state.frames.empty()) {
+        ThreadFrame& frame = state.frames.back();
+        if (!frame.block || frame.statementIndex >= frame.block->children.size()) {
+            if (frame.loop) {
+                if (--frame.loopIterationsRemaining <= 0) {
+                    state.frames.pop_back();
+                } else {
+                    frame.statementIndex = 0;
+                }
+            } else {
+                state.frames.pop_back();
+            }
+            continue;
+        }
+
+        const AstNode* stmt = frame.block->children[frame.statementIndex].get();
+        ++frame.statementIndex;
+
+        if (stmt->type == AstNodeType::RETURN_STMT) {
+            returnNode_ = stmt;
+            if (!stmt->children.empty()) {
+                SyncCallStackFromThread(state);
+                (void)ExecuteNode(stmt->children[0].get());
+                SyncThreadFromCallStack(state);
+            }
+            returnNode_ = nullptr;
+            PopCurrentFunctionFrames(state);
+            continue;
+        }
+
+        SyncCallStackFromThread(state);
+        if (stmt->type == AstNodeType::EXITWHEN) {
+            if (frame.loop && !stmt->children.empty() && JassValueToBool(ExecuteNode(stmt->children[0].get()))) {
+                SyncThreadFromCallStack(state);
+                state.frames.pop_back();
+                continue;
+            }
+            SyncThreadFromCallStack(state);
+            if (sleepRequested_) {
+                result.sleeping = true;
+                result.sleepSeconds = sleepSeconds_;
+                sleepRequested_ = false;
+                sleepSeconds_ = 0.0f;
+                return result;
+            }
+            continue;
+        }
+
+        if (stmt->type == AstNodeType::IF_STMT) {
+            const AstNode* selectedBlock = nullptr;
+            if (stmt->children.size() >= 2 && JassValueToBool(ExecuteNode(stmt->children[0].get()))) {
+                selectedBlock = stmt->children[1].get();
+            } else {
+                for (size_t i = 2; i < stmt->children.size(); ++i) {
+                    const AstNode* branch = stmt->children[i].get();
+                    if (branch->type == AstNodeType::IF_STMT) {
+                        if (branch->children.size() >= 2 && JassValueToBool(ExecuteNode(branch->children[0].get()))) {
+                            selectedBlock = branch->children[1].get();
+                            break;
+                        }
+                    } else {
+                        selectedBlock = branch;
+                        break;
+                    }
+                }
+            }
+            SyncThreadFromCallStack(state);
+            if (sleepRequested_) {
+                result.sleeping = true;
+                result.sleepSeconds = sleepSeconds_;
+                sleepRequested_ = false;
+                sleepSeconds_ = 0.0f;
+                return result;
+            }
+            if (selectedBlock) {
+                PushBlockFrame(state, selectedBlock, false);
+            }
+            continue;
+        }
+
+        if (stmt->type == AstNodeType::LOOP_STMT) {
+            SyncThreadFromCallStack(state);
+            if (!stmt->children.empty()) {
+                PushBlockFrame(state, stmt->children[0].get(), true);
+            }
+            continue;
+        }
+
+        if (stmt->type == AstNodeType::BLOCK) {
+            SyncThreadFromCallStack(state);
+            PushBlockFrame(state, stmt, false);
+            continue;
+        }
+
+        if (stmt->type == AstNodeType::CALL_STMT) {
+            auto fit = functions_.find(stmt->text);
+            if (fit != functions_.end()) {
+                std::vector<JassValue> args;
+                for (auto& child : stmt->children) {
+                    args.push_back(ExecuteNode(child.get()));
+                    if (sleepRequested_) break;
+                }
+                SyncThreadFromCallStack(state);
+                if (sleepRequested_) {
+                    result.sleeping = true;
+                    result.sleepSeconds = sleepSeconds_;
+                    sleepRequested_ = false;
+                    sleepSeconds_ = 0.0f;
+                    return result;
+                }
+                if (!PushThreadFrame(state, stmt->text, args)) {
+                    errors_.push_back("Unknown function: " + stmt->text);
+                }
+                continue;
+            }
+        }
+
+        (void)ExecuteNode(stmt);
+        SyncThreadFromCallStack(state);
+        if (sleepRequested_) {
+            result.sleeping = true;
+            result.sleepSeconds = sleepSeconds_;
+            sleepRequested_ = false;
+            sleepSeconds_ = 0.0f;
+            return result;
+        }
+        if (returnNode_) {
+            returnNode_ = nullptr;
+            PopCurrentFunctionFrames(state);
+        }
+    }
+
+    state.completed = true;
+    result.completed = true;
+    callStack_.clear();
+    return result;
+}
+
 bool JassVM::HasFunction(const std::string& funcName) const {
     return functions_.find(funcName) != functions_.end();
 }
 
+void JassVM::RequestSleep(float seconds) {
+    sleepRequested_ = true;
+    sleepSeconds_ = std::max(0.0f, seconds);
+}
+
 JassValue JassVM::ExecuteFunction(const AstNode* func, const std::vector<JassValue>& args) {
     // Push new scope
-    callStack_.push(Scope());
+    callStack_.push_back(Scope());
 
     // Set parameter values
     for (size_t i = 0; i < func->parameters.size() && i < args.size(); i++) {
-        callStack_.top().locals[func->parameters[i].first] = args[i];
+        callStack_.back().locals[func->parameters[i].first] = args[i];
     }
 
     returnNode_ = nullptr;
@@ -162,11 +403,11 @@ JassValue JassVM::ExecuteFunction(const AstNode* func, const std::vector<JassVal
                 break;
             }
             result = ExecuteNode(stmt.get());
-            if (returnNode_) break;
+            if (returnNode_ || sleepRequested_) break;
         }
     }
 
-    callStack_.pop();
+    callStack_.pop_back();
     return result;
 }
 
@@ -193,7 +434,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
         case AstNodeType::VARIABLE: {
             // Check locals first, then globals
             if (!callStack_.empty()) {
-                auto& locals = callStack_.top().locals;
+                auto& locals = callStack_.back().locals;
                 auto it = locals.find(node->text);
                 if (it != locals.end()) return it->second;
             }
@@ -209,7 +450,9 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 std::vector<JassValue> args;
                 for (auto& child : node->children) {
                     args.push_back(ExecuteNode(child.get()));
+                    if (sleepRequested_) break;
                 }
+                if (sleepRequested_) return JassValue::Null();
                 return nat->second(args);
             }
             // User function
@@ -218,7 +461,9 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 std::vector<JassValue> args;
                 for (auto& child : node->children) {
                     args.push_back(ExecuteNode(child.get()));
+                    if (sleepRequested_) break;
                 }
+                if (sleepRequested_) return JassValue::Null();
                 return ExecuteFunction(fit->second, args);
             }
             errors_.push_back("Unknown function: " + node->text);
@@ -324,7 +569,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                     // Array declaration: local integer array arr
                     // Create an empty array in locals
                     if (!callStack_.empty()) {
-                        callStack_.top().locals[node->text] = JassValue::Null(); // placeholder for array
+                        callStack_.back().locals[node->text] = JassValue::Null(); // placeholder for array
                     }
                     return JassValue::Null();
                 }
@@ -340,7 +585,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                     else val = JassValue::Null();
                 }
                 if (!callStack_.empty()) {
-                    callStack_.top().locals[node->text] = val;
+                    callStack_.back().locals[node->text] = val;
                 }
                 return val;
             }
@@ -357,8 +602,8 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 // Store in array storage
                 std::string arrName = arrAccess->text;
                 std::string key = arrName + "[" + std::to_string(index) + "]";
-                if (!callStack_.empty() && callStack_.top().locals.find(arrName) != callStack_.top().locals.end()) {
-                    callStack_.top().locals[key] = val;
+                if (!callStack_.empty() && callStack_.back().locals.find(arrName) != callStack_.back().locals.end()) {
+                    callStack_.back().locals[key] = val;
                 } else {
                     globals_[key] = val;
                 }
@@ -372,7 +617,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
             }
             // Write to local if exists, otherwise global
             if (!callStack_.empty()) {
-                auto& locals = callStack_.top().locals;
+                auto& locals = callStack_.back().locals;
                 if (locals.find(node->text) != locals.end()) {
                     locals[node->text] = val;
                     return val;
@@ -391,7 +636,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
             std::string key = node->text + "[" + std::to_string(index) + "]";
             // Check locals first
             if (!callStack_.empty()) {
-                auto& locals = callStack_.top().locals;
+                auto& locals = callStack_.back().locals;
                 auto it = locals.find(key);
                 if (it != locals.end()) return it->second;
             }
@@ -407,16 +652,20 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 std::vector<JassValue> args;
                 for (auto& child : node->children) {
                     args.push_back(ExecuteNode(child.get()));
+                    if (sleepRequested_) break;
                 }
-                nat->second(args);
+                if (!sleepRequested_) nat->second(args);
             } else {
                 auto fit = functions_.find(node->text);
                 if (fit != functions_.end()) {
                     std::vector<JassValue> args;
                     for (auto& child : node->children) {
                         args.push_back(ExecuteNode(child.get()));
+                        if (sleepRequested_) break;
                     }
-                    ExecuteFunction(fit->second, args);
+                    if (!sleepRequested_) ExecuteFunction(fit->second, args);
+                } else {
+                    errors_.push_back("Unknown function: " + node->text);
                 }
             }
             return JassValue::Null();
@@ -429,7 +678,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
             if (cond.boolVal) {
                 for (auto& stmt : node->children[1]->children) {
                     auto r = ExecuteNode(stmt.get());
-                    if (returnNode_) return r;
+                    if (returnNode_ || sleepRequested_) return r;
                 }
             } else {
                 // Check elseif/else
@@ -439,7 +688,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                         if (elseifCond.boolVal) {
                             for (auto& stmt : node->children[i]->children[1]->children) {
                                 auto r = ExecuteNode(stmt.get());
-                                if (returnNode_) return r;
+                                if (returnNode_ || sleepRequested_) return r;
                             }
                             break;
                         }
@@ -447,7 +696,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                         // else block
                         for (auto& stmt : node->children[i]->children) {
                             auto r = ExecuteNode(stmt.get());
-                            if (returnNode_) return r;
+                            if (returnNode_ || sleepRequested_) return r;
                         }
                     }
                 }
@@ -466,7 +715,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                         continue;
                     }
                     auto r = ExecuteNode(stmt.get());
-                    if (returnNode_) return r;
+                    if (returnNode_ || sleepRequested_) return r;
                 }
                 if (exited) break;
             }
@@ -489,7 +738,7 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
         case AstNodeType::BLOCK: {
             for (auto& stmt : node->children) {
                 auto r = ExecuteNode(stmt.get());
-                if (returnNode_) return r;
+                if (returnNode_ || sleepRequested_) return r;
             }
             return JassValue::Null();
         }

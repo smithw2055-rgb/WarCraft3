@@ -374,6 +374,30 @@ bool MdxAnimator::GetObjectWorldTransformYUp(int objectId, Mat4& outMatrix, Vec3
     return false;
 }
 
+bool MdxAnimator::GetObjectWorldLocationYUp(int objectId, Vec3& outPosition) const {
+    for (const auto& node : nodes_) {
+        if (node.objectId != objectId) {
+            continue;
+        }
+
+        Vec3 pivot = {0, 0, 0};
+        if (node.pivotIndex >= 0 && pivotPoints_ && node.pivotIndex < (int)pivotPoints_->size()) {
+            const auto& mdxPivot = (*pivotPoints_)[(size_t)node.pivotIndex];
+            pivot = {mdxPivot[0], mdxPivot[1], mdxPivot[2]};
+        }
+
+        const Mat4& matrix = node.worldMatrix;
+        const Vec3 mdxPosition{
+            matrix.m[0] * pivot.x + matrix.m[4] * pivot.y + matrix.m[8] * pivot.z + matrix.m[12],
+            matrix.m[1] * pivot.x + matrix.m[5] * pivot.y + matrix.m[9] * pivot.z + matrix.m[13],
+            matrix.m[2] * pivot.x + matrix.m[6] * pivot.y + matrix.m[10] * pivot.z + matrix.m[14]
+        };
+        outPosition = {mdxPosition.x, mdxPosition.z, -mdxPosition.y};
+        return IsFiniteVec3(outPosition);
+    }
+    return false;
+}
+
 bool MdxAnimator::GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const {
     Mat4 matrix;
     if (!GetObjectWorldTransformYUp(objectId, matrix)) {
@@ -451,10 +475,10 @@ void MdxAnimator::ResetEventEmitters() {
 }
 
 void MdxAnimator::BuildSkeleton(const MdxModel& model) {
-    MdxAnimatorLog( "MdxAnimator::BuildSkeleton begin bones=%zu helpers=%zu attachments=%zu lights=%zu emit1=%zu emit2=%zu ribbons=%zu events=%zu\n",
+    MdxAnimatorLog( "MdxAnimator::BuildSkeleton begin bones=%zu helpers=%zu attachments=%zu lights=%zu emit1=%zu emit2=%zu popcorn=%zu ribbons=%zu events=%zu collisions=%zu\n",
         model.bones.size(), model.helpers.size(), model.attachments.size(), model.lights.size(),
-        model.particleEmitters1.size(), model.particleEmitters2.size(),
-        model.ribbonEmitters.size(), model.eventObjects.size());
+        model.particleEmitters1.size(), model.particleEmitters2.size(), model.particleEmittersPopcorn.size(),
+        model.ribbonEmitters.size(), model.eventObjects.size(), model.collisionShapes.size());
     nodes_.clear();
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton after nodes clear\n");
     nodeOrder_.clear();
@@ -476,7 +500,8 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton after entries ctor\n");
     entries.reserve(model.bones.size() + model.helpers.size() + model.attachments.size()
         + model.lights.size() + model.particleEmitters1.size() + model.particleEmitters2.size()
-        + model.ribbonEmitters.size() + model.eventObjects.size());
+        + model.particleEmittersPopcorn.size() + model.ribbonEmitters.size()
+        + model.eventObjects.size() + model.collisionShapes.size());
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton after entries reserve\n");
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton after entry map ctor\n");
     auto hasEntryObjectId = [&](int objectId) -> bool {
@@ -543,11 +568,17 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
     for (const auto& emitter : model.particleEmitters2) {
         addEntry(emitter.objectId, emitter.parentId, (uint32_t)emitter.flags, &emitter.timelines, nullptr, TAG_KP2V);
     }
+    for (const auto& emitter : model.particleEmittersPopcorn) {
+        addEntry(emitter.objectId, emitter.parentId, emitter.flags, &emitter.timelines, nullptr, MAKE_TAG('K','P','P','V'));
+    }
     for (const auto& ribbon : model.ribbonEmitters) {
         addEntry(ribbon.objectId, ribbon.parentId, ribbon.flags, &ribbon.timelines, nullptr, TAG_KRVS);
     }
     for (const auto& eventObject : model.eventObjects) {
         addEntry(eventObject.objectId, eventObject.parentId, eventObject.flags, &eventObject.timelines);
+    }
+    for (const auto& collisionShape : model.collisionShapes) {
+        addEntry(collisionShape.objectId, collisionShape.parentId, collisionShape.flags, &collisionShape.timelines);
     }
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton entries=%zu\n", entries.size());
 
@@ -738,14 +769,16 @@ void MdxAnimator::Update(float dt) {
     sequenceState_.frameTime -= (float)intAdv;
     sequenceState_.currentFrame += intAdv;
 
+    const uint32_t animEnd = (end > start) ? (end - 1) : start;
     bool resetEvents = false;
-    if (sequenceState_.currentFrame >= end) {
+    if (sequenceState_.currentFrame >= animEnd) {
         if (sequenceState_.loop) {
-            uint32_t over = sequenceState_.currentFrame - end;
-            sequenceState_.currentFrame = start + (over % range);
+            sequenceState_.currentFrame = start;
+            sequenceState_.frameTime = 0.0f;
             resetEvents = true;
         } else {
-            sequenceState_.currentFrame = end;
+            sequenceState_.currentFrame = animEnd;
+            sequenceState_.frameTime = 0.0f;
             sequenceState_.finished = true;
         }
     }
@@ -804,7 +837,9 @@ void MdxAnimator::UpdateEventEmitters() {
         if (GetObjectWorldTransformYUp(trigger.objectId, localTransform, &trigger.localScale)) {
             trigger.hasLocalTransform = true;
             trigger.localTransform = localTransform;
-            trigger.localPosition = {localTransform.m[12], localTransform.m[13], localTransform.m[14]};
+            if (!GetObjectWorldLocationYUp(trigger.objectId, trigger.localPosition)) {
+                trigger.localPosition = {localTransform.m[12], localTransform.m[13], localTransform.m[14]};
+            }
         }
         triggeredEvents_.push_back(std::move(trigger));
         eventTrack.lastEmissionKey = keyframeIndex;

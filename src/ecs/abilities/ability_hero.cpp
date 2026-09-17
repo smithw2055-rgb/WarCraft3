@@ -54,11 +54,12 @@ bool CAbilityHero::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, in
 }
 
 void CAbilityHero::AddXP(CSimulation& game, CUnit* unit, int amount) {
+    if (game.IsHeroXPSuspended()) return;
     if (heroLevel_ >= 10) return; // max level
 
-    // Apply player handicap
+    // Apply player XP handicap (ref CAbilityHero.addXp uses getHandicapXP)
     auto* player = game.GetPlayer(unit->GetPlayerIndex());
-    float handicap = player ? player->GetHandicap() : 1.0f;
+    float handicap = player ? player->GetHandicapXP() : 1.0f;
     xp_ += (int)(amount * handicap);
 
     // Check for level ups
@@ -79,6 +80,28 @@ void CAbilityHero::SetHeroLevel(CSimulation& game, CUnit* unit, int level) {
     if (totalXP > xp_) {
         AddXP(game, unit, totalXP - xp_);
     }
+}
+
+void CAbilityHero::SetXP(CSimulation& game, CUnit* unit, int value) {
+    // Ref semantics (CAbilityHero.setXp): only increases XP/level, never
+    // decreases. Applies handicapXP rounding like the reference.
+    auto* player = game.GetPlayer(unit->GetPlayerIndex());
+    float handicap = player ? player->GetHandicapXP() : 1.0f;
+    int newXp = (int)((float)value * handicap + 0.5f);
+    if (newXp > xp_) {
+        AddXP(game, unit, newXp - xp_);
+    }
+}
+
+bool CAbilityHero::SelectHeroSkill(CSimulation& game, CUnit* unit, War3ID skillCode) {
+    if (skillPoints_ <= 0) return false;
+    if (skillsAvailable_.count(skillCode) == 0) {
+        // Like ref selectHeroSkill: unknown skills still consume the order
+        // only when learnable; report failure otherwise.
+        return false;
+    }
+    LearnSkill(game, unit, skillCode);
+    return true;
 }
 
 void CAbilityHero::LearnSkill(CSimulation& game, CUnit* unit, War3ID skillCode) {
@@ -107,21 +130,23 @@ void CAbilityHero::LearnSkill(CSimulation& game, CUnit* unit, War3ID skillCode) 
 
 void CAbilityHero::CalculateDerivedStats(CSimulation& game, CUnit* unit) {
     (void)game;
+    if (!unit || !unit->GetUnitType()) return;
     int str = strength_.GetCurrent(heroLevel_);
     int agi = agility_.GetCurrent(heroLevel_);
     int intel = intelligence_.GetCurrent(heroLevel_);
 
-    // STR: +HP, +HP regen
+    // STR: +HP, +HP regen. Stored as the hero layer so item/upgrade
+    // max-life bonuses survive level-ups and stat changes.
     float strHPBonus = str * 25.0f; // standard WC3: 25 HP per STR
-    unit->SetMaxLife((float)unit->GetUnitType()->GetMaxLife() + strHPBonus);
+    unit->SetHeroBonusLife(strHPBonus);
 
     // AGI: +armor, +attack speed
-    float agiArmorBonus = agi * 0.33f; // standard WC3: ~0.33 armor per AGI
-    (void)agiArmorBonus; // TODO: apply to defense
+    int agiArmorBonus = (int)(agi * 0.33f); // standard WC3: ~0.33 armor per AGI
+    unit->SetDefense(unit->GetUnitType()->GetDefense() + agiArmorBonus);
 
-    // INT: +MP, +MP regen
+    // INT: +MP, +MP regen (hero layer, see above)
     float intMPBonus = intel * 15.0f; // standard WC3: 15 MP per INT
-    unit->SetMaxMana((int)((float)unit->GetUnitType()->GetManaMaximum() + intMPBonus));
+    unit->SetHeroBonusMana((int)intMPBonus);
 
     // Primary attribute damage bonus
     auto primary = unit->GetUnitType()->GetPrimaryAttribute();
@@ -131,7 +156,22 @@ void CAbilityHero::CalculateDerivedStats(CSimulation& game, CUnit* unit) {
         case CPrimaryAttribute::AGILITY: primaryBase = agi; break;
         case CPrimaryAttribute::INTELLIGENCE: primaryBase = intel; break;
     }
-    (void)primaryBase; // TODO: apply as damage bonus
+    unit->SetHeroBonusDamage(primaryBase);
+}
+
+void CAbilityHero::AddStrengthBonus(CSimulation& game, CUnit* unit, int v) {
+    strength_.bonus += v;
+    CalculateDerivedStats(game, unit);
+}
+
+void CAbilityHero::AddAgilityBonus(CSimulation& game, CUnit* unit, int v) {
+    agility_.bonus += v;
+    CalculateDerivedStats(game, unit);
+}
+
+void CAbilityHero::AddIntelligenceBonus(CSimulation& game, CUnit* unit, int v) {
+    intelligence_.bonus += v;
+    CalculateDerivedStats(game, unit);
 }
 
 int CAbilityHero::GetXPForLevel(int level) const {

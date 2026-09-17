@@ -23,7 +23,7 @@
         <Border Margin="22,9" Style="{StaticResource GlueButtonFillStyle}"/>
         <Border x:Name="GlueMenuButtonHoverSinglePlayerButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
         <Border x:Name="GlueMenuButtonPressedSinglePlayerButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-        <TextBlock Text="SINGLE PLAYER" Foreground="#FFFFFFFF" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <TextBlock Text="Single Player" Foreground="#FFFCD412" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Grid>
 
       <Rectangle Canvas.Left="1016" Canvas.Top="326" Width="492" Height="123" Fill="{StaticResource GlueButton1BorderBrush}"/>
@@ -33,7 +33,7 @@
         <Border Margin="22,9" Style="{StaticResource GlueButtonFillStyle}"/>
         <Border x:Name="GlueMenuButtonHoverBattleNetButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
         <Border x:Name="GlueMenuButtonPressedBattleNetButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-        <TextBlock Text="BATTLE.NET" Foreground="#FFFFFFFF" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <TextBlock Text="Battle.net" Foreground="#FFFCD412" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Grid>
 
       <Rectangle Canvas.Left="1016" Canvas.Top="440" Width="492" Height="123" Fill="{StaticResource GlueButton1BorderBrush}"/>
@@ -43,7 +43,7 @@
         <Border Margin="22,9" Style="{StaticResource GlueButtonFillStyle}"/>
         <Border x:Name="GlueMenuButtonHoverLocalAreaNetworkButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
         <Border x:Name="GlueMenuButtonPressedLocalAreaNetworkButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-        <TextBlock Text="LOCAL AREA NETWORK" Foreground="#FFFFFFFF" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <TextBlock Text="Local Area Network" Foreground="#FFFCD412" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Grid>
 
       <Rectangle Canvas.Left="1016" Canvas.Top="554" Width="492" Height="123" Fill="{StaticResource GlueButton1BorderBrush}"/>
@@ -53,17 +53,17 @@
         <Border Margin="22,9" Style="{StaticResource GlueButtonFillStyle}"/>
         <Border x:Name="GlueMenuButtonHoverOptionsButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
         <Border x:Name="GlueMenuButtonPressedOptionsButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-        <TextBlock Text="OPTIONS" Foreground="#FFFFFFFF" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <TextBlock Text="Options" Foreground="#FFFCD412" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Grid>
 
       <Rectangle Canvas.Left="1016" Canvas.Top="668" Width="492" Height="123" Fill="{StaticResource GlueButton1BorderBrush}"/>
       <Grid x:Name="CreditsButton" Canvas.Left="1140" Canvas.Top="700" Width="344" Height="60">
         <Border Style="{StaticResource GlueButtonChromeStyle}"/>
-        <Border Margin="28,11" Style="{StaticResource GlueButtonFillStyle}"/>
-        <Border Margin="22,9" Style="{StaticResource GlueButtonFillStyle}"/>
+        <Border Margin="28,11" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+        <Border Margin="22,9" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
         <Border x:Name="GlueMenuButtonHoverCreditsButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
         <Border x:Name="GlueMenuButtonPressedCreditsButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-        <TextBlock Text="CREDITS" Foreground="#FFFFFFFF" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <TextBlock Text="Credits" Foreground="#FF8C8C8C" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Grid>
 
       <!-- UI\FrameDef\Glue\MainMenu.fdf: ExitBackdrop at BOTTOMRIGHT -0.015,0.05 -->
@@ -74,7 +74,42 @@
         <Border Margin="22,9" Style="{StaticResource GlueButtonFillStyle}"/>
         <Border x:Name="GlueMenuButtonHoverExitButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
         <Border x:Name="GlueMenuButtonPressedExitButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-        <TextBlock Text="EXIT" Foreground="#FFFFFFFF" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <TextBlock Text="Quit" Foreground="#FFFCD412" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Grid>
+
+      <Grid x:Name="QuitConfirmDialog" Canvas.Left="470" Canvas.Top="408" Width="596" Height="328" Visibility="Collapsed">
+        <Border Style="{StaticResource GluePanelFrameStyle}"/>
+        <Border Margin="12" Background="{StaticResource GluePanelMetalPiecesExpansionBrush}" Opacity="0.68"/>
+        <Border Margin="23" Style="{StaticResource GlueInsetPanelStyle}"/>
+        <Border Margin="22,24,22,244" Background="{StaticResource GluePanelGearRailBrush}" Opacity="0.70"/>
+        <TextBlock Text="Quit Warcraft III?" Canvas.Left="0" Canvas.Top="0"
+                   Foreground="#FFFCD412" FontSize="28" FontWeight="Bold"
+                   HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,54,0,0"/>
+        <TextBlock Text="Are you sure you want to quit?"
+                   Foreground="#FFE8E0C8" FontSize="21" TextAlignment="Center"
+                   HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,126,0,0"/>
+
+        <Grid x:Name="QuitConfirmOKButton" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+              Margin="88,0,0,50" Width="188" Height="58">
+          <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+          <Border Margin="25,10" Style="{StaticResource GlueButtonFillStyle}"/>
+          <Border Margin="19,8" Style="{StaticResource GlueButtonFillStyle}"/>
+          <Border x:Name="GlueMenuButtonHoverQuitConfirmOKButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+          <Border x:Name="GlueMenuButtonPressedQuitConfirmOKButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+          <TextBlock Text="OK" Foreground="#FFFCD412" FontSize="22" FontWeight="Bold"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Grid>
+
+        <Grid x:Name="QuitConfirmCancelButton" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+              Margin="0,0,88,50" Width="188" Height="58">
+          <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+          <Border Margin="25,10" Style="{StaticResource GlueButtonFillStyle}"/>
+          <Border Margin="19,8" Style="{StaticResource GlueButtonFillStyle}"/>
+          <Border x:Name="GlueMenuButtonHoverQuitConfirmCancelButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+          <Border x:Name="GlueMenuButtonPressedQuitConfirmCancelButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+          <TextBlock Text="Cancel" Foreground="#FFFCD412" FontSize="22" FontWeight="Bold"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Grid>
       </Grid>
     </Canvas>
   </Grid>

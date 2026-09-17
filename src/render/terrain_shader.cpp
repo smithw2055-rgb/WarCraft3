@@ -57,7 +57,7 @@ static std::string BuildGroundVertex() {
 static std::string BuildGroundFragment(int textureCount) {
     std::ostringstream ss;
     ss << "#version 410 core\n"
-       << "uniform bool show_pathing_map;\nuniform bool show_lighting;\nuniform bool base_texture_only;\n"
+       << "uniform bool show_lighting;\nuniform bool base_texture_only;\n"
        << SamplerDeclarations(textureCount)
        << "uniform sampler2D shadowMap;\nuniform sampler2D fogOfWarMap;\n"
        << "uniform vec4 u_fogColor;\nuniform vec4 u_fogParams;\n"
@@ -148,11 +148,6 @@ static std::string BuildCliffFragment(int groundTextureCount) {
        << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.r & 31u, vec3(wrappedUv, textureIndices.r >> 5)) * (1.0 - terrainColor.a);\n"
        << "    return terrainColor;\n"
        << "}\n"
-       << "vec4 sample_ground_projected_terrain(vec2 terrainTilePos) {\n"
-       << "    ivec2 terrainCell = ivec2(floor(terrainTilePos));\n"
-       << "    vec2 uv = vec2(fract(terrainTilePos.x), 1.0 - fract(terrainTilePos.y));\n"
-       << "    return sample_terrain_layers(terrainCell, uv);\n"
-       << "}\n"
        << "vec4 sample_triplanar_terrain(ivec2 cell, vec3 worldPos, vec3 worldNormal) {\n"
        << "    vec3 blend = abs(normalize(worldNormal));\n"
        << "    blend = max(blend, vec3(0.0001));\n"
@@ -180,8 +175,9 @@ static std::string BuildCliffFragment(int groundTextureCount) {
        << "    float topInnerSeam = topCoverage * (1.0 - smoothstep(maxLocalHeight - topBand, maxLocalHeight - topBand + topSeam, vLocalHeight));\n"
        << "    float bottomInnerSeam = bottomCoverage * (1.0 - smoothstep(minLocalHeight + bottomBand - bottomSeam, minLocalHeight + bottomBand, vLocalHeight));\n"
        << "    vec2 terrainTilePos = pathing_map_uv * 0.25;\n"
-       << "    vec4 topTerrainColor = topValid ? sample_ground_projected_terrain(terrainTilePos) : rockColor;\n"
-       << "    vec4 bottomTerrainColor = bottomValid ? sample_ground_projected_terrain(terrainTilePos) : rockColor;\n"
+       << "    vec2 terrainUv = vec2(fract(terrainTilePos.x), 1.0 - fract(terrainTilePos.y));\n"
+       << "    vec4 topTerrainColor = topValid ? sample_terrain_layers(ivec2(u_topTerrainCell.xy), terrainUv) : rockColor;\n"
+       << "    vec4 bottomTerrainColor = bottomValid ? sample_terrain_layers(ivec2(u_bottomTerrainCell.xy), terrainUv) : rockColor;\n"
        << "    rockColor.a = 1.0;\n"
        << "    topTerrainColor.a = 1.0;\n"
        << "    bottomTerrainColor.a = 1.0;\n"
@@ -389,11 +385,11 @@ sg_shader TerrainShaders::CreateGroundShader(int textureCount) {
 
     // FS uniform block
     desc.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
-    desc.uniform_blocks[1].size = 44;
+    desc.uniform_blocks[1].size = 40;
     desc.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_NATIVE;
-    const char* fsNames[] = {"show_pathing_map","show_lighting","base_texture_only","u_fogColor","u_fogParams"};
-    sg_uniform_type fsTypes[] = {SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT4,SG_UNIFORMTYPE_FLOAT4};
-    for (int i = 0; i < 5; ++i) {
+    const char* fsNames[] = {"show_lighting","base_texture_only","u_fogColor","u_fogParams"};
+    sg_uniform_type fsTypes[] = {SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT4,SG_UNIFORMTYPE_FLOAT4};
+    for (int i = 0; i < 4; ++i) {
         desc.uniform_blocks[1].glsl_uniforms[i].glsl_name = fsNames[i];
         desc.uniform_blocks[1].glsl_uniforms[i].type = fsTypes[i];
         desc.uniform_blocks[1].glsl_uniforms[i].array_count = 1;

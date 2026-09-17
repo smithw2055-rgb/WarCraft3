@@ -12,3 +12,5 @@ int MdxSelectSequenceIndexByPrimaryAndTags(
 int MdxSelectSpellSequenceIndex(
     const MdxModel& model,
     const std::vector<std::string>& secondaryTags);
+
+float MdxSequenceDurationSeconds(const MdxModel& model, int sequenceIndex);

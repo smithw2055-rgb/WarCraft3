@@ -123,7 +123,7 @@ bool CBehaviorFollow::MoveTowardWaypoint(CSimulation& simulation) {
 }
 
 bool CBehaviorFollow::Update(CSimulation& simulation) {
-    if (!unit_ || !target_) return true;
+    if (!unit_ || !target_ || unit_->IsRooted()) return true;
 
     const float targetX = target_->GetX();
     const float targetY = target_->GetY();

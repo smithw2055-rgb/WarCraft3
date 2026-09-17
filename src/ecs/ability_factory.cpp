@@ -108,7 +108,8 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("AHab")) return std::make_unique<CAbilityBrillianceAura>(handleId);
     if (code == War3ID("AOae")) return std::make_unique<CAbilityEnduranceAura>(handleId);
     if (code == War3ID("AOac")) return std::make_unique<CAbilityCommandAura>(handleId);
-    if (code == War3ID("AUav")) return std::make_unique<CAbilityUnholyAura>(handleId);
+    if (code == War3ID("AUau")) return std::make_unique<CAbilityUnholyAura>(handleId);
+    if (code == War3ID("AUav")) return std::make_unique<CAbilityVampiricAura>(handleId);
     if (code == War3ID("AEah")) return std::make_unique<CAbilityThornsAura>(handleId);
     if (code == War3ID("AEar")) return std::make_unique<CAbilityTrueshotAura>(handleId);
 

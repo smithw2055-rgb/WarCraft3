@@ -65,6 +65,9 @@ static constexpr uint32_t TAG_KP2E = MAKE_TAG('K','P','2','E');
 static constexpr uint32_t TAG_KP2N = MAKE_TAG('K','P','2','N');
 static constexpr uint32_t TAG_KP2W = MAKE_TAG('K','P','2','W');
 static constexpr uint32_t TAG_KP2V = MAKE_TAG('K','P','2','V');
+static constexpr uint32_t TAG_KCTR = MAKE_TAG('K','C','T','R');
+static constexpr uint32_t TAG_KTTR = MAKE_TAG('K','T','T','R');
+static constexpr uint32_t TAG_KCRL = MAKE_TAG('K','C','R','L');
 
 struct MdxReader {
     const uint8_t* d;
@@ -119,6 +122,7 @@ static int TimelineElemSize(uint32_t tag) {
         case MAKE_TAG('K','F','C','3'): return 3; // layer fresnel color
         case MAKE_TAG('K','G','R','T'): return 4; // rotation (quaternion)
         case MAKE_TAG('K','T','A','R'): return 4; // tex anim rotation
+        case MAKE_TAG('K','C','R','L'): return 1; // camera roll
         case TAG_KEVT: return 1; // event trigger keyframes
         default: return 1;                          // scalar (float)
     }
@@ -627,7 +631,11 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 lt.objectId = genericNode.objectId;
                 lt.parentId = genericNode.parentId;
                 lt.flags = genericNode.flags;
-                lt.textureId = r.s32();
+                int typeValue = r.s32();
+                if (typeValue >= (int)MdxLightType::Omnidirectional
+                    && typeValue <= (int)MdxLightType::Ambient) {
+                    lt.type = (MdxLightType)typeValue;
+                }
                 lt.attenuationStart = r.f32();
                 lt.attenuationEnd = r.f32();
                 r.readFloatArray(lt.color, 3);
@@ -747,6 +755,40 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
             break;
         }
 
+        // ---- CORN (ParticleEmitterPopcorn) ----
+        case T_CORN: {
+            while (r.off + 4 <= chunkEnd) {
+                size_t entryStart = r.off;
+                uint32_t entrySize = r.u32();
+                if (entrySize < 652 || entryStart + entrySize > chunkEnd) break;
+                size_t entryEndLocal = entryStart + entrySize;
+
+                MdxParticleEmitterPopcorn em;
+                MdxNode genericNode;
+                ReadSizedGenericObject(r, entryEndLocal, genericNode, em.timelines);
+                em.name = genericNode.name;
+                em.objectId = genericNode.objectId;
+                em.parentId = genericNode.parentId;
+                em.flags = genericNode.flags;
+
+                if (r.off + 552 > entryEndLocal) break;
+                em.lifeSpan = r.f32();
+                em.emissionRate = r.f32();
+                em.speed = r.f32();
+                r.readFloatArray(em.color, 3);
+                em.alpha = r.f32();
+                em.replaceableId = r.s32();
+                em.path = r.readStr(260);
+                em.animationVisibilityGuide = r.readStr(260);
+                ReadTimelines(r, entryEndLocal, em.timelines);
+                r.off = entryEndLocal;
+
+                out.particleEmittersPopcorn.push_back(std::move(em));
+            }
+            r.off = chunkEnd;
+            break;
+        }
+
         // ---- RIBB (RibbonEmitter) ----
         case T_RIBB: {
             while (r.off + 4 <= chunkEnd) {
@@ -771,7 +813,8 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                 rb.emissionRate = (float)r.u32();
                 rb.rows = r.u32();
                 rb.columns = r.u32();
-                rb.priorityPlane = r.s32();
+                rb.materialId = r.s32();
+                rb.priorityPlane = rb.materialId; // legacy alias
                 rb.gravity = r.f32();
                 ReadTimelines(r, entryEndLocal, rb.timelines);
                 r.off = entryEndLocal;
@@ -790,7 +833,10 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
 
                 MdxEventObject ev;
                 MdxNode genericNode;
-                ReadSizedGenericObject(r, chunkEnd, genericNode, ev.timelines);
+                // Bound generic timelines to this entry's generic object so a
+                // corrupt size can't swallow following entries (ref
+                // MdlxGenericObject.readMdx: size - 96 bytes of timelines).
+                ReadSizedGenericObject(r, entryStart + genericSize, genericNode, ev.timelines);
                 ev.name = genericNode.name;
                 ev.objectId = genericNode.objectId;
                 ev.parentId = genericNode.parentId;
@@ -807,6 +853,7 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
                     ev.timelines.push_back(std::move(eventTrack));
                 }
                 out.eventObjects.push_back(std::move(ev));
+                if (r.off <= entryStart) break; // progress guard
             }
             r.off = chunkEnd;
             break;
@@ -814,10 +861,44 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
 
         // ---- CLID (collision shapes) ----
         case T_CLID: {
-            int count = (int)(chunkSize / 4);
-            out.collisionShapes.resize(count);
-            for (int i = 0; i < count; i++)
-                out.collisionShapes[i] = r.u32();
+            while (r.off + 4 <= chunkEnd) {
+                size_t entryStart = r.off;
+                uint32_t genericSize = R32(r.d + r.off);
+                if (genericSize < 96 || entryStart + genericSize > chunkEnd) break;
+
+                MdxCollisionShape shape;
+                MdxNode genericNode;
+                ReadSizedGenericObject(r, entryStart + genericSize, genericNode, shape.timelines);
+                shape.name = genericNode.name;
+                shape.objectId = genericNode.objectId;
+                shape.parentId = genericNode.parentId;
+                shape.flags = genericNode.flags;
+
+                if (r.off + 16 > chunkEnd) break;
+                int typeValue = r.s32();
+                if (typeValue < (int)MdxCollisionShapeType::Box
+                    || typeValue > (int)MdxCollisionShapeType::Cylinder) {
+                    // Unknown shape type: stop parsing shapes but keep the
+                    // ones already decoded (matches prior behavior, avoids
+                    // misaligned reads corrupting the rest of the chunk).
+                    break;
+                }
+                shape.type = (MdxCollisionShapeType)typeValue;
+                r.readFloatArray(shape.vertices[0], 3);
+
+                if (shape.type != MdxCollisionShapeType::Sphere) {
+                    if (r.off + 12 > chunkEnd) break;
+                    r.readFloatArray(shape.vertices[1], 3);
+                }
+                if (shape.type == MdxCollisionShapeType::Sphere
+                    || shape.type == MdxCollisionShapeType::Cylinder) {
+                    if (r.off + 4 > chunkEnd) break;
+                    shape.boundsRadius = r.f32();
+                }
+
+                out.collisionShapes.push_back(std::move(shape));
+                if (r.off <= entryStart) break; // progress guard
+            }
             r.off = chunkEnd;
             break;
         }
@@ -1076,10 +1157,10 @@ static bool MdxBuildSequenceTimeline(const MdxTimeline& source,
     return !out.frames.empty();
 }
 
-static bool MdxSampleTimelineForModel(const MdxTimeline& tl, const MdxModel* model,
-                                      uint32_t frame, float elapsedMs,
-                                      float* out, int elemCount, float defaultVal,
-                                      int sequenceIndex) {
+bool MdxSampleTimelineForModel(const MdxTimeline& tl, const MdxModel* model,
+                               uint32_t frame, float elapsedMs,
+                               float* out, int elemCount, float defaultVal,
+                               int sequenceIndex) {
     if (tl.globalSequenceId >= 0 && model
         && tl.globalSequenceId < (int)model->globalSequences.size()) {
         const uint32_t duration = model->globalSequences[(size_t)tl.globalSequenceId];
@@ -1282,6 +1363,53 @@ bool MdxSampleParticleEmitter2(const MdxParticleEmitter2& emitter,
         if (timeline.tag == TAG_KP2E) {
             out.emissionRateKey = MdxTimelineKeyAtOrBeforeFrame(timeline, model, frame, elapsedMs, sequenceIndex);
             break;
+        }
+    }
+    return sampledAny;
+}
+
+bool MdxSampleCamera(const MdxCamera& camera,
+                     const MdxModel* model,
+                     uint32_t frame,
+                     float elapsedMs,
+                     MdxCameraSample& out,
+                     int sequenceIndex) {
+    std::copy(camera.pos, camera.pos + 3, out.pos);
+    std::copy(camera.target, camera.target + 3, out.target);
+    out.fov = camera.fov;
+    out.farClip = camera.farClip;
+    out.nearClip = camera.nearClip;
+    out.roll = 0.0f;
+
+    bool sampledAny = false;
+    for (const MdxTimeline& timeline : camera.timelines) {
+        if (timeline.tag == TAG_KCTR) {
+            float sampled[3] = {};
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, sampled, 3,
+                                          0.0f, sequenceIndex)) {
+                for (int i = 0; i < 3; ++i) {
+                    out.pos[i] = camera.pos[i] + sampled[i];
+                }
+                sampledAny = true;
+            }
+        }
+        else if (timeline.tag == TAG_KTTR) {
+            float sampled[3] = {};
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, sampled, 3,
+                                          0.0f, sequenceIndex)) {
+                for (int i = 0; i < 3; ++i) {
+                    out.target[i] = camera.target[i] + sampled[i];
+                }
+                sampledAny = true;
+            }
+        }
+        else if (timeline.tag == TAG_KCRL) {
+            float sampled = 0.0f;
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, &sampled, 1,
+                                          0.0f, sequenceIndex)) {
+                out.roll = sampled;
+                sampledAny = true;
+            }
         }
     }
     return sampledAny;

@@ -2,7 +2,7 @@
 #include "csimulation.h"
 
 CPlayer::CPlayer(int id, const std::string& name, CMapControl controller)
-    : id_(id), name_(name), controller_(controller) {}
+    : id_(id), name_(name), controller_(controller), color_(id) {}
 
 bool CPlayer::IsTechUnlocked(War3ID id) const {
     auto it = techtreeUnlocked_.find(id.value);
@@ -21,6 +21,15 @@ int CPlayer::GetTechLevel(War3ID id) const {
 
 void CPlayer::SetTechLevel(War3ID id, int level) {
     techtreeUnlocked_[id.value] = level;
+}
+
+int CPlayer::GetTechMaxAllowed(War3ID id) const {
+    auto it = techtreeMaxAllowed_.find(id.value);
+    return (it != techtreeMaxAllowed_.end()) ? it->second : -1;
+}
+
+void CPlayer::SetTechMaxAllowed(War3ID id, int level) {
+    techtreeMaxAllowed_[id.value] = level;
 }
 
 bool CPlayer::HasAlliance(const CPlayer& other, CAllianceType type) const {

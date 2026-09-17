@@ -34,6 +34,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -202,6 +203,14 @@ void HudDiagLog(const char* fmt, ...) {
     if (log) {
         log << buffer << '\n';
     }
+}
+
+bool AeroRenderProbeEnabled() {
+    static const bool enabled = []() {
+        const char* value = std::getenv("WARSMASH_AERO_RENDER_PROBE");
+        return value && value[0] && value[0] != '0';
+    }();
+    return enabled;
 }
 
 int ToLogicalPixels(int physicalPixels, float dpiScale) {
@@ -1053,7 +1062,7 @@ void NoesisHudHost::Render() {
 
     sg_reset_state_cache();
     static uint64_t renderProbeFrame = 0;
-    const bool logProbe = (renderProbeFrame++ % 120) == 0;
+    const bool logProbe = AeroRenderProbeEnabled() && (renderProbeFrame++ % 120) == 0;
     auto* renderer = view_->GetRenderer();
 
     renderTreeReady_ = renderer->UpdateRenderTree();

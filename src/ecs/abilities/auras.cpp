@@ -1,4 +1,7 @@
 #include "auras.h"
+#include "ecs/buffs.h"
+#include "ecs/csimulation.h"
+#include "ecs/unit.h"
 
 // ===== Devotion Aura =====
 CAbilityDevotionAura::CAbilityDevotionAura(int handleId)
@@ -32,7 +35,7 @@ CAbilityEnduranceAura::CAbilityEnduranceAura(int handleId)
 
 // ===== Unholy Aura =====
 CAbilityUnholyAura::CAbilityUnholyAura(int handleId)
-    : CAbilityAura(handleId, War3ID("AUav")) {
+    : CAbilityAura(handleId, War3ID("AUau")) {
     SetRadius(900.0f);
     SetAffectsAllies(true);
     SetAffectsSelf(true);
@@ -54,6 +57,22 @@ CAbilityThornsAura::CAbilityThornsAura(int handleId)
     SetAffectsAllies(true);
     SetAffectsSelf(true);
     // Thorns reflects damage - handled in combat system
+}
+
+void CAbilityThornsAura::ApplyAura(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    // Level-1 object data (DataA1=0.1): 10% melee reflect while in range.
+    // The buff is refreshed every aura tick; RemoveAura takes it away.
+    if (CBuff* existing = target->GetBuff(War3ID("BEah"))) {
+        existing->RefreshDuration();
+    } else {
+        target->AddBuff(std::make_unique<CBuffThorns>(2.0f, 0.10f, War3ID("BEah")), game);
+    }
+}
+
+void CAbilityThornsAura::RemoveAura(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    target->RemoveBuff(War3ID("BEah"), game);
 }
 
 // ===== Brilliance Aura =====
@@ -88,6 +107,21 @@ CAbilityVampiricAura::CAbilityVampiricAura(int handleId)
     SetAffectsAllies(true);
     SetAffectsSelf(true);
     // Life steal - handled in combat system
+}
+
+void CAbilityVampiricAura::ApplyAura(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    // Level-1 object data (DataA1=0.15): 15% life steal while in range.
+    if (CBuff* existing = target->GetBuff(War3ID("BUav"))) {
+        existing->RefreshDuration();
+    } else {
+        target->AddBuff(std::make_unique<CBuffLifesteal>(2.0f, 0.15f), game);
+    }
+}
+
+void CAbilityVampiricAura::RemoveAura(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    target->RemoveBuff(War3ID("BUav"), game);
 }
 
 // ===== Command Aura =====

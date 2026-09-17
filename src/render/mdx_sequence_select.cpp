@@ -259,3 +259,14 @@ int MdxSelectSpellSequenceIndex(
 
     return MdxSelectSequenceIndexByPrimaryAndTags(model, "spell", secondaryTags);
 }
+
+float MdxSequenceDurationSeconds(const MdxModel& model, int sequenceIndex) {
+    if (sequenceIndex < 0 || sequenceIndex >= (int)model.sequences.size()) {
+        return 0.0f;
+    }
+    const MdxSequence& sequence = model.sequences[(size_t)sequenceIndex];
+    if (sequence.endFrame <= sequence.startFrame) {
+        return 0.0f;
+    }
+    return (float)(sequence.endFrame - sequence.startFrame) / 1000.0f;
+}

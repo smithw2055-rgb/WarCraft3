@@ -194,4 +194,30 @@ void JassCommonEnv::WireCallbacks(CSimulation& sim) {
                 natives_->FireItemEvent(unitHandle, itemHandle, eventType);
         }
     );
+
+    // Unit trained / summoned / research / revive events -> JASS triggers
+    sim.SetUnitTrainedCallback(
+        [this](int buildingHandle, int trainedHandle) {
+            if (natives_)
+                natives_->FireTrainedEvent(buildingHandle, trainedHandle);
+        }
+    );
+    sim.SetUnitSummonedCallback(
+        [this](int summonerHandle, int summonedHandle) {
+            if (natives_)
+                natives_->FireSummonEvent(summonerHandle, summonedHandle);
+        }
+    );
+    sim.SetResearchFinishedCallback(
+        [this](int unitHandle, int upgradeId) {
+            if (natives_)
+                natives_->FireResearchEvent(unitHandle, upgradeId);
+        }
+    );
+    sim.SetHeroRevivedCallback(
+        [this](int reviverHandle, int revivedHandle) {
+            if (natives_)
+                natives_->FireReviveEvent(reviverHandle, revivedHandle);
+        }
+    );
 }

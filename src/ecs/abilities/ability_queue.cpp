@@ -359,6 +359,9 @@ void CAbilityQueue::ProcessCompletion(CSimulation& game, CUnit* building) {
                         if (rallyAbility) {
                             rallyAbility->ApplyToTrainedUnit(game, building, newUnit);
                         }
+                        if (const auto& trainedCb = game.GetUnitTrainedCallback()) {
+                            trainedCb(building->GetHandleId(), newUnit->GetHandleId());
+                        }
                         std::cout << "Trained unit: " << completedId.ToString() << std::endl;
                     }
                 }
@@ -370,6 +373,9 @@ void CAbilityQueue::ProcessCompletion(CSimulation& game, CUnit* building) {
             auto* player = game.GetPlayer(building->GetPlayerIndex());
             if (player) {
                 player->AddTechUnlocked(game, completedId);
+                if (const auto& researchCb = game.GetResearchFinishedCallback()) {
+                    researchCb(building->GetHandleId(), (int)completedId.value);
+                }
                 std::cout << "Research completed: " << completedId.ToString() << std::endl;
             }
             break;
@@ -384,6 +390,9 @@ void CAbilityQueue::ProcessCompletion(CSimulation& game, CUnit* building) {
                 hero->SetMana((float)hero->GetMaxMana() * 0.5f);
                 hero->SetPosition(building->GetX() + building->GetCollisionSize() + 64.0f,
                                   building->GetY());
+                if (const auto& revivedCb = game.GetHeroRevivedCallback()) {
+                    revivedCb(building->GetHandleId(), hero->GetHandleId());
+                }
                 std::cout << "Hero revived!" << std::endl;
             }
             break;

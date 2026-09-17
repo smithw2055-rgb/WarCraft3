@@ -6,6 +6,7 @@
 #include "resource/mpq_storm.h"
 #include "model/mdx.h"
 #include "render/mdx_viewer.h"
+#include "render/picking.h"
 
 struct PlacedModel {
     float pos[3] = {};
@@ -25,6 +26,9 @@ struct PlacedModel {
     bool transient = false;
     float transientAge = 0.0f;
     float transientMaxAge = 1.0f;
+    bool transientHasPhysics = false;
+    Vec3 transientVelocity = {0, 0, 0};
+    float transientGravity = 0.0f;
     bool useCustomModelMatrix = false;
     Mat4 customModelMatrix = Mat4::Identity();
     std::unique_ptr<MdxViewer> ownedViewer;
@@ -64,7 +68,9 @@ public:
                                          float angle, float scale, int player = 0,
                                          float fallbackLifeSeconds = 1.0f);
     int AddTransientModelWithSceneMatrix(const std::string& path, const Mat4& modelMatrix,
-                                         int player = 0, float fallbackLifeSeconds = 1.0f);
+                                         int player = 0, float fallbackLifeSeconds = 1.0f,
+                                         const Vec3& initialVelocity = Vec3{0, 0, 0},
+                                         float gravity = 0.0f);
 
     // Render all placed models
     void RenderAll(const Mat4& view, const Mat4& proj, float dt);
@@ -85,6 +91,7 @@ public:
         if (index < 0 || index >= (int)instances_.size()) return nullptr;
         return instances_[index]->viewer;
     }
+    bool IntersectInstanceRayWithCollision(int index, const picking::PickRay& ray, float& outT) const;
 
 private:
     struct LoadStats {

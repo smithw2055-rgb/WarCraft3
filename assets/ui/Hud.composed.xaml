@@ -156,15 +156,15 @@
              FontSize="19.2"
              FontWeight="Bold"/>
   <TextBlock x:Name="ResourceBarUpkeepText"
-             Canvas.Left="456"
-             Canvas.Top="6"
-             Width="112"
-             Height="31.5"
+             Canvas.Left="477"
+             Canvas.Top="10"
+             Width="92"
+             Height="24"
              TextAlignment="Center"
              Foreground="#FF66E8FF"
-             FontSize="19.2"
+             FontSize="14.4"
              FontWeight="Bold"
-             Text="Upkeep NYI"/>
+             Text="No Upkeep"/>
   <Canvas x:Name="TimeOfDayIndicator"
           Canvas.Left="574"
           Canvas.Top="6"
@@ -277,15 +277,15 @@
           </StackPanel>
         </Grid>
 
-        <Grid Canvas.Left="420" Canvas.Top="56" Width="560" Height="254" Margin="0">
+        <Grid Canvas.Left="405.12" Canvas.Top="56" Width="575" Height="254" Margin="0">
           <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="184"/>
+            <ColumnDefinition Width="190.08"/>
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
           <Border x:Name="PortraitViewport"
-                  Width="150"
-                  Height="150"
-                  Margin="0,0,0,4"
+                  Width="160.32"
+                  Height="163.2"
+                  Margin="0,0,0,26.8"
                   HorizontalAlignment="Left"
                   VerticalAlignment="Bottom"
                   Background="#00000000"
@@ -295,7 +295,12 @@
               <Image x:Name="PortraitIcon" Margin="8" Stretch="Uniform"/>
             </Grid>
           </Border>
-          <Grid Grid.Column="1" Margin="0,2,0,0">
+          <Grid Grid.Column="1"
+                Width="345.6"
+                Height="230.4"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Margin="0,51.52,0,0">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto"/>
               <RowDefinition Height="33"/>
@@ -571,7 +576,7 @@
           </Grid>
         </Grid>
 
-        <Grid x:Name="CommandColumn" Canvas.Left="983.04" Canvas.Top="72.64" Width="535.872" Height="253.44">
+        <Grid x:Name="CommandColumn" Canvas.Left="983.04" Canvas.Top="80.64" Width="535.872" Height="257.28">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="202.56"/>
             <ColumnDefinition Width="333.312"/>
@@ -580,8 +585,8 @@
                   Grid.Column="0"
                   HorizontalAlignment="Left"
                   VerticalAlignment="Bottom"
-                  Width="146"
-                  Height="224"
+                  Width="151.68"
+                  Height="220.8"
                   Background="#00000000"
                   BorderThickness="0"
                   Padding="0">
@@ -652,7 +657,7 @@
                   Grid.Column="1"
                   Margin="0,0,0,0"
                   HorizontalAlignment="Left"
-                  VerticalAlignment="Bottom"
+                  VerticalAlignment="Top"
                   Width="333.312"
                   Height="253.44"
                   Background="#00000000"

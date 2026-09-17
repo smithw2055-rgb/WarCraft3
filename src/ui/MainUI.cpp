@@ -366,6 +366,11 @@ bool MainUI::SwitchNoesisXaml(MpqManager* mpq, int screenW, int screenH,
     return hudHost_->ReloadXaml(hudXamlPath, mpq_, gameVersion);
 }
 
+void MainUI::ApplyMapAbilityMods(const std::string& mapPath) {
+    if (!mpq_ || mapPath.empty()) return;
+    abilityData_ = CAbilityData::LoadFromMpq(*mpq_, mapPath);
+}
+
 void MainUI::Shutdown() {
     hudHost_.reset();
     textures_.clear();

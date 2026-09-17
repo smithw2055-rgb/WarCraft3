@@ -4,6 +4,7 @@
 #include "render/splat_model.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 struct MdxEventSplatMesh {
@@ -14,3 +15,10 @@ struct MdxEventSplatMesh {
 MdxEventSplatMesh BuildMdxEventSplatMeshFromTransform(const Mat4& worldTransform,
                                                        float halfSize,
                                                        float zOffset = 8.0f);
+
+MdxEventSplatMesh BuildMdxEventSplatMeshFromTransform(const Mat4& worldTransform,
+                                                       float halfSize,
+                                                       float zOffset,
+                                                       const Vec3& localScale);
+
+Vec3 MdxEventSplatScaleCompensationForType(const std::string& type, const Vec3& localScale);

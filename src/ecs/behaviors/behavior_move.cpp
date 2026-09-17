@@ -248,7 +248,7 @@ bool CBehaviorMove::MoveTowardWaypoint(CSimulation& simulation) {
 }
 
 bool CBehaviorMove::Update(CSimulation& simulation) {
-    if (!unit_) return true;
+    if (!unit_ || unit_->IsRooted()) return true;
 
     // If following a moving target, update destination
     if (targetWidget_) {

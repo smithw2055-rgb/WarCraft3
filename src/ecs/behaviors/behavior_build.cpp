@@ -154,8 +154,18 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
         // Race-specific construction progress
         switch (buildModel_) {
             case CBuildModel::HUMAN:
-                // Human: worker stays outside and "repairs" the building
-                // Construction progresses as long as worker is alive and near
+                // Human: worker stays outside and works the building.
+                // Construction stalls while the worker is dead or away
+                // from the site (ref CBehaviorHumanBuild pause).
+                if (unit_->IsDead()) {
+                    return true;
+                } {
+                    const float dx = buildX_ - unit_->GetX();
+                    const float dy = buildY_ - unit_->GetY();
+                    if (dx * dx + dy * dy > 400.0f * 400.0f) {
+                        return false;
+                    }
+                }
                 constructionProgress_ += dt;
                 break;
 
@@ -236,8 +246,8 @@ void CBehaviorBuild::CreateBuilding(CSimulation& simulation) {
                 break;
 
             case CBuildModel::NIGHT_ELF:
-                // Night Elf: worker hides inside (like Orc)
-                // For Ancients, worker food is consumed
+                // Night Elf: wisp hides inside during construction and is
+                // consumed on completion (see CompleteBuilding).
                 unit_->SetHidden(true);
                 building->SetConstructionPaused(false);
                 break;
@@ -273,13 +283,18 @@ void CBehaviorBuild::CompleteBuilding(CSimulation& simulation) {
             break;
 
         case CBuildModel::ORC:
-        case CBuildModel::NIGHT_ELF:
-            // Orc/Night Elf: unhide worker and reposition outside
+            // Orc: unhide peon and reposition outside
             unit_->SetHidden(false);
             if (building) {
                 float offset = building->GetCollisionSize() + unit_->GetCollisionSize() + 32.0f;
                 unit_->SetPosition(building->GetX() + offset, building->GetY());
             }
+            break;
+
+        case CBuildModel::NIGHT_ELF:
+            // Night Elf: the wisp sacrifices itself (ref CBehaviorNightElfBuild).
+            // It stays hidden and is removed instead of emerging.
+            simulation.RemoveUnit(unit_);
             break;
 
         case CBuildModel::UNDEAD:

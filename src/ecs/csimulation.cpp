@@ -125,6 +125,9 @@ void CSimulation::Update() {
         }
     }
 
+    // Step projectiles after units so just-fired shots move the same tick.
+    UpdateProjectiles();
+
     ProcessUnitRemovals();
     ProcessNewUnits();
     ProcessDestructableRemovals();
@@ -141,6 +144,24 @@ void CSimulation::Update() {
     postUpdateCallbacks_.clear();
 
     gameTurnTick_++;
+}
+
+void CSimulation::UpdateProjectiles() {
+    for (auto it = projectiles_.begin(); it != projectiles_.end();) {
+        if (it->Update(*this)) {
+            it = projectiles_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+CUnit* CSimulation::AdoptUnit(std::unique_ptr<CUnit> unit) {
+    if (!unit) return nullptr;
+    CUnit* ptr = unit.get();
+    unitMap_[ptr->GetHandleId()] = std::move(unit);
+    newUnits_.push_back(ptr);
+    return ptr;
 }
 
 CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
@@ -359,8 +380,9 @@ void CSimulation::AddPlayer(std::unique_ptr<CPlayer> player) {
 }
 
 void CSimulation::AdvanceGameTime(float dt) {
+    if (timeOfDaySuspended_) return;
     float dayLength = gameplayConstants_.gameDayLength;
-    gameTimeOfDay_ += dt;
+    gameTimeOfDay_ += dt * timeOfDayScale_;
     if (gameTimeOfDay_ >= dayLength) gameTimeOfDay_ -= dayLength;
 
     float gameHours = gameplayConstants_.gameDayHours;

@@ -5,7 +5,9 @@
 #include "render/mdx_animator.h"
 #include "render/mdx_event_effects.h"
 #include "render/mdx_particles.h"
+#include "render/mdx_prem_particles.h"
 #include "render/mdx_skinning.h"
+#include "render/picking.h"
 #include "resource/mpq_storm.h"
 #include <string>
 #include <vector>
@@ -37,6 +39,8 @@ public:
     bool IsValid() const { return !batches_.empty(); }
     const Vec3& GetBoundsCenter() const { return center_; }
     float GetBoundsRadius() const { return radius_; }
+    bool HasCollisionShapes() const { return modelSource_ && !modelSource_->collisionShapes.empty(); }
+    bool IntersectRayWithCollision(const picking::PickRay& ray, const Mat4& modelMatrix, float& outT) const;
     bool PlayStandSequence();
     bool PlayStandSequenceWithTags(const std::vector<std::string>& secondaryTags);
     bool PlayStandSequenceWithTag(const char* secondaryTag);
@@ -81,10 +85,12 @@ public:
     bool IsCurrentSequenceFinished() const;
     bool IsCurrentSequenceLooping() const;
     bool GetSequenceName(int index, std::string& outName) const;
+    float GetSequenceDurationSeconds(int index) const;
     float GetAnimationSpeedScale() const { return animationSpeedScale_; }
     int GetTriggeredEventCount() const { return triggeredEventCount_; }
     int GetResolvedEventEffectCount() const { return resolvedEventEffectCount_; }
     const std::vector<MdxEventEffect>& GetResolvedEventEffects() const { return resolvedEventEffects_; }
+    const std::vector<MdxParticleEmitter1Spawn>& GetParticleEmitter1Spawns() const { return particleEmitter1Spawns_; }
     void DebugLogState(const char* tag) const;
     void SetFog(const float color[3], float start, float end);
     void DisableFog();
@@ -210,6 +216,9 @@ private:
     // Particle system
     MdxParticleSystem particles_;
     bool hasParticles_ = false;
+    bool hasParticleEmitter1_ = false;
+    std::vector<MdxParticleEmitter1RuntimeState> particleEmitter1States_;
+    std::vector<MdxParticleEmitter1Spawn> particleEmitter1Spawns_;
     MdxEventEffectResolver eventEffectResolver_;
     bool eventEffectResolverLoaded_ = false;
     std::vector<MdxEventEffect> resolvedEventEffects_;

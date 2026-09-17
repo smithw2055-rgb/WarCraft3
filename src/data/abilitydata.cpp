@@ -1,11 +1,168 @@
 #include "abilitydata.h"
+#include "object_mod_meta.h"
+#include "map/object_mods.h"
 #include "resource/mpq_storm.h"
 #include "resource/slk.h"
 #include <iostream>
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 
+namespace {
+
+int FindRowByAlias(SlkTable& slk, int aliasCol, const std::string& alias) {
+    if (aliasCol < 0) return -1;
+    for (int r = 0; r < slk.Rows(); ++r) {
+        if (slk.GetString(r, aliasCol, "") == alias) return r;
+    }
+    return -1;
+}
+
+// Clone a base SLK row for a custom object id; returns the new row index.
+int CloneSlkRow(SlkTable& slk, int baseRow, const std::string& newAlias) {
+    if (baseRow < 0 || baseRow >= slk.Rows()) return -1;
+    std::vector<std::string> row = slk.data_[baseRow];
+    const int aliasCol = slk.FindColumn("alias");
+    if (aliasCol >= 0 && aliasCol < (int)row.size()) row[aliasCol] = newAlias;
+    const int codeCol = slk.FindColumn("code");
+    if (codeCol >= 0 && codeCol < (int)row.size()) row[codeCol] = newAlias;
+    slk.data_.push_back(std::move(row));
+    return (int)slk.data_.size() - 1;
+}
+
+void SetSlkCell(SlkTable& slk, int row, const std::string& colName, const std::string& value,
+                int& applied, int& unknown) {
+    const int col = slk.FindColumn(colName);
+    if (col < 0 || row < 0 || row >= slk.Rows()) {
+        unknown++;
+        return;
+    }
+    if (col >= (int)slk.data_[row].size()) {
+        slk.data_[row].resize(col + 1);
+    }
+    slk.data_[row][col] = value;
+    applied++;
+}
+
+bool EqualsNoCase(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i])) return false;
+    }
+    return true;
+}
+
+// Apply one w3a/w3h modification set to SLK rows (+ skin profile table).
+void ApplyAbilityModSet(SlkTable& slk, TxtTable& skinTbl, const ObjectMetaTable& meta,
+                        const ObjectModificationSet& set, int& applied, int& unknown,
+                        int& customCloned, int& customSkipped) {
+    const int aliasCol = slk.FindColumn("alias");
+    for (const auto& entry : set.custom) {
+        const std::string oldId = entry.oldId.ToString();
+        const std::string newId = entry.newId.ToString();
+        if (oldId.size() != 4 || newId.size() != 4) {
+            customSkipped++;
+            continue;
+        }
+        const int newRow = CloneSlkRow(slk, FindRowByAlias(slk, aliasCol, oldId), newId);
+        if (newRow < 0) {
+            customSkipped++;
+            continue;
+        }
+        customCloned++;
+        for (const auto& mod : entry.modifications) {
+            std::string table, key;
+            if (!ResolveObjectModField(meta, mod, table, key)) {
+                unknown++;
+                continue;
+            }
+            const std::string value = FormatObjectModValue(mod);
+            if (EqualsNoCase(table, "Profile")) {
+                skinTbl.SetString(newId, key, value);
+                applied++;
+            } else {
+                SetSlkCell(slk, newRow, key, value, applied, unknown);
+            }
+        }
+    }
+    for (const auto& entry : set.original) {
+        const std::string section = entry.oldId.ToString();
+        const int row = FindRowByAlias(slk, aliasCol, section);
+        if (row < 0) {
+            unknown += (int)entry.modifications.size();
+            continue;
+        }
+        for (const auto& mod : entry.modifications) {
+            std::string table, key;
+            if (!ResolveObjectModField(meta, mod, table, key)) {
+                unknown++;
+                continue;
+            }
+            const std::string value = FormatObjectModValue(mod);
+            if (EqualsNoCase(table, "Profile")) {
+                skinTbl.SetString(section, key, value);
+                applied++;
+            } else {
+                SetSlkCell(slk, row, key, value, applied, unknown);
+            }
+        }
+    }
+}
+
+void ApplyMapAbilityMods(const MpqManager& mpq, const std::string& mapPath,
+                         SlkTable& abilitySlk, TxtTable& skinTbl, SlkTable& buffSlk) {
+    if (mapPath.empty()) return;
+
+    ObjectModificationSet abilitySet;
+    const bool hasW3a = LoadWar3MapAbilityMods(mapPath, abilitySet);
+    ObjectModificationSet buffSet;
+    const bool hasW3h = LoadWar3MapBuffMods(mapPath, buffSet);
+    if (!hasW3a && !hasW3h) {
+        std::cout << "ObjectMods: no war3map.w3a/w3h ability modifications" << std::endl;
+        return;
+    }
+
+    if (hasW3a) {
+        std::vector<uint8_t> metaBuf;
+        SlkTable metaSlk;
+        ObjectMetaTable meta;
+        if (mpq.ReadFile("Units\\AbilityMetaData.slk", metaBuf) &&
+            metaSlk.Load(metaBuf.data(), metaBuf.size()) && meta.Load(metaSlk)) {
+            int applied = 0, unknown = 0, cloned = 0, skipped = 0;
+            ApplyAbilityModSet(abilitySlk, skinTbl, meta, abilitySet,
+                               applied, unknown, cloned, skipped);
+            std::cout << "ObjectMods: war3map.w3a applied=" << applied
+                      << " unknown=" << unknown << " customCloned=" << cloned
+                      << " customSkipped=" << skipped << std::endl;
+        } else {
+            std::cerr << "ObjectMods: AbilityMetaData.slk unavailable; w3a skipped" << std::endl;
+        }
+    }
+    if (hasW3h) {
+        std::vector<uint8_t> metaBuf;
+        SlkTable metaSlk;
+        ObjectMetaTable meta;
+        if (mpq.ReadFile("Units\\AbilityBuffMetaData.slk", metaBuf) &&
+            metaSlk.Load(metaBuf.data(), metaBuf.size()) && meta.Load(metaSlk)) {
+            int applied = 0, unknown = 0, cloned = 0, skipped = 0;
+            ApplyAbilityModSet(buffSlk, skinTbl, meta, buffSet,
+                               applied, unknown, cloned, skipped);
+            std::cout << "ObjectMods: war3map.w3h applied=" << applied
+                      << " unknown=" << unknown << " customCloned=" << cloned
+                      << " customSkipped=" << skipped << std::endl;
+        } else {
+            std::cerr << "ObjectMods: AbilityBuffMetaData.slk unavailable; w3h skipped" << std::endl;
+        }
+    }
+}
+
+} // namespace
+
 CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq) {
+    return LoadFromMpq(mpq, "");
+}
+
+CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq, const std::string& mapPath) {
     CAbilityData data;
 
     // Load AbilityData.slk (actual SLK spreadsheet format)
@@ -45,6 +202,17 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq) {
         std::cout << "CAbilityData: no rows found" << std::endl;
         return data;
     }
+
+    SlkTable buffSlk;
+    {
+        std::vector<uint8_t> buf;
+        if (mpq.ReadFile("Units\\AbilityBuffData.slk", buf)) {
+            buffSlk.Load(buf.data(), buf.size());
+        }
+    }
+
+    // Map-specific custom abilities/buffs (war3map.w3a/.w3h) before parsing.
+    ApplyMapAbilityMods(mpq, mapPath, abilitySlk, skinTbl, buffSlk);
 
     // Map column names to indices
     auto col = [&](const std::string& name) -> int { return abilitySlk.FindColumn(name); };
@@ -158,13 +326,6 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq) {
         data.abilities_[id] = std::move(def);
     }
 
-    SlkTable buffSlk;
-    {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Units\\AbilityBuffData.slk", buf)) {
-            buffSlk.Load(buf.data(), buf.size());
-        }
-    }
     if (buffSlk.Rows() > 0) {
         auto buffCol = [&](const std::string& name) -> int { return buffSlk.FindColumn(name); };
         const int colAliasBuff = buffCol("alias");

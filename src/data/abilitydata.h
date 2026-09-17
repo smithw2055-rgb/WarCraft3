@@ -65,6 +65,7 @@ public:
     const BuffMap& GetAllBuffs() const { return buffs_; }
 
     static CAbilityData LoadFromMpq(const class MpqManager& mpq);
+    static CAbilityData LoadFromMpq(const class MpqManager& mpq, const std::string& mapPath);
 
 private:
     AbilityMap abilities_;

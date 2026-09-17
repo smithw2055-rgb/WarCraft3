@@ -73,6 +73,7 @@ public:
 
 private:
     void LoadUnitDataTables();
+    void LoadGameplayConstants();
     void LoadWorldEditStrings(const std::string& mapPath);
     void DetermineTileset(const std::string& mapPath);
     void LoadTerrainData(const std::string& mapPath);

@@ -17,9 +17,17 @@ public:
                  float damage, float bonusDamage = 0) override;
 
     bool CanBeTargetedBy(CSimulation& simulation, CUnit* source,
-                         const std::vector<CTargetType>& targetsAllowed) const override;
+                          const std::vector<CTargetType>& targetsAllowed) const override;
+
+    // Animation tag for the renderer (Set/QueueDestructableAnimation).
+    const std::string& GetAnimation() const { return animation_; }
+    void SetAnimation(const std::string& anim) { animation_ = anim; queuedAnimation_.clear(); }
+    void QueueAnimation(const std::string& anim) { queuedAnimation_ = anim; }
+    const std::string& GetQueuedAnimation() const { return queuedAnimation_; }
 
 private:
     War3ID typeId_;
     bool invulnerable_ = false;
+    std::string animation_;
+    std::string queuedAnimation_;
 };

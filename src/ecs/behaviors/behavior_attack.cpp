@@ -54,7 +54,7 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
     if (!attack) {
         return true;
     }
-    attackRange_ = attack->range;
+    attackRange_ = unit_->GetAttackRange(0);
 
     float dx = target_->GetX() - unit_->GetX();
     float dy = target_->GetY() - unit_->GetY();
@@ -63,6 +63,13 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
     const int currentTick = simulation.GetGameTurnTick();
 
     if (dist > attackRange_) {
+        // Rooted units hold position: no chasing, but the behavior stays
+        // alive so in-range targets are still attacked (ref rooted combat).
+        if (unit_->IsRooted()) {
+            ResetAttackSwingState();
+            propelling_ = false;
+            return false;
+        }
         ResetAttackSwingState();
         if (unit_->IsBuilding() || !unit_->GetMoveBehavior()) {
             propelling_ = false;
@@ -190,10 +197,57 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
         else {
             damageAmount = (float)base;
         }
+        // Instance bonuses (items, upgrades, hero primary attribute) are part
+        // of base damage, so armor reduction in CUnit::Damage applies to them.
+        damageAmount += (float)unit_->GetBonusDamage();
 
-        target_->Damage(simulation, unit_, true, false,
-                        attack->attackType, CDamageType::NORMAL,
-                        weaponSound, damageAmount, 0);
+        const bool ranged = CWeaponTypeInfo::IsRanged(attack->weaponType);
+        const bool firesProjectile = ranged &&
+            attack->weaponType != CWeaponType::INSTANT && attack->projectileSpeed > 0.0f;
+        if (firesProjectile) {
+            // Dice are rolled at fire time; the missile carries final damage.
+            CProjectile shot;
+            shot.attackerHandleId = unit_->GetHandleId();
+            shot.targetHandleId = target_->GetHandleId();
+            shot.x = unit_->GetX();
+            shot.y = unit_->GetY();
+            shot.speed = attack->projectileSpeed;
+            shot.damage = damageAmount;
+            shot.attackType = attack->attackType;
+            shot.weaponSound = weaponSound;
+            if (attack->weaponType == CWeaponType::MISSILE_SPLASH && attack->areaHalf > 0.0f) {
+                shot.splashFull = attack->areaFull;
+                shot.splashHalf = attack->areaHalf;
+                shot.splashQuarter = attack->areaQuarter;
+                shot.splashFactorHalf = attack->damageFactorHalf;
+                shot.splashFactorQuarter = attack->damageFactorQuarter;
+                shot.splashBonus = (float)unit_->GetBonusDamage();
+            }
+            if (attack->weaponType == CWeaponType::MISSILE_BOUNCE && attack->targetCount > 0) {
+                shot.bouncesLeft = attack->targetCount;
+                shot.bounceRange = attack->areaHalf > 0.0f ? attack->areaHalf : 500.0f;
+                shot.bounceLossFactor = attack->damageLossFactor > 0.0f ? attack->damageLossFactor : 1.0f;
+            }
+            const float dx0 = target_->GetX() - shot.x;
+            const float dy0 = target_->GetY() - shot.y;
+            shot.maxTravel = std::sqrt(dx0 * dx0 + dy0 * dy0) + 512.0f;
+            simulation.SpawnProjectile(std::move(shot));
+        } else if (attack->areaHalf > 0.0f) {
+            auto* combat = simulation.GetCombatSystem();
+            if (combat) {
+                combat->ApplySplashDamage(simulation, unit_, target_, true, ranged,
+                                          attack->attackType, CDamageType::NORMAL,
+                                          weaponSound, damageAmount, 0, 0, 0, *attack);
+            } else {
+                target_->Damage(simulation, unit_, true, ranged,
+                                attack->attackType, CDamageType::NORMAL,
+                                weaponSound, damageAmount, 0);
+            }
+        } else {
+            target_->Damage(simulation, unit_, true, ranged,
+                            attack->attackType, CDamageType::NORMAL,
+                            weaponSound, damageAmount, 0);
+        }
         damageAppliedThisSwing_ = true;
         if (target_->IsDead()) {
             return true; // target dead, behavior done
@@ -205,7 +259,9 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
     }
 
     if (currentTick >= cooldownEndTick_) {
-        const int cooldownTicks = std::max(1, (int)std::ceil(attack->cooldown / simulation.GetSimStepTime()));
+        const float speedMul = std::max(0.01f, unit_->GetAttackSpeedMultiplier());
+        const float effectiveCooldown = attack->cooldown / speedMul;
+        const int cooldownTicks = std::max(1, (int)std::ceil(effectiveCooldown / simulation.GetSimStepTime()));
         const int damagePointTicks = std::max(0, (int)std::ceil(attack->damagePoint / simulation.GetSimStepTime()));
         const int backswingTicks = std::max(0, (int)std::ceil(attack->backswingPoint / simulation.GetSimStepTime()));
 

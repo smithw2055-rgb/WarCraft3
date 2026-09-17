@@ -29,6 +29,7 @@ public:
     const CUpgradeType* GetUpgrade(War3ID id) const;
 
     static CUpgradeData LoadFromMpq(const class MpqManager& mpq);
+    static CUpgradeData LoadFromMpq(const class MpqManager& mpq, const std::string& mapPath);
 
 private:
     std::unordered_map<War3ID, std::unique_ptr<CUpgradeType>> upgrades_;

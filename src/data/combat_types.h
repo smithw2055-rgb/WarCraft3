@@ -14,7 +14,11 @@ enum class CDefenseType : uint8_t {
 enum class CDamageType : uint8_t {
     UNKNOWN, NORMAL, ENHANCED, FIRE, COLD, LIGHTNING, POISON, DISEASE, DIVINE,
     MAGIC, SONIC, ACID, FORCE, DEATH, MIND, PLANT, MECHANICAL,
-    PERCENT, ARMOR_SELF, AOE, SLEEP
+    PERCENT, ARMOR_SELF, AOE, SLEEP,
+    // Extended JASS damage types (common.j ConvertDamageType 21-26). Like all
+    // non-NORMAL types they ignore armor value (ref CUnit.damage) but still
+    // apply the attack-vs-defense-type table.
+    DEFENSIVE, DEMOLITION, SLOW_POISON, SPIRIT_LINK, SHADOW_STRIKE, UNIVERSAL
 };
 
 enum class CRegenType : uint8_t {
@@ -49,7 +53,21 @@ struct CAttackTypeInfo {
 struct CDefenseTypeInfo {
     static CDefenseType FromString(const std::string& s);
     static std::string ToString(CDefenseType t);
-    static float CalcDamageReduction(int defense, int attackerLevel);
+    static float CalcDamageReduction(int defense, int attackerLevel, float defenseArmor = 0.06f);
+};
+
+// Attack-type vs defense-type multipliers, indexed LIGHT..UNARMORED per
+// DefenseTypeIndex() in combat_system.cpp:
+// [0]=NONE, [1]=LIGHT, [2]=MEDIUM, [3]=HEAVY, [4]=FORTIFIED,
+// [5]=HERO, [6]=DIVINE, [7]=UNARMORED.
+struct AttackDefenseTable {
+    float normal[8];
+    float pierce[8];
+    float siege[8];
+    float magic[8];
+    float chaos[8];
+    float hero[8];
+    float spells[8];
 };
 
 struct CRegenTypeInfo {
@@ -58,4 +76,10 @@ struct CRegenTypeInfo {
 
 struct CWeaponTypeInfo {
     static CWeaponType FromString(const std::string& s);
+    // Mirrors ref CWeaponType.ranged: only Normal melee (and None) hit
+    // instantly; every other weapon type travels (or is instant-cast).
+    static bool IsRanged(CWeaponType t) {
+        return t != CWeaponType::NONE && t != CWeaponType::NORMAL &&
+               t != CWeaponType::UNKNOWN;
+    }
 };

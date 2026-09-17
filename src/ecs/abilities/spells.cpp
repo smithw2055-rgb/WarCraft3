@@ -23,7 +23,7 @@ void CAbilityBlizzard::DoEffect(CSimulation& game, CUnit* caster, float x, float
         float dist = std::sqrt(dx * dx + dy * dy);
         if (dist <= radius_) {
             unit->Damage(game, caster, false, false,
-                         CAttackType::NORMAL, CDamageType::NORMAL,
+                         CAttackType::SPELLS, CDamageType::COLD,
                          "", damagePerWave_ * waves_, 0);
         }
     }
@@ -82,7 +82,7 @@ void CAbilityThunderClap::DoEffect(CSimulation& game, CUnit* caster) {
         float dist = std::sqrt(dx * dx + dy * dy);
         if (dist <= radius_) {
             unit->Damage(game, caster, false, false,
-                         CAttackType::NORMAL, CDamageType::NORMAL,
+                         CAttackType::SPELLS, CDamageType::SONIC,
                          "", damage_, 0);
             unit->AddBuff(std::make_unique<CBuffSlow>(slowDuration_, slowPercent_, caster->GetHandleId()), game);
         }
@@ -102,7 +102,7 @@ CAbilityStormBolt::CAbilityStormBolt(int handleId)
 void CAbilityStormBolt::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || target->IsDead()) return;
     target->Damage(game, caster, false, false,
-                   CAttackType::NORMAL, CDamageType::NORMAL,
+                   CAttackType::SPELLS, CDamageType::LIGHTNING,
                    "", damage_, 0);
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {
@@ -129,7 +129,7 @@ void CAbilityWarStomp::DoEffect(CSimulation& game, CUnit* caster) {
         float dist = std::sqrt(dx * dx + dy * dy);
         if (dist <= radius_) {
             unit->Damage(game, caster, false, false,
-                         CAttackType::NORMAL, CDamageType::NORMAL,
+                         CAttackType::SPELLS, CDamageType::SONIC,
                          "", damage_, 0);
             unit->AddBuff(std::make_unique<CBuffStun>(stunDuration_), game);
         }
@@ -164,7 +164,7 @@ void CAbilityDeathCoil::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
         targetUnit->SetLife(game, newLife);
     } else {
         targetUnit->Damage(game, caster, false, false,
-                           CAttackType::NORMAL, CDamageType::NORMAL,
+                           CAttackType::SPELLS, CDamageType::DEATH,
                            "", damage_, 0);
     }
 }
@@ -183,7 +183,7 @@ void CAbilityFrostNova::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
     if (!target || target->IsDead()) return;
 
     target->Damage(game, caster, false, false,
-                   CAttackType::NORMAL, CDamageType::NORMAL,
+                   CAttackType::SPELLS, CDamageType::COLD,
                    "", damage_, 0);
 
     for (auto* unit : game.GetUnits()) {
@@ -193,7 +193,7 @@ void CAbilityFrostNova::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
         float dist = std::sqrt(dx * dx + dy * dy);
         if (dist <= radius_) {
             unit->Damage(game, caster, false, false,
-                         CAttackType::NORMAL, CDamageType::NORMAL,
+                         CAttackType::SPELLS, CDamageType::COLD,
                          "", aoeDamage_, 0);
             unit->AddBuff(std::make_unique<CBuffSlow>(slowDuration_, slowPercent_, caster->GetHandleId()), game);
         }
@@ -219,7 +219,7 @@ void CAbilityManaBurn::DoEffect(CSimulation& game, CUnit* caster, CWidget* targe
     int manaToBurn = std::min(manaBurned_, (int)targetUnit->GetMana());
     targetUnit->SetMana(targetUnit->GetMana() - manaToBurn);
     targetUnit->Damage(game, caster, false, false,
-                       CAttackType::NORMAL, CDamageType::NORMAL,
+                       CAttackType::SPELLS, CDamageType::MIND,
                        "", (float)manaToBurn, 0);
 }
 
@@ -237,7 +237,7 @@ void CAbilityEntanglingRoots::DoEffect(CSimulation& game, CUnit* caster, CWidget
     if (!target || target->IsDead()) return;
     float totalDamage = damagePerSecond_ * duration_;
     target->Damage(game, caster, false, false,
-                   CAttackType::NORMAL, CDamageType::NORMAL,
+                   CAttackType::SPELLS, CDamageType::POISON,
                    "", totalDamage, 0);
     // Apply periodic damage as a buff
     auto* targetUnit = dynamic_cast<CUnit*>(target);

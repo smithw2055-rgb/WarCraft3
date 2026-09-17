@@ -119,6 +119,9 @@ public:
               const std::string& hudXamlPath = "assets/ui/Hud.xaml", int gameVersion = 0);
     bool SwitchNoesisXaml(MpqManager* mpq, int screenW, int screenH,
                           const std::string& hudXamlPath, int gameVersion = 0);
+    // Reload ability/buff tooltip data with map-specific w3a/w3h object
+    // modifications applied (no-op when the map has none).
+    void ApplyMapAbilityMods(const std::string& mapPath);
     void Shutdown();
     void Update(int screenW, int screenH);
     void RenderNoesisOffscreen();

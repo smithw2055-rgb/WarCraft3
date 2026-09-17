@@ -99,7 +99,7 @@ void CAbilityChainLightning::DoEffect(CSimulation& game, CUnit* caster, CWidget*
     float dmg = damage_;
     for (int i = 0; i < bounces_ && current; i++) {
         current->Damage(game, caster, false, false,
-                        CAttackType::NORMAL, CDamageType::NORMAL,
+                        CAttackType::SPELLS, CDamageType::LIGHTNING,
                         "", dmg, 0);
         dmg *= (1.0f - damageReduction_);
         CUnit* next = nullptr;
@@ -131,6 +131,9 @@ void CAbilityFeralSpirit::DoEffect(CSimulation& game, CUnit* caster) {
         auto* wolf = game.CreateUnit(wolfType_, caster->GetPlayerIndex(), x, y, 0);
         if (wolf) {
             // TODO: set summon duration, mark as summoned
+            if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
+                summonedCb(caster->GetHandleId(), wolf->GetHandleId());
+            }
         }
     }
 }
@@ -183,7 +186,7 @@ void CAbilityCarrionSwarm::DoEffect(CSimulation& game, CUnit* caster, CWidget* t
         float perp = std::abs(ux*ny - uy*nx);
         if (perp <= width_/2) {
             unit->Damage(game, caster, false, false,
-                         CAttackType::NORMAL, CDamageType::NORMAL,
+                         CAttackType::SPELLS, CDamageType::POISON,
                          "", damage_, 0);
         }
     }
@@ -229,7 +232,11 @@ void CAbilityInferno::DoEffect(CSimulation& game, CUnit* caster, float x, float 
     }
     // Summon infernal
     auto* infernal = game.CreateUnit(infernalType_, caster->GetPlayerIndex(), x, y, 0);
-    (void)infernal;
+    if (infernal) {
+        if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
+            summonedCb(caster->GetHandleId(), infernal->GetHandleId());
+        }
+    }
 }
 
 // ===== Silence =====
@@ -283,7 +290,7 @@ void CAbilityLifeDrain::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
     if (!target || !caster || target->IsDead()) return;
     float totalDrain = drainPerSecond_ * duration_;
     target->Damage(game, caster, false, false,
-                   CAttackType::NORMAL, CDamageType::NORMAL,
+                   CAttackType::SPELLS, CDamageType::MAGIC,
                    "", totalDrain, 0);
     float newLife = caster->GetLife() + totalDrain;
     if (newLife > caster->GetMaxLife()) newLife = caster->GetMaxLife();
@@ -302,7 +309,7 @@ CAbilityFingerOfDeath::CAbilityFingerOfDeath(int handleId)
 void CAbilityFingerOfDeath::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target) return;
     target->Damage(game, caster, false, false,
-                   CAttackType::NORMAL, CDamageType::NORMAL,
+                   CAttackType::SPELLS, CDamageType::DEATH,
                    "", damage_, 0);
 }
 
@@ -339,7 +346,7 @@ void CAbilityRainOfChaos::DoEffect(CSimulation& game, CUnit* caster, float x, fl
             float dy = unit->GetY() - wy;
             if (dx*dx + dy*dy <= radius_*radius_) {
                 unit->Damage(game, caster, false, false,
-                             CAttackType::NORMAL, CDamageType::NORMAL,
+                             CAttackType::SPELLS, CDamageType::FIRE,
                              "", damage_, 0);
             }
         }

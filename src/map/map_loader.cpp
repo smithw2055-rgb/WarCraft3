@@ -1,9 +1,25 @@
 #include "map_loader.h"
 #include "../data/gameplay_constants.h"
+#include "../resource/slk.h"
 #include "../map/w3x_storm.h"
 #include "../map/wts.h"
 #include "../ecs/destructable.h"
 #include <iostream>
+
+namespace {
+
+static uint32_t FourCC(const char* text) {
+    return (uint32_t(uint8_t(text[0])) << 24)
+         | (uint32_t(uint8_t(text[1])) << 16)
+         | (uint32_t(uint8_t(text[2])) << 8)
+         | uint32_t(uint8_t(text[3]));
+}
+
+static bool IsKnownNonRenderableMapUnit(uint32_t id) {
+    return id == FourCC("sloc");
+}
+
+} // namespace
 
 MapLoader::MapLoader(MpqManager& mpq, CSimulation& sim, CUnitData& unitData,
                      CDestructableData& destructableData, CItemData& itemData,
@@ -30,6 +46,7 @@ void MapLoader::CreateTasks(const std::string& mapPath, int localPlayerIndex) {
 
     tasks_.push_back([this]() { DetermineTileset(mapPath_); });
     tasks_.push_back([this]() { LoadWorldEditStrings(mapPath_); });
+    tasks_.push_back([this]() { LoadGameplayConstants(); });
     tasks_.push_back([this]() { LoadUnitDataTables(); });
     tasks_.push_back([this]() { LoadTerrainData(mapPath_); });
     tasks_.push_back([this]() { LoadPathingData(mapPath_); });
@@ -76,6 +93,28 @@ void MapLoader::DetermineTileset(const std::string& mapPath) {
 void MapLoader::LoadWorldEditStrings(const std::string& mapPath) {
     // WorldEditStrings loaded as needed; WTS strings parsed later
     std::cout << "  WorldEdit strings prepared" << std::endl;
+}
+
+void MapLoader::LoadGameplayConstants() {
+    // Misc gameplay data (armor formula + attack/defense bonus table), merged
+    // like warsmash_ref: Units\MiscData.txt first, Units\MiscGame.txt wins on
+    // conflicts. Missing files keep compiled-in TFT defaults.
+    if (mpq_.ArchiveCount() == 0) return;
+    TxtTable misc;
+    bool loaded = false;
+    std::vector<uint8_t> bytes;
+    if (mpq_.ReadFile("Units\\MiscData.txt", bytes) && !bytes.empty()) {
+        loaded = misc.Load(bytes.data(), bytes.size()) || loaded;
+    }
+    if (mpq_.ReadFile("Units\\MiscGame.txt", bytes) && !bytes.empty()) {
+        loaded = misc.Load(bytes.data(), bytes.size()) || loaded;
+    }
+    if (loaded) {
+        gameplayConstants_ = CGameplayConstants(misc);
+        sim_.SetGameplayConstants(gameplayConstants_);
+        std::cout << "  GameplayConstants: loaded (DefenseArmor="
+                  << gameplayConstants_.GetDefenseArmor() << ")" << std::endl;
+    }
 }
 
 void MapLoader::LoadUnitDataTables() {
@@ -154,7 +193,7 @@ void MapLoader::LoadObjectModifications(const std::string& mapPath) {
         unitData_ = CUnitData::LoadFromMpq(mpq_, gameplayConstants_, mapPath);
         destructableData_ = CDestructableData::LoadFromMpq(mpq_, mapPath);
         itemData_ = CItemData::LoadFromMpq(mpq_, mapPath);
-        upgradeData_ = CUpgradeData::LoadFromMpq(mpq_);
+        upgradeData_ = CUpgradeData::LoadFromMpq(mpq_, mapPath);
         sim_.SetUnitData(&unitData_);
         sim_.SetDestructableData(&destructableData_);
         sim_.SetItemData(&itemData_);
@@ -252,6 +291,9 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
         }
         if (!simUnit) {
             if (!loadRenderAssets_) {
+                continue;
+            }
+            if (IsKnownNonRenderableMapUnit(u.id)) {
                 continue;
             }
             if (scene_.HasItemPath(u.id, u.skinId)) {

@@ -108,39 +108,38 @@ if(BUILD_APP)
         find_library(XCURSOR_LIBRARY Xcursor REQUIRED)
     endif()
 
-    set(NOESIS_SDK_DIR "${CMAKE_SOURCE_DIR}/third_party/noesisGUI")
-    if(NOT EXISTS "${NOESIS_SDK_DIR}/Include/NsCore/Noesis.h")
-        message(FATAL_ERROR "NoesisGUI SDK not found at ${NOESIS_SDK_DIR}")
+    set(AERO_SDK_DIR "${CMAKE_SOURCE_DIR}/third_party/AeroGUI")
+    set(AERO_BIN_DIR "${AERO_SDK_DIR}/Bin/x64-release-shared")
+    if(NOT EXISTS "${AERO_SDK_DIR}/Include/NsCore/Aero.h")
+        message(FATAL_ERROR "AeroGUI SDK not found at ${AERO_SDK_DIR}")
     endif()
 
-    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-        set(NOESIS_ARCH "windows_x86_64")
-    else()
-        set(NOESIS_ARCH "windows_x86")
+    if(NOT EXISTS "${AERO_BIN_DIR}")
+        message(FATAL_ERROR "AeroGUI shared library directory not found at ${AERO_BIN_DIR}")
     endif()
 
-    set(NOESIS_INCLUDE_DIRS
-        "${NOESIS_SDK_DIR}/Include"
-        "${NOESIS_SDK_DIR}/Src/Packages/App/Launcher/Include"
-        "${NOESIS_SDK_DIR}/Src/Packages/App/ApplicationLauncher/Include"
-        "${NOESIS_SDK_DIR}/Src/Packages/App/Providers/Include"
-        "${NOESIS_SDK_DIR}/Src/Packages/App/Theme/Include"
-        "${NOESIS_SDK_DIR}/Src/Packages/Render/GLRenderDevice/Include"
+    set(AERO_INCLUDE_DIRS
+        "${AERO_SDK_DIR}/Include"
+        "${AERO_SDK_DIR}/Packages/App/Launcher/Include"
+        "${AERO_SDK_DIR}/Packages/App/ApplicationLauncher/Include"
+        "${AERO_SDK_DIR}/Packages/App/Providers/Include"
+        "${AERO_SDK_DIR}/Packages/App/Theme/Include"
+        "${AERO_SDK_DIR}/Packages/Render/GLRenderDevice/Include"
     )
 
-    find_library(NOESIS_CORE_LIBRARY
-        NAMES Noesis
-        PATHS "${NOESIS_SDK_DIR}/Lib/${NOESIS_ARCH}"
+    find_library(AERO_CORE_LIBRARY
+        NAMES Aero
+        PATHS "${AERO_BIN_DIR}"
         NO_DEFAULT_PATH
     )
-    find_library(NOESIS_APP_LIBRARY
-        NAMES NoesisApp
-        PATHS "${NOESIS_SDK_DIR}/Lib/${NOESIS_ARCH}"
+    find_library(AERO_APP_LIBRARY
+        NAMES AeroApp
+        PATHS "${AERO_BIN_DIR}"
         NO_DEFAULT_PATH
     )
 
-    if(NOT NOESIS_CORE_LIBRARY OR NOT NOESIS_APP_LIBRARY)
-        message(FATAL_ERROR "NoesisGUI libraries not found in ${NOESIS_SDK_DIR}/Lib/${NOESIS_ARCH}")
+    if(NOT AERO_CORE_LIBRARY OR NOT AERO_APP_LIBRARY)
+        message(FATAL_ERROR "AeroGUI libraries not found in ${AERO_BIN_DIR}")
     endif()
 
     set(NS_LICENSE_NAME_VALUE "$ENV{NS_LICENSE_NAME}")
@@ -188,8 +187,14 @@ set(SOURCES
     src/map/unitsdoo.cpp
     src/model/mdx.cpp
     src/render/mdx_viewer.cpp
+    src/render/mdx_sequence_select.cpp
     src/render/mdx_animator.cpp
+    src/render/mdx_collision.cpp
+    src/render/mdx_event_effects.cpp
+    src/render/mdx_event_splat.cpp
+    src/render/mdx_skinning.cpp
     src/render/mdx_particles.cpp
+    src/render/mdx_prem_particles.cpp
     src/render/light_manager.cpp
     src/render/scene.cpp
     src/render/replaceable_ids.cpp
@@ -252,6 +257,7 @@ set(SOURCES
     src/ecs/behaviors/behavior_patrol.cpp
     src/ecs/behaviors/behavior_attack_move.cpp
     src/ecs/behaviors/behavior_stun.cpp
+    src/ecs/behaviors/behavior_board_transport.cpp
     src/ecs/behaviors/behavior_build.cpp
     src/ecs/behaviors/behavior_repair.cpp
     src/ecs/behaviors/behavior_harvest.cpp
@@ -264,11 +270,16 @@ set(SOURCES
     src/scripting/JassLexer.cpp
     src/scripting/JassParser.cpp
     src/scripting/JassVM.cpp
+    src/scripting/jass_animation_tags.cpp
     src/scripting/JassNatives.cpp
     # ===== Audio =====
     src/audio/AudioSystem.cpp
     # ===== UI =====
     src/ui/UiRenderer.cpp
+    src/ui/GluePanels.cpp
+    src/ui/GlueMenuControl.cpp
+    src/ui/MdxSceneControl.cpp
+    src/ui/MdxUiSceneRenderer.cpp
     src/ui/NoesisHudHost.cpp
     src/ui/FrameDefinition.cpp
     src/ui/FdfParser.cpp
@@ -292,6 +303,7 @@ set(SOURCES
     src/ui/BuffBar.cpp
     # ===== Core / State Machine =====
     src/core/game_controller.cpp
+    src/core/map_path_resolver.cpp
     src/core/warsmash_config.cpp
     # ===== Map Loading =====
     src/map/map_loader.cpp
@@ -304,7 +316,7 @@ if(BUILD_APP)
     # Add executable
     add_executable(warsmash ${SOURCES})
 
-    target_include_directories(warsmash PRIVATE src ${NOESIS_INCLUDE_DIRS})
+    target_include_directories(warsmash PRIVATE src ${AERO_INCLUDE_DIRS})
 
     # Pass project source root to code so it can find assets regardless of build location
     target_compile_definitions(warsmash PRIVATE
@@ -314,7 +326,7 @@ if(BUILD_APP)
         __STORMLIB_NO_STATIC_LINK__
     )
 
-    # -- Link StormLib (optional — app works without MPQ access) --
+    # -- Link StormLib (optional - app works without MPQ access) --
     macro(link_stormlib target)
         if(StormLib_FOUND)
             target_link_libraries(${target} PRIVATE StormLib::storm)
@@ -334,7 +346,7 @@ if(BUILD_APP)
                 endforeach()
             endif()
         else()
-            message(WARNING "Building without StormLib — MPQ/terrain loading disabled")
+            message(WARNING "Building without StormLib - MPQ/terrain loading disabled")
             target_compile_definitions(${target} PRIVATE WITHOUT_STORMLIB=1)
         endif()
     endmacro()
@@ -345,17 +357,17 @@ if(BUILD_APP)
     if(PLATFORM_WINDOWS)
         target_link_libraries(warsmash PRIVATE
             ${OPENGL_LIBRARIES}
-            ${NOESIS_CORE_LIBRARY}
-            ${NOESIS_APP_LIBRARY}
+            ${AERO_CORE_LIBRARY}
+            ${AERO_APP_LIBRARY}
         )
         link_stormlib(warsmash)
-        foreach(NOESIS_DLL Noesis.dll NoesisApp.dll NoesisOrg.dll)
-            if(EXISTS "${NOESIS_SDK_DIR}/Bin/${NOESIS_ARCH}/${NOESIS_DLL}")
+        foreach(AERO_DLL Aero.dll AeroApp.dll)
+            if(EXISTS "${AERO_BIN_DIR}/${AERO_DLL}")
                 add_custom_command(TARGET warsmash POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${NOESIS_SDK_DIR}/Bin/${NOESIS_ARCH}/${NOESIS_DLL}"
+                        "${AERO_BIN_DIR}/${AERO_DLL}"
                         "$<TARGET_FILE_DIR:warsmash>/"
-                    COMMENT "Copying ${NOESIS_DLL} to output"
+                    COMMENT "Copying ${AERO_DLL} to output"
                 )
             endif()
         endforeach()
@@ -364,8 +376,8 @@ if(BUILD_APP)
         target_include_directories(warsmash PRIVATE ${OPENGL_INCLUDE_DIRS} ${X11_INCLUDE_DIR})
         target_link_libraries(warsmash PRIVATE
             ${OPENGL_LIBRARIES}
-            ${NOESIS_CORE_LIBRARY}
-            ${NOESIS_APP_LIBRARY}
+            ${AERO_CORE_LIBRARY}
+            ${AERO_APP_LIBRARY}
             ${X11_LIBRARIES}
             ${XI_LIBRARY}
             ${XCURSOR_LIBRARY}
@@ -397,6 +409,34 @@ if(BUILD_APP)
         src/resource/mpq_storm.cpp
     )
     link_stormlib(search_mdx)
+
+    add_executable(mpq_file_probe
+        tools/mpq_file_probe.cpp
+        src/resource/mpq_storm.cpp
+    )
+    target_include_directories(mpq_file_probe PRIVATE src)
+    target_compile_definitions(mpq_file_probe PRIVATE
+        PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        __STORMLIB_NO_STATIC_LINK__
+    )
+    link_stormlib(mpq_file_probe)
+
+    add_executable(extract_ui_assets
+        tools/extract_ui_assets.cpp
+        src/resource/mpq_storm.cpp
+        src/resource/slk.cpp
+        src/asset/BLP.cpp
+        src/model/mdx.cpp
+        src/asset/stb_image.cpp
+        src/asset/stb_image_write.cpp
+    )
+    target_include_directories(extract_ui_assets PRIVATE src)
+    target_compile_definitions(extract_ui_assets PRIVATE
+        PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        __STORMLIB_NO_STATIC_LINK__
+    )
+    link_stormlib(extract_ui_assets)
+
     target_include_directories(resource_auditor PRIVATE src)
     target_compile_definitions(resource_auditor PRIVATE
         PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"

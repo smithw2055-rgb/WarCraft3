@@ -981,12 +981,15 @@ int SceneManager::AddTransientModelAtScenePosition(const std::string& path, cons
     inst->smoothMotion = false;
     inst->transient = true;
     inst->transientAge = 0.0f;
-    inst->transientMaxAge = std::max(0.1f, fallbackLifeSeconds);
     inst->ownedViewer = std::move(uniqueViewer);
     inst->viewer = inst->ownedViewer.get();
+    float transientLifeSeconds = fallbackLifeSeconds;
     if (inst->viewer) {
         inst->viewer->PlaySequenceByIndex(0, false);
+        transientLifeSeconds = std::max(transientLifeSeconds,
+                                        inst->viewer->GetSequenceDurationSeconds(0));
     }
+    inst->transientMaxAge = std::max(0.1f, transientLifeSeconds);
 
     const int instanceIndex = (int)instances_.size();
     instances_.push_back(inst);
@@ -994,7 +997,8 @@ int SceneManager::AddTransientModelAtScenePosition(const std::string& path, cons
 }
 
 int SceneManager::AddTransientModelWithSceneMatrix(const std::string& path, const Mat4& modelMatrix,
-                                                   int player, float fallbackLifeSeconds) {
+                                                   int player, float fallbackLifeSeconds,
+                                                   const Vec3& initialVelocity, float gravity) {
     const std::string modelPath = NormalizeModelPathWithExtension(path);
     std::unique_ptr<MdxViewer> uniqueViewer = CreateUnitViewer(modelPath);
     if (!uniqueViewer) {
@@ -1015,14 +1019,20 @@ int SceneManager::AddTransientModelWithSceneMatrix(const std::string& path, cons
     inst->smoothMotion = false;
     inst->transient = true;
     inst->transientAge = 0.0f;
-    inst->transientMaxAge = std::max(0.1f, fallbackLifeSeconds);
+    inst->transientVelocity = initialVelocity;
+    inst->transientGravity = gravity;
+    inst->transientHasPhysics = Dot(initialVelocity, initialVelocity) > 0.0f || std::fabs(gravity) > 0.0f;
     inst->useCustomModelMatrix = true;
     inst->customModelMatrix = modelMatrix;
     inst->ownedViewer = std::move(uniqueViewer);
     inst->viewer = inst->ownedViewer.get();
+    float transientLifeSeconds = fallbackLifeSeconds;
     if (inst->viewer) {
         inst->viewer->PlaySequenceByIndex(0, false);
+        transientLifeSeconds = std::max(transientLifeSeconds,
+                                        inst->viewer->GetSequenceDurationSeconds(0));
     }
+    inst->transientMaxAge = std::max(0.1f, transientLifeSeconds);
 
     const int instanceIndex = (int)instances_.size();
     instances_.push_back(inst);
@@ -1048,6 +1058,36 @@ bool SceneManager::SetInstanceVisible(int index, bool visible) {
     if (index < 0 || index >= (int)instances_.size()) return false;
     instances_[index]->visible = visible;
     return true;
+}
+
+bool SceneManager::IntersectInstanceRayWithCollision(int index, const picking::PickRay& ray, float& outT) const {
+    if (index < 0 || index >= (int)instances_.size()) {
+        return false;
+    }
+    const PlacedModel* inst = instances_[index];
+    if (!inst || !inst->visible || !inst->viewer) {
+        return false;
+    }
+
+    Mat4 modelMatrix = Mat4::Identity();
+    if (inst->useCustomModelMatrix) {
+        modelMatrix = inst->customModelMatrix;
+    }
+    else {
+        const float scale = (inst->scale[0] + inst->scale[1] + inst->scale[2]) / 3.0f;
+        const float c = std::cos(inst->renderAngle);
+        const float s = std::sin(inst->renderAngle);
+        modelMatrix.m[0] = c * scale;
+        modelMatrix.m[2] = -s * scale;
+        modelMatrix.m[5] = scale;
+        modelMatrix.m[8] = s * scale;
+        modelMatrix.m[10] = c * scale;
+        modelMatrix.m[12] = inst->renderPos[0];
+        modelMatrix.m[13] = inst->renderPos[1];
+        modelMatrix.m[14] = inst->renderPos[2];
+    }
+
+    return inst->viewer->IntersectRayWithCollision(ray, modelMatrix, outT);
 }
 
 void SceneManager::SetDebugRenderRange(int start, int count) {
@@ -1129,9 +1169,34 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
                     }
                     frameEventEffects_.push_back(std::move(eventEffect));
                 }
+                for (const MdxParticleEmitter1Spawn& spawn : inst->viewer->GetParticleEmitter1Spawns()) {
+                    if (spawn.modelPath.empty()) {
+                        continue;
+                    }
+                    const Mat4 worldTransform = BuildInstanceModelMatrix(*inst) * spawn.localTransform;
+                    const Vec3 worldVelocity{
+                        inst->scale[0] * spawn.velocity.x,
+                        inst->scale[1] * spawn.velocity.y,
+                        inst->scale[2] * spawn.velocity.z
+                    };
+                    AddTransientModelWithSceneMatrix(spawn.modelPath, worldTransform, inst->player,
+                                                     spawn.lifeSpan, worldVelocity, spawn.gravity);
+                }
             }
             if (inst->transient) {
                 inst->transientAge += std::max(0.0f, dt);
+                if (inst->transientHasPhysics && inst->useCustomModelMatrix) {
+                    MdxAdvanceParticleEmitter1SpawnTransform(inst->customModelMatrix,
+                                                             inst->transientVelocity,
+                                                             inst->transientGravity,
+                                                             dt);
+                    inst->pos[0] = inst->customModelMatrix.m[12];
+                    inst->pos[1] = inst->customModelMatrix.m[13];
+                    inst->pos[2] = inst->customModelMatrix.m[14];
+                    inst->renderPos[0] = inst->pos[0];
+                    inst->renderPos[1] = inst->pos[1];
+                    inst->renderPos[2] = inst->pos[2];
+                }
                 const bool sequenceFinished = inst->viewer->HasAnimations()
                     && inst->viewer->IsCurrentSequenceFinished();
                 if (sequenceFinished || inst->transientAge >= inst->transientMaxAge) {

@@ -46,7 +46,27 @@ bool LoadWar3MapDestructableMods(const std::string& mapPath,
                                   WtsTable* wts = nullptr);
 
 bool LoadWar3MapItemMods(const std::string& mapPath,
+                          ObjectModificationSet& out,
+                          WtsTable* wts = nullptr);
+
+// Ability/upgrade/buff object data (war3map.w3a/.w3q/.w3h) use the extended
+// per-modification level + data-pointer encoding (ref object data parsing).
+bool LoadWar3MapAbilityMods(const std::string& mapPath,
+                            ObjectModificationSet& out,
+                            WtsTable* wts = nullptr);
+
+bool LoadWar3MapUpgradeMods(const std::string& mapPath,
+                            ObjectModificationSet& out,
+                            WtsTable* wts = nullptr);
+
+bool LoadWar3MapBuffMods(const std::string& mapPath,
                          ObjectModificationSet& out,
+                         WtsTable* wts = nullptr);
+
+// In-memory parse entry point (same code path as the archive loaders;
+// exposed for tests and tools).
+bool ParseObjectModsData(const uint8_t* data, size_t size,
+                         bool extended, ObjectModificationSet& out,
                          WtsTable* wts = nullptr);
 
 bool LoadWar3MapObjectMods(const std::string& mapPath,

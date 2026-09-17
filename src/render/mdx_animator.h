@@ -76,6 +76,7 @@ public:
     int GetBoneIndexForObjectId(int objectId) const;
     bool IsObjectVisible(int objectId) const;
     bool GetObjectWorldTransformYUp(int objectId, Mat4& outMatrix, Vec3* outScale = nullptr) const;
+    bool GetObjectWorldLocationYUp(int objectId, Vec3& outPosition) const;
     bool GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const;
     const std::vector<MdxEventTrigger>& GetTriggeredEvents() const { return triggeredEvents_; }
 

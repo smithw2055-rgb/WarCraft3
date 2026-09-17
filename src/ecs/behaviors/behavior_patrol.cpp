@@ -125,7 +125,7 @@ bool CBehaviorPatrol::MoveTowardWaypoint(CSimulation& simulation) {
 }
 
 bool CBehaviorPatrol::Update(CSimulation& simulation) {
-    if (!unit_ || points_.empty()) return true;
+    if (!unit_ || points_.empty() || unit_->IsRooted()) return true;
 
     auto& target = points_[currentTarget_];
     float dx = target.x - unit_->GetX();

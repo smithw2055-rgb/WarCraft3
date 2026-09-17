@@ -121,7 +121,7 @@ bool CBehaviorAttackMove::MoveTowardWaypoint(CSimulation& simulation) {
 
 bool CBehaviorAttackMove::Update(CSimulation& simulation) {
     if (!unit_) return true;
-    if (unit_->IsBuilding() || !unit_->GetMoveBehavior()) {
+    if (unit_->IsBuilding() || !unit_->GetMoveBehavior() || unit_->IsRooted()) {
         return true;
     }
 

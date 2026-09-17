@@ -39,6 +39,9 @@ private:
         std::string birthSequence;
         std::string standSequence;
         std::string path;
+        int cameraSequenceIndex = -1;
+        float cameraElapsedMs = 0.0f;
+        bool cameraLoop = true;
     };
 
     bool EnsureLoaded();
@@ -50,6 +53,9 @@ private:
     bool LoadGlueMainMenu();
     void RenderSingle(float dt);
     void RenderGlueMainMenu(float dt);
+    uint32_t CameraFrameForLayer(const Layer& layer) const;
+    void AdvanceLayerCamera(Layer& layer, float dt);
+    bool BuildModelCameraViewProj(Layer& layer, float dt, Mat4& view, Mat4& proj);
     void ReleaseTarget();
 
     std::string sceneKey_;

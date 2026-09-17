@@ -136,6 +136,23 @@ struct MdxParticleEmitter2Sample {
     int emissionRateKey = -1;
 };
 
+// ---- ParticleEmitterPopcorn (CORN) ----
+struct MdxParticleEmitterPopcorn {
+    std::string name;
+    int objectId = -1;
+    int parentId = -1;
+    uint32_t flags = 0;
+    float lifeSpan = 0.0f;
+    float emissionRate = 0.0f;
+    float speed = 0.0f;
+    float color[3] = {1.0f, 1.0f, 1.0f};
+    float alpha = 0.0f;
+    int replaceableId = 0;
+    std::string path;
+    std::string animationVisibilityGuide;
+    std::vector<MdxTimeline> timelines;
+};
+
 // ---- Ribbon emitter ----
 struct MdxRibbonEmitter {
     std::string name;
@@ -153,8 +170,9 @@ struct MdxRibbonEmitter {
     float gravity = 0.0f;
     unsigned rows = 1;
     unsigned columns = 1;
-    int priorityPlane = 0;
-    int replaceableId = 0;
+    // Ref MdlxRibbonEmitter: this field is materialId (not priority plane).
+    int materialId = 0;
+    int priorityPlane = 0; // legacy alias, kept in sync on load
 
     std::vector<MdxTimeline> timelines;
 };
@@ -170,20 +188,26 @@ struct MdxEventObject {
     std::vector<MdxTimeline> timelines; // KEVT (keyframe trigger)
 };
 
+enum class MdxLightType : int {
+    Omnidirectional = 0,
+    Directional = 1,
+    Ambient = 2,
+};
+
 // ---- Light (MDX light node) ----
 struct MdxLight {
     std::string name;
     int objectId = -1;
     int parentId = -1;
     uint32_t flags = 0;
-    int textureId = -1;
+    MdxLightType type = MdxLightType::Omnidirectional;
     float attenuationStart = 0;
     float attenuationEnd = 0;
     float intensity = 1.0f;
     float color[3] = {1,1,1};
     float ambientIntensity = 0;
     float ambientColor[3] = {0,0,0};
-    std::vector<MdxTimeline> timelines; // KLAS, KLAE, KLBC, KABP, KPLA, KPLS
+    std::vector<MdxTimeline> timelines; // KLAS, KLAE, KLAC, KLAI, KLBI, KLBC, KLAV
 };
 
 // ---- Geoset (extended with skinning data) ----
@@ -242,7 +266,16 @@ struct MdxCamera {
     float fov = 0;
     float farClip = 0;
     float nearClip = 0;
-    std::vector<MdxTimeline> timelines; // KCTR (translation), KTTR (target)
+    std::vector<MdxTimeline> timelines; // KCTR (translation), KTTR (target), KCRL (roll)
+};
+
+struct MdxCameraSample {
+    float pos[3] = {};
+    float target[3] = {};
+    float fov = 0.0f;
+    float farClip = 0.0f;
+    float nearClip = 0.0f;
+    float roll = 0.0f;
 };
 
 // ---- Attachment ----
@@ -253,6 +286,24 @@ struct MdxAttachment {
     uint32_t flags = 0;
     std::string path;
     int attachmentId = 0;
+    std::vector<MdxTimeline> timelines;
+};
+
+enum class MdxCollisionShapeType : int {
+    Box = 0,
+    Plane = 1,
+    Sphere = 2,
+    Cylinder = 3,
+};
+
+struct MdxCollisionShape {
+    std::string name;
+    int objectId = -1;
+    int parentId = -1;
+    uint32_t flags = 0;
+    MdxCollisionShapeType type = MdxCollisionShapeType::Sphere;
+    float vertices[2][3] = {};
+    float boundsRadius = 0.0f;
     std::vector<MdxTimeline> timelines;
 };
 
@@ -281,6 +332,7 @@ struct MdxModel {
     // Emitters
     std::vector<MdxParticleEmitter1> particleEmitters1; // PREM
     std::vector<MdxParticleEmitter2> particleEmitters2; // PRE2
+    std::vector<MdxParticleEmitterPopcorn> particleEmittersPopcorn; // CORN
     std::vector<MdxRibbonEmitter> ribbonEmitters;       // RIBB
     std::vector<MdxEventObject> eventObjects;           // EVTS
 
@@ -290,8 +342,8 @@ struct MdxModel {
     // Global sequences
     std::vector<uint32_t> globalSequences;
 
-    // DNC collision shapes (CLID)
-    std::vector<uint32_t> collisionShapes;
+    // Collision shapes (CLID)
+    std::vector<MdxCollisionShape> collisionShapes;
 
     // Bounds
     float boundsMin[3] = {};
@@ -303,6 +355,10 @@ struct MdxModel {
 // Evaluate a timeline at a given frame (normalized to [0,1] between surrounding keys)
 // Returns true if data exists and writes to `out`; false if timeline is empty.
 bool MdxSampleTimeline(const MdxTimeline& tl, uint32_t frame, float* out, int elemCount, float defaultVal = 0.0f);
+bool MdxSampleTimelineForModel(const MdxTimeline& tl, const MdxModel* model,
+                               uint32_t frame, float elapsedMs,
+                               float* out, int elemCount, float defaultVal = 0.0f,
+                               int sequenceIndex = -1);
 bool MdxSampleParticleEmitter1(const MdxParticleEmitter1& emitter,
                                const MdxModel* model,
                                uint32_t frame,
@@ -315,6 +371,12 @@ bool MdxSampleParticleEmitter2(const MdxParticleEmitter2& emitter,
                                float elapsedMs,
                                MdxParticleEmitter2Sample& out,
                                int sequenceIndex = -1);
+bool MdxSampleCamera(const MdxCamera& camera,
+                     const MdxModel* model,
+                     uint32_t frame,
+                     float elapsedMs,
+                     MdxCameraSample& out,
+                     int sequenceIndex = -1);
 
 // Geoset animation color timelines (KGAC) are stored as BGR; convert them for
 // renderer-facing RGB color uniforms.

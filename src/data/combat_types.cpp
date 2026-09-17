@@ -59,11 +59,16 @@ std::string CDefenseTypeInfo::ToString(CDefenseType t) {
     }
 }
 
-float CDefenseTypeInfo::CalcDamageReduction(int defense, int attackerLevel) {
+float CDefenseTypeInfo::CalcDamageReduction(int defense, int attackerLevel, float defenseArmor) {
     (void)attackerLevel;
-    // WC3 formula: reduction = (defense * 0.06) / (1 + defense * 0.06)
-    float d = (float)defense;
-    return (d * 0.06f) / (1.0f + d * 0.06f);
+    // Matches warsmash_ref CUnit.damage: positive armor uses
+    // reduction = (defense * k) / (1 + defense * k); negative armor amplifies
+    // damage as 2 - (1 - k)^(-defense). k = DefenseArmor (0.06 default).
+    if (defense >= 0) {
+        float d = (float)defense;
+        return (d * defenseArmor) / (1.0f + d * defenseArmor);
+    }
+    return 1.0f - (2.0f - std::pow(1.0f - defenseArmor, -(float)defense));
 }
 
 CRegenType CRegenTypeInfo::FromString(const std::string& s) {

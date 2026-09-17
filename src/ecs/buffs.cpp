@@ -1,6 +1,8 @@
 #include "buffs.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
+#include "ecs/behaviors/behavior_stun.h"
+#include <memory>
 
 // ===== CBuffSlow =====
 CBuffSlow::CBuffSlow(float duration, float slowPercent, int casterHandle)
@@ -10,14 +12,18 @@ CBuffSlow::CBuffSlow(float duration, float slowPercent, int casterHandle)
 
 void CBuffSlow::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
-    originalSpeed_ = target->GetSpeed();
-    int reduction = (int)(originalSpeed_ * slowPercent_);
-    target->SetSpeed(originalSpeed_ - reduction);
+    if (!target) return;
+    // Store the delta (not the original speed) so concurrent speed buffs
+    // applied in between are not clobbered on remove.
+    appliedReduction_ = (int)(target->GetSpeed() * slowPercent_);
+    target->SetSpeed(target->GetSpeed() - appliedReduction_);
 }
 
 void CBuffSlow::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    target->SetSpeed(originalSpeed_);
+    if (!target) return;
+    target->SetSpeed(target->GetSpeed() + appliedReduction_);
+    appliedReduction_ = 0;
 }
 
 CBuff* CBuffSlow::Clone() const {
@@ -54,15 +60,18 @@ CBuffBloodlust::CBuffBloodlust(float duration, float speedBonus, float attackSpe
 
 void CBuffBloodlust::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
-    int bonus = (int)(target->GetSpeed() * speedBonus_);
-    target->SetSpeed(target->GetSpeed() + bonus);
-    // TODO: apply attack speed bonus
+    if (!target) return;
+    appliedSpeedBonus_ = (int)(target->GetSpeed() * speedBonus_);
+    target->SetSpeed(target->GetSpeed() + appliedSpeedBonus_);
+    target->MultiplyAttackSpeed(1.0f + attackSpeedBonus_);
 }
 
 void CBuffBloodlust::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    int bonus = (int)(target->GetSpeed() * speedBonus_ / (1.0f + speedBonus_));
-    target->SetSpeed(target->GetSpeed() - bonus);
+    if (!target) return;
+    target->SetSpeed(target->GetSpeed() - appliedSpeedBonus_);
+    appliedSpeedBonus_ = 0;
+    target->DivideAttackSpeed(1.0f + attackSpeedBonus_);
 }
 
 CBuff* CBuffBloodlust::Clone() const {
@@ -72,21 +81,41 @@ CBuff* CBuffBloodlust::Clone() const {
 }
 
 // ===== CBuffThorns =====
-CBuffThorns::CBuffThorns(float duration, float reflectPercent)
-    : CBuff(War3ID("Bthr"), duration, true), reflectPercent_(reflectPercent) {}
+CBuffThorns::CBuffThorns(float duration, float reflectPercent, War3ID id)
+    : CBuff(id, duration, true), reflectPercent_(reflectPercent) {}
 
 void CBuffThorns::OnApply(CSimulation& game, CUnit* target) {
     (void)game; (void)target;
-    // TODO: register damage reflection callback
+    // Reflection is handled in CUnit::Damage via HasBuff(Bthr); no registration needed.
 }
 
 void CBuffThorns::OnRemove(CSimulation& game, CUnit* target) {
     (void)game; (void)target;
-    // TODO: unregister damage reflection callback
+    // See OnApply: buff presence is the only state.
 }
 
 CBuff* CBuffThorns::Clone() const {
-    auto* copy = new CBuffThorns(duration_, reflectPercent_);
+    auto* copy = new CBuffThorns(duration_, reflectPercent_, GetId());
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffLifesteal =====
+CBuffLifesteal::CBuffLifesteal(float duration, float stealPercent)
+    : CBuff(War3ID("BUav"), duration, true), stealPercent_(stealPercent) {}
+
+void CBuffLifesteal::OnApply(CSimulation& game, CUnit* target) {
+    (void)game; (void)target;
+    // Steal is applied in CUnit::Damage via HasBuff(BUav); no registration needed.
+}
+
+void CBuffLifesteal::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game; (void)target;
+    // See OnApply: buff presence is the only state.
+}
+
+CBuff* CBuffLifesteal::Clone() const {
+    auto* copy = new CBuffLifesteal(duration_, stealPercent_);
     copy->remaining_ = remaining_;
     return copy;
 }
@@ -102,7 +131,16 @@ void CBuffDivineShield::OnApply(CSimulation& game, CUnit* target) {
 
 void CBuffDivineShield::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    target->SetInvulnerable(false);
+    if (!target) return;
+    // Don't strip invulnerability granted by another active shield:
+    // OnRemove runs before the buff is erased, so self is still counted.
+    int shieldCount = 0;
+    for (const auto& b : target->GetBuffs()) {
+        if (b && b->GetId() == War3ID("Bdsh")) ++shieldCount;
+    }
+    if (shieldCount <= 1) {
+        target->SetInvulnerable(false);
+    }
 }
 
 CBuff* CBuffDivineShield::Clone() const {
@@ -116,13 +154,26 @@ CBuffStun::CBuffStun(float duration)
     : CBuff(War3ID("Bstn"), duration, false) {}
 
 void CBuffStun::OnApply(CSimulation& game, CUnit* target) {
-    (void)game; (void)target;
-    // TODO: disable unit actions
+    if (!target) return;
+    target->ClearOrders();
+    auto stun = std::make_unique<CBehaviorStun>();
+    stun->SetDuration(GetRemaining() > 0 ? GetRemaining() : GetDuration());
+    target->SetCurrentBehavior(std::move(stun));
+    if (auto* behavior = target->GetCurrentBehavior()) {
+        behavior->Begin(game);
+    }
 }
 
 void CBuffStun::OnRemove(CSimulation& game, CUnit* target) {
-    (void)game; (void)target;
-    // TODO: re-enable unit actions
+    (void)game;
+    if (!target) return;
+    // Only clear if the unit is still stunned (behavior may already have
+    // expired and been cleaned up by CUnit::Update).
+    if (auto* behavior = target->GetCurrentBehavior()) {
+        if (behavior->GetCategory() == CBehaviorCategory::STUN) {
+            target->SetCurrentBehavior(nullptr);
+        }
+    }
 }
 
 CBuff* CBuffStun::Clone() const {

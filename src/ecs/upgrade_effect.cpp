@@ -36,12 +36,15 @@ CUpgradeEffectAttackDamage::CUpgradeEffectAttackDamage(War3ID target, int baseVa
     , baseValue_(baseValue), perLevel_(perLevel) {}
 
 void CUpgradeEffectAttackDamage::Apply(CSimulation& game, CUnit* unit, int level) {
-    (void)game; (void)unit; (void)level;
-    // TODO: modify attack damage on unit type
+    (void)game;
+    if (!unit) return;
+    unit->AddBonusDamage(baseValue_ + perLevel_ * (level - 1));
 }
 
 void CUpgradeEffectAttackDamage::Unapply(CSimulation& game, CUnit* unit, int level) {
-    (void)game; (void)unit; (void)level;
+    (void)game;
+    if (!unit) return;
+    unit->AddBonusDamage(-(baseValue_ + perLevel_ * (level - 1)));
 }
 
 // ===== CUpgradeEffectDefense =====
@@ -51,13 +54,14 @@ CUpgradeEffectDefense::CUpgradeEffectDefense(War3ID target, int baseValue, int p
 
 void CUpgradeEffectDefense::Apply(CSimulation& game, CUnit* unit, int level) {
     (void)game;
-    int bonus = baseValue_ + perLevel_ * (level - 1);
-    // TODO: add defense bonus to unit
-    (void)unit; (void)bonus;
+    if (!unit) return;
+    unit->AddBonusArmor(baseValue_ + perLevel_ * (level - 1));
 }
 
 void CUpgradeEffectDefense::Unapply(CSimulation& game, CUnit* unit, int level) {
-    (void)game; (void)unit; (void)level;
+    (void)game;
+    if (!unit) return;
+    unit->AddBonusArmor(-(baseValue_ + perLevel_ * (level - 1)));
 }
 
 // ===== CUpgradeEffectHitPoints =====
@@ -67,14 +71,14 @@ CUpgradeEffectHitPoints::CUpgradeEffectHitPoints(War3ID target, int baseValue, i
 
 void CUpgradeEffectHitPoints::Apply(CSimulation& game, CUnit* unit, int level) {
     (void)game;
-    int bonus = baseValue_ + perLevel_ * (level - 1);
-    unit->SetMaxLife(unit->GetMaxLife() + bonus);
+    if (!unit) return;
+    unit->AddBonusMaxLife((float)(baseValue_ + perLevel_ * (level - 1)));
 }
 
 void CUpgradeEffectHitPoints::Unapply(CSimulation& game, CUnit* unit, int level) {
     (void)game;
-    int bonus = baseValue_ + perLevel_ * (level - 1);
-    unit->SetMaxLife(unit->GetMaxLife() - bonus);
+    if (!unit) return;
+    unit->AddBonusMaxLife(-(float)(baseValue_ + perLevel_ * (level - 1)));
 }
 
 // ===== CUpgradeEffectMoveSpeed =====
@@ -100,10 +104,13 @@ CUpgradeEffectAttackRange::CUpgradeEffectAttackRange(War3ID target, int baseValu
     , baseValue_(baseValue), perLevel_(perLevel) {}
 
 void CUpgradeEffectAttackRange::Apply(CSimulation& game, CUnit* unit, int level) {
-    (void)game; (void)unit; (void)level;
-    // TODO: modify attack range on unit's attacks
+    (void)game;
+    if (!unit) return;
+    unit->AddAttackRangeBonusAll((float)(baseValue_ + perLevel_ * (level - 1)));
 }
 
 void CUpgradeEffectAttackRange::Unapply(CSimulation& game, CUnit* unit, int level) {
-    (void)game; (void)unit; (void)level;
+    (void)game;
+    if (!unit) return;
+    unit->AddAttackRangeBonusAll(-(float)(baseValue_ + perLevel_ * (level - 1)));
 }

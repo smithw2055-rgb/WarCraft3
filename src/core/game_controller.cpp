@@ -1,6 +1,7 @@
 #include "game_controller.h"
 #include "../render/renderer.h"
 #include "../render/mdx_event_splat.h"
+#include "../render/mdx_sequence_select.h"
 #include "../render/picking.h"
 #include "../render/unit_selection_geom.h"
 #include "../ecs/animation_utils.h"
@@ -333,6 +334,20 @@ static std::string UiOnlyMdxPathFromModelField(std::string path) {
 
 static Vec3 UiOnlyMdxPointToYUp(const float value[3]) {
     return Vec3(value[0], value[2], -value[1]);
+}
+
+static int UiOnlySelectStandSequenceIndex(const MdxModel& model) {
+    int sequenceIndex = MdxSelectSequenceIndexByPrimaryAndTags(model, "stand", {});
+    if (sequenceIndex >= 0) {
+        return sequenceIndex;
+    }
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        const MdxSequence& sequence = model.sequences[(size_t)i];
+        if (sequence.endFrame > sequence.startFrame) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 static std::vector<War3UI::GlueCampaignListItem> LoadUiOnlyGlueCampaigns(const MpqManager& mpq,
@@ -1597,6 +1612,9 @@ void GameController::InitLoading() {
     mapLoader_->SetConfigData(configEnv_ ? configEnv_->GetData() : nullptr);
     mapLoader_->SetLoadRenderAssets(!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_);
     mapLoader_->CreateTasks(mapPath_, 0);
+    if (!hideHud_) {
+        ui_.ApplyMapAbilityMods(mapPath_);
+    }
     loadingProgress_ = 0.0f;
     loadingInitialized_ = true;
     std::cout << "Loading started..." << std::endl;
@@ -1708,6 +1726,7 @@ void GameController::InitInGame() {
             simulation_.Update();
             if (jassNatives_) {
                 jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
+                jassNatives_->UpdateRegions();
                 jassNatives_->PumpQueuedThreads(1024);
             }
             EnsureHumanMeleeStartsFromMapConfig();
@@ -1879,6 +1898,13 @@ void GameController::WireJassCallbacks() {
 
     auto* jassData = jassNatives_->GetData().get();
     if (!jassData) return;
+
+    // Ref GetLocationZ reads the map terrain height; route JASS queries to
+    // the live textured terrain (0 when no map is loaded).
+    jassData->SetTerrainHeightCallback([this](float x, float y) -> float {
+        return texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, y) : 0.0f;
+    });
+    jassData->SetLocalPlayerIndex(config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0);
 
     jassData->camSetPosition = [this](float x, float y, float z) {
         camera_.SetTarget(x, y, z); camera_.ResetToHome();
@@ -2128,6 +2154,38 @@ void GameController::WireJassCallbacks() {
             }
         }
     );
+
+    simulation_.SetUnitTrainedCallback(
+        [this](int buildingHandle, int trainedHandle) {
+            if (jassNatives_) {
+                jassNatives_->FireTrainedEvent(buildingHandle, trainedHandle);
+            }
+        }
+    );
+
+    simulation_.SetUnitSummonedCallback(
+        [this](int summonerHandle, int summonedHandle) {
+            if (jassNatives_) {
+                jassNatives_->FireSummonEvent(summonerHandle, summonedHandle);
+            }
+        }
+    );
+
+    simulation_.SetResearchFinishedCallback(
+        [this](int unitHandle, int upgradeId) {
+            if (jassNatives_) {
+                jassNatives_->FireResearchEvent(unitHandle, upgradeId);
+            }
+        }
+    );
+
+    simulation_.SetHeroRevivedCallback(
+        [this](int reviverHandle, int revivedHandle) {
+            if (jassNatives_) {
+                jassNatives_->FireReviveEvent(reviverHandle, revivedHandle);
+            }
+        }
+    );
 }
 
 // --- Update ---
@@ -2271,6 +2329,7 @@ void GameController::StepSimulation(float dt) {
         simulation_.Update();
         if (jassNatives_) {
             jassNatives_->UpdateTimers(simStep);
+            jassNatives_->UpdateRegions();
             jassNatives_->PumpQueuedThreads(1024);
         }
         simulationAccumulator_ -= simStep;
@@ -2481,8 +2540,13 @@ void GameController::Render(int screenW, int screenH) {
                     const float scale = eventEffect.effect.scale > 0.0f ? eventEffect.effect.scale : 1.0f;
                     splat.halfSize = std::max(16.0f, scale * 64.0f);
                     if (eventEffect.hasWorldTransform) {
+                        const Vec3 splatScaleCompensation = MdxEventSplatScaleCompensationForType(
+                            eventEffect.effect.type, eventEffect.effect.localScale);
                         MdxEventSplatMesh mesh = BuildMdxEventSplatMeshFromTransform(
-                            eventEffect.worldTransform, splat.halfSize, 8.0f);
+                            eventEffect.worldTransform,
+                            splat.halfSize,
+                            8.0f,
+                            splatScaleCompensation);
                         splat.meshVertices = std::move(mesh.vertices);
                         splat.meshIndices = std::move(mesh.indices);
                     }
@@ -2626,6 +2690,8 @@ bool GameController::LoadUiOnlyGlueBackgroundModel() {
         glueBackgroundLoaded_ = true;
         glueBackgroundPath_ = path;
         glueBackgroundViewer_.PlayStandSequence();
+        glueBackgroundCameraSequenceIndex_ = UiOnlySelectStandSequenceIndex(glueBackgroundModel_);
+        glueBackgroundCameraElapsedMs_ = 0.0f;
         std::cout << "UI-only mode: loaded glue background model " << glueBackgroundPath_
                   << " cameras=" << glueBackgroundModel_.cameras.size()
                   << " sequences=" << glueBackgroundModel_.sequences.size() << std::endl;
@@ -2744,12 +2810,34 @@ void GameController::RenderUiOnlyGlueBackground(int screenW, int screenH) {
     Mat4 proj;
     if (!glueBackgroundModel_.cameras.empty()) {
         const MdxCamera& camera = glueBackgroundModel_.cameras[0];
-        view = LookAt(UiOnlyMdxPointToYUp(camera.pos),
-                      UiOnlyMdxPointToYUp(camera.target),
+        glueBackgroundCameraElapsedMs_ += 1000.0f / 60.0f;
+        uint32_t cameraFrame = 0;
+        if (glueBackgroundCameraSequenceIndex_ >= 0
+            && glueBackgroundCameraSequenceIndex_ < (int)glueBackgroundModel_.sequences.size()) {
+            const MdxSequence& sequence = glueBackgroundModel_.sequences[(size_t)glueBackgroundCameraSequenceIndex_];
+            const float durationMs = MdxSequenceDurationSeconds(glueBackgroundModel_, glueBackgroundCameraSequenceIndex_) * 1000.0f;
+            if (durationMs > 0.0f) {
+                glueBackgroundCameraElapsedMs_ = std::fmod(glueBackgroundCameraElapsedMs_, durationMs);
+            }
+            const uint32_t range = sequence.endFrame > sequence.startFrame
+                ? sequence.endFrame - sequence.startFrame
+                : 0;
+            const uint32_t offset = range > 0
+                ? std::min(range, (uint32_t)glueBackgroundCameraElapsedMs_)
+                : 0;
+            cameraFrame = sequence.startFrame + offset;
+        }
+
+        MdxCameraSample sampledCamera;
+        MdxSampleCamera(camera, &glueBackgroundModel_, cameraFrame,
+                        glueBackgroundCameraElapsedMs_, sampledCamera,
+                        glueBackgroundCameraSequenceIndex_);
+        view = LookAt(UiOnlyMdxPointToYUp(sampledCamera.pos),
+                      UiOnlyMdxPointToYUp(sampledCamera.target),
                       Vec3(0.0f, 1.0f, 0.0f));
-        const float fovDeg = camera.fov * 0.6f * 57.2957795f;
-        const float nearClip = std::max(1.0f, camera.nearClip);
-        const float farClip = std::max(nearClip + 1.0f, camera.farClip);
+        const float fovDeg = sampledCamera.fov * 0.6f * 57.2957795f;
+        const float nearClip = std::max(1.0f, sampledCamera.nearClip);
+        const float farClip = std::max(nearClip + 1.0f, sampledCamera.farClip);
         proj = Perspective(fovDeg, (float)screenW / (float)screenH, nearClip, farClip);
     } else {
         view = LookAt(Vec3(0.0f, 900.0f, 1800.0f), Vec3(0.0f, 400.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
@@ -3185,6 +3273,17 @@ static int CountPlayerTownHalls(CSimulation& sim, int playerIndex) {
     return count;
 }
 
+static bool IsCampaignMapPath(const std::string& mapPath) {
+    std::string path = LowerAscii(mapPath);
+    std::replace(path.begin(), path.end(), '/', '\\');
+    return path.find("\\maps\\campaign\\") != std::string::npos
+        || path.find("\\maps\\frozenthrone\\campaign\\") != std::string::npos
+        || path.find("warsmash_mpq_map_maps_campaign_") != std::string::npos
+        || path.find("warsmash_mpq_map_maps_frozenthrone_campaign_") != std::string::npos
+        || path.rfind("maps\\campaign\\", 0) == 0
+        || path.rfind("maps\\frozenthrone\\campaign\\", 0) == 0;
+}
+
 static bool FindPlayerTownHallPosition(CSimulation& sim, int playerIndex, float& outX, float& outY) {
     for (auto* unit : sim.GetUnits())
         if (unit && unit->GetPlayerIndex() == playerIndex && IsHumanTownHallType(unit->GetTypeId())) {
@@ -3320,6 +3419,10 @@ void GameController::EnsureHumanMeleeStartForPlayer(int playerIndex, float start
 
 void GameController::EnsureHumanMeleeStartsFromMapConfig() {
     if (!jassNatives_ || !simulationInitialized_) return;
+    if (IsCampaignMapPath(mapPath_)) {
+        std::cout << "MeleeFallback: skipped for campaign map" << std::endl;
+        return;
+    }
     auto data = jassNatives_->GetData();
     if (!data) return;
 
@@ -3359,6 +3462,7 @@ void GameController::FlushStartupSimulationState() {
         size_t before = simulation_.GetUnits().size();
         simulation_.Update();
         int timers = jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
+        jassNatives_->UpdateRegions();
         int pumped = jassNatives_->PumpQueuedThreads(1024);
         if (!diagnoseMapOnly_ && !debugGameplaySmoke_) {
             SyncAndReconcileVisuals();
@@ -3644,6 +3748,7 @@ void GameController::RunGameplaySmoke() {
             simulation_.Update();
             if (jassNatives_) {
                 jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
+                jassNatives_->UpdateRegions();
                 jassNatives_->PumpQueuedThreads(128);
             }
             if (done && done()) return i + 1;
@@ -4057,8 +4162,13 @@ CUnit* GameController::PickSimulationUnitAtScreenPoint(float sx, float sy, const
                               + unit_selection_geom::ComputeUnitSelectionVisualHeight(*unit) * 0.5f,
                           unit->GetY());
 
+        bool visualHasCollisionShapes = false;
+        bool visualCollisionHit = false;
+        float visualCollisionT = 0.0f;
         if (auto vit = simUnitToVisualIdx.find(unit->GetHandleId()); vit != simUnitToVisualIdx.end()) {
             if (MdxViewer* v = scene_.GetViewer(vit->second)) {
+                visualHasCollisionShapes = v->HasCollisionShapes();
+                visualCollisionHit = scene_.IntersectInstanceRayWithCollision(vit->second, ray, visualCollisionT);
                 sphereCenter = Vec3(unit->GetX() + v->GetBoundsCenter().x,
                                     unit_selection_geom::ComputeUnitVisualHeight(*unit, texturedTerrain_.IsValid(), terrainH) + v->GetBoundsCenter().y,
                                     unit->GetY() + v->GetBoundsCenter().z);
@@ -4074,7 +4184,11 @@ CUnit* GameController::PickSimulationUnitAtScreenPoint(float sx, float sy, const
             footX, footY, headX, headY, rpx);
 
         float hitT;
-        if (picking::IntersectSphere(ray, sphereCenter, sphereRadius, hitT)) {
+        if (visualCollisionHit) {
+            if (visualCollisionT < bestRayT) { bestRayT = visualCollisionT; bestRay = unit; }
+            if (!unit->IsBuilding() && visualCollisionT < bestRayNonBuildingT) { bestRayNonBuildingT = visualCollisionT; bestRayNonBuilding = unit; }
+        }
+        else if (!visualHasCollisionShapes && picking::IntersectSphere(ray, sphereCenter, sphereRadius, hitT)) {
             if (hitT < bestRayT) { bestRayT = hitT; bestRay = unit; }
             if (!unit->IsBuilding() && hitT < bestRayNonBuildingT) { bestRayNonBuildingT = hitT; bestRayNonBuilding = unit; }
         }

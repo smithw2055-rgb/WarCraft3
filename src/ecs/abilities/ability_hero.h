@@ -32,8 +32,10 @@ public:
     // XP and leveling
     int GetXP() const { return xp_; }
     void AddXP(CSimulation& game, CUnit* unit, int amount);
+    void SetXP(CSimulation& game, CUnit* unit, int value);
     int GetHeroLevel() const { return heroLevel_; }
     void SetHeroLevel(CSimulation& game, CUnit* unit, int level);
+    bool SelectHeroSkill(CSimulation& game, CUnit* unit, War3ID skillCode);
 
     // Skill points
     int GetSkillPoints() const { return skillPoints_; }
@@ -50,6 +52,11 @@ public:
     void SetStrengthPerLevel(float v) { strength_.perLevelFactor = v; }
     void SetAgilityPerLevel(float v) { agility_.perLevelFactor = v; }
     void SetIntelligencePerLevel(float v) { intelligence_.perLevelFactor = v; }
+
+    // Item/upgrade bonus stats (stack on top of base + per-level growth)
+    void AddStrengthBonus(CSimulation& game, CUnit* unit, int v);
+    void AddAgilityBonus(CSimulation& game, CUnit* unit, int v);
+    void AddIntelligenceBonus(CSimulation& game, CUnit* unit, int v);
 
     // Proper name
     const std::string& GetProperName() const { return properName_; }

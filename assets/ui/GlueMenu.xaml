@@ -17,7 +17,7 @@
                            Stretch="UniformToFill"
                            IsActive="True"
                            IsHitTestVisible="False"/>
-    <local:MainMenuBackdropControl/>
+    <local:MainMenuBackdropControl x:Name="MainMenuBackdropFrame"/>
     <Viewbox Stretch="UniformToFill" IsHitTestVisible="False">
       <Grid Width="1536" Height="1152">
         <Canvas x:Name="GlueNightElfBackdropLayer" Visibility="Collapsed">
@@ -61,6 +61,9 @@
         <local:CampaignPanelControl x:Name="CampaignMenu" Width="1536" Height="1152" Visibility="Collapsed"/>
 
         <local:CustomGamePanelControl x:Name="CustomGameMenu" Width="1536" Height="1152" Visibility="Collapsed"/>
+        <local:GlueOptionsPanelControl x:Name="OptionsMenu" Width="1536" Height="1152" Visibility="Collapsed"/>
+        <local:GlueBattleNetPanelControl x:Name="BattleNetMenu" Width="1536" Height="1152" Visibility="Collapsed"/>
+        <local:GlueLocalAreaNetworkPanelControl x:Name="LocalAreaNetworkMenu" Width="1536" Height="1152" Visibility="Collapsed"/>
       </Grid>
     </Viewbox>
   </Grid>

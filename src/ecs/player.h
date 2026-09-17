@@ -31,7 +31,20 @@ public:
 
     int GetId() const { return id_; }
     const std::string& GetName() const { return name_; }
+    void SetName(const std::string& name) { name_ = name; }
     CMapControl GetController() const { return controller_; }
+    void SetController(CMapControl controller) { controller_ = controller; }
+
+    // JASS player identity (ref CPlayer/CBasePlayer): race ordinal
+    // (Human=1, Orc=2, Undead=3, NightElf=4), color index, observer flag.
+    int GetRace() const { return race_; }
+    void SetRace(int race) { race_ = race; }
+    int GetColor() const { return color_; }
+    void SetColor(int color) { color_ = color; }
+    bool IsObserver() const { return observer_; }
+    void SetObserver(bool observer) { observer_ = observer; }
+    int GetTeam() const { return team_; }
+    void SetTeam(int team) { team_ = team; }
 
     // Resources
     int GetGold() const { return gold_; }
@@ -50,6 +63,9 @@ public:
     void AddTechUnlocked(CSimulation& simulation, War3ID id);
     int GetTechLevel(War3ID id) const;
     void SetTechLevel(War3ID id, int level);
+    int GetTechMaxAllowed(War3ID id) const;
+    void SetTechMaxAllowed(War3ID id, int level);
+    int GetTechCount() const { return (int)techtreeUnlocked_.size(); }
 
     // Alliances
     bool HasAlliance(const CPlayer& other, CAllianceType type) const;
@@ -78,6 +94,8 @@ public:
     // Handicap (multiplier for XP, etc.)
     float GetHandicap() const { return handicap_; }
     void SetHandicap(float v) { handicap_ = v; }
+    float GetHandicapXP() const { return handicapXP_; }
+    void SetHandicapXP(float v) { handicapXP_ = v; }
 
     // Food
     float GetFoodCapMod() const { return foodCapCeiling_; }
@@ -105,7 +123,13 @@ private:
     std::vector<CUnit*> heroes_;
 
     std::unordered_map<uint32_t, int> techtreeUnlocked_;
+    std::unordered_map<uint32_t, int> techtreeMaxAllowed_;
     std::unordered_set<War3ID> disabledAbilities_;
     float handicap_ = 1.0f;
+    float handicapXP_ = 1.0f;
+    int race_ = 0;
+    int color_ = 0;
+    bool observer_ = false;
+    int team_ = -1;
     int allianceData_[24] = {}; // bitfield per other player
 };

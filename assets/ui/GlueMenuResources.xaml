@@ -177,21 +177,25 @@
   <!-- Frozen Throne custom game slot color texture=ReplaceableTextures\TeamColor\TeamColor11.blp -->
   <ImageBrush x:Key="GlueTeamColor11Brush" ImageSource="glues/teamcolor/TeamColor11.png" Stretch="Fill"/>
 
+  <SolidColorBrush x:Key="GlueControlFillBrush" Color="#FF00005E"/>
+  <SolidColorBrush x:Key="GlueControlPressedFillBrush" Color="#FF000036"/>
+  <SolidColorBrush x:Key="GlueControlSelectedBrush" Color="#FF1E86C7"/>
+
   <Style x:Key="GlueButtonChromeStyle" TargetType="Border">
     <Setter Property="Background" Value="{StaticResource GlueButton1BorderSingleBrush}"/>
   </Style>
   <Style x:Key="GlueButtonFillStyle" TargetType="Border">
-    <Setter Property="Background" Value="{StaticResource GlueButton1BackdropBackgroundBrush}"/>
+    <Setter Property="Background" Value="#FF00005E"/>
     <Setter Property="BorderBrush" Value="{StaticResource GlueButton1BackdropBorderBrush}"/>
     <Setter Property="BorderThickness" Value="2"/>
   </Style>
   <Style x:Key="GlueButtonDisabledFillStyle" TargetType="Border">
-    <Setter Property="Background" Value="{StaticResource GlueButton1BackdropBackgroundDisabledBrush}"/>
+    <Setter Property="Background" Value="#FF141414"/>
     <Setter Property="BorderBrush" Value="{StaticResource GlueButton1BackdropBorderDisabledBrush}"/>
     <Setter Property="BorderThickness" Value="2"/>
   </Style>
   <Style x:Key="GlueButtonPressedFillStyle" TargetType="Border">
-    <Setter Property="Background" Value="{StaticResource GlueButton1BackdropBackgroundDownBrush}"/>
+    <Setter Property="Background" Value="#FF000036"/>
     <Setter Property="BorderBrush" Value="{StaticResource GlueButton1BackdropBorderDownBrush}"/>
     <Setter Property="BorderThickness" Value="2"/>
   </Style>
@@ -205,6 +209,26 @@
     <Setter Property="BorderBrush" Value="{StaticResource GlueButton1BackdropBorderDisabledBrush}"/>
     <Setter Property="BorderThickness" Value="1"/>
     <Setter Property="Opacity" Value="0.58"/>
+  </Style>
+  <Style x:Key="GlueControlFillStyle" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource GlueControlFillBrush}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource GlueButton1BackdropBorderBrush}"/>
+    <Setter Property="BorderThickness" Value="2"/>
+  </Style>
+  <Style x:Key="GlueControlSelectedFillStyle" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource GlueControlSelectedBrush}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource GlueButton1KeyHighlightBrush}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+  </Style>
+  <Style x:Key="GlueEditBoxStyle" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource GlueControlPressedFillBrush}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource GlueButton1BackdropBorderBrush}"/>
+    <Setter Property="BorderThickness" Value="2"/>
+  </Style>
+  <Style x:Key="GlueListBoxStyle" TargetType="Border">
+    <Setter Property="Background" Value="#D605070A"/>
+    <Setter Property="BorderBrush" Value="{StaticResource GluePanelRailBrush}"/>
+    <Setter Property="BorderThickness" Value="1"/>
   </Style>
   <Style x:Key="GluePanelFrameStyle" TargetType="Border">
     <Setter Property="Background" Value="#E805070A"/>

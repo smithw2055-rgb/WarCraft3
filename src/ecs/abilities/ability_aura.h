@@ -36,9 +36,9 @@ public:
     void AddBonus(CAuraBonus bonus) { bonuses_.push_back(bonus); }
     const std::vector<CAuraBonus>& GetBonuses() const { return bonuses_; }
 
-private:
-    void ApplyAura(CSimulation& game, CUnit* target);
-    void RemoveAura(CSimulation& game, CUnit* target);
+protected:
+    virtual void ApplyAura(CSimulation& game, CUnit* target);
+    virtual void RemoveAura(CSimulation& game, CUnit* target);
 
     float radius_ = 900.0f;
     bool affectsAllies_ = true;

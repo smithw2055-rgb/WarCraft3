@@ -264,6 +264,8 @@ private:
     MdxViewer glueBackgroundViewer_;
     bool glueBackgroundLoaded_ = false;
     std::string glueBackgroundPath_;
+    int glueBackgroundCameraSequenceIndex_ = -1;
+    float glueBackgroundCameraElapsedMs_ = 0.0f;
     struct GlueSpriteLayer {
         MdxModel model;
         MdxViewer viewer;

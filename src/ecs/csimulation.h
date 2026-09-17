@@ -10,6 +10,7 @@
 #include "ecs/player.h"
 #include "ecs/handle_id.h"
 #include "ecs/combat/combat_system.h"
+#include "ecs/combat/projectile.h"
 #include "data/gameplay_constants.h"
 
 class AudioSystem;
@@ -32,7 +33,10 @@ public:
     CItemData* GetItemData() const { return itemData_; }
     void SetUpgradeData(CUpgradeData* data) { upgradeData_ = data; }
     CUpgradeData* GetUpgradeData() const { return upgradeData_; }
-    void SetGameplayConstants(const CGameplayConstants& c) { gameplayConstants_ = c; }
+    void SetGameplayConstants(const CGameplayConstants& c) {
+        gameplayConstants_ = c;
+        combatSystem_.Configure(c.GetDefenseArmor(), c.damageBonus);
+    }
     const CGameplayConstants& GetGameplayConstants() const { return gameplayConstants_; }
 
     // Game loop
@@ -69,6 +73,14 @@ public:
     float GetGameTimeOfDay() const { return gameTimeOfDay_; }
     void SetGameTimeOfDay(float t) { gameTimeOfDay_ = t; }
     void AdvanceGameTime(float dt);
+    // Time-of-day control (ref SuspendTimeOfDay / time-of-day scale).
+    bool IsTimeOfDaySuspended() const { return timeOfDaySuspended_; }
+    void SetTimeOfDaySuspended(bool v) { timeOfDaySuspended_ = v; }
+    float GetTimeOfDayScale() const { return timeOfDayScale_; }
+    void SetTimeOfDayScale(float v) { timeOfDayScale_ = v; }
+    // Hero XP control (SuspendHeroXP blocks AddXP gains map-wide).
+    bool IsHeroXPSuspended() const { return heroXPSuspended_; }
+    void SetHeroXPSuspended(bool v) { heroXPSuspended_ = v; }
 
     // Day/night
     bool IsDaytime() const { return daytime_; }
@@ -90,6 +102,16 @@ public:
     // Combat
     CCombatSystem* GetCombatSystem() { return &combatSystem_; }
     const CCombatSystem* GetCombatSystem() const { return &combatSystem_; }
+
+    // Projectiles (see combat/projectile.h). Spawned by ranged attacks at
+    // their damage point; stepped in Update() after units.
+    void SpawnProjectile(CProjectile&& p) { projectiles_.push_back(std::move(p)); }
+    const std::vector<CProjectile>& GetProjectiles() const { return projectiles_; }
+    void UpdateProjectiles();
+
+    // Takes ownership of an externally constructed unit (tests, editor).
+    // Visible to lookups immediately, joins units_ on the next Update.
+    CUnit* AdoptUnit(std::unique_ptr<CUnit> unit);
 
     // Callbacks
     void AddPostUpdateCallback(std::function<void()> cb);
@@ -113,6 +135,24 @@ public:
         itemRemovedCallback_ = std::move(cb);
     }
     const std::function<void(int)>& GetItemRemovedCallback() const { return itemRemovedCallback_; }
+    void SetUnitTrainedCallback(std::function<void(int buildingHandle, int trainedHandle)> cb) {
+        unitTrainedCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int)>& GetUnitTrainedCallback() const { return unitTrainedCallback_; }
+    void SetUnitSummonedCallback(std::function<void(int summonerHandle, int summonedHandle)> cb) {
+        unitSummonedCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int)>& GetUnitSummonedCallback() const { return unitSummonedCallback_; }
+    void SetResearchFinishedCallback(std::function<void(int unitHandle, int upgradeId)> cb) {
+        researchFinishedCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int)>& GetResearchFinishedCallback() const {
+        return researchFinishedCallback_;
+    }
+    void SetHeroRevivedCallback(std::function<void(int reviverHandle, int revivedHandle)> cb) {
+        heroRevivedCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int)>& GetHeroRevivedCallback() const { return heroRevivedCallback_; }
 
 private:
     void ProcessUnitRemovals();
@@ -126,12 +166,16 @@ private:
     // Game state
     float gameTimeOfDay_ = 12.0f; // noon
     bool daytime_ = true;
+    bool timeOfDaySuspended_ = false;
+    float timeOfDayScale_ = 1.0f;
+    bool heroXPSuspended_ = false;
     CGameplayConstants gameplayConstants_;
 
     // Unit lists (using raw pointers managed by unique_ptr in maps)
     std::vector<CUnit*> units_;
     std::vector<CUnit*> newUnits_;
     std::vector<CUnit*> removedUnits_;
+    std::vector<CProjectile> projectiles_;
     std::unordered_map<int, std::unique_ptr<CUnit>> unitMap_;
     std::vector<CDestructable*> destructables_;
     std::vector<CDestructable*> newDestructables_;
@@ -164,4 +208,8 @@ private:
     std::function<void(int, int, int, float, float)> unitOrderCallback_;
     std::function<void(int, int, int)> itemEventCallback_;
     std::function<void(int)> itemRemovedCallback_;
+    std::function<void(int, int)> unitTrainedCallback_;
+    std::function<void(int, int)> unitSummonedCallback_;
+    std::function<void(int, int)> researchFinishedCallback_;
+    std::function<void(int, int)> heroRevivedCallback_;
 };

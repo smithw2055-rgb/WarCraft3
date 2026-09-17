@@ -550,7 +550,7 @@
                       <TextBlock x:Name="SelectedMapAuthorText" Text="Author: Unknown" Foreground="#FFCAB77A" FontSize="16" Margin="0,4,0,0"/>
                       <TextBlock x:Name="SelectedMapPageText" Text="Map 1 of 1" Foreground="#FFCAB77A" FontSize="16" Margin="0,4,0,0"/>
                       <TextBlock x:Name="SelectedMapPathText" Text="Maps/FrozenThrone" Foreground="#FFCAB77A" FontSize="15" TextWrapping="Wrap" Margin="0,4,0,0"/>
-                      <TextBlock x:Name="SelectedMapDescriptionText" Text="Small island duel map. Map preview and W3I details pending." Foreground="#FFCAB77A" FontSize="16" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                      <TextBlock x:Name="SelectedMapDescriptionText" Text="Small island duel map with map preview, player slots, and tileset details." Foreground="#FFCAB77A" FontSize="16" TextWrapping="Wrap" Margin="0,8,0,0"/>
                     </StackPanel>
                   </Grid>
                 </Grid>

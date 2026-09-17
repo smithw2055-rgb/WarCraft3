@@ -11,93 +11,132 @@
   </UserControl.Resources>
 
   <Grid Width="1536" Height="1152">
-    <Border Width="610" Height="680" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,90,118,0"
-            Style="{StaticResource GluePanelFrameStyle}">
-      <Grid>
-        <Border Background="{StaticResource GluePanelMetalPiecesExpansionBrush}" Opacity="0.82"/>
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="32"/>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="32"/>
-          </Grid.ColumnDefinitions>
-          <Border Grid.Column="0" Style="{StaticResource GluePanelSideRailStyle}"/>
-          <Border Grid.Column="2" Style="{StaticResource GluePanelSideRailStyle}"/>
-        </Grid>
-        <Border Width="16" Height="128" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="26,30,0,0" Style="{StaticResource GluePanelRailCapStyle}"/>
-        <Border Width="16" Height="128" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,30,26,0" Style="{StaticResource GluePanelRailCapStyle}"/>
-        <Border Width="128" Height="64" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="30,0,0,14" Style="{StaticResource GluePanelGearRailStyle}"/>
-        <Border Width="128" Height="64" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,30,14" Style="{StaticResource GluePanelGearRailStyle}"/>
-        <Border Margin="16" Background="{StaticResource GluePanelExpansionDetailBrush}" Opacity="0.50"/>
-        <Border Margin="28" Background="#D0060709"/>
-        <Grid Margin="36">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="70"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="76"/>
-          </Grid.RowDefinitions>
-          <TextBlock Text="SINGLE PLAYER" Foreground="#FFE7D184" FontSize="34" FontWeight="Bold" VerticalAlignment="Top"/>
-          <StackPanel Grid.Row="1" Width="390" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,18,0,0">
-            <Grid x:Name="ProfileButton" Height="50" Margin="0,0,0,10">
-              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
-              <Border Margin="24,10" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border x:Name="GlueMenuButtonHoverProfileButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
-              <Border x:Name="GlueMenuButtonPressedProfileButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-              <TextBlock Text="PROFILE" Foreground="#FFFFFFFF" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Grid>
-            <Grid x:Name="CampaignButton" Height="50" Margin="0,0,0,10">
-              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
-              <Border Margin="24,10" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border x:Name="GlueMenuButtonHoverCampaignButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
-              <Border x:Name="GlueMenuButtonPressedCampaignButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-              <TextBlock Text="CAMPAIGN" Foreground="#FFFFFFFF" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Grid>
-            <Grid x:Name="LoadSavedButton" Height="50" Margin="0,0,0,10">
-              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
-              <Border Margin="24,10" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border x:Name="GlueMenuButtonHoverLoadSavedButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
-              <Border x:Name="GlueMenuButtonPressedLoadSavedButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-              <TextBlock Text="LOAD SAVED GAME" Foreground="#FFFFFFFF" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Grid>
-            <Grid x:Name="ViewReplayButton" Height="50" Margin="0,0,0,10">
-              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
-              <Border Margin="24,10" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border x:Name="GlueMenuButtonHoverViewReplayButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
-              <Border x:Name="GlueMenuButtonPressedViewReplayButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-              <TextBlock Text="VIEW REPLAY" Foreground="#FFFFFFFF" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Grid>
-            <Grid x:Name="CustomCampaignButton" Height="50" Margin="0,0,0,10">
-              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
-              <Border Margin="24,10" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border x:Name="GlueMenuButtonHoverCustomCampaignButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
-              <Border x:Name="GlueMenuButtonPressedCustomCampaignButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-              <TextBlock Text="CUSTOM CAMPAIGN" Foreground="#FFFFFFFF" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Grid>
-            <Grid x:Name="CustomGameButton" Height="50">
-              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
-              <Border Margin="24,10" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
-              <Border x:Name="GlueMenuButtonHoverCustomGameButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
-              <Border x:Name="GlueMenuButtonPressedCustomGameButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-              <TextBlock Text="CUSTOM GAME" Foreground="#FFFFFFFF" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Grid>
-          </StackPanel>
-          <Grid x:Name="CancelButton" Grid.Row="2" Width="220" Height="52" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+    <Canvas>
+      <Canvas x:Name="SinglePlayerMainPanel">
+        <Grid x:Name="ProfileButton" Canvas.Left="1016" Canvas.Top="212" Width="492" Height="70">
+          <Border Background="{StaticResource GlueButton1BorderSingleBrush}" Opacity="0.78"/>
+          <Border Margin="34,16,58,14" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+          <Border x:Name="GlueMenuButtonHoverProfileButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+          <Border x:Name="GlueMenuButtonPressedProfileButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+          <TextBlock Text="WorldEdit" Foreground="#FFFFFFFF" FontSize="21" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="50,0,0,0"/>
+          <Grid Width="42" Height="42" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,26,0">
             <Border Style="{StaticResource GlueButtonChromeStyle}"/>
-            <Border Margin="20,10" Style="{StaticResource GlueButtonFillStyle}"/>
-            <Border Margin="15,8" Style="{StaticResource GlueButtonFillStyle}"/>
-            <Border x:Name="GlueMenuButtonHoverCancelButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
-            <Border x:Name="GlueMenuButtonPressedCancelButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
-            <TextBlock Text="CANCEL" Foreground="#FFFFFFFF" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Border Margin="8" Background="#FF00195A"/>
+            <Border Margin="11" Background="{StaticResource GlueButton1KeyHighlightBrush}" Opacity="0.55"/>
+          </Grid>
+        </Grid>
+
+        <StackPanel Canvas.Left="1058" Canvas.Top="322" Width="390">
+          <Grid x:Name="CampaignButton" Height="52" Margin="0,0,0,18">
+            <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+            <Border Margin="24,10" Style="{StaticResource GlueButtonFillStyle}"/>
+            <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
+            <Border x:Name="GlueMenuButtonHoverCampaignButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+            <Border x:Name="GlueMenuButtonPressedCampaignButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            <TextBlock Text="Campaign" Foreground="#FFFCD412" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Grid>
+          <Grid x:Name="LoadSavedButton" Height="52" Margin="0,0,0,18">
+            <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+            <Border Margin="24,10" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+            <Border Margin="18,8" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+            <Border x:Name="GlueMenuButtonHoverLoadSavedButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+            <Border x:Name="GlueMenuButtonPressedLoadSavedButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            <TextBlock Text="Load Saved Game" Foreground="#FF8C8C8C" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Grid>
+          <Grid x:Name="ViewReplayButton" Height="52" Margin="0,0,0,18">
+            <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+            <Border Margin="24,10" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+            <Border Margin="18,8" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+            <Border x:Name="GlueMenuButtonHoverViewReplayButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+            <Border x:Name="GlueMenuButtonPressedViewReplayButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            <TextBlock Text="View Replay" Foreground="#FF8C8C8C" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Grid>
+          <Grid x:Name="CustomCampaignButton" Height="52" Margin="0,0,0,18">
+            <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+            <Border Margin="24,10" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+            <Border Margin="18,8" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+            <Border x:Name="GlueMenuButtonHoverCustomCampaignButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+            <Border x:Name="GlueMenuButtonPressedCustomCampaignButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            <TextBlock Text="Custom Campaign" Foreground="#FF8C8C8C" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Grid>
+          <Grid x:Name="CustomGameButton" Height="52">
+            <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+            <Border Margin="24,10" Style="{StaticResource GlueButtonFillStyle}"/>
+            <Border Margin="18,8" Style="{StaticResource GlueButtonFillStyle}"/>
+            <Border x:Name="GlueMenuButtonHoverCustomGameButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+            <Border x:Name="GlueMenuButtonPressedCustomGameButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            <TextBlock Text="Custom Game" Foreground="#FFFCD412" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Grid>
+        </StackPanel>
+      </Canvas>
+
+      <Grid x:Name="ProfilePanel" Canvas.Left="875" Canvas.Top="296" Width="590" Height="520" Visibility="Collapsed">
+        <Border Style="{StaticResource GluePanelFrameStyle}"/>
+        <Border Margin="16" Background="#EA05070A" BorderBrush="#FF263348" BorderThickness="1"/>
+        <Grid Margin="34,30,34,32">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="44"/>
+            <RowDefinition Height="34"/>
+            <RowDefinition Height="190"/>
+            <RowDefinition Height="24"/>
+            <RowDefinition Height="56"/>
+            <RowDefinition Height="78"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+
+          <TextBlock Text="Player Profiles" Foreground="#FFFCD412" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <TextBlock Grid.Row="1" Text="Select Profile:" Foreground="#FFFFFFFF" FontSize="17" VerticalAlignment="Center"/>
+          <Grid Grid.Row="2">
+            <Border Style="{StaticResource GlueInsetPanelStyle}"/>
+            <StackPanel Margin="12,10">
+              <Grid Height="38">
+                <Border Background="#6600124A" BorderBrush="#FF5C6F9E" BorderThickness="1"/>
+                <TextBlock Text="WorldEdit" Foreground="#FFFFFFFF" FontSize="18" VerticalAlignment="Center" Margin="12,0,0,0"/>
+              </Grid>
+            </StackPanel>
+          </Grid>
+
+          <TextBlock Grid.Row="3" Text="New Profile:" Foreground="#FFFFFFFF" FontSize="16" VerticalAlignment="Bottom"/>
+          <Grid Grid.Row="4" Height="42" VerticalAlignment="Center">
+            <Border Style="{StaticResource GlueInsetPanelStyle}"/>
+            <TextBlock Text="WorldEdit" Foreground="#FFB8B8B8" FontSize="18" VerticalAlignment="Center" Margin="12,0,0,0"/>
+          </Grid>
+
+          <Grid Grid.Row="5" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="16"/>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="16"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid Height="46" Grid.Column="0">
+              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+              <Border Margin="15,8" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+              <TextBlock Text="Add Profile" Foreground="#FF8C8C8C" FontSize="15" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <Grid Height="46" Grid.Column="2">
+              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+              <Border Margin="15,8" Style="{StaticResource GlueButtonDisabledFillStyle}"/>
+              <TextBlock Text="Delete Profile" Foreground="#FF8C8C8C" FontSize="15" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <Grid Height="46" Grid.Column="4">
+              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+              <Border Margin="15,8" Style="{StaticResource GlueButtonFillStyle}"/>
+              <TextBlock Text="Select Profile" Foreground="#FFFCD412" FontSize="15" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
           </Grid>
         </Grid>
       </Grid>
-    </Border>
+
+      <Grid x:Name="CancelButton" Canvas.Left="1104" Canvas.Top="958" Width="344" Height="60">
+        <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+        <Border Margin="28,11" Style="{StaticResource GlueButtonFillStyle}"/>
+        <Border Margin="22,9" Style="{StaticResource GlueButtonFillStyle}"/>
+        <Border x:Name="GlueMenuButtonHoverCancelButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+        <Border x:Name="GlueMenuButtonPressedCancelButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+        <TextBlock Text="Cancel" Foreground="#FFFCD412" FontSize="23" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Grid>
+    </Canvas>
   </Grid>
 </UserControl>
-

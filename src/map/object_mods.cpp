@@ -97,64 +97,178 @@ private:
     const uint8_t* data_ = nullptr;
     size_t size_ = 0;
     size_t off_ = 0;
+
+public:
+    size_t Offset() const { return off_; }
+    size_t Size() const { return size_; }
 };
 
 bool ParseModificationTable(Reader& r, int version, bool custom, bool extended,
+                            bool readVersionJunk, bool diagnostics,
                             WtsTable* wts,
                             std::vector<ObjectModificationEntry>& out) {
     (void)version;
     int count = 0;
-    if (!r.I32(count) || count < 0 || count > 200000) return false;
+    if (!r.I32(count) || count < 0 || count > 200000) {
+        if (diagnostics) {
+            std::cerr << "ObjectMods: invalid " << (custom ? "custom" : "original")
+                      << " table count at offset=" << r.Offset()
+                      << " version=" << version << " count=" << count << std::endl;
+        }
+        return false;
+    }
     out.reserve(out.size() + static_cast<size_t>(count));
 
     for (int i = 0; i < count; ++i) {
         ObjectModificationEntry entry;
         entry.custom = custom;
-        if (!r.Id(entry.oldId)) return false;
-        if (!r.Id(entry.newId)) return false;
+        if (!r.Id(entry.oldId)) {
+            if (diagnostics) {
+                std::cerr << "ObjectMods: missing oldId in " << (custom ? "custom" : "original")
+                          << " entry=" << i << " offset=" << r.Offset() << std::endl;
+            }
+            return false;
+        }
+        if (!r.Id(entry.newId)) {
+            if (diagnostics) {
+                std::cerr << "ObjectMods: missing newId in " << (custom ? "custom" : "original")
+                          << " entry=" << i << " offset=" << r.Offset() << std::endl;
+            }
+            return false;
+        }
 
-        if (version >= 3) {
+        if (version >= 3 && readVersionJunk) {
             int junkCount = 0;
-            if (!r.I32(junkCount) || junkCount < 0 || junkCount > 1024) return false;
+            if (!r.I32(junkCount) || junkCount < 0 || junkCount > 1024) {
+                if (diagnostics) {
+                    std::cerr << "ObjectMods: invalid junk count in " << (custom ? "custom" : "original")
+                              << " entry=" << i << " offset=" << r.Offset()
+                              << " junkCount=" << junkCount << std::endl;
+                }
+                return false;
+            }
             for (int j = 0; j < junkCount; ++j) {
                 int ignored = 0;
-                if (!r.I32(ignored)) return false;
+                if (!r.I32(ignored)) {
+                    if (diagnostics) {
+                        std::cerr << "ObjectMods: truncated junk data in " << (custom ? "custom" : "original")
+                                  << " entry=" << i << " junkIndex=" << j
+                                  << " offset=" << r.Offset() << std::endl;
+                    }
+                    return false;
+                }
             }
         }
 
         int modCount = 0;
-        if (!r.I32(modCount) || modCount < 0 || modCount > 200000) return false;
+        if (!r.I32(modCount) || modCount < 0 || modCount > 200000) {
+            if (diagnostics) {
+                std::cerr << "ObjectMods: invalid modification count in " << (custom ? "custom" : "original")
+                          << " entry=" << i << " offset=" << r.Offset()
+                          << " modCount=" << modCount << std::endl;
+            }
+            return false;
+        }
         entry.modifications.reserve(static_cast<size_t>(modCount));
         for (int j = 0; j < modCount; ++j) {
             ObjectModification mod;
-            if (!r.Id(mod.id)) return false;
-            if (!r.I32(mod.varType)) return false;
+            if (!r.Id(mod.id)) {
+                if (diagnostics) {
+                    std::cerr << "ObjectMods: missing mod id in " << (custom ? "custom" : "original")
+                              << " entry=" << i << " mod=" << j
+                              << " offset=" << r.Offset() << std::endl;
+                }
+                return false;
+            }
+            if (!r.I32(mod.varType)) {
+                if (diagnostics) {
+                    std::cerr << "ObjectMods: missing var type in " << (custom ? "custom" : "original")
+                              << " entry=" << i << " mod=" << j
+                              << " offset=" << r.Offset() << std::endl;
+                }
+                return false;
+            }
             if (extended) {
-                if (!r.I32(mod.level)) return false;
-                if (!r.I32(mod.dataPointer)) return false;
+                if (!r.I32(mod.level)) {
+                    if (diagnostics) {
+                        std::cerr << "ObjectMods: missing level in " << (custom ? "custom" : "original")
+                                  << " entry=" << i << " mod=" << j
+                                  << " offset=" << r.Offset() << std::endl;
+                    }
+                    return false;
+                }
+                if (!r.I32(mod.dataPointer)) {
+                    if (diagnostics) {
+                        std::cerr << "ObjectMods: missing data pointer in " << (custom ? "custom" : "original")
+                                  << " entry=" << i << " mod=" << j
+                                  << " offset=" << r.Offset() << std::endl;
+                    }
+                    return false;
+                }
             }
 
             switch (mod.varType) {
             case ObjectModification::INT:
-                if (!r.I32(mod.intValue)) return false;
+                if (!r.I32(mod.intValue)) {
+                    if (diagnostics) {
+                        std::cerr << "ObjectMods: missing int value in " << (custom ? "custom" : "original")
+                                  << " entry=" << i << " mod=" << j
+                                  << " field=" << mod.id.ToString()
+                                  << " offset=" << r.Offset() << std::endl;
+                    }
+                    return false;
+                }
                 break;
             case ObjectModification::BOOLEAN:
-                if (!r.I32(mod.intValue)) return false;
+                if (!r.I32(mod.intValue)) {
+                    if (diagnostics) {
+                        std::cerr << "ObjectMods: missing bool value in " << (custom ? "custom" : "original")
+                                  << " entry=" << i << " mod=" << j
+                                  << " field=" << mod.id.ToString()
+                                  << " offset=" << r.Offset() << std::endl;
+                    }
+                    return false;
+                }
                 mod.intValue = mod.intValue != 0 ? 1 : 0;
                 break;
             case ObjectModification::STRING:
-                if (!r.String(mod.stringValue)) return false;
+                if (!r.String(mod.stringValue)) {
+                    if (diagnostics) {
+                        std::cerr << "ObjectMods: missing string value in " << (custom ? "custom" : "original")
+                                  << " entry=" << i << " mod=" << j
+                                  << " field=" << mod.id.ToString()
+                                  << " offset=" << r.Offset() << std::endl;
+                    }
+                    return false;
+                }
                 if (wts) mod.stringValue = wts->Resolve(mod.stringValue);
                 break;
             case ObjectModification::REAL:
             case ObjectModification::UNREAL:
             default:
-                if (!r.F32(mod.realValue)) return false;
+                if (!r.F32(mod.realValue)) {
+                    if (diagnostics) {
+                        std::cerr << "ObjectMods: missing real value in " << (custom ? "custom" : "original")
+                                  << " entry=" << i << " mod=" << j
+                                  << " field=" << mod.id.ToString()
+                                  << " varType=" << mod.varType
+                                  << " offset=" << r.Offset() << std::endl;
+                    }
+                    return false;
+                }
                 break;
             }
 
             War3ID ignoredJunk;
-            if (!r.Id(ignoredJunk)) return false;
+            if (!r.Id(ignoredJunk)) {
+                if (diagnostics) {
+                    std::cerr << "ObjectMods: missing trailing junk id in " << (custom ? "custom" : "original")
+                              << " entry=" << i << " mod=" << j
+                              << " field=" << mod.id.ToString()
+                              << " offset=" << r.Offset() << std::endl;
+                }
+                return false;
+            }
             entry.modifications.push_back(std::move(mod));
         }
         out.push_back(std::move(entry));
@@ -162,20 +276,55 @@ bool ParseModificationTable(Reader& r, int version, bool custom, bool extended,
     return true;
 }
 
-bool ParseObjectMods(const uint8_t* data, size_t size,
-                     bool extended, ObjectModificationSet& out, WtsTable* wts) {
+bool ParseObjectModsWithOptions(const uint8_t* data, size_t size, bool extended,
+                                bool readVersionJunk, bool diagnostics,
+                                ObjectModificationSet& out, WtsTable* wts) {
     Reader r(data, size);
     int version = 0;
-    if (!r.I32(version)) return false;
-    if (version < 1 || version > 3) return false;
+    if (!r.I32(version)) {
+        if (diagnostics) {
+            std::cerr << "ObjectMods: missing version size=" << size << std::endl;
+        }
+        return false;
+    }
+    if (version < 1 || version > 3) {
+        if (diagnostics) {
+            std::cerr << "ObjectMods: unsupported version=" << version
+                      << " size=" << size << std::endl;
+        }
+        return false;
+    }
 
     ObjectModificationSet parsed;
     parsed.version = version;
-    if (!ParseModificationTable(r, version, false, extended, wts, parsed.original)) return false;
-    if (!ParseModificationTable(r, version, true, extended, wts, parsed.custom)) return false;
+    if (!ParseModificationTable(r, version, false, extended, readVersionJunk,
+                                diagnostics, wts, parsed.original)) {
+        return false;
+    }
+    if (!ParseModificationTable(r, version, true, extended, readVersionJunk,
+                                diagnostics, wts, parsed.custom)) {
+        return false;
+    }
 
     out = std::move(parsed);
     return true;
+}
+
+bool ParseObjectMods(const uint8_t* data, size_t size,
+                     bool extended, ObjectModificationSet& out, WtsTable* wts) {
+    if (ParseObjectModsWithOptions(data, size, extended, true, false, out, wts)) {
+        return true;
+    }
+    if (extended && ParseObjectModsWithOptions(data, size, extended, false, false, out, wts)) {
+        return true;
+    }
+    if (extended && ParseObjectModsWithOptions(data, size, false, true, false, out, wts)) {
+        return true;
+    }
+    if (extended && ParseObjectModsWithOptions(data, size, false, false, false, out, wts)) {
+        return true;
+    }
+    return ParseObjectModsWithOptions(data, size, extended, true, true, out, wts);
 }
 
 } // namespace
@@ -217,7 +366,32 @@ bool LoadWar3MapDestructableMods(const std::string& mapPath,
 }
 
 bool LoadWar3MapItemMods(const std::string& mapPath,
+                          ObjectModificationSet& out,
+                          WtsTable* wts) {
+    return LoadWar3MapObjectMods(mapPath, "war3map.w3t", false, out, wts);
+}
+
+bool LoadWar3MapAbilityMods(const std::string& mapPath,
+                            ObjectModificationSet& out,
+                            WtsTable* wts) {
+    return LoadWar3MapObjectMods(mapPath, "war3map.w3a", true, out, wts);
+}
+
+bool LoadWar3MapUpgradeMods(const std::string& mapPath,
+                            ObjectModificationSet& out,
+                            WtsTable* wts) {
+    return LoadWar3MapObjectMods(mapPath, "war3map.w3q", true, out, wts);
+}
+
+bool LoadWar3MapBuffMods(const std::string& mapPath,
                          ObjectModificationSet& out,
                          WtsTable* wts) {
-    return LoadWar3MapObjectMods(mapPath, "war3map.w3t", false, out, wts);
+    return LoadWar3MapObjectMods(mapPath, "war3map.w3h", true, out, wts);
+}
+
+bool ParseObjectModsData(const uint8_t* data, size_t size,
+                         bool extended, ObjectModificationSet& out,
+                         WtsTable* wts) {
+    if (!data || size == 0) return false;
+    return ParseObjectMods(data, size, extended, out, wts);
 }

@@ -3,12 +3,14 @@
 #include "renderer.h"
 #include "replaceable_ids.h"
 #include "mdx_sequence_select.h"
+#include "mdx_collision.h"
 #include "asset/BLP.h"
 #include "asset/DDS.h"
 #include "asset/stb_image.h"
 #include <algorithm>
 #include <iostream>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <unordered_map>
@@ -28,6 +30,14 @@ static bool ShouldLogModelDebug(const std::string& name) {
 }
 
 static int g_mdxLoadTraceCount = 0;
+
+static bool MdxLoadTraceEnabled() {
+    static const bool enabled = []() {
+        const char* value = std::getenv("WARSMASH_MDX_LOAD_TRACE");
+        return value && value[0] && value[0] != '0';
+    }();
+    return enabled;
+}
 
 namespace {
 static bool IsSuspiciousViewHandle(sg_view view) {
@@ -209,18 +219,10 @@ static bool SampleGlobalTimelineLooped(const MdxTimeline& timeline, uint32_t fra
 
 static bool SampleTimelineForModel(const MdxTimeline& timeline, const MdxModel* model,
                                    uint32_t sequenceFrame, float elapsedMs,
-                                   float* out, int elemCount, float defaultVal = 0.0f) {
-    if (timeline.globalSequenceId >= 0 && model
-        && timeline.globalSequenceId < (int)model->globalSequences.size()) {
-        const uint32_t duration = model->globalSequences[(size_t)timeline.globalSequenceId];
-        if (duration > 0) {
-            const uint32_t elapsed = (uint32_t)std::max(0.0f, elapsedMs);
-            return SampleGlobalTimelineLooped(timeline, elapsed % duration, duration, out, elemCount);
-        }
-    }
-    return MdxSampleTimeline(timeline,
-        TimelineFrameForModel(timeline, model, sequenceFrame, elapsedMs),
-        out, elemCount, defaultVal);
+                                   float* out, int elemCount, float defaultVal = 0.0f,
+                                   int sequenceIndex = -1) {
+    return MdxSampleTimelineForModel(timeline, model, sequenceFrame, elapsedMs,
+                                     out, elemCount, defaultVal, sequenceIndex);
 }
 
 static bool ModelHasAnimatedMaterials(const MdxModel& model) {
@@ -583,8 +585,7 @@ static float ComputeSequenceDurationSpeedRatio(const MdxModel& model,
     if (sequenceIndex < 0 || sequenceIndex >= (int)model.sequences.size() || durationSeconds <= 0.0f) {
         return 1.0f;
     }
-    const auto& sequence = model.sequences[sequenceIndex];
-    const float sequenceDurationSeconds = std::max(0.001f, (float)(sequence.endFrame - sequence.startFrame) / 1000.0f);
+    const float sequenceDurationSeconds = std::max(0.001f, MdxSequenceDurationSeconds(model, sequenceIndex));
     return std::clamp(sequenceDurationSeconds / durationSeconds, 0.1f, 4.0f);
 }
 
@@ -731,6 +732,9 @@ sg_image MdxViewer::sharedWhiteTexture_ = {0};
 sg_view MdxViewer::sharedWhiteTextureView_ = {0};
 
 void MdxViewer::DebugLogState(const char* tag) const {
+    if (!MdxLoadTraceEnabled()) {
+        return;
+    }
     std::fprintf(stderr,
         "MdxViewer::State tag=%s this=%p name=%s batches=%zu ownsModel=%d ownsGpu=%d modelSource=%p sharedSource=%p hasAnim=%d hasAnimMats=%d initAnim=%d particles=%d boneView=0x%08x boneTexId=%u geoStates=%zu layerStates=%zu\n",
         tag ? tag : "",
@@ -1185,9 +1189,12 @@ void MdxViewer::ReleaseSharedShader() {
 }
 
 void MdxViewer::Release() {
-    std::fprintf(stderr, "MdxViewer::Release begin name=%s batches=%zu ownsGpu=%d rendererActive=%d\n",
-        name_.c_str(), batches_.size(), ownsBatchGpuResources_ ? 1 : 0, Renderer::IsActive() ? 1 : 0);
-    std::fflush(stderr);
+    const bool traceRelease = MdxLoadTraceEnabled();
+    if (traceRelease) {
+        std::fprintf(stderr, "MdxViewer::Release begin name=%s batches=%zu ownsGpu=%d rendererActive=%d\n",
+            name_.c_str(), batches_.size(), ownsBatchGpuResources_ ? 1 : 0, Renderer::IsActive() ? 1 : 0);
+        std::fflush(stderr);
+    }
     const bool emptyViewerState = name_.empty()
         && batches_.empty()
         && !ownsModelData_
@@ -1207,8 +1214,10 @@ void MdxViewer::Release() {
         elapsedMs_ = 0.0f;
         ownsBatchGpuResources_ = true;
         pendingStandSequenceAfterCurrent_ = false;
-        std::fprintf(stderr, "MdxViewer::Release end empty\n");
-        std::fflush(stderr);
+        if (traceRelease) {
+            std::fprintf(stderr, "MdxViewer::Release end empty\n");
+            std::fflush(stderr);
+        }
         return;
     }
     if (!Renderer::IsActive()) {
@@ -1226,8 +1235,10 @@ void MdxViewer::Release() {
         animatedLayerAlphas_.clear();
         modelTextures_.clear();
         elapsedMs_ = 0.0f;
-        std::fprintf(stderr, "MdxViewer::Release end inactive name=%s\n", name_.c_str());
-        std::fflush(stderr);
+        if (traceRelease) {
+            std::fprintf(stderr, "MdxViewer::Release end inactive name=%s\n", name_.c_str());
+            std::fflush(stderr);
+        }
         return;
     }
     for (auto& b : batches_) {
@@ -1249,22 +1260,30 @@ void MdxViewer::Release() {
         }
     }
     modelTextures_.clear();
-    std::fprintf(stderr, "MdxViewer::Release before bone-view id=0x%08x texId=%u\n",
-        cachedBoneView_.id, cachedBoneTexId_);
-    std::fflush(stderr);
+    if (traceRelease) {
+        std::fprintf(stderr, "MdxViewer::Release before bone-view id=0x%08x texId=%u\n",
+            cachedBoneView_.id, cachedBoneTexId_);
+        std::fflush(stderr);
+    }
     SafeDestroyViewHandle(cachedBoneView_, "cachedBoneView");
-    std::fprintf(stderr, "MdxViewer::Release after bone-view\n");
-    std::fflush(stderr);
+    if (traceRelease) {
+        std::fprintf(stderr, "MdxViewer::Release after bone-view\n");
+        std::fflush(stderr);
+    }
     cachedBoneTexId_ = 0;
     batches_.clear();
     shader_ = {0};
     if (hasParticles_) {
-        std::fprintf(stderr, "MdxViewer::Release destroy particles begin\n");
-        std::fflush(stderr);
+        if (traceRelease) {
+            std::fprintf(stderr, "MdxViewer::Release destroy particles begin\n");
+            std::fflush(stderr);
+        }
         particles_.Destroy();
         hasParticles_ = false;
-        std::fprintf(stderr, "MdxViewer::Release destroy particles end\n");
-        std::fflush(stderr);
+        if (traceRelease) {
+            std::fprintf(stderr, "MdxViewer::Release destroy particles end\n");
+            std::fflush(stderr);
+        }
     }
     modelData_ = MdxModel{};
     ownsModelData_ = false;
@@ -1278,8 +1297,10 @@ void MdxViewer::Release() {
     animatedLayerAlphas_.clear();
     elapsedMs_ = 0.0f;
     pendingStandSequenceAfterCurrent_ = false;
-    std::fprintf(stderr, "MdxViewer::Release end active name=%s\n", name_.c_str());
-    std::fflush(stderr);
+    if (traceRelease) {
+        std::fprintf(stderr, "MdxViewer::Release end active name=%s\n", name_.c_str());
+        std::fflush(stderr);
+    }
 }
 
 bool MdxViewer::ShareModelResourcesFrom(const MdxViewer& other) {
@@ -1320,6 +1341,15 @@ bool MdxViewer::ShareModelResourcesFrom(const MdxViewer& other) {
     // Particle systems stay disabled for now; each runtime instance owns only animation state.
     hasParticles_ = false;
     return true;
+}
+
+bool MdxViewer::IntersectRayWithCollision(const picking::PickRay& ray,
+                                          const Mat4& modelMatrix,
+                                          float& outT) const {
+    if (!modelSource_ || modelSource_->collisionShapes.empty() || !initializedAnimator_) {
+        return false;
+    }
+    return MdxIntersectCollisionShapes(*modelSource_, animator_, ray, modelMatrix, outT);
 }
 
 static sg_image CreateSGImage(int w, int h, const uint8_t* pixels) {
@@ -1367,11 +1397,15 @@ static sg_image LoadTextureFromMpq(MpqManager* mpq, const std::string& path) {
 
 bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, bool enableParticles) {
     DebugLogState("load-pre-release");
-    std::fprintf(stderr, "MdxViewer::Load pre-release incoming=%s\n", model.name.c_str());
-    std::fflush(stderr);
+    if (MdxLoadTraceEnabled()) {
+        std::fprintf(stderr, "MdxViewer::Load pre-release incoming=%s\n", model.name.c_str());
+        std::fflush(stderr);
+    }
     Release();
-    std::fprintf(stderr, "MdxViewer::Load post-release incoming=%s\n", model.name.c_str());
-    std::fflush(stderr);
+    if (MdxLoadTraceEnabled()) {
+        std::fprintf(stderr, "MdxViewer::Load post-release incoming=%s\n", model.name.c_str());
+        std::fflush(stderr);
+    }
     modelData_ = model;
     ownsModelData_ = true;
     ownsBatchGpuResources_ = true;
@@ -1382,7 +1416,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
 
     name_ = sourceModel.name;
     const bool logModelDebug = ShouldLogModelDebug(name_);
-    const bool traceLoad = g_mdxLoadTraceCount < 4;
+    const bool traceLoad = MdxLoadTraceEnabled() && g_mdxLoadTraceCount < 4;
     if (traceLoad) {
         ++g_mdxLoadTraceCount;
         std::fprintf(stderr,
@@ -1397,7 +1431,9 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
     // Many Warcraft III models rely on bones/helpers even without animation sequences.
     // Treat any skeletal hierarchy as needing the animator path so bind-pose transforms
     // are still applied.
-    hasAnimations_ = !sourceModel.bones.empty() || !sourceModel.helpers.empty();
+    hasAnimations_ = !sourceModel.bones.empty() || !sourceModel.helpers.empty()
+        || !sourceModel.particleEmittersPopcorn.empty()
+        || !sourceModel.collisionShapes.empty();
     hasAnimatedMaterials_ = ModelHasAnimatedMaterials(sourceModel);
 
     sg_sampler_desc smp = {};
@@ -1477,7 +1513,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
             std::cout << "ModelDebug[" << name_ << "]: light objectId=" << light.objectId
                       << " parentId=" << light.parentId
                       << " flags=0x" << std::hex << light.flags << std::dec
-                      << " textureId=" << light.textureId
+                      << " type=" << (int)light.type
                       << " name=" << light.name << std::endl;
         }
         for (const auto& emitter : sourceModel.particleEmitters1) {
@@ -1500,7 +1536,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
             std::cout << "ModelDebug[" << name_ << "]: ribbon objectId=" << ribbon.objectId
                       << " parentId=" << ribbon.parentId
                       << " flags=0x" << std::hex << ribbon.flags << std::dec
-                      << " replaceableId=" << ribbon.replaceableId
+                      << " materialId=" << ribbon.materialId
                       << " name=" << ribbon.name << std::endl;
         }
         for (const auto& eventObject : sourceModel.eventObjects) {
@@ -1834,6 +1870,14 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
         -(sourceModel.boundsMin[1] + sourceModel.boundsMax[1]) * 0.5f
     };
     radius_ = sourceModel.boundsRadius > 0 ? sourceModel.boundsRadius : 100.0f;
+
+    hasParticleEmitter1_ = false;
+    particleEmitter1Spawns_.clear();
+    particleEmitter1States_.clear();
+    if (enableParticles && !sourceModel.particleEmitters1.empty()) {
+        MdxResetParticleEmitter1RuntimeStates(sourceModel, particleEmitter1States_);
+        hasParticleEmitter1_ = true;
+    }
 
     if (enableParticles && !sourceModel.particleEmitters2.empty()) {
         particles_.Init(sourceModel, mpq);
@@ -2285,6 +2329,10 @@ bool MdxViewer::GetSequenceName(int index, std::string& outName) const {
     return true;
 }
 
+float MdxViewer::GetSequenceDurationSeconds(int index) const {
+    return modelSource_ ? MdxSequenceDurationSeconds(*modelSource_, index) : 0.0f;
+}
+
 void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
                                    const std::vector<float>* uvSource,
                                    const MdxModel& model, MpqManager* mpq) {
@@ -2359,6 +2407,7 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
 
 void MdxViewer::Update(float dt) {
     elapsedMs_ += std::max(0.0f, dt) * 1000.0f;
+    particleEmitter1Spawns_.clear();
     if (initializedAnimator_) {
         animator_.Update(dt);
         ProcessTriggeredEvents();
@@ -2374,10 +2423,19 @@ void MdxViewer::Update(float dt) {
                           initializedAnimator_ ? &animator_ : nullptr,
                           initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
                           elapsedMs_);
+    if (hasParticleEmitter1_ && modelSource_) {
+        MdxCollectParticleEmitter1Spawns(*modelSource_,
+                                         initializedAnimator_ ? &animator_ : nullptr,
+                                         initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
+                                         elapsedMs_, dt,
+                                         particleEmitter1States_,
+                                         particleEmitter1Spawns_);
+    }
 }
 
 void MdxViewer::Update(float dt, const Mat4& view) {
     elapsedMs_ += std::max(0.0f, dt) * 1000.0f;
+    particleEmitter1Spawns_.clear();
     if (hasAnimations_) {
         Vec3 cameraForward = {-view.m[2], -view.m[6], -view.m[10]};
         animator_.SetCameraForward(cameraForward);
@@ -2397,6 +2455,14 @@ void MdxViewer::Update(float dt, const Mat4& view) {
                           initializedAnimator_ ? &animator_ : nullptr,
                           initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
                           elapsedMs_);
+    if (hasParticleEmitter1_ && modelSource_) {
+        MdxCollectParticleEmitter1Spawns(*modelSource_,
+                                         initializedAnimator_ ? &animator_ : nullptr,
+                                         initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
+                                         elapsedMs_, dt,
+                                         particleEmitter1States_,
+                                         particleEmitter1Spawns_);
+    }
 }
 
 void MdxViewer::ProcessTriggeredEvents() {
@@ -2504,11 +2570,13 @@ void MdxViewer::UpdateAnimatedStates() {
                     continue;
                 }
                 if (timeline.tag == TAG_KGAO
-                    && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, sampled, 1, geosetAnim.alpha)) {
+                    && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, sampled, 1,
+                                              geosetAnim.alpha, currentSequence)) {
                     state.alpha = sampled[0];
                 }
                 else if (timeline.tag == TAG_KGAC
-                    && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, sampled, 3, 1.0f)) {
+                    && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, sampled, 3,
+                                              1.0f, currentSequence)) {
                     MdxConvertAnimatedColorBgrToRgb(sampled, state.color);
                 }
             }
@@ -2531,7 +2599,8 @@ void MdxViewer::UpdateAnimatedStates() {
                     continue;
                 }
                 if (timeline.tag == TAG_KMTA
-                    && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, &sampled, 1, layer.alpha)) {
+                    && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, &sampled, 1,
+                                              layer.alpha, currentSequence)) {
                     materialLayers[li] = sampled;
                     break;
                 }
@@ -2672,6 +2741,7 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
     fsU.fogParams[2] = fogEnd_;
     fsU.fogParams[3] = 0.0f;
     const uint32_t currentFrame = initializedAnimator_ ? animator_.GetCurrentFrame() : 0;
+    const int currentSequenceIndex = initializedAnimator_ ? animator_.GetCurrentSequence() : -1;
 
     sg_sampler linearSmp = {0};
     sg_sampler_desc smpDesc = {};
@@ -2695,7 +2765,7 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
         if (batch.hasTextureIdTimeline && !batch.textureIdTimeline.frames.empty()) {
             float sampledTextureId = (float)activeTextureId;
             if (SampleTimelineForModel(batch.textureIdTimeline, modelSource_, currentFrame, elapsedMs_,
-                    &sampledTextureId, 1, (float)activeTextureId)) {
+                    &sampledTextureId, 1, (float)activeTextureId, currentSequenceIndex)) {
                 activeTextureId = (int)std::lround(sampledTextureId);
             }
         }
@@ -2749,21 +2819,24 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
             const auto& texAnim = modelSource_->texAnims[(size_t)batch.textureAnimationId];
             if (const MdxTimeline* tl = FindTimeline(texAnim.timelines, TAG_KTAT)) {
                 float sampled[3] = {0.0f, 0.0f, 0.0f};
-                if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 3, 0.0f)) {
+                if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 3,
+                                           0.0f, currentSequenceIndex)) {
                     fsU.uvTransRot[0] = sampled[0];
                     fsU.uvTransRot[1] = sampled[1];
                 }
             }
             if (const MdxTimeline* tl = FindTimeline(texAnim.timelines, TAG_KTAR)) {
                 float sampled[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-                if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 4, 0.0f)) {
+                if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 4,
+                                           0.0f, currentSequenceIndex)) {
                     fsU.uvTransRot[2] = sampled[2];
                     fsU.uvTransRot[3] = sampled[3];
                 }
             }
             if (const MdxTimeline* tl = FindTimeline(texAnim.timelines, TAG_KTAS)) {
                 float sampled[3] = {1.0f, 1.0f, 1.0f};
-                if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 3, 1.0f)) {
+                if (SampleTimelineForModel(*tl, modelSource_, currentFrame, elapsedMs_, sampled, 3,
+                                           1.0f, currentSequenceIndex)) {
                     fsU.texFlags[2] = std::isfinite(sampled[0]) ? sampled[0] : 1.0f;
                     fsU.texFlags[3] = std::isfinite(sampled[1]) ? sampled[1] : 1.0f;
                 }

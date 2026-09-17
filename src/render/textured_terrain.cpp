@@ -955,10 +955,9 @@ void TexturedTerrain::Render(const Mat4& view, const Mat4& proj, float time) {
 
         // FS uniforms
         struct {
-            float showPathing, showLighting, baseTexOnly;
+            float showLighting, baseTexOnly;
             float fogColor[4], fogParams[4];
         } fsU = {};
-        fsU.showPathing = showPathing_ ? 1.0f : 0.0f;
         fsU.baseTexOnly = (debugMode_ == 4) ? 1.0f : 0.0f;
         fsU.fogColor[0] = fogColor_[0];
         fsU.fogColor[1] = fogColor_[1];

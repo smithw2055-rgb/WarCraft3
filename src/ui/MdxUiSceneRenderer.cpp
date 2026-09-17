@@ -1,12 +1,14 @@
 #include "MdxUiSceneRenderer.h"
 
 #include "third_party/sokol/sokol_gfx.h"
+#include "render/mdx_sequence_select.h"
 
 #include <NsRender/GLFactory.h>
 #include <NsRender/Texture.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -86,6 +88,29 @@ std::string MdxPathFromModelField(std::string path) {
 
 Vec3 MdxPointToYUp(const float value[3]) {
     return Vec3(value[0], value[2], -value[1]);
+}
+
+int FindSequenceIndexByName(const MdxModel& model, const char* sequenceName) {
+    if (sequenceName && *sequenceName) {
+        const std::string requested = LowerAscii(sequenceName);
+        for (int i = 0; i < (int)model.sequences.size(); ++i) {
+            if (LowerAscii(model.sequences[(size_t)i].name) == requested) {
+                return i;
+            }
+        }
+    }
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        if (LowerAscii(model.sequences[(size_t)i].name).find("stand") != std::string::npos) {
+            return i;
+        }
+    }
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        const MdxSequence& sequence = model.sequences[(size_t)i];
+        if (sequence.endFrame > sequence.startFrame) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 std::string ResolveSkinField(const std::string& fieldName) {
@@ -427,6 +452,12 @@ bool MdxUiSceneRenderer::LoadModelInto(Layer& layer, const std::string& path,
     if (setMidFrame) {
         nextLayer.viewer->SetCurrentSequenceFrameByRatio(0.5f);
     }
+    nextLayer.cameraSequenceIndex = FindSequenceIndexByName(*nextLayer.model, sequence);
+    nextLayer.cameraLoop = loop;
+    if (setMidFrame && nextLayer.cameraSequenceIndex >= 0) {
+        nextLayer.cameraElapsedMs =
+            MdxSequenceDurationSeconds(*nextLayer.model, nextLayer.cameraSequenceIndex) * 500.0f;
+    }
 
     nextLayer.loaded = true;
     nextLayer.path = path;
@@ -618,6 +649,57 @@ void MdxUiSceneRenderer::Render(float dt) {
     sg_reset_state_cache();
 }
 
+uint32_t MdxUiSceneRenderer::CameraFrameForLayer(const Layer& layer) const {
+    if (!layer.model || layer.cameraSequenceIndex < 0
+        || layer.cameraSequenceIndex >= (int)layer.model->sequences.size()) {
+        return 0;
+    }
+    const MdxSequence& sequence = layer.model->sequences[(size_t)layer.cameraSequenceIndex];
+    if (sequence.endFrame <= sequence.startFrame) {
+        return sequence.startFrame;
+    }
+    const uint32_t range = sequence.endFrame - sequence.startFrame;
+    uint32_t advance = (uint32_t)std::max(0.0f, layer.cameraElapsedMs);
+    if (layer.cameraLoop) {
+        advance %= range;
+    } else if (advance >= range) {
+        advance = range - 1;
+    }
+    return sequence.startFrame + advance;
+}
+
+void MdxUiSceneRenderer::AdvanceLayerCamera(Layer& layer, float dt) {
+    if (!layer.model) {
+        return;
+    }
+    layer.cameraElapsedMs += std::max(0.0f, dt) * 1000.0f;
+    if (!layer.cameraLoop || layer.cameraSequenceIndex < 0
+        || layer.cameraSequenceIndex >= (int)layer.model->sequences.size()) {
+        return;
+    }
+    const float durationMs = MdxSequenceDurationSeconds(*layer.model, layer.cameraSequenceIndex) * 1000.0f;
+    if (durationMs > 0.0f && layer.cameraElapsedMs >= durationMs) {
+        layer.cameraElapsedMs = std::fmod(layer.cameraElapsedMs, durationMs);
+    }
+}
+
+bool MdxUiSceneRenderer::BuildModelCameraViewProj(Layer& layer, float dt, Mat4& view, Mat4& proj) {
+    if (!layer.model || layer.model->cameras.empty() || width_ <= 0 || height_ <= 0) {
+        return false;
+    }
+    AdvanceLayerCamera(layer, dt);
+    MdxCameraSample camera;
+    MdxSampleCamera(layer.model->cameras[0], layer.model.get(),
+                    CameraFrameForLayer(layer), layer.cameraElapsedMs,
+                    camera, layer.cameraSequenceIndex);
+    view = LookAt(MdxPointToYUp(camera.pos), MdxPointToYUp(camera.target), Vec3(0.0f, 1.0f, 0.0f));
+    const float nearClip = std::max(1.0f, camera.nearClip);
+    const float farClip = std::max(nearClip + 1.0f, camera.farClip);
+    proj = Perspective(camera.fov * 0.6f * 57.2957795f, (float)width_ / (float)height_,
+                       nearClip, farClip);
+    return true;
+}
+
 void MdxUiSceneRenderer::RenderSingle(float dt) {
     if (!single_.loaded || width_ <= 0 || height_ <= 0) {
         return;
@@ -625,14 +707,7 @@ void MdxUiSceneRenderer::RenderSingle(float dt) {
 
     Mat4 view;
     Mat4 proj;
-    if (useModelCamera_ && single_.model && !single_.model->cameras.empty()) {
-        const MdxCamera& camera = single_.model->cameras[0];
-        view = LookAt(MdxPointToYUp(camera.pos), MdxPointToYUp(camera.target), Vec3(0.0f, 1.0f, 0.0f));
-        const float nearClip = std::max(1.0f, camera.nearClip);
-        const float farClip = std::max(nearClip + 1.0f, camera.farClip);
-        proj = Perspective(camera.fov * 0.6f * 57.2957795f, (float)width_ / (float)height_,
-                           nearClip, farClip);
-    } else {
+    if (!useModelCamera_ || !BuildModelCameraViewProj(single_, dt, view, proj)) {
         view = LookAt(Vec3(0.0f, 900.0f, 1800.0f), Vec3(0.0f, 400.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
         proj = Perspective(60.0f, (float)width_ / (float)height_, 8.0f, 70000.0f);
     }
@@ -649,14 +724,7 @@ void MdxUiSceneRenderer::RenderGlueMainMenu(float dt) {
     if (background_.loaded) {
         Mat4 view;
         Mat4 proj;
-        if (useModelCamera_ && background_.model && !background_.model->cameras.empty()) {
-            const MdxCamera& camera = background_.model->cameras[0];
-            view = LookAt(MdxPointToYUp(camera.pos), MdxPointToYUp(camera.target), Vec3(0.0f, 1.0f, 0.0f));
-            const float nearClip = std::max(1.0f, camera.nearClip);
-            const float farClip = std::max(nearClip + 1.0f, camera.farClip);
-            proj = Perspective(camera.fov * 0.6f * 57.2957795f, (float)width_ / (float)height_,
-                               nearClip, farClip);
-        } else {
+        if (!useModelCamera_ || !BuildModelCameraViewProj(background_, dt, view, proj)) {
             view = LookAt(Vec3(0.0f, 900.0f, 1800.0f), Vec3(0.0f, 400.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
             proj = Perspective(60.0f, (float)width_ / (float)height_, 8.0f, 70000.0f);
         }
