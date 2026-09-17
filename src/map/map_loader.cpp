@@ -4,6 +4,7 @@
 #include "../map/w3x_storm.h"
 #include "../map/wts.h"
 #include "../ecs/destructable.h"
+#include "../ecs/abilities/ability_inventory.h"
 #include <iostream>
 
 namespace {
@@ -271,6 +272,19 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
     unitLoadResult_.mapUnitCount = unitsDoo_.units.size();
     for (const auto& u : unitsDoo_.units) {
         War3ID id(u.id);
+        // Random-table spawn (ref randomFlag==2): roll the unit type from the
+        // chance table with the deterministic sim RNG.
+        if (u.randomFlag == 2 && !u.randomTable.empty()) {
+            float roll = sim_.SimRand01() * 100.0f;
+            float accum = 0.0f;
+            for (const auto& entry : u.randomTable) {
+                accum += (float)entry.chance;
+                if (roll < accum) {
+                    id = War3ID(entry.id);
+                    break;
+                }
+            }
+        }
         CUnit* simUnit = nullptr;
         if (unitData_.HasUnitType(id)) {
             simUnit = sim_.CreateUnit(id, u.player, u.pos[0], u.pos[1], u.angle);
@@ -287,6 +301,28 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
                 unitVisualSeeds_.push_back(seed);
                 if (u.hitpoints > 0) simUnit->SetLife(sim_, (float)u.hitpoints);
                 if (u.mana > 0) simUnit->SetMana((float)u.mana);
+                if (u.heroLevel > 0) simUnit->SetHeroLevel(u.heroLevel);
+                if (u.targetAcquisition >= 0.0f) simUnit->SetAcquireRange(u.targetAcquisition);
+                // Preplaced ability levels (autocast flags retained for future).
+                for (const auto& mod : u.modifiedAbilities) {
+                    if (CAbility* ability = simUnit->GetAbility(War3ID(mod.id))) {
+                        if (mod.level > 0) ability->SetLevel(mod.level);
+                    }
+                }
+                // Preplaced inventory (heroes, shops): create + pick up.
+                if (!u.inventory.empty()) {
+                    if (auto* inv = dynamic_cast<CAbilityInventory*>(
+                            simUnit->GetAbility(War3ID("AInv")))) {
+                        for (const auto& entry : u.inventory) {
+                            War3ID itemId(entry.id);
+                            if (!itemData_.HasItem(itemId)) continue;
+                            if (CItem* item = sim_.CreateItem(
+                                    itemId, u.pos[0], u.pos[1])) {
+                                inv->PickUpItem(sim_, simUnit, item, entry.slot);
+                            }
+                        }
+                    }
+                }
             }
         }
         if (!simUnit) {

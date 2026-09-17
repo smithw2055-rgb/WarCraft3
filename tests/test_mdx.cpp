@@ -1606,3 +1606,39 @@ bool TestMdxSequenceDurationSeconds() {
     TEST_ASSERT(Near(MdxSequenceDurationSeconds(model, 2), 0.0f));
     return true;
 }
+
+bool TestMdxSkipsFaceFxAndBindPose() {
+    std::vector<uint8_t> data;
+    PushMdxTag(data, 'M', 'D', 'L', 'X');
+    // VERS chunk: size 4 + version 800.
+    PushMdxTag(data, 'V', 'E', 'R', 'S');
+    PushLE32(data, 4);
+    PushLE32(data, 800);
+    // FAFX chunk with opaque payload: must be skipped, not fail.
+    PushMdxTag(data, 'F', 'A', 'F', 'X');
+    PushLE32(data, 16);
+    for (int i = 0; i < 16; i++) data.push_back(uint8_t(i));
+    // BPOS chunk with opaque payload: must be skipped, not fail.
+    PushMdxTag(data, 'B', 'P', 'O', 'S');
+    PushLE32(data, 12);
+    for (int i = 0; i < 12; i++) data.push_back(uint8_t(0xAB));
+    // A sequence after the skipped chunks proves parsing continues.
+    PushMdxTag(data, 'S', 'E', 'Q', 'S');
+    PushLE32(data, 132);
+    PushFixedString(data, "Stand", 80);
+    PushLE32(data, 0);     // start frame
+    PushLE32(data, 1000);  // end frame
+    PushLE32(data, 0x3f800000u); // move speed = 1.0
+    PushLE32(data, 0);     // flags
+    PushLE32(data, 0x3f800000u); // rarity = 1.0
+    PushLE32(data, 0);     // sync point
+    for (int i = 0; i < 6; i++) PushLE32(data, 0); // bounds min/max
+    PushLE32(data, 0x40000000u); // bounds radius = 2.0
+
+    MdxModel model;
+    TEST_ASSERT(MdxLoad(data.data(), data.size(), model));
+    TEST_ASSERT(model.version == 800);
+    TEST_ASSERT(model.sequences.size() == 1);
+    TEST_ASSERT(model.sequences[0].name == "Stand");
+    return true;
+}

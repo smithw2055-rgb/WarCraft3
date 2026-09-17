@@ -61,48 +61,84 @@ bool UnitsDooLoad(const uint8_t* data, size_t size, UnitsDooData& out, const W3i
         u.hitpoints = (int)R32LE(data + off); off += 4;
         u.mana = (int)R32LE(data + off); off += 4;
 
-        if (out.version > 7) { CHK(4); off += 4; }
+        if (out.version > 7) { CHK(4); u.droppedItemTable = (int)R32LE(data + off); off += 4; }
 
         CHK(4);
         int dropSetCount = (int)R32LE(data + off); off += 4;
         if (dropSetCount < 0 || dropSetCount > 10000) return false;
+        u.dropSets.resize((size_t)dropSetCount);
         for (int ds = 0; ds < dropSetCount; ++ds) {
             CHK(4);
             int itemCount = (int)R32LE(data + off); off += 4;
             if (itemCount < 0 || itemCount > 10000) return false;
-            if (itemCount > 0) { CHK((size_t)itemCount * 8); off += (size_t)itemCount * 8; }
+            auto& set = u.dropSets[(size_t)ds].items;
+            set.resize((size_t)itemCount);
+            for (int k = 0; k < itemCount; ++k) {
+                CHK(8);
+                set[(size_t)k].id = TagBE(data + off); off += 4;
+                set[(size_t)k].chance = (int)R32LE(data + off); off += 4;
+            }
         }
 
-        CHK(16);
+        CHK(8);
         u.goldAmount = (int)R32LE(data + off); off += 4;
-        off += 4;
+        u.targetAcquisition = RF32(data + off); off += 4;
+        CHK(4);
         u.heroLevel = (int)R32LE(data + off); off += 4;
-        if (out.version > 7) { CHK(12); off += 12; }
+        if (out.version > 7) {
+            CHK(12);
+            u.heroStrength = (int)R32LE(data + off); off += 4;
+            u.heroAgility = (int)R32LE(data + off); off += 4;
+            u.heroIntelligence = (int)R32LE(data + off); off += 4;
+        }
 
         CHK(4);
         int invCount = (int)R32LE(data + off); off += 4;
         if (invCount < 0 || invCount > 10000) return false;
-        if (invCount > 0) { CHK((size_t)invCount * 8); off += invCount * 8; }
+        u.inventory.resize((size_t)invCount);
+        for (int k = 0; k < invCount; ++k) {
+            CHK(8);
+            u.inventory[(size_t)k].slot = (int)R32LE(data + off); off += 4;
+            u.inventory[(size_t)k].id = TagBE(data + off); off += 4;
+        }
 
         CHK(4);
         int abilityCount = (int)R32LE(data + off); off += 4;
         if (abilityCount < 0 || abilityCount > 10000) return false;
-        if (abilityCount > 0) { CHK((size_t)abilityCount * 12); off += abilityCount * 12; }
+        u.modifiedAbilities.resize((size_t)abilityCount);
+        for (int k = 0; k < abilityCount; ++k) {
+            CHK(12);
+            u.modifiedAbilities[(size_t)k].id = TagBE(data + off); off += 4;
+            u.modifiedAbilities[(size_t)k].autocastActive = (int)R32LE(data + off); off += 4;
+            u.modifiedAbilities[(size_t)k].level = (int)R32LE(data + off); off += 4;
+        }
 
         CHK(4);
         int randomFlag = (int)R32LE(data + off); off += 4;
-        if (randomFlag == 0) { CHK(4); off += 4; }
-        else if (randomFlag == 1) { CHK(8); off += 8; }
+        u.randomFlag = randomFlag;
+        if (randomFlag == 0) {
+            CHK(4);
+            u.randomLevel[0] = data[off++];
+            u.randomLevel[1] = data[off++];
+            u.randomLevel[2] = data[off++];
+            u.randomItemClass = data[off++];
+        }
+        else if (randomFlag == 1) { CHK(8); u.randomGroup = R32LE(data + off); off += 4; u.randomPosition = R32LE(data + off); off += 4; }
         else if (randomFlag == 2) {
             CHK(4);
             int randCount = (int)R32LE(data + off); off += 4;
             if (randCount < 0 || randCount > 10000) return false;
-            if (randCount > 0) { CHK((size_t)randCount * 8); off += randCount * 8; }
+            u.randomTable.resize((size_t)randCount);
+            for (int k = 0; k < randCount; ++k) {
+                CHK(8);
+                u.randomTable[(size_t)k].id = TagBE(data + off); off += 4;
+                u.randomTable[(size_t)k].chance = (int)R32LE(data + off); off += 4;
+            }
         }
 
         CHK(12);
         u.customTeamColor = (int)R32LE(data + off); off += 4;
-        off += 4;
+        u.waygate = (int)R32LE(data + off); off += 4;
         u.creationNumber = (int)R32LE(data + off); off += 4;
     }
     return true;

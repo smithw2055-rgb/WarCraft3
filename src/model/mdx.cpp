@@ -903,6 +903,15 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
             break;
         }
 
+        case T_FAFX:
+        case T_BPOS:
+            // Face effects and Reforged bind pose carry no renderer state in
+            // this port; skipped like unknown chunks (ref MdlxUnknownChunk).
+            // Explicit cases (not default) so a future facial-animation or
+            // bind-pose skinning pass has a hook.
+            r.off = chunkEnd;
+            break;
+
         default:
             r.off = chunkEnd;
             break;

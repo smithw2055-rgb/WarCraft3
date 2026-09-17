@@ -58,6 +58,7 @@ bool TestMdxEventSplatScaleCompensationMatchesEventType();
 bool TestMdxSequenceSelectsExactSecondaryTags();
 bool TestMdxSequenceSelectsSpellSecondaryFallback();
 bool TestMdxSequenceDurationSeconds();
+bool TestMdxSkipsFaceFxAndBindPose();
 bool TestJassAnimationTagOrdinalsMatchReference();
 bool TestJassPopulateAnimationTagsFromSelector();
 bool TestJassVmThreadSleepResumesAfterWait();
@@ -136,6 +137,9 @@ bool TestHeroSkillLevelsAndGrants();
 bool TestVfsFolderLastAddedWins();
 bool TestVfsFolderShadowsArchive();
 bool TestVfsLastOpenedArchiveWins();
+bool TestW3iParsesPlayersAndForces();
+bool TestW3iParsesTechAndRandomTables();
+bool TestUnitsDooRetainsDropsAndInventory();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -185,6 +189,7 @@ int main() {
         {"MDX sequence selects exact secondary tags", TestMdxSequenceSelectsExactSecondaryTags},
         {"MDX sequence selects spell secondary fallback", TestMdxSequenceSelectsSpellSecondaryFallback},
         {"MDX sequence duration seconds", TestMdxSequenceDurationSeconds},
+        {"MDX skips FaceFX and bind pose", TestMdxSkipsFaceFxAndBindPose},
         {"JASS animation tag ordinals match reference", TestJassAnimationTagOrdinalsMatchReference},
         {"JASS PopulateTags parses selector", TestJassPopulateAnimationTagsFromSelector},
         {"JASS VM thread sleep resumes after wait", TestJassVmThreadSleepResumesAfterWait},
@@ -263,6 +268,9 @@ int main() {
         {"VFS folder last-added wins", TestVfsFolderLastAddedWins},
         {"VFS folder shadows archive", TestVfsFolderShadowsArchive},
         {"VFS game archive order and map mount", TestVfsLastOpenedArchiveWins},
+        {"W3I parses players and forces", TestW3iParsesPlayersAndForces},
+        {"W3I parses tech and random tables", TestW3iParsesTechAndRandomTables},
+        {"Units.doo retains drops and inventory", TestUnitsDooRetainsDropsAndInventory},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif
