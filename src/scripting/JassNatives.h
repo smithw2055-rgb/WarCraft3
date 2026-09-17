@@ -194,6 +194,47 @@ struct JassTextTag {
 struct JassEffect {
     std::string modelPath;
     float x = 0, y = 0, z = 0;
+    // Spell-effect attachment (ref AddSpellEffectTarget*): target widget
+    // sim handle + attach point, or -1/empty for point effects.
+    int targetSimHandle = -1;
+    std::string attachPoint;
+    int abilityId = 0;
+    int effectType = 0;
+};
+
+// Billboard image (ref image API): full state retained for the renderer;
+// render consumption lands with the UI/scene image pass.
+struct JassImage {
+    std::string file;
+    float sizeX = 0, sizeY = 0, sizeZ = 0;
+    float posX = 0, posY = 0, posZ = 0;
+    float originX = 0, originY = 0, originZ = 0;
+    int imageType = 0;
+    bool visible = false;
+    bool render = true;
+    bool renderAlways = false;
+    bool aboveWater = false;
+    bool constantHeight = false;
+    int red = 255, green = 255, blue = 255, alpha = 255;
+};
+
+// Clickable trackable (ref trackable API): firing hit/track events needs
+// the render picking path; registration below stores trigger interest.
+struct JassTrackable {
+    std::string modelPath;
+    float x = 0, y = 0, facing = 0;
+};
+
+// Ground decal (ref ubersplat API): renderer consumes finished/color.
+struct JassUbersplat {
+    float x = 0, y = 0;
+    std::string name;
+    int red = 255, green = 255, blue = 255, alpha = 255;
+    bool forcePaused = false;
+    bool noBirthTime = false;
+    bool finished = false;
+    bool render = true;
+    bool renderAlways = false;
 };
 
 struct JassQuestItem {
@@ -225,7 +266,8 @@ struct JassHandleInfo {
         ITEM, DESTRUCTABLE, RECT, REGION, SOUND, TEXT_TAG,
         EFFECT, LIGHTNING, WEATHER, FOG_MODIFIER, QUEST, QUEST_ITEM, CAMERA_SETUP, ABILITY,
         PRIMARY_TAG, SECONDARY_TAG, PRIMARY_TAGS, SECONDARY_TAGS,
-        DIALOG, BUTTON, MULTIBOARD, MULTIBOARDITEM, LEADERBOARD
+        DIALOG, BUTTON, MULTIBOARD, MULTIBOARDITEM, LEADERBOARD,
+        IMAGE, TRACKABLE, UBERSPLAT
     };
     Type type;
     int id;
@@ -410,6 +452,13 @@ public:
 
     std::unordered_map<int, std::shared_ptr<JassEffect>> effects;
     int nextEffectId = 0x0B000000;
+
+    std::unordered_map<int, std::shared_ptr<JassImage>> images;
+    int nextImageId = 0x16000000;
+    std::unordered_map<int, std::shared_ptr<JassTrackable>> trackables;
+    int nextTrackableId = 0x17000000;
+    std::unordered_map<int, std::shared_ptr<JassUbersplat>> ubersplats;
+    int nextUbersplatId = 0x18000000;
 
     std::unordered_map<int, std::shared_ptr<JassQuest>> quests;
     int nextQuestId = 0x10000000;
@@ -642,6 +691,7 @@ private:
     void RegisterOrderIdNatives();
     void RegisterTerrainQueryNatives();
     void RegisterPlayerTeamNatives();
+    void RegisterVisualNatives();
 
     void RegisterConfigPlayerNatives();
 

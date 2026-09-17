@@ -24,12 +24,12 @@ static bool IsKnownNonRenderableMapUnit(uint32_t id) {
 
 MapLoader::MapLoader(MpqManager& mpq, CSimulation& sim, CUnitData& unitData,
                      CDestructableData& destructableData, CItemData& itemData,
-                     CUpgradeData& upgradeData, SceneManager& scene,
+                     CUpgradeData& upgradeData, CAbilityData& abilityData, SceneManager& scene,
                      TexturedTerrain& terrain, TileSet& tileset,
                      W3EMap& mapData, W3iInfo& w3i, WpmData& wpm)
     : mpq_(mpq), sim_(sim), unitData_(unitData),
       destructableData_(destructableData), itemData_(itemData),
-      upgradeData_(upgradeData), scene_(scene),
+      upgradeData_(upgradeData), abilityData_(abilityData), scene_(scene),
       terrain_(terrain), tileset_(tileset),
       mapData_(mapData), w3i_(w3i), wpm_(wpm)
 {
@@ -124,10 +124,12 @@ void MapLoader::LoadUnitDataTables() {
         destructableData_ = CDestructableData::LoadFromMpq(mpq_);
         itemData_ = CItemData::LoadFromMpq(mpq_);
         upgradeData_ = CUpgradeData::LoadFromMpq(mpq_);
+        abilityData_ = CAbilityData::LoadFromMpq(mpq_);
         sim_.SetUnitData(&unitData_);
         sim_.SetDestructableData(&destructableData_);
         sim_.SetItemData(&itemData_);
         sim_.SetUpgradeData(&upgradeData_);
+        sim_.SetAbilityData(&abilityData_);
         sim_.SetGameplayConstants(gameplayConstants_);
         std::cout << "  UnitData: " << unitData_.GetAllTypes().size() << " types loaded" << std::endl;
     }
@@ -197,10 +199,12 @@ void MapLoader::LoadObjectModifications(const std::string& mapPath) {
         destructableData_ = CDestructableData::LoadFromMpq(mpq_, mapPath);
         itemData_ = CItemData::LoadFromMpq(mpq_, mapPath);
         upgradeData_ = CUpgradeData::LoadFromMpq(mpq_, mapPath);
+        abilityData_ = CAbilityData::LoadFromMpq(mpq_, mapPath);
         sim_.SetUnitData(&unitData_);
         sim_.SetDestructableData(&destructableData_);
         sim_.SetItemData(&itemData_);
         sim_.SetUpgradeData(&upgradeData_);
+        sim_.SetAbilityData(&abilityData_);
         if (loadRenderAssets_) {
             scene_.ApplyMapObjectModifications(mapPath);
         }

@@ -34,6 +34,8 @@ public:
     CItemData* GetItemData() const { return itemData_; }
     void SetUpgradeData(CUpgradeData* data) { upgradeData_ = data; }
     CUpgradeData* GetUpgradeData() const { return upgradeData_; }
+    void SetAbilityData(CAbilityData* data) { abilityData_ = data; }
+    CAbilityData* GetAbilityData() const { return abilityData_; }
     void SetGameplayConstants(const CGameplayConstants& c) {
         gameplayConstants_ = c;
         combatSystem_.Configure(c.GetDefenseArmor(), c.damageBonus);

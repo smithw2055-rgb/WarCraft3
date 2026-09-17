@@ -30,6 +30,7 @@ add_executable(warsmash_tests
     test_vfs_overlay.cpp
     test_map_data.cpp
     test_jass_orders_terrain.cpp
+    test_jass_visuals.cpp
     test_jass_unimplemented.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp

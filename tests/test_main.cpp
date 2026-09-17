@@ -144,6 +144,10 @@ bool TestIssueOrderByIdNatives();
 bool TestTerrainQueryNatives();
 bool TestRectRegionCellNatives();
 bool TestPlayerTeamNatives();
+bool TestAbilityArtLookupFromProfiles();
+bool TestSpellEffectNatives();
+bool TestImageNatives();
+bool TestTrackableAndUbersplatNatives();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -279,6 +283,10 @@ int main() {
         {"Terrain query natives", TestTerrainQueryNatives},
         {"Rect/region cell natives", TestRectRegionCellNatives},
         {"Player/team natives", TestPlayerTeamNatives},
+        {"Ability art lookup from profiles", TestAbilityArtLookupFromProfiles},
+        {"Spell effect natives", TestSpellEffectNatives},
+        {"Image natives", TestImageNatives},
+        {"Trackable and ubersplat natives", TestTrackableAndUbersplatNatives},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

@@ -31,6 +31,12 @@ struct CAbilityDefFull {
     int levels = 1;
     int race = 0;
 
+    // Effect/sound art per effecttype ordinal (ref ConvertEffectType 0..6:
+    // EFFECT/TARGET/CASTER/SPECIAL/AREA_EFFECT/MISSILE/LIGHTNING), from the
+    // ability Func profile skin tables. Empty when the profile has none.
+    std::vector<std::string> effectArtByType = std::vector<std::string>(7);
+    std::string effectSound;
+
     std::vector<std::string> dataFields; // raw data fields A-I
 };
 

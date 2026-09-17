@@ -21,6 +21,7 @@
 #include "../ecs/player.h"
 #include "../ecs/abilities/ability_harvest.h"
 #include "../data/unitdata.h"
+#include "../data/abilitydata.h"
 #include "../data/destructabledata.h"
 #include "../data/itemdata.h"
 #include "../data/upgradedata.h"
@@ -326,6 +327,7 @@ private:
     CDestructableData destructableData_;
     CItemData itemData_;
     CUpgradeData upgradeData_;
+    CAbilityData abilityData_;
     WpmData wpm_;
     bool simulationInitialized_ = false;
     bool debugSelectFirstUnitForHud_ = false;

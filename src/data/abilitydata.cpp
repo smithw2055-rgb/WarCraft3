@@ -296,6 +296,24 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq, const std::string&
             // For abilities without matching hardcoded override, keep defaults (empty art, -1,-1 pos)
         }
 
+        // Effect/sound art per effecttype from the Func profile skin tables
+        // (ref GetAbilityEffect/Sound; single value per type, no index list).
+        {
+            static const char* kEffectKeys[7] = {
+                "Effectart", "TargetArt", "Casterart", "Specialart",
+                "Areaeffectart", "Missileart", "LightningEffect",
+            };
+            std::string lc = code;
+            for (auto& c : lc) c = (char)std::tolower(c);
+            for (int t = 0; t < 7; t++) {
+                std::string art = skinTbl.GetString(code, kEffectKeys[t], "");
+                if (art.empty()) art = skinTbl.GetString(lc, kEffectKeys[t], "");
+                def->effectArtByType[(size_t)t] = art;
+            }
+            def->effectSound = skinTbl.GetString(code, "Effectsound", "");
+            if (def->effectSound.empty()) def->effectSound = skinTbl.GetString(lc, "Effectsound", "");
+        }
+
         // Combat fields (level 1)
         if (colTargs1 >= 0) def->targetsAllowed = abilitySlk.GetString(r, colTargs1, "");
         if (colCast1 >= 0) def->castTime = (float)std::atof(abilitySlk.GetString(r, colCast1, "0").c_str());

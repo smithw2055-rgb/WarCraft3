@@ -1617,7 +1617,7 @@ void GameController::InitLoading() {
 
     mapLoader_ = std::make_unique<MapLoader>(
         mpq_, simulation_, unitData_, destructableData_,
-        itemData_, upgradeData_, scene_, texturedTerrain_, tileset_, map_, w3i_, wpm_);
+        itemData_, upgradeData_, abilityData_, scene_, texturedTerrain_, tileset_, map_, w3i_, wpm_);
     mapLoader_->SetConfigData(configEnv_ ? configEnv_->GetData() : nullptr);
     mapLoader_->SetLoadRenderAssets(!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_);
     mapLoader_->CreateTasks(mapPath_, 0);

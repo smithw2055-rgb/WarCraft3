@@ -12,6 +12,7 @@
 #include "ecs/orders/order.h"
 #include "ecs/pathing/world_collision.h"
 #include "data/unitdata.h"
+#include "data/abilitydata.h"
 #include "data/itemdata.h"
 #include "data/combat_types.h"
 #include <iostream>
@@ -928,6 +929,7 @@ void JassNatives::RegisterCommonNatives() {
     RegisterOrderIdNatives();
     RegisterTerrainQueryNatives();
     RegisterPlayerTeamNatives();
+    RegisterVisualNatives();
     std::cout << "JassNatives: registered common natives" << std::endl;
 }
 
@@ -7317,6 +7319,356 @@ void JassNatives::RegisterPlayerTeamNatives() {
     });
     vm_.RegisterNative("SetMapFlag", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (!args.empty() && data) data->gameConfig.mapFlags |= (uint32_t)args[0].intVal;
+        return JassValue::Null();
+    });
+}
+
+// ============================================================
+// 27. Visual natives: spell effects, images, trackables, ubersplats
+// ============================================================
+void JassNatives::RegisterVisualNatives() {
+    auto makeEffect = [data = data_]() -> std::pair<int, std::shared_ptr<JassEffect>> {
+        auto e = std::make_shared<JassEffect>();
+        int id = data->nextEffectId++;
+        data->effects[id] = e;
+        return {data->AllocHandle(JassHandleInfo::EFFECT, id), e};
+    };
+    // Ability art lookup: ById natives resolve the model path from the
+    // ability profile (ref ability art); string spell natives pass it.
+    auto abilityArt = [data = data_, sim = sim_](int abilityId, int type) -> std::string {
+        (void)data;
+        if (!sim || type < 0 || type > 6) return "";
+        const CAbilityData* abilityData = sim->GetAbilityData();
+        if (!abilityData) return "";
+        const CAbilityDefFull* def = abilityData->GetAbility(War3ID((uint32_t)abilityId));
+        if (!def || type >= (int)def->effectArtByType.size()) return "";
+        return def->effectArtByType[(size_t)type];
+    };
+    auto resolveWidget = [data = data_](int widgetHandle) -> int {
+        // Spell targets may be units, items or destructables; first hit wins.
+        // Stored for renderer consumption alongside the attach point.
+        static const JassHandleInfo::Type kinds[] = {
+            JassHandleInfo::UNIT, JassHandleInfo::ITEM, JassHandleInfo::DESTRUCTABLE,
+        };
+        for (auto kind : kinds) {
+            int simId = data->GetSimHandle(widgetHandle, kind);
+            if (simId >= 0) return simId;
+        }
+        return -1;
+    };
+
+    vm_.RegisterNative("AddSpellEffect", [makeEffect, abilityArt](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Int(0);
+        auto [handle, e] = makeEffect();
+        // Retail shows the ability's own art of type t (abilityString is a
+        // 4-char code); a longer string is kept verbatim defensively.
+        e->abilityId = RawcodeFromString(args[0].strVal);
+        e->effectType = args[1].intVal;
+        e->modelPath = args[0].strVal.size() == 4
+            ? abilityArt(e->abilityId, e->effectType)
+            : args[0].strVal;
+        e->x = args[2].realVal;
+        e->y = args[3].realVal;
+        return JassValue::Int(handle);
+    });
+    vm_.RegisterNative("AddSpellEffectLoc", [data = data_, makeEffect, abilityArt](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Int(0);
+        auto [handle, e] = makeEffect();
+        e->abilityId = RawcodeFromString(args[0].strVal);
+        e->effectType = args[1].intVal;
+        e->modelPath = args[0].strVal.size() == 4
+            ? abilityArt(e->abilityId, e->effectType)
+            : args[0].strVal;
+        int locSim = data->GetSimHandle(args[2].intVal, JassHandleInfo::LOCATION);
+        if (locSim >= 0) {
+            auto it = data->locations.find(locSim);
+            if (it != data->locations.end()) {
+                e->x = it->second->x;
+                e->y = it->second->y;
+            }
+        }
+        return JassValue::Int(handle);
+    });
+    vm_.RegisterNative("AddSpellEffectById", [makeEffect, abilityArt](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Int(0);
+        auto [handle, e] = makeEffect();
+        e->abilityId = args[0].intVal;
+        e->effectType = args[1].intVal;
+        e->modelPath = abilityArt(args[0].intVal, args[1].intVal);
+        e->x = args[2].realVal;
+        e->y = args[3].realVal;
+        return JassValue::Int(handle);
+    });
+    vm_.RegisterNative("AddSpellEffectByIdLoc", [data = data_, makeEffect, abilityArt](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Int(0);
+        auto [handle, e] = makeEffect();
+        e->abilityId = args[0].intVal;
+        e->effectType = args[1].intVal;
+        e->modelPath = abilityArt(args[0].intVal, args[1].intVal);
+        int locSim = data->GetSimHandle(args[2].intVal, JassHandleInfo::LOCATION);
+        if (locSim >= 0) {
+            auto it = data->locations.find(locSim);
+            if (it != data->locations.end()) {
+                e->x = it->second->x;
+                e->y = it->second->y;
+            }
+        }
+        return JassValue::Int(handle);
+    });
+    vm_.RegisterNative("AddSpellEffectTarget", [makeEffect, resolveWidget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Int(0);
+        auto [handle, e] = makeEffect();
+        e->modelPath = args[0].strVal;
+        e->effectType = args[1].intVal;
+        e->targetSimHandle = resolveWidget(args[2].intVal);
+        e->attachPoint = args[3].strVal;
+        return JassValue::Int(handle);
+    });
+    vm_.RegisterNative("AddSpellEffectTargetById", [makeEffect, abilityArt, resolveWidget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Int(0);
+        auto [handle, e] = makeEffect();
+        e->abilityId = args[0].intVal;
+        e->effectType = args[1].intVal;
+        e->modelPath = abilityArt(args[0].intVal, args[1].intVal);
+        e->targetSimHandle = resolveWidget(args[2].intVal);
+        e->attachPoint = args[3].strVal;
+        return JassValue::Int(handle);
+    });
+    vm_.RegisterNative("GetAbilityEffect", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 3 || !sim) return JassValue::Str("");
+        const CAbilityData* abilityData = sim->GetAbilityData();
+        if (!abilityData) return JassValue::Str("");
+        const CAbilityDefFull* def = abilityData->GetAbility(War3ID::FromString(args[0].strVal));
+        if (!def) return JassValue::Str("");
+        const int type = args[1].intVal;
+        // Single art value per type in the Func profiles (no index lists).
+        if (type < 0 || type >= (int)def->effectArtByType.size()) return JassValue::Str("");
+        return JassValue::Str(def->effectArtByType[(size_t)type]);
+    });
+    vm_.RegisterNative("GetAbilityEffectById", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 3 || !sim) return JassValue::Str("");
+        const CAbilityData* abilityData = sim->GetAbilityData();
+        if (!abilityData) return JassValue::Str("");
+        const CAbilityDefFull* def = abilityData->GetAbility(War3ID((uint32_t)args[0].intVal));
+        if (!def) return JassValue::Str("");
+        const int type = args[1].intVal;
+        if (type < 0 || type >= (int)def->effectArtByType.size()) return JassValue::Str("");
+        return JassValue::Str(def->effectArtByType[(size_t)type]);
+    });
+    vm_.RegisterNative("GetAbilitySound", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 3 || !sim) return JassValue::Str("");
+        const CAbilityData* abilityData = sim->GetAbilityData();
+        if (!abilityData) return JassValue::Str("");
+        const CAbilityDefFull* def = abilityData->GetAbility(War3ID::FromString(args[0].strVal));
+        // Func profiles carry a single Effectsound per ability (no per-type).
+        return JassValue::Str(def ? def->effectSound : "");
+    });
+    vm_.RegisterNative("GetAbilitySoundById", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 3 || !sim) return JassValue::Str("");
+        const CAbilityData* abilityData = sim->GetAbilityData();
+        if (!abilityData) return JassValue::Str("");
+        const CAbilityDefFull* def = abilityData->GetAbility(War3ID((uint32_t)args[0].intVal));
+        return JassValue::Str(def ? def->effectSound : "");
+    });
+
+    vm_.RegisterNative("CreateImage", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 11) return JassValue::Int(0);
+        auto img = std::make_shared<JassImage>();
+        img->file = args[0].strVal;
+        img->sizeX = args[1].realVal; img->sizeY = args[2].realVal; img->sizeZ = args[3].realVal;
+        img->posX = args[4].realVal; img->posY = args[5].realVal; img->posZ = args[6].realVal;
+        img->originX = args[7].realVal; img->originY = args[8].realVal; img->originZ = args[9].realVal;
+        img->imageType = args[10].intVal;
+        int id = data->nextImageId++;
+        data->images[id] = img;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::IMAGE, id));
+    });
+    vm_.RegisterNative("DestroyImage", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::IMAGE);
+        if (id >= 0) { data->images.erase(id); data->FreeHandle(args[0].intVal); }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ShowImage", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::IMAGE);
+        if (id >= 0) {
+            auto it = data->images.find(id);
+            if (it != data->images.end()) it->second->visible = args[1].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetImageRender", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::IMAGE);
+        if (id >= 0) {
+            auto it = data->images.find(id);
+            if (it != data->images.end()) it->second->render = args[1].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetImageRenderAlways", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::IMAGE);
+        if (id >= 0) {
+            auto it = data->images.find(id);
+            if (it != data->images.end()) it->second->renderAlways = args[1].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetImageAboveWater", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::IMAGE);
+        if (id >= 0) {
+            auto it = data->images.find(id);
+            if (it != data->images.end()) it->second->aboveWater = args[1].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetImageColor", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::IMAGE);
+        if (id >= 0) {
+            auto it = data->images.find(id);
+            if (it != data->images.end()) {
+                it->second->red = args[1].intVal;
+                it->second->green = args[2].intVal;
+                it->second->blue = args[3].intVal;
+                it->second->alpha = args[4].intVal;
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetImageConstantHeight", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::IMAGE);
+        if (id >= 0) {
+            auto it = data->images.find(id);
+            if (it != data->images.end()) it->second->constantHeight = args[1].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetImagePosition", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::IMAGE);
+        if (id >= 0) {
+            auto it = data->images.find(id);
+            if (it != data->images.end()) {
+                it->second->posX = args[1].realVal;
+                it->second->posY = args[2].realVal;
+                it->second->posZ = args[3].realVal;
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetImageType", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::IMAGE);
+        if (id >= 0) {
+            auto it = data->images.find(id);
+            if (it != data->images.end()) it->second->imageType = args[1].intVal;
+        }
+        return JassValue::Null();
+    });
+
+    vm_.RegisterNative("CreateTrackable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Int(0);
+        auto t = std::make_shared<JassTrackable>();
+        t->modelPath = args[0].strVal;
+        t->x = args[1].realVal;
+        t->y = args[2].realVal;
+        t->facing = args[3].realVal;
+        int id = data->nextTrackableId++;
+        data->trackables[id] = t;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::TRACKABLE, id));
+    });
+    // Retail has no DestroyTrackable; hit/track event interest is stored on
+    // triggers below and fired once the render picking path exists.
+    vm_.RegisterNative("TriggerRegisterTrackableHitEvent", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        // Triggers are keyed by raw id (ref CreateTrigger convention).
+        if (data->GetSimHandle(args[1].intVal, JassHandleInfo::TRACKABLE) < 0) return JassValue::Null();
+        auto it = data->triggers.find(args[0].intVal);
+        if (it != data->triggers.end()) it->second->registeredEvents.emplace_back(args[1].intVal, 4101);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("TriggerRegisterTrackableTrackEvent", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (data->GetSimHandle(args[1].intVal, JassHandleInfo::TRACKABLE) < 0) return JassValue::Null();
+        auto it = data->triggers.find(args[0].intVal);
+        if (it != data->triggers.end()) it->second->registeredEvents.emplace_back(args[1].intVal, 4102);
+        return JassValue::Null();
+    });
+
+    vm_.RegisterNative("CreateUbersplat", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 9) return JassValue::Int(0);
+        auto s = std::make_shared<JassUbersplat>();
+        s->x = args[0].realVal;
+        s->y = args[1].realVal;
+        s->name = args[2].strVal;
+        s->red = args[3].intVal;
+        s->green = args[4].intVal;
+        s->blue = args[5].intVal;
+        s->alpha = args[6].intVal;
+        s->forcePaused = args[7].boolVal;
+        s->noBirthTime = args[8].boolVal;
+        int id = data->nextUbersplatId++;
+        data->ubersplats[id] = s;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::UBERSPLAT, id));
+    });
+    vm_.RegisterNative("DestroyUbersplat", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::UBERSPLAT);
+        if (id >= 0) { data->ubersplats.erase(id); data->FreeHandle(args[0].intVal); }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FinishUbersplat", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::UBERSPLAT);
+        if (id >= 0) {
+            auto it = data->ubersplats.find(id);
+            if (it != data->ubersplats.end()) it->second->finished = true;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ResetUbersplat", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::UBERSPLAT);
+        if (id >= 0) {
+            auto it = data->ubersplats.find(id);
+            if (it != data->ubersplats.end()) it->second->finished = false;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetUbersplatRender", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::UBERSPLAT);
+        if (id >= 0) {
+            auto it = data->ubersplats.find(id);
+            if (it != data->ubersplats.end()) it->second->render = args[1].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetUbersplatRenderAlways", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::UBERSPLAT);
+        if (id >= 0) {
+            auto it = data->ubersplats.find(id);
+            if (it != data->ubersplats.end()) it->second->renderAlways = args[1].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ShowUbersplat", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::UBERSPLAT);
+        if (id >= 0) {
+            auto it = data->ubersplats.find(id);
+            if (it != data->ubersplats.end()) it->second->render = args[1].boolVal;
+        }
         return JassValue::Null();
     });
 }
