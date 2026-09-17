@@ -1,6 +1,7 @@
 #include "ability_hero.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
+#include "ecs/ability_factory.h"
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -100,8 +101,11 @@ bool CAbilityHero::SelectHeroSkill(CSimulation& game, CUnit* unit, War3ID skillC
         // only when learnable; report failure otherwise.
         return false;
     }
+    const int pointsBefore = skillPoints_;
     LearnSkill(game, unit, skillCode);
-    return true;
+    // LearnSkill keeps the point for unknown codes; report success only
+    // when a point was actually spent (ref selectHeroSkill).
+    return skillPoints_ < pointsBefore;
 }
 
 void CAbilityHero::LearnSkill(CSimulation& game, CUnit* unit, War3ID skillCode) {
@@ -118,13 +122,20 @@ void CAbilityHero::LearnSkill(CSimulation& game, CUnit* unit, War3ID skillCode) 
     }
 
     if (existingAbility) {
-        // Level up existing ability (TODO: implement level system on abilities)
+        // Level up the existing ability (ref hero skill levels 1-3).
+        existingAbility->SetLevel(existingAbility->GetLevel() + 1);
         skillPoints_--;
-        std::cout << "Hero learned skill: " << skillCode.ToString() << std::endl;
-    } else {
-        // TODO: Create new ability instance from ability data and add to unit
+        std::cout << "Hero leveled skill: " << skillCode.ToString()
+                  << " to " << existingAbility->GetLevel() << std::endl;
+    } else if (auto created = AbilityFactory::CreateAbility(game.AllocateHandleId(), skillCode)) {
+        created->SetLevel(1);
+        unit->AddAbility(game, std::move(created));
         skillPoints_--;
         std::cout << "Hero learned new skill: " << skillCode.ToString() << std::endl;
+    } else {
+        // Unknown skill code (e.g. custom ability with no C++ class yet):
+        // keep the point, like ref selectHeroSkill reporting failure.
+        std::cout << "Hero cannot learn unknown skill: " << skillCode.ToString() << std::endl;
     }
 }
 

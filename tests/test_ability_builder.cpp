@@ -7,6 +7,7 @@
 
 #include "data/combat_types.h"
 #include "ecs/abilities/ability_builder.h"
+#include "ecs/abilities/ability_hero.h"
 #include "ecs/abilities/spells2.h"
 #include "ecs/buffs.h"
 #include "ecs/csimulation.h"
@@ -188,8 +189,7 @@ bool TestSimRandIsDeterministic() {
     return true;
 }
 
-bool TestSummonWithoutUnitDataIsGraceful() {
-    CSimulation sim;
+bool TestSummonWithoutUnitDataIsGraceful() {    CSimulation sim;
     auto* caster = AdoptAt(sim, 161, 0, 0);
     Settle(sim);
     // No unit data registered: helper must return nullptr, not crash, and
@@ -200,5 +200,28 @@ bool TestSummonWithoutUnitDataIsGraceful() {
                                  64, 64, 0, 60.0f);
     TEST_ASSERT(out == nullptr);
     TEST_ASSERT(!fired);
+    return true;
+}
+
+bool TestHeroSkillLevelsAndGrants() {
+    CSimulation sim;
+    auto* hero = AdoptAt(sim, 171, 0, 0);
+    Settle(sim);
+    CAbilityHero skill(2001);
+    skill.AddLearnableSkill(War3ID("AHtb")); // Storm Bolt exists in factory
+    skill.AddLearnableSkill(War3ID("ZZZ7")); // unknown: point must be kept
+    skill.SetSkillPoints(3);
+    TEST_ASSERT(skill.SelectHeroSkill(sim, hero, War3ID("AHtb")));
+    CAbility* granted = hero->GetAbility(War3ID("AHtb"));
+    TEST_ASSERT(granted != nullptr);
+    TEST_ASSERT(granted->GetLevel() == 1);
+    TEST_ASSERT(skill.GetSkillPoints() == 2);
+    // Second point levels the existing ability instead of duplicating it.
+    TEST_ASSERT(skill.SelectHeroSkill(sim, hero, War3ID("AHtb")));
+    TEST_ASSERT(granted->GetLevel() == 2);
+    TEST_ASSERT(skill.GetSkillPoints() == 1);
+    // Unknown skill keeps the point.
+    TEST_ASSERT(!skill.SelectHeroSkill(sim, hero, War3ID("ZZZ7")));
+    TEST_ASSERT(skill.GetSkillPoints() == 1);
     return true;
 }

@@ -7,7 +7,8 @@ CBehaviorStun::CBehaviorStun() {}
 void CBehaviorStun::Begin(CSimulation& simulation) {
     (void)simulation;
     remaining_ = duration_;
-    // TODO: play stun animation
+    // No sim-side animation hook: sequence selection is render-side
+    // (game_controller maps behavior category to MDX sequences there).
 }
 
 void CBehaviorStun::End(CSimulation& simulation) {

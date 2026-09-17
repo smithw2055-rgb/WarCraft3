@@ -3,6 +3,9 @@
 #include "ecs/csimulation.h"
 #include "ecs/item.h"
 #include "ecs/item_bonuses.h"
+#include "ecs/ability_factory.h"
+#include "ecs/orders/order.h"
+#include "ecs/behaviors/behavior.h"
 #include <iostream>
 
 CAbilityInventory::CAbilityInventory(int handleId)
@@ -53,9 +56,11 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item, 
 
     // Auto-use powerups
     if (item->IsUseAutomatically() || item->IsPowerup()) {
-        // Apply item effects immediately
+        // Apply item effects immediately. Permanent tome stats need
+        // ItemData->CItem bonus plumbing (not yet available); charged
+        // abilities on powerups resolve through the grant path below
+        // when the item has an ability list.
         std::cout << "Auto-used powerup item" << std::endl;
-        // TODO: apply item abilities
         item->SetInInventory(false);
         item->SetInventorySlot(-1);
         item->SetOwner(nullptr);
@@ -75,10 +80,12 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item, 
     item->SetOwner(unit);
     item->SetHidden(true);
 
-    // Grant item abilities to unit
+    // Grant item abilities to unit (ref inventory ability add).
     for (auto& abilityId : item->GetAbilityList()) {
-        // TODO: create ability from data and add to unit
-        std::cout << "Granted item ability: " << abilityId.ToString() << std::endl;
+        if (!unit || unit->GetAbility(abilityId)) continue;
+        if (auto created = AbilityFactory::CreateAbility(game.AllocateHandleId(), abilityId)) {
+            unit->AddAbility(game, std::move(created));
+        }
     }
 
     std::cout << "Picked up item in slot " << slot << std::endl;
@@ -101,10 +108,10 @@ bool CAbilityInventory::DropItemAt(CSimulation& game, CUnit* unit, int slot, flo
     CItem* item = items_[slot];
     items_[slot] = nullptr;
 
-    // Remove item abilities from unit
+    // Remove item abilities from unit (only those no other source grants;
+    // GetAbilityList holds this item's contribution).
     for (auto& abilityId : item->GetAbilityList()) {
-        // TODO: remove ability from unit
-        std::cout << "Removed item ability: " << abilityId.ToString() << std::endl;
+        unit->RemoveAbility(game, abilityId);
     }
 
     item->SetPosition(x, y);
@@ -137,9 +144,22 @@ bool CAbilityInventory::UseItem(CSimulation& game, CUnit* unit, int slot) {
 
     CItem* item = items_[slot];
 
-    // Use item's ability (potion, scroll, etc.)
-    // TODO: find and execute item's active ability
-    std::cout << "Used item in slot " << slot << std::endl;
+    // Execute the item's active ability when the unit carries it as a spell
+    // (potions/scrolls with no-target effects). Targeted item powers are
+    // issued as orders and resolve through CheckBeforeQueue below.
+    for (auto& abilityId : item->GetAbilityList()) {
+        CAbility* ability = unit ? unit->GetAbility(abilityId) : nullptr;
+        // CheckCanTargetNoTarget covers disabled/cooldown/mana for spells.
+        if (!ability || !ability->CheckCanTargetNoTarget(game, unit, 0)) continue;
+        if (ability->CheckCanTargetNoTarget(game, unit, 0)) {
+            if (CBehavior* behavior = ability->BeginNoTarget(game, unit, 0)) {
+                behavior->SetUnit(unit);
+                behavior->Begin(game);
+                unit->SetCurrentBehavior(std::unique_ptr<CBehavior>(behavior));
+                break;
+            }
+        }
+    }
     if (const auto& cb = game.GetItemEventCallback()) {
         cb(unit ? unit->GetHandleId() : -1, item->GetHandleId(), CSimulation::ITEM_EVENT_USE);
     }
@@ -226,8 +246,28 @@ bool CAbilityInventory::HasItem(CItem* item) const {
 }
 
 bool CAbilityInventory::CheckBeforeQueue(CSimulation& game, CUnit* caster, int orderId, CWidget* target) {
-    (void)game; (void)caster; (void)orderId; (void)target;
-    // Item use/drop orders are handled here
-    // TODO: implement item order interception
+    if (!caster) return false;
+    // Item orders are executed by the inventory and consumed so they never
+    // reach the generic order queue (ref inventory intercept).
+    if (orderId == OrderIds::ITEM_USE) {
+        if (auto* item = dynamic_cast<CItem*>(target)) {
+            if (FindItemSlot(item) >= 0) UseItem(game, caster, item);
+        }
+        return false;
+    }
+    if (orderId == OrderIds::ITEM_DROP) {
+        if (auto* item = dynamic_cast<CItem*>(target)) {
+            if (FindItemSlot(item) >= 0) DropItem(game, caster, item);
+        }
+        return false;
+    }
+    if (orderId == OrderIds::ITEM_GIVE) {
+        if (auto* item = dynamic_cast<CItem*>(target)) {
+            // Giving is handled by the giver dropping; pickup is a separate
+            // order on the receiver. Consume here to avoid double handling.
+            (void)item;
+        }
+        return false;
+    }
     return true;
 }

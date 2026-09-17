@@ -286,7 +286,18 @@ void CAbilityQueue::CancelQueueItem(CSimulation& game, CUnit* building, int slot
                 player->AddLumber(GetUpgradeLumberCost(*upgrade, currentLevel));
             }
         }
-        // TODO: refund hero revive
+        // Refund hero revive with the same level-scaled formula used when the
+        // revive was queued (see QueueReviveHero). The queue stores the hero
+        // handle id, so look the hero up for its current level/type costs.
+        if (queueTypes_[slot] == CQueueItemType::HERO_REVIVE) {
+            if (CUnit* hero = game.GetUnit((int)typeId.value)) {
+                if (auto* heroType = unitData->GetUnitType(hero->GetTypeId())) {
+                    int heroLevel = hero->GetHeroLevel();
+                    player->AddGold((int)(heroType->GetGoldCost() * (0.5f + 0.1f * heroLevel)));
+                    player->AddLumber((int)(heroType->GetLumberCost() * (0.5f + 0.1f * heroLevel)));
+                }
+            }
+        }
     }
 
     // Shift queue left

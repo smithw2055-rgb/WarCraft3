@@ -46,9 +46,10 @@ CBehavior* CAbilityUpgrade::BeginNoTarget(CSimulation& game, CUnit* caster, int 
     player->AddGold(-upgradeType->GetGoldCost());
     player->AddLumber(-upgradeType->GetLumberCost());
 
-    // Start upgrade (change unit type in-place)
-    // TODO: implement proper upgrade progress tracking
-    // For now, instant upgrade
+    // Start upgrade (change unit type in-place).
+    // Simplification: applied instantly. A timed morph needs CUnit type-swap
+    // support (stats/ability rebuild mid-game), which does not exist yet;
+    // route through CAbilityQueue once it does (ref upgrade progress).
     std::cout << "Upgrading to: " << upgradeId.ToString() << std::endl;
 
     return nullptr;

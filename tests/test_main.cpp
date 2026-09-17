@@ -132,6 +132,7 @@ bool TestEffectChainDamageAndHeal();
 bool TestBuilderRegistryRoundTrip();
 bool TestSimRandIsDeterministic();
 bool TestSummonWithoutUnitDataIsGraceful();
+bool TestHeroSkillLevelsAndGrants();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -255,6 +256,7 @@ int main() {
         {"Builder registry round trip", TestBuilderRegistryRoundTrip},
         {"Sim rand is deterministic", TestSimRandIsDeterministic},
         {"Summon without unit data is graceful", TestSummonWithoutUnitDataIsGraceful},
+        {"Hero skill levels and grants", TestHeroSkillLevelsAndGrants},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif
