@@ -130,3 +130,28 @@ public:
 private:
     float healPerTick_;
 };
+
+// Timed life buff - marks a summoned unit and kills it on expiry.
+// (ref CBuffTimedLife: summon spells attach this instead of a unit field;
+// isTimedLifeBar() drives the blue dissipate bar in the renderer.)
+class CBuffTimedLife : public CBuff {
+public:
+    CBuffTimedLife(War3ID alias, float duration);
+
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    bool IsTimedLifeBar() const { return true; }
+    CBuff* Clone() const override;
+};
+
+// Life drain channel - periodic damage to the bearer, healing the caster.
+// (ref Life Drain: channelled, not the instant drain previously used.)
+class CBuffLifeDrain : public CBuff {
+public:
+    CBuffLifeDrain(float duration, float drainPerTick, int casterHandle);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float drainPerTick_;
+};

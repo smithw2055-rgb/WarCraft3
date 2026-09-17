@@ -128,6 +128,12 @@ public:
     bool HasBuff(War3ID buffId) const;
     const std::vector<std::unique_ptr<CBuff>>& GetBuffs() const { return buffs_; }
     void UpdateBuffs(CSimulation& game);
+    // Crowd-control / summon queries (type-based so custom buff ids from
+    // object data still work; canonical ids: BOhx/BUsl/BNsi/timed-life).
+    bool IsHexed() const;
+    bool IsSilenced() const;
+    bool IsAsleep() const;
+    bool IsSummoned() const;
 
     // ===== Behavior System =====
     // Current behavior

@@ -50,6 +50,13 @@ void CBehaviorAttack::SetTarget(CWidget* target) {
 
 bool CBehaviorAttack::Update(CSimulation& simulation) {
     if (!unit_ || !target_) return true;
+    // Hexed units cannot attack (but may still move). Stay alive and idle
+    // so the behavior resumes when the hex expires (ref hex).
+    if (unit_->IsHexed()) {
+        ResetAttackSwingState();
+        propelling_ = false;
+        return false;
+    }
     const CUnitAttack* attack = GetPrimaryAttack();
     if (!attack) {
         return true;

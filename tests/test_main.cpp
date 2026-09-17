@@ -123,6 +123,15 @@ bool TestJassCameraSetup();
 bool TestJassSoundMusic();
 bool TestJassCinematicVisuals();
 bool TestJassSuspendDecayMisc();
+bool TestTimedLifeKillsBearerOnExpiry();
+bool TestHexUsesMarkerNotStun();
+bool TestSleepWakesOnDamage();
+bool TestSilenceBlocksCastOnly();
+bool TestLifeDrainTicksHealCaster();
+bool TestEffectChainDamageAndHeal();
+bool TestBuilderRegistryRoundTrip();
+bool TestSimRandIsDeterministic();
+bool TestSummonWithoutUnitDataIsGraceful();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -237,6 +246,15 @@ int main() {
         {"JASS sound music", TestJassSoundMusic},
         {"JASS cinematic visuals", TestJassCinematicVisuals},
         {"JASS suspend decay misc", TestJassSuspendDecayMisc},
+        {"Timed life kills bearer on expiry", TestTimedLifeKillsBearerOnExpiry},
+        {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
+        {"Sleep wakes on damage", TestSleepWakesOnDamage},
+        {"Silence blocks cast only", TestSilenceBlocksCastOnly},
+        {"Life drain ticks heal caster", TestLifeDrainTicksHealCaster},
+        {"Effect chain damage and heal", TestEffectChainDamageAndHeal},
+        {"Builder registry round trip", TestBuilderRegistryRoundTrip},
+        {"Sim rand is deterministic", TestSimRandIsDeterministic},
+        {"Summon without unit data is graceful", TestSummonWithoutUnitDataIsGraceful},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

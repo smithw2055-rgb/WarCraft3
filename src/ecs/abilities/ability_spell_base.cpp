@@ -13,6 +13,10 @@ bool CAbilitySpellBase::CheckCanUse(CSimulation& game, CUnit* unit, int orderId)
     (void)orderId;
     if (IsDisabled()) return false;
     if (IsOnCooldown()) return false;
+    if (!unit) return false;
+    // Silenced units cannot cast; hexed units can neither attack nor cast
+    // (ref target checks ABConditionIsUnitPassAllAbilityTargetChecks).
+    if (unit->IsSilenced() || unit->IsHexed()) return false;
     if (unit->GetMana() < manaCost_) return false;
     return true;
 }

@@ -51,6 +51,7 @@ public:
 private:
     War3ID wolfType_ = War3ID("nwlg");
     int count_ = 2;
+    float summonDuration_ = 60.0f; // ref Feral Spirit wolf timed life
 };
 
 // ===== Earthquake (Far Seer) - AOE damage to buildings =====
@@ -93,6 +94,7 @@ private:
     War3ID infernalType_ = War3ID("ninf");
     float stunDuration_ = 2.0f;
     float stunRadius_ = 250.0f;
+    float summonDuration_ = 180.0f; // ref Inferno timed life
 };
 
 // ===== Silence (Dark Ranger) - prevent casting =====
@@ -134,10 +136,17 @@ private:
 };
 
 // ===== Dark Portal (Archimonde) - summon units =====
+// Implemented as an AbilityBuilder chain (summon action), the first spell
+// migrated off hardcoded DoEffect logic (ref abilitybuilder behavior/).
 class CAbilityDarkPortal : public CAbilitySpellBase {
 public:
     CAbilityDarkPortal(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+private:
+    War3ID portalUnitType_ = War3ID("nfel"); // Felguard through the portal
+    int summonCount_ = 2;
+    float summonDuration_ = 120.0f;
+    bool chainRegistered_ = false;
 };
 
 // ===== Rain of Chaos (Archimonde) - AOE damage =====

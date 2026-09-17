@@ -156,6 +156,12 @@ void CSimulation::UpdateProjectiles() {
     }
 }
 
+float CSimulation::SimRand01() {
+    // Numerical Recipes LCG; high 16 bits give a [0,1) float.
+    simRandState_ = simRandState_ * 1664525u + 1013904223u;
+    return (float)(simRandState_ >> 16) * (1.0f / 65536.0f);
+}
+
 CUnit* CSimulation::AdoptUnit(std::unique_ptr<CUnit> unit) {
     if (!unit) return nullptr;
     CUnit* ptr = unit.get();

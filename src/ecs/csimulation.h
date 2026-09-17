@@ -103,6 +103,12 @@ public:
     CCombatSystem* GetCombatSystem() { return &combatSystem_; }
     const CCombatSystem* GetCombatSystem() const { return &combatSystem_; }
 
+    // Deterministic synced RNG (ref GameTurnManager lockstep: every client
+    // must roll the same sequence; std::rand is banned in sim code).
+    // LCG, seeded fixed per game so replays stay reproducible.
+    float SimRand01();
+    float SimRandRange(float lo, float hi) { return lo + (hi - lo) * SimRand01(); }
+
     // Projectiles (see combat/projectile.h). Spawned by ranged attacks at
     // their damage point; stepped in Update() after units.
     void SpawnProjectile(CProjectile&& p) { projectiles_.push_back(std::move(p)); }
@@ -196,8 +202,8 @@ private:
     CUpgradeData* upgradeData_ = nullptr;
 
     CCombatSystem combatSystem_;
-    std::unique_ptr<CWorldCollision> worldCollision_;
-    std::unique_ptr<CPathfindingProcessor> pathfindingProcessor_;
+    uint32_t simRandState_ = 0x12345678u; // deterministic sim RNG (LCG)
+    std::unique_ptr<CWorldCollision> worldCollision_;    std::unique_ptr<CPathfindingProcessor> pathfindingProcessor_;
     AudioSystem* audio_ = nullptr;
     HandleIdAllocator handleIdAlloc_;
 

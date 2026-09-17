@@ -182,6 +182,52 @@ CBuff* CBuffStun::Clone() const {
     return copy;
 }
 
+// ===== CBuffSleep =====
+// Canonical buff id BUsl (ref Units\AbilityBuffData.slk, Dreadlord Sleep).
+CBuffSleep::CBuffSleep(float duration)
+    : CBuff(War3ID("BUsl"), duration, false) {}
+
+void CBuffSleep::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    // Sleep interrupts orders like stun, but any damage wakes the unit
+    // (handled in CUnit::Damage). No stun behavior: the unit simply idles.
+    target->ClearOrders();
+    target->SetCurrentBehavior(nullptr);
+}
+
+void CBuffSleep::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game; (void)target;
+}
+
+CBuff* CBuffSleep::Clone() const {
+    auto* copy = new CBuffSleep(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffSilence =====
+// Canonical buff id BNsi (ref Units\AbilityBuffData.slk, Dark Ranger Silence).
+CBuffSilence::CBuffSilence(float duration)
+    : CBuff(War3ID("BNsi"), duration, false) {}
+
+CBuff* CBuffSilence::Clone() const {
+    auto* copy = new CBuffSilence(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffHex =====
+// Canonical buff id BOhx (ref Units\AbilityBuffData.slk, Shadow Hunter Hex).
+CBuffHex::CBuffHex(float duration)
+    : CBuff(War3ID("BOhx"), duration, false) {}
+
+CBuff* CBuffHex::Clone() const {
+    auto* copy = new CBuffHex(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
 // ===== CBuffRejuvenation =====
 CBuffRejuvenation::CBuffRejuvenation(float duration, float healPerTick)
     : CBuff(War3ID("Brej"), duration, true), healPerTick_(healPerTick) {
@@ -198,6 +244,53 @@ void CBuffRejuvenation::OnPeriodic(CSimulation& game, CUnit* target) {
 
 CBuff* CBuffRejuvenation::Clone() const {
     auto* copy = new CBuffRejuvenation(duration_, healPerTick_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffTimedLife =====
+CBuffTimedLife::CBuffTimedLife(War3ID alias, float duration)
+    : CBuff(alias, duration, false) {}
+
+void CBuffTimedLife::OnRemove(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    // Summoned unit dissipates when its timed life runs out (ref
+    // CBuffTimedLife.onBuffRemove -> unit.kill). Lethal chaos damage keeps
+    // death callbacks and corpse flow consistent with normal kills.
+    target->Damage(game, nullptr, false, false,
+                   CAttackType::CHAOS, CDamageType::NORMAL,
+                   "", 1e9f, 0);
+}
+
+CBuff* CBuffTimedLife::Clone() const {
+    auto* copy = new CBuffTimedLife(GetId(), duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffLifeDrain =====
+CBuffLifeDrain::CBuffLifeDrain(float duration, float drainPerTick, int casterHandle)
+    : CBuff(War3ID("ANdr"), duration, false), drainPerTick_(drainPerTick) {
+    casterHandleId_ = casterHandle;
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffLifeDrain::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    target->Damage(game, nullptr, false, false,
+                   CAttackType::SPELLS, CDamageType::MAGIC,
+                   "", drainPerTick_, 0);
+    if (CUnit* caster = game.GetUnit(casterHandleId_)) {
+        if (!caster->IsDead()) {
+            float newLife = caster->GetLife() + drainPerTick_;
+            if (newLife > caster->GetMaxLife()) newLife = caster->GetMaxLife();
+            caster->SetLife(game, newLife);
+        }
+    }
+}
+
+CBuff* CBuffLifeDrain::Clone() const {
+    auto* copy = new CBuffLifeDrain(duration_, drainPerTick_, casterHandleId_);
     copy->remaining_ = remaining_;
     return copy;
 }

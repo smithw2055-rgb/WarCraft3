@@ -2,6 +2,7 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
+#include "ecs/abilities/ability_builder.h"
 #include <cmath>
 #include <iostream>
 
@@ -79,8 +80,8 @@ void CAbilityHex::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || target->IsDead()) return;
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {
-        // Apply stun as hex
-        targetUnit->AddBuff(std::make_unique<CBuffStun>(duration_), game);
+        // Hex: cannot attack or cast, but can move (canonical buff BOhx).
+        targetUnit->AddBuff(std::make_unique<CBuffHex>(duration_), game);
     }
 }
 
@@ -128,13 +129,10 @@ void CAbilityFeralSpirit::DoEffect(CSimulation& game, CUnit* caster) {
     for (int i = 0; i < count_; i++) {
         float x = caster->GetX() + (i - count_/2) * 64.0f;
         float y = caster->GetY() + 64.0f;
-        auto* wolf = game.CreateUnit(wolfType_, caster->GetPlayerIndex(), x, y, 0);
-        if (wolf) {
-            // TODO: set summon duration, mark as summoned
-            if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-                summonedCb(caster->GetHandleId(), wolf->GetHandleId());
-            }
-        }
+        // Timed-life summon (ref CBuffTimedLife): wolves dissipate instead
+        // of living forever; summoned callback fires for JASS GetSummonedUnit.
+        SummonTimedUnit(game, caster, wolfType_, War3ID("AOsf"),
+                        x, y, caster->GetFacing(), summonDuration_);
     }
 }
 
@@ -206,7 +204,8 @@ void CAbilitySleep::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) 
     if (!target || target->IsDead()) return;
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {
-        targetUnit->AddBuff(std::make_unique<CBuffStun>(duration_), game);
+        // Sleep: idles the target; any damage wakes it (see CUnit::Damage).
+        targetUnit->AddBuff(std::make_unique<CBuffSleep>(duration_), game);
     }
 }
 
@@ -230,13 +229,9 @@ void CAbilityInferno::DoEffect(CSimulation& game, CUnit* caster, float x, float 
             unit->AddBuff(std::make_unique<CBuffStun>(stunDuration_), game);
         }
     }
-    // Summon infernal
-    auto* infernal = game.CreateUnit(infernalType_, caster->GetPlayerIndex(), x, y, 0);
-    if (infernal) {
-        if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-            summonedCb(caster->GetHandleId(), infernal->GetHandleId());
-        }
-    }
+    // Summon infernal with timed life (ref CBuffTimedLife).
+    SummonTimedUnit(game, caster, infernalType_, War3ID("AUin"),
+                    x, y, caster->GetFacing(), summonDuration_);
 }
 
 // ===== Silence =====
@@ -251,12 +246,12 @@ CAbilitySilence::CAbilitySilence(int handleId)
 void CAbilitySilence::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     (void)caster;
     for (auto* unit : game.GetUnits()) {
-        if (unit->IsDead()) continue;
+        if (unit->IsDead() || unit == caster) continue;
         float dx = unit->GetX() - x;
         float dy = unit->GetY() - y;
         if (dx*dx + dy*dy <= radius_*radius_) {
-            // Apply silence as a stun (simplified)
-            unit->AddBuff(std::make_unique<CBuffStun>(duration_), game);
+            // Silence blocks casting only; the target keeps moving/attacking.
+            unit->AddBuff(std::make_unique<CBuffSilence>(duration_), game);
         }
     }
 }
@@ -288,13 +283,11 @@ CAbilityLifeDrain::CAbilityLifeDrain(int handleId)
 
 void CAbilityLifeDrain::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || target->IsDead()) return;
-    float totalDrain = drainPerSecond_ * duration_;
-    target->Damage(game, caster, false, false,
-                   CAttackType::SPELLS, CDamageType::MAGIC,
-                   "", totalDrain, 0);
-    float newLife = caster->GetLife() + totalDrain;
-    if (newLife > caster->GetMaxLife()) newLife = caster->GetMaxLife();
-    caster->SetLife(game, newLife);
+    auto* targetUnit = dynamic_cast<CUnit*>(target);
+    if (!targetUnit) return;
+    // Channelled drain over time (ref): periodic damage + heal to caster.
+    targetUnit->AddBuff(std::make_unique<CBuffLifeDrain>(
+        duration_, drainPerSecond_ * 1.0f, caster->GetHandleId()), game);
 }
 
 // ===== Finger of Death =====
@@ -323,8 +316,19 @@ CAbilityDarkPortal::CAbilityDarkPortal(int handleId)
 }
 
 void CAbilityDarkPortal::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    (void)game; (void)caster; (void)x; (void)y;
-    // TODO: summon portal units
+    if (!caster) return;
+    // First spell on the AbilityBuilder path: register the summon chain once,
+    // then run it like the ref .j doEffect (summon + fired summoned events).
+    if (!chainRegistered_) {
+        ABEffectChain chain;
+        chain.Add(std::make_unique<ABActionSummon>(
+            portalUnitType_, War3ID("ANdp"), summonCount_, summonDuration_));
+        AbilityBuilderRegistry::Instance().Register(War3ID("ANdp"), std::move(chain));
+        chainRegistered_ = true;
+    }
+    if (const ABEffectChain* chain = AbilityBuilderRegistry::Instance().Find(War3ID("ANdp"))) {
+        chain->Run(game, caster, nullptr, true, x, y);
+    }
 }
 
 // ===== Rain of Chaos =====
@@ -338,8 +342,9 @@ CAbilityRainOfChaos::CAbilityRainOfChaos(int handleId)
 
 void CAbilityRainOfChaos::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     for (int w = 0; w < waves_; w++) {
-        float wx = x + (std::rand() % 200 - 100);
-        float wy = y + (std::rand() % 200 - 100);
+        // Deterministic synced scatter (std::rand is banned in sim code).
+        float wx = x + game.SimRandRange(-100.0f, 100.0f);
+        float wy = y + game.SimRandRange(-100.0f, 100.0f);
         for (auto* unit : game.GetUnits()) {
             if (unit->IsDead()) continue;
             float dx = unit->GetX() - wx;

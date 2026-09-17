@@ -294,6 +294,34 @@ bool CUnit::HasBuff(War3ID buffId) const {
     return GetBuff(buffId) != nullptr;
 }
 
+bool CUnit::IsHexed() const {
+    for (const auto& buff : buffs_) {
+        if (buff && dynamic_cast<const CBuffHex*>(buff.get())) return true;
+    }
+    return false;
+}
+
+bool CUnit::IsSilenced() const {
+    for (const auto& buff : buffs_) {
+        if (buff && dynamic_cast<const CBuffSilence*>(buff.get())) return true;
+    }
+    return false;
+}
+
+bool CUnit::IsAsleep() const {
+    for (const auto& buff : buffs_) {
+        if (buff && dynamic_cast<const CBuffSleep*>(buff.get())) return true;
+    }
+    return false;
+}
+
+bool CUnit::IsSummoned() const {
+    for (const auto& buff : buffs_) {
+        if (buff && dynamic_cast<const CBuffTimedLife*>(buff.get())) return true;
+    }
+    return false;
+}
+
 void CUnit::UpdateBuffs(CSimulation& game) {
     for (auto it = buffs_.begin(); it != buffs_.end();) {
         auto& buff = *it;
@@ -619,6 +647,12 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
     float oldLife = life_;
     life_ -= actualDamage;
     if (life_ < 0) life_ = 0;
+
+    // Sleep breaks on any damage (ref sleep). Removal runs OnRemove; the
+    // buff has no behavior of its own so no extra cleanup is needed.
+    if (actualDamage > 0 && IsAsleep()) {
+        RemoveBuff(War3ID("BUsl"), simulation);
+    }
 
     // Thorns aura: reflect a share of melee attack damage back to the attacker.
     // Guarded by isAttack+!isRanged so reflected hits never re-reflect

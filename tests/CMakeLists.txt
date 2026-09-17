@@ -26,6 +26,7 @@ add_executable(warsmash_tests
     test_gameplay_data.cpp
     test_projectiles.cpp
     test_transport.cpp
+    test_ability_builder.cpp
     test_jass_unimplemented.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
@@ -116,6 +117,7 @@ add_executable(warsmash_tests
     ../src/ecs/abilities/spells.cpp
     ../src/ecs/abilities/spells2.cpp
     ../src/ecs/abilities/auras.cpp
+    ../src/ecs/abilities/ability_builder.cpp
 )
 
 target_include_directories(warsmash_tests PRIVATE ../src)

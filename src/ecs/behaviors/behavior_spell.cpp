@@ -43,6 +43,11 @@ void CBehaviorSpell::End(CSimulation& simulation) {
 
 bool CBehaviorSpell::Update(CSimulation& simulation) {
     if (!unit_ || !spellAbility_) return true;
+    // Cast fizzles if the caster is silenced/hexed mid-cast (ref conditions).
+    if (unit_->IsSilenced() || unit_->IsHexed()) {
+        propelling_ = false;
+        return true;
+    }
 
     float dt = simulation.GetSimStepTime();
 
