@@ -148,6 +148,11 @@ bool TestAbilityArtLookupFromProfiles();
 bool TestSpellEffectNatives();
 bool TestImageNatives();
 bool TestTrackableAndUbersplatNatives();
+bool TestPoolPlaceRandomItem();
+bool TestPoolPlaceRandomUnit();
+bool TestChooseRandomCreep();
+bool TestShopStockStateMachine();
+bool TestShopPurchaseConsumesStock();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -287,6 +292,11 @@ int main() {
         {"Spell effect natives", TestSpellEffectNatives},
         {"Image natives", TestImageNatives},
         {"Trackable and ubersplat natives", TestTrackableAndUbersplatNatives},
+        {"Pool place random item", TestPoolPlaceRandomItem},
+        {"Pool place random unit", TestPoolPlaceRandomUnit},
+        {"Choose random creep", TestChooseRandomCreep},
+        {"Shop stock state machine", TestShopStockStateMachine},
+        {"Shop purchase consumes stock", TestShopPurchaseConsumesStock},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

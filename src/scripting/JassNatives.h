@@ -460,6 +460,26 @@ public:
     std::unordered_map<int, std::shared_ptr<JassUbersplat>> ubersplats;
     int nextUbersplatId = 0x18000000;
 
+    // Weighted random pools (ref itempool/unitpool): entries keep insertion
+    // order; rolls use the deterministic sim RNG so setup stays in sync.
+    struct JassWeightedPool {
+        std::vector<std::pair<uint32_t, double>> entries; // rawcode + weight
+    };
+    std::unordered_map<int, std::shared_ptr<JassWeightedPool>> itemPools;
+    int nextItemPoolId = 0x19000000;
+    std::unordered_map<int, std::shared_ptr<JassWeightedPool>> unitPools;
+    int nextUnitPoolId = 0x1A000000;
+    // Global shop stock from AddItemToAllStock/AddUnitToAllStock: applied to
+    // every existing shop ability immediately. Shops created later need an
+    // explicit AddItemToStock (no central shop-creation hook exists yet).
+    struct JassGlobalStock {
+        uint32_t id = 0;
+        int current = 0;
+        int max = 0;
+        bool isUnit = false;
+    };
+    std::vector<JassGlobalStock> globalShopStock;
+
     std::unordered_map<int, std::shared_ptr<JassQuest>> quests;
     int nextQuestId = 0x10000000;
 
@@ -692,6 +712,7 @@ private:
     void RegisterTerrainQueryNatives();
     void RegisterPlayerTeamNatives();
     void RegisterVisualNatives();
+    void RegisterPoolStockNatives();
 
     void RegisterConfigPlayerNatives();
 

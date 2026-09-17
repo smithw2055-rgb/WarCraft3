@@ -6,6 +6,7 @@
 #include "ecs/abilities/ability_inventory.h"
 #include "data/itemdata.h"
 #include <iostream>
+#include <algorithm>
 
 CAbilitySellItems::CAbilitySellItems(int handleId)
     : CAbility(handleId, War3ID("Asei"), CAbilityCategory::SELL_ITEMS) {
@@ -64,6 +65,13 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
         return false;
     }
 
+    // Stock gate (after all failure exits): only applies when a stock
+    // entry exists for this id; legacy unlimited shops are unaffected.
+    if (FindStock(itemTypeId) && !ConsumeStock(itemTypeId)) {
+        std::cout << "Out of stock: " << itemTypeId.ToString() << std::endl;
+        return false;
+    }
+
     // Deduct gold
     player->AddGold(-itemGoldCost);
     player->AddLumber(-itemLumberCost);
@@ -80,4 +88,70 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
     }
 
     return false; // order consumed
+}
+
+void CAbilitySellItems::AddStockItem(War3ID id, int current, int max) {
+    for (auto& e : stock_) {
+        if (e.id == id && !e.isUnit) {
+            e.current = current;
+            e.max = max;
+            e.timer = 0.0f;
+            return;
+        }
+    }
+    stock_.push_back({id, current, max, 0.0f, false});
+}
+
+void CAbilitySellItems::AddStockUnit(War3ID id, int current, int max) {
+    for (auto& e : stock_) {
+        if (e.id == id && e.isUnit) {
+            e.current = current;
+            e.max = max;
+            e.timer = 0.0f;
+            return;
+        }
+    }
+    stock_.push_back({id, current, max, 0.0f, true});
+}
+
+bool CAbilitySellItems::RemoveStock(War3ID id) {
+    const size_t before = stock_.size();
+    stock_.erase(std::remove_if(stock_.begin(), stock_.end(),
+        [&](const StockEntry& e) { return e.id == id; }), stock_.end());
+    return stock_.size() != before;
+}
+
+const CAbilitySellItems::StockEntry* CAbilitySellItems::FindStock(War3ID id) const {
+    for (const auto& e : stock_) {
+        if (e.id == id) return &e;
+    }
+    return nullptr;
+}
+
+bool CAbilitySellItems::ConsumeStock(War3ID id) {
+    for (auto& e : stock_) {
+        if (e.id == id) {
+            if (e.current <= 0) return false;
+            e.current--;
+            return true;
+        }
+    }
+    return true; // no entry: unlimited legacy behavior
+}
+
+void CAbilitySellItems::OnTick(CSimulation& game, CUnit* unit) {
+    (void)game; (void)unit;
+    if (stockReplenishInterval_ <= 0.0f) return;
+    const float dt = game.GetSimStepTime();
+    for (auto& e : stock_) {
+        if (e.current >= e.max) {
+            e.timer = 0.0f;
+            continue;
+        }
+        e.timer += dt;
+        while (e.timer >= stockReplenishInterval_ && e.current < e.max) {
+            e.timer -= stockReplenishInterval_;
+            e.current++;
+        }
+    }
 }

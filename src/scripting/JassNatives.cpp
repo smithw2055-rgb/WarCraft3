@@ -7,6 +7,7 @@
 #include "ecs/item.h"
 #include "ecs/abilities/ability_inventory.h"
 #include "ecs/abilities/ability_hero.h"
+#include "ecs/abilities/ability_sell_items.h"
 #include "ecs/ability_factory.h"
 #include "ecs/destructable.h"
 #include "ecs/orders/order.h"
@@ -930,6 +931,7 @@ void JassNatives::RegisterCommonNatives() {
     RegisterTerrainQueryNatives();
     RegisterPlayerTeamNatives();
     RegisterVisualNatives();
+    RegisterPoolStockNatives();
     std::cout << "JassNatives: registered common natives" << std::endl;
 }
 
@@ -7668,6 +7670,228 @@ void JassNatives::RegisterVisualNatives() {
         if (id >= 0) {
             auto it = data->ubersplats.find(id);
             if (it != data->ubersplats.end()) it->second->render = args[1].boolVal;
+        }
+        return JassValue::Null();
+    });
+}
+
+// ============================================================
+// 28. Pool + shop-stock natives
+// ============================================================
+// Weighted roll shared by pools (ref pool placement). roll01 comes from
+// the deterministic sim RNG so map setup stays in sync.
+static uint32_t PickWeightedPoolEntry(const std::vector<std::pair<uint32_t, double>>& entries, double roll01) {
+    double total = 0.0;
+    for (const auto& e : entries) {
+        if (e.second > 0.0) total += e.second;
+    }
+    if (total <= 0.0 || entries.empty()) return 0;
+    double r = roll01 * total;
+    for (const auto& e : entries) {
+        if (e.second <= 0.0) continue;
+        r -= e.second;
+        if (r <= 0.0) return e.first;
+    }
+    return entries.back().first;
+}
+
+void JassNatives::RegisterPoolStockNatives() {
+    vm_.RegisterNative("CreateItemPool", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        auto pool = std::make_shared<JassNativesData::JassWeightedPool>();
+        int id = data->nextItemPoolId++;
+        data->itemPools[id] = pool;
+        return JassValue::Int(id);
+    });
+    vm_.RegisterNative("DestroyItemPool", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!args.empty()) data->itemPools.erase(args[0].intVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ItemPoolAddItemType", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        auto it = data->itemPools.find(args[0].intVal);
+        if (it == data->itemPools.end()) return JassValue::Null();
+        it->second->entries.emplace_back((uint32_t)args[1].intVal, args[2].realVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ItemPoolRemoveItemType", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        auto it = data->itemPools.find(args[0].intVal);
+        if (it == data->itemPools.end()) return JassValue::Null();
+        auto& entries = it->second->entries;
+        entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const auto& e) {
+            return e.first == (uint32_t)args[1].intVal;
+        }), entries.end());
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("PlaceRandomItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || !sim) return JassValue::Null();
+        auto it = data->itemPools.find(args[0].intVal);
+        if (it == data->itemPools.end()) return JassValue::Null();
+        const uint32_t picked = PickWeightedPoolEntry(it->second->entries, sim->SimRand01());
+        if (picked == 0) return JassValue::Null();
+        return JassValue::Int(data->CreateItemHandle(sim, War3ID(picked), args[1].realVal, args[2].realVal));
+    });
+    vm_.RegisterNative("CreateUnitPool", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        auto pool = std::make_shared<JassNativesData::JassWeightedPool>();
+        int id = data->nextUnitPoolId++;
+        data->unitPools[id] = pool;
+        return JassValue::Int(id);
+    });
+    vm_.RegisterNative("DestroyUnitPool", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!args.empty()) data->unitPools.erase(args[0].intVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitPoolAddUnitType", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        auto it = data->unitPools.find(args[0].intVal);
+        if (it == data->unitPools.end()) return JassValue::Null();
+        it->second->entries.emplace_back((uint32_t)args[1].intVal, args[2].realVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitPoolRemoveUnitType", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        auto it = data->unitPools.find(args[0].intVal);
+        if (it == data->unitPools.end()) return JassValue::Null();
+        auto& entries = it->second->entries;
+        entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const auto& e) {
+            return e.first == (uint32_t)args[1].intVal;
+        }), entries.end());
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("PlaceRandomUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5 || !sim) return JassValue::Null();
+        auto it = data->unitPools.find(args[0].intVal);
+        if (it == data->unitPools.end()) return JassValue::Null();
+        const uint32_t picked = PickWeightedPoolEntry(it->second->entries, sim->SimRand01());
+        if (picked == 0) return JassValue::Null();
+        CUnit* unit = sim->CreateUnit(War3ID(picked), ResolvePlayerId(data, args[1].intVal),
+                                      args[2].realVal, args[3].realVal, args[4].realVal);
+        if (!unit) return JassValue::Null();
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
+    });
+    vm_.RegisterNative("ChooseRandomCreep", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.empty() || !sim) return JassValue::Int(0);
+        const CUnitData* unitData = sim->GetUnitData();
+        if (!unitData) return JassValue::Int(0);
+        // Melee creep tables are level bands over the creep races (ref has
+        // no Jass2-native equivalent either; approximated from unit data).
+        std::vector<uint32_t> candidates;
+        for (const auto& [id, type] : unitData->GetAllTypes()) {
+            if (!type || type->IsBuilding() || type->IsHero()) continue;
+            if (type->GetLevel() != args[0].intVal) continue;
+            const std::string& race = type->GetUnitRace().name;
+            if (race == "creeps" || race == "demon" || race == "naga") {
+                candidates.push_back(id.value);
+            }
+        }
+        if (candidates.empty()) return JassValue::Int(0);
+        return JassValue::Int((int)candidates[(size_t)(sim->SimRand01() * (float)candidates.size()) % candidates.size()]);
+    });
+    vm_.RegisterNative("ChooseRandomNPBuilding", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)args; (void)data;
+        if (!sim) return JassValue::Int(0);
+        const CUnitData* unitData = sim->GetUnitData();
+        if (!unitData) return JassValue::Int(0);
+        std::vector<uint32_t> candidates;
+        for (const auto& [id, type] : unitData->GetAllTypes()) {
+            if (!type || !type->IsBuilding()) continue;
+            if (type->GetUnitRace().name == "other") {
+                candidates.push_back(id.value);
+            }
+        }
+        if (candidates.empty()) return JassValue::Int(0);
+        return JassValue::Int((int)candidates[(size_t)(sim->SimRand01() * (float)candidates.size()) % candidates.size()]);
+    });
+
+    auto findShop = [data = data_, sim = sim_](int unitHandle) -> CAbilitySellItems* {
+        if (!sim) return nullptr;
+        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
+        if (uSim < 0) return nullptr;
+        CUnit* u = sim->GetUnit(uSim);
+        if (!u) return nullptr;
+        return dynamic_cast<CAbilitySellItems*>(u->GetAbility(War3ID("Asei")));
+    };
+    auto allShops = [data = data_, sim = sim_]() -> std::vector<CAbilitySellItems*> {
+        std::vector<CAbilitySellItems*> out;
+        if (!sim) return out;
+        for (CUnit* u : sim->GetUnits()) {
+            if (!u) continue;
+            if (auto* shop = dynamic_cast<CAbilitySellItems*>(u->GetAbility(War3ID("Asei")))) {
+                out.push_back(shop);
+            }
+        }
+        return out;
+    };
+    vm_.RegisterNative("AddItemToStock", [findShop](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto* shop = findShop(args[0].intVal)) {
+            shop->AddStockItem(War3ID((uint32_t)args[1].intVal), args[2].intVal, args[3].intVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("AddItemToAllStock", [data = data_, allShops](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        const uint32_t id = (uint32_t)args[0].intVal;
+        data->globalShopStock.push_back({id, args[1].intVal, args[2].intVal, false});
+        for (auto* shop : allShops()) shop->AddStockItem(War3ID(id), args[1].intVal, args[2].intVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RemoveItemFromStock", [findShop](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* shop = findShop(args[0].intVal)) {
+            shop->RemoveStock(War3ID((uint32_t)args[1].intVal));
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RemoveItemFromAllStock", [data = data_, allShops](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        const uint32_t id = (uint32_t)args[0].intVal;
+        auto& global = data->globalShopStock;
+        global.erase(std::remove_if(global.begin(), global.end(), [&](const auto& e) {
+            return e.id == id && !e.isUnit;
+        }), global.end());
+        for (auto* shop : allShops()) shop->RemoveStock(War3ID(id));
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("AddUnitToStock", [findShop](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto* shop = findShop(args[0].intVal)) {
+            shop->AddStockUnit(War3ID((uint32_t)args[1].intVal), args[2].intVal, args[3].intVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("AddUnitToAllStock", [data = data_, allShops](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        const uint32_t id = (uint32_t)args[0].intVal;
+        data->globalShopStock.push_back({id, args[1].intVal, args[2].intVal, true});
+        for (auto* shop : allShops()) shop->AddStockUnit(War3ID(id), args[1].intVal, args[2].intVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RemoveUnitFromStock", [findShop](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto* shop = findShop(args[0].intVal)) {
+            shop->RemoveStock(War3ID((uint32_t)args[1].intVal));
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RemoveUnitFromAllStock", [data = data_, allShops](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        const uint32_t id = (uint32_t)args[0].intVal;
+        auto& global = data->globalShopStock;
+        global.erase(std::remove_if(global.begin(), global.end(), [&](const auto& e) {
+            return e.id == id && e.isUnit;
+        }), global.end());
+        for (auto* shop : allShops()) shop->RemoveStock(War3ID(id));
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("AddResourceAmount", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Null();
+        const int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
+        if (simId >= 0) {
+            if (auto* destructable = sim->GetDestructable(simId)) {
+                destructable->SetLife(*sim, destructable->GetLife() + (float)args[1].intVal);
+            }
         }
         return JassValue::Null();
     });
