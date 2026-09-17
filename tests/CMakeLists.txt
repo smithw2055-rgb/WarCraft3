@@ -27,6 +27,7 @@ add_executable(warsmash_tests
     test_projectiles.cpp
     test_transport.cpp
     test_ability_builder.cpp
+    test_vfs_overlay.cpp
     test_jass_unimplemented.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp

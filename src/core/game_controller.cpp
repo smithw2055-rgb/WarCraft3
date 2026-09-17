@@ -1345,7 +1345,7 @@ bool GameController::Initialize() {
     std::cout << "\nMap: " << fs::path(mapPath_).filename() << std::endl;
 
     if (!mapPath_.empty() && fs::exists(mapPath_)) {
-        mpq_.Open(mapPath_);
+        mpq_.OpenOnTop(mapPath_);
     }
 
     if (debugHudGameMode_) {
@@ -1440,7 +1440,7 @@ void GameController::HandleGlueMapLaunchRequest(const std::string& mapPath, int 
 
     mapPath_ = resolvedPath;
     if (fs::exists(mapPath_)) {
-        mpq_.Open(mapPath_);
+        mpq_.OpenOnTop(mapPath_);
     }
     TransitionTo(GameState::MAP_CONFIG);
     MoveDebugLogLine("GlueMapLaunch: queued map load path='" + mapPath_ + "'");
@@ -1472,7 +1472,7 @@ bool GameController::StartPendingGlueMapLaunch(int screenW, int screenH) {
     config_.localPlayerIndex = localPlayerIndex;
 
     if (fs::exists(mapPath_)) {
-        mpq_.Open(mapPath_);
+        mpq_.OpenOnTop(mapPath_);
     }
 
     if (!debugHudGameMode_) {

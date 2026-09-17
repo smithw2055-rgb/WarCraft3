@@ -133,6 +133,9 @@ bool TestBuilderRegistryRoundTrip();
 bool TestSimRandIsDeterministic();
 bool TestSummonWithoutUnitDataIsGraceful();
 bool TestHeroSkillLevelsAndGrants();
+bool TestVfsFolderLastAddedWins();
+bool TestVfsFolderShadowsArchive();
+bool TestVfsLastOpenedArchiveWins();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -257,6 +260,9 @@ int main() {
         {"Sim rand is deterministic", TestSimRandIsDeterministic},
         {"Summon without unit data is graceful", TestSummonWithoutUnitDataIsGraceful},
         {"Hero skill levels and grants", TestHeroSkillLevelsAndGrants},
+        {"VFS folder last-added wins", TestVfsFolderLastAddedWins},
+        {"VFS folder shadows archive", TestVfsFolderShadowsArchive},
+        {"VFS game archive order and map mount", TestVfsLastOpenedArchiveWins},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif
