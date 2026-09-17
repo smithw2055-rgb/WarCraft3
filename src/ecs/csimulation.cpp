@@ -162,6 +162,29 @@ float CSimulation::SimRand01() {
     return (float)(simRandState_ >> 16) * (1.0f / 65536.0f);
 }
 
+bool CSimulation::IsPointBlighted(float x, float y) const {
+    // W3E-baked blight bit first.
+    if (terrainMap_) {
+        if (const W3ETileCorner* corner = W3ECornerAt(*terrainMap_, x, y)) {
+            if (corner->IsBlight()) return true;
+        }
+    }
+    // Script overrides apply in order; last matching rect wins.
+    bool blighted = false;
+    for (const auto& r : blightRects_) {
+        if (x >= r.minX && x <= r.maxX && y >= r.minY && y <= r.maxY) {
+            blighted = r.blighted;
+        }
+    }
+    for (const auto& c : blightCircles_) {
+        const float dx = x - c.x, dy = y - c.y;
+        if (dx * dx + dy * dy <= c.radius * c.radius) {
+            blighted = c.blighted;
+        }
+    }
+    return blighted;
+}
+
 CUnit* CSimulation::AdoptUnit(std::unique_ptr<CUnit> unit) {
     if (!unit) return nullptr;
     CUnit* ptr = unit.get();

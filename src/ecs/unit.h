@@ -142,6 +142,8 @@ public:
     void IssueOrder(std::unique_ptr<COrder> order);
     void ClearOrders();
     void Stop(CSimulation& simulation);
+    // Last issued order id (ref GetUnitCurrentOrder); 0 when none issued.
+    int GetLastOrderId() const { return lastOrderId_; }
 
     // Behavior storage (set by abilities on Add)
     CBehaviorMove* GetMoveBehavior() const { return moveBehavior_.get(); }
@@ -357,6 +359,7 @@ private:
     std::unique_ptr<CBehavior> ownedCurrentBehavior_;
     CBehavior* currentBehavior_ = nullptr;
     std::queue<std::unique_ptr<COrder>> orderQueue_;
+    int lastOrderId_ = 0;
 
     // Transport cargo (passengers hidden aboard this unit)
     std::vector<CUnit*> cargoUnits_;

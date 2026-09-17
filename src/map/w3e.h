@@ -47,3 +47,17 @@ struct W3EMap {
 
 bool W3ELoad(const uint8_t* data, size_t size, W3EMap& out);
 bool W3ELoadFromFile(const std::string& path, W3EMap& out);
+
+// World-space tile lookup for JASS terrain queries (ref terrain natives).
+// Tiles are 128x128 world units starting at (offsetX, offsetY); returns
+// nullptr when outside the map or when the map has no tiles.
+inline const W3ETileCorner* W3ECornerAt(const W3EMap& map, float x, float y) {
+    if (map.tileWidth <= 0 || map.tileHeight <= 0 || map.tiles.empty()) return nullptr;
+    constexpr float kTileSize = 128.0f;
+    const int cx = (int)((x - map.offsetX) / kTileSize);
+    const int cy = (int)((y - map.offsetY) / kTileSize);
+    if (cx < 0 || cy < 0 || cx >= map.tileWidth || cy >= map.tileHeight) return nullptr;
+    const size_t idx = (size_t)cy * (size_t)map.tileWidth + (size_t)cx;
+    if (idx >= map.tiles.size()) return nullptr;
+    return &map.tiles[idx];
+}

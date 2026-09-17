@@ -140,6 +140,10 @@ bool TestVfsLastOpenedArchiveWins();
 bool TestW3iParsesPlayersAndForces();
 bool TestW3iParsesTechAndRandomTables();
 bool TestUnitsDooRetainsDropsAndInventory();
+bool TestIssueOrderByIdNatives();
+bool TestTerrainQueryNatives();
+bool TestRectRegionCellNatives();
+bool TestPlayerTeamNatives();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -271,6 +275,10 @@ int main() {
         {"W3I parses players and forces", TestW3iParsesPlayersAndForces},
         {"W3I parses tech and random tables", TestW3iParsesTechAndRandomTables},
         {"Units.doo retains drops and inventory", TestUnitsDooRetainsDropsAndInventory},
+        {"Issue order-by-id natives", TestIssueOrderByIdNatives},
+        {"Terrain query natives", TestTerrainQueryNatives},
+        {"Rect/region cell natives", TestRectRegionCellNatives},
+        {"Player/team natives", TestPlayerTeamNatives},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

@@ -425,6 +425,7 @@ bool CUnit::CanBeTargetedBy(CSimulation& simulation, CUnit* source,
 }
 
 void CUnit::IssueOrder(std::unique_ptr<COrder> order) {
+    if (order) lastOrderId_ = order->GetOrderId();
     orderQueue_.push(std::move(order));
 }
 

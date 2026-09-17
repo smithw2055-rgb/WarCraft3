@@ -136,6 +136,8 @@ void MapLoader::LoadUnitDataTables() {
 void MapLoader::LoadTerrainData(const std::string& mapPath) {
     if (W3XLoadTerrain(mapPath, mapData_)) {
         std::cout << "  Terrain: " << mapData_.tileWidth << "x" << mapData_.tileHeight << " tiles" << std::endl;
+        // Publish to the sim for JASS terrain queries (GetTerrainType etc.).
+        sim_.SetTerrainMap(&mapData_);
     } else {
         fatalError_ = true;
         fatalErrorMessage_ = "Terrain W3E failed to load";

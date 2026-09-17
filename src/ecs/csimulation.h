@@ -12,6 +12,7 @@
 #include "ecs/combat/combat_system.h"
 #include "ecs/combat/projectile.h"
 #include "data/gameplay_constants.h"
+#include "map/w3e.h"
 
 class AudioSystem;
 
@@ -89,6 +90,31 @@ public:
     // Audio
     void SetAudioSystem(AudioSystem* audio) { audio_ = audio; }
     AudioSystem* GetAudioSystem() const { return audio_; }
+
+    // Terrain reference for JASS terrain queries (GetTerrainType and
+    // friends). Set by the map loader next to SetPathingMap; may be null in
+    // tests, in which case queries return safe defaults.
+    void SetTerrainMap(const W3EMap* w3e) { terrainMap_ = w3e; }
+    const W3EMap* GetTerrainMap() const { return terrainMap_; }
+
+    // Script blight overrides from SetBlight* natives (ref blight state).
+    // W3E-baked blight bits are read from the terrain map; these add
+    // (blighted=true) or clear (false) blight on top. Last match wins.
+    struct BlightRect {
+        float minX = 0, minY = 0, maxX = 0, maxY = 0;
+        bool blighted = true;
+    };
+    struct BlightCircle {
+        float x = 0, y = 0, radius = 0;
+        bool blighted = true;
+    };
+    void SetBlightRect(float minX, float minY, float maxX, float maxY, bool blighted) {
+        blightRects_.push_back({minX, minY, maxX, maxY, blighted});
+    }
+    void SetBlightCircle(float x, float y, float radius, bool blighted) {
+        blightCircles_.push_back({x, y, radius, blighted});
+    }
+    bool IsPointBlighted(float x, float y) const;
 
     // Pathing
     CWorldCollision* GetWorldCollision() const { return worldCollision_.get(); }
@@ -203,6 +229,9 @@ private:
 
     CCombatSystem combatSystem_;
     uint32_t simRandState_ = 0x12345678u; // deterministic sim RNG (LCG)
+    const W3EMap* terrainMap_ = nullptr;  // terrain queries (owned by loader)
+    std::vector<BlightRect> blightRects_; // SetBlight* overrides
+    std::vector<BlightCircle> blightCircles_;
     std::unique_ptr<CWorldCollision> worldCollision_;    std::unique_ptr<CPathfindingProcessor> pathfindingProcessor_;
     AudioSystem* audio_ = nullptr;
     HandleIdAllocator handleIdAlloc_;

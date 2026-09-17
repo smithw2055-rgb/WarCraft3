@@ -631,6 +631,11 @@ static bool IsPointInJassRegion(const JassRegion& region, float x, float y) {
             return true;
         }
     }
+    for (const auto& c : region.cells) {
+        if (x >= c.minX && x <= c.maxX && y >= c.minY && y <= c.maxY) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -920,6 +925,9 @@ void JassNatives::RegisterCommonNatives() {
     RegisterLightningNatives();
     RegisterCameraNatives();
     RegisterGameNatives();
+    RegisterOrderIdNatives();
+    RegisterTerrainQueryNatives();
+    RegisterPlayerTeamNatives();
     std::cout << "JassNatives: registered common natives" << std::endl;
 }
 
@@ -6801,6 +6809,514 @@ void JassNatives::RegisterConfigPlayerNatives() {
     });
 
     vm_.RegisterNative("SetPlayers", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Null();
+    });
+}
+
+// ============================================================
+// 24. Order-by-id natives (retail common.j numeric order ids)
+// ============================================================
+void JassNatives::RegisterOrderIdNatives() {
+    // Shared issuers: same dispatch as the string-order twins, but the
+    // order id comes straight from the script (ref ById natives).
+    auto issueNoTarget = [data = data_, sim = sim_](int unitHandle, int orderId) -> bool {
+        if (orderId <= 0 || !sim) return false;
+        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
+        if (uSim < 0) return false;
+        CUnit* u = sim->GetUnit(uSim);
+        if (!u) return false;
+        u->IssueOrder(std::make_unique<COrderNoTarget>(orderId));
+        return true;
+    };
+    auto issuePoint = [data = data_, sim = sim_](int unitHandle, int orderId, float x, float y) -> bool {
+        if (orderId <= 0 || !sim) return false;
+        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
+        if (uSim < 0) return false;
+        CUnit* u = sim->GetUnit(uSim);
+        if (!u) return false;
+        u->IssueOrder(std::make_unique<COrderTargetPoint>(orderId, x, y));
+        return true;
+    };
+    auto issueTarget = [data = data_, sim = sim_](int unitHandle, int orderId, int targetHandle) -> bool {
+        if (orderId <= 0 || !sim) return false;
+        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
+        if (uSim < 0) return false;
+        CUnit* u = sim->GetUnit(uSim);
+        if (!u) return false;
+        int tSim = data->GetSimHandle(targetHandle, JassHandleInfo::UNIT);
+        CUnit* target = tSim >= 0 ? sim->GetUnit(tSim) : nullptr;
+        if (!target) return false;
+        u->IssueOrder(std::make_unique<COrderTargetWidget>(orderId, target));
+        return true;
+    };
+    auto groupUnits = [data = data_](int groupHandle) -> std::vector<int> {
+        int simId = data->GetSimHandle(groupHandle, JassHandleInfo::GROUP);
+        if (simId < 0) return {};
+        auto git = data->groups.find(simId);
+        if (git == data->groups.end()) return {};
+        return git->second->unitHandles;
+    };
+    auto locationXY = [data = data_](int locHandle, float& x, float& y) -> bool {
+        int locSim = data->GetSimHandle(locHandle, JassHandleInfo::LOCATION);
+        if (locSim < 0) return false;
+        auto it = data->locations.find(locSim);
+        if (it == data->locations.end()) return false;
+        x = it->second->x;
+        y = it->second->y;
+        return true;
+    };
+
+    vm_.RegisterNative("IssueImmediateOrderById", [issueNoTarget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Bool(false);
+        return JassValue::Bool(issueNoTarget(args[0].intVal, args[1].intVal));
+    });
+    vm_.RegisterNative("IssuePointOrderById", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Bool(false);
+        return JassValue::Bool(issuePoint(args[0].intVal, args[1].intVal, args[2].realVal, args[3].realVal));
+    });
+    vm_.RegisterNative("IssuePointOrderByIdLoc", [issuePoint, locationXY](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        float x = 0, y = 0;
+        if (!locationXY(args[2].intVal, x, y)) return JassValue::Bool(false);
+        return JassValue::Bool(issuePoint(args[0].intVal, args[1].intVal, x, y));
+    });
+    vm_.RegisterNative("IssueTargetOrderById", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        return JassValue::Bool(issueTarget(args[0].intVal, args[1].intVal, args[2].intVal));
+    });
+    vm_.RegisterNative("IssueBuildOrderById", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4 || !sim) return JassValue::Bool(false);
+        int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        if (uSim < 0) return JassValue::Bool(false);
+        CUnit* u = sim->GetUnit(uSim);
+        if (!u) return JassValue::Bool(false);
+        // args[1] is the building/unit rawcode used as order id (ref).
+        u->IssueOrder(std::make_unique<COrderTargetPoint>((int)(uint32_t)args[1].intVal, args[2].realVal, args[3].realVal));
+        return JassValue::Bool(true);
+    });
+    // Instant orders execute through the same queue; behaviorally identical
+    // here because orders dispatch on the next sim tick (ref instant queue).
+    vm_.RegisterNative("IssueInstantPointOrder", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Bool(false);
+        return JassValue::Bool(issuePoint(args[0].intVal, ParseOrderString(args[1].strVal), args[2].realVal, args[3].realVal));
+    });
+    vm_.RegisterNative("IssueInstantPointOrderById", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Bool(false);
+        return JassValue::Bool(issuePoint(args[0].intVal, args[1].intVal, args[2].realVal, args[3].realVal));
+    });
+    vm_.RegisterNative("IssueInstantTargetOrder", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        return JassValue::Bool(issueTarget(args[0].intVal, ParseOrderString(args[1].strVal), args[2].intVal));
+    });
+    vm_.RegisterNative("IssueInstantTargetOrderById", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        return JassValue::Bool(issueTarget(args[0].intVal, args[1].intVal, args[2].intVal));
+    });
+    // Neutral orders: the sim has no neutral-order gate, so these issue
+    // exactly like player orders (ref neutral dispatch without controller).
+    vm_.RegisterNative("IssueNeutralImmediateOrderById", [issueNoTarget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        return JassValue::Bool(issueNoTarget(args[1].intVal, args[2].intVal));
+    });
+    vm_.RegisterNative("IssueNeutralPointOrderById", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Bool(false);
+        return JassValue::Bool(issuePoint(args[1].intVal, args[2].intVal, args[3].realVal, args[4].realVal));
+    });
+    vm_.RegisterNative("IssueNeutralTargetOrderById", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Bool(false);
+        return JassValue::Bool(issueTarget(args[1].intVal, args[2].intVal, args[3].intVal));
+    });
+    vm_.RegisterNative("IssueNeutralImmediateOrder", [issueNoTarget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        return JassValue::Bool(issueNoTarget(args[1].intVal, ParseOrderString(args[2].strVal)));
+    });
+    vm_.RegisterNative("IssueNeutralPointOrder", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Bool(false);
+        return JassValue::Bool(issuePoint(args[1].intVal, ParseOrderString(args[2].strVal), args[3].realVal, args[4].realVal));
+    });
+    vm_.RegisterNative("IssueNeutralTargetOrder", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Bool(false);
+        return JassValue::Bool(issueTarget(args[1].intVal, ParseOrderString(args[2].strVal), args[3].intVal));
+    });
+
+    vm_.RegisterNative("GroupImmediateOrderById", [data = data_, sim = sim_, groupUnits](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || args[1].intVal <= 0 || !sim) return JassValue::Bool(false);
+        for (int uh : groupUnits(args[0].intVal)) {
+            int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
+            if (uSim >= 0) {
+                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderNoTarget>(args[1].intVal));
+            }
+        }
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("GroupPointOrderById", [data = data_, sim = sim_, groupUnits](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4 || args[1].intVal <= 0 || !sim) return JassValue::Bool(false);
+        for (int uh : groupUnits(args[0].intVal)) {
+            int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
+            if (uSim >= 0) {
+                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetPoint>(args[1].intVal, args[2].realVal, args[3].realVal));
+            }
+        }
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("GroupPointOrderByIdLoc", [data = data_, sim = sim_, groupUnits, locationXY](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || args[1].intVal <= 0 || !sim) return JassValue::Bool(false);
+        float x = 0, y = 0;
+        if (!locationXY(args[2].intVal, x, y)) return JassValue::Bool(false);
+        for (int uh : groupUnits(args[0].intVal)) {
+            int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
+            if (uSim >= 0) {
+                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetPoint>(args[1].intVal, x, y));
+            }
+        }
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("GroupPointOrderLoc", [data = data_, sim = sim_, groupUnits, locationXY](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || !sim) return JassValue::Bool(false);
+        int orderId = ParseOrderString(args[1].strVal);
+        if (orderId <= 0) return JassValue::Bool(false);
+        float x = 0, y = 0;
+        if (!locationXY(args[2].intVal, x, y)) return JassValue::Bool(false);
+        for (int uh : groupUnits(args[0].intVal)) {
+            int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
+            if (uSim >= 0) {
+                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetPoint>(orderId, x, y));
+            }
+        }
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("GroupTargetOrderById", [data = data_, sim = sim_, groupUnits](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || args[1].intVal <= 0 || !sim) return JassValue::Bool(false);
+        int tSim = data->GetSimHandle(args[2].intVal, JassHandleInfo::UNIT);
+        CUnit* target = tSim >= 0 ? sim->GetUnit(tSim) : nullptr;
+        if (!target) return JassValue::Bool(false);
+        for (int uh : groupUnits(args[0].intVal)) {
+            int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
+            if (uSim >= 0) {
+                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetWidget>(args[1].intVal, target));
+            }
+        }
+        return JassValue::Bool(true);
+    });
+}
+
+// ============================================================
+// 25. Terrain / rect / region query natives
+// ============================================================
+void JassNatives::RegisterTerrainQueryNatives() {
+    // Retail pathingtype ordinals (common.j ConvertPathingType 0..7).
+    constexpr int kPathAny = 0, kPathWalk = 1, kPathFly = 2, kPathBuild = 3;
+    constexpr int kPathPeon = 4, kPathBlight = 5, kPathFloat = 6, kPathAmphib = 7;
+
+    vm_.RegisterNative("GetTerrainType", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 2 || !sim) return JassValue::Int(0);
+        const W3EMap* map = sim->GetTerrainMap();
+        if (!map) return JassValue::Int(0);
+        const W3ETileCorner* corner = W3ECornerAt(*map, args[0].realVal, args[1].realVal);
+        if (!corner) return JassValue::Int(0);
+        const int paletteIndex = corner->GroundTexture();
+        if (paletteIndex < 0 || paletteIndex >= (int)map->groundTilePalette.size()) return JassValue::Int(0);
+        return JassValue::Int((int)map->groundTilePalette[(size_t)paletteIndex]);
+    });
+    vm_.RegisterNative("GetTerrainVariance", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 2 || !sim) return JassValue::Int(0);
+        const W3EMap* map = sim->GetTerrainMap();
+        if (!map) return JassValue::Int(0);
+        const W3ETileCorner* corner = W3ECornerAt(*map, args[0].realVal, args[1].realVal);
+        return JassValue::Int(corner ? corner->GroundVariation() : 0);
+    });
+    vm_.RegisterNative("GetTerrainCliffLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 2 || !sim) return JassValue::Int(0);
+        const W3EMap* map = sim->GetTerrainMap();
+        if (!map) return JassValue::Int(0);
+        const W3ETileCorner* corner = W3ECornerAt(*map, args[0].realVal, args[1].realVal);
+        return JassValue::Int(corner ? corner->LayerHeight() : 0);
+    });
+    vm_.RegisterNative("IsTerrainPathable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 3 || !sim) return JassValue::Bool(false);
+        const float x = args[0].realVal, y = args[1].realVal;
+        const int type = args[2].intVal;
+        const W3EMap* map = sim->GetTerrainMap();
+        const W3ETileCorner* corner = map ? W3ECornerAt(*map, x, y) : nullptr;
+        const bool inMap = corner != nullptr;
+        const bool water = inMap && corner->IsWater();
+        const bool boundary = inMap && corner->IsBoundary();
+        auto walkable = [&]() -> bool {
+            if (!inMap) return false;
+            if (water || boundary) return false;
+            if (sim->GetPathfinding() && sim->GetPathfinding()->HasPathingMap()) {
+                return sim->GetPathfinding()->IsWorldPointPathableForUnit(x, y, 0.0f, PathingGridMovementType::FOOT, nullptr);
+            }
+            return true;
+        };
+        switch (type) {
+            case kPathAny: return JassValue::Bool(walkable() || (inMap && !boundary));
+            case kPathWalk:
+            case kPathPeon: return JassValue::Bool(walkable());
+            case kPathFly: return JassValue::Bool(inMap && !boundary);
+            case kPathBuild: return JassValue::Bool(walkable() && !sim->IsPointBlighted(x, y));
+            case kPathBlight: return JassValue::Bool(sim->IsPointBlighted(x, y));
+            case kPathFloat: return JassValue::Bool(inMap && water && !boundary);
+            case kPathAmphib: return JassValue::Bool(walkable() || (inMap && water && !boundary));
+            default: return JassValue::Bool(false);
+        }
+    });
+    vm_.RegisterNative("IsPointBlighted", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 2 || !sim) return JassValue::Bool(false);
+        return JassValue::Bool(sim->IsPointBlighted(args[0].realVal, args[1].realVal));
+    });
+    vm_.RegisterNative("SetBlight", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Null();
+        int rectSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
+        if (rectSim < 0) return JassValue::Null();
+        auto it = data->rects.find(rectSim);
+        if (it == data->rects.end()) return JassValue::Null();
+        const JassRect& r = *it->second;
+        sim->SetBlightRect(r.minX, r.minY, r.maxX, r.maxY, args[1].boolVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetBlightRect", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Null();
+        int rectSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
+        if (rectSim < 0) return JassValue::Null();
+        auto it = data->rects.find(rectSim);
+        if (it == data->rects.end()) return JassValue::Null();
+        const JassRect& r = *it->second;
+        sim->SetBlightRect(r.minX, r.minY, r.maxX, r.maxY, args[1].boolVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetBlightPoint", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 4 || !sim) return JassValue::Null();
+        // Ref setBlight(x, y, radius, blighted): circular paint.
+        sim->SetBlightCircle(args[0].realVal, args[1].realVal, args[2].realVal, args[3].boolVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetBlightLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4 || !sim) return JassValue::Null();
+        int locSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::LOCATION);
+        if (locSim < 0) return JassValue::Null();
+        auto it = data->locations.find(locSim);
+        if (it == data->locations.end()) return JassValue::Null();
+        sim->SetBlightCircle(it->second->x, it->second->y, args[2].realVal, args[3].boolVal);
+        return JassValue::Null();
+    });
+
+    vm_.RegisterNative("SetRect", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        int rectSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
+        if (rectSim < 0) return JassValue::Null();
+        auto it = data->rects.find(rectSim);
+        if (it == data->rects.end()) return JassValue::Null();
+        JassRect& r = *it->second;
+        r.minX = args[1].realVal; r.minY = args[2].realVal;
+        r.maxX = args[3].realVal; r.maxY = args[4].realVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetRectFromLoc", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        int rectSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
+        int minSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::LOCATION);
+        int maxSim = data->GetSimHandle(args[2].intVal, JassHandleInfo::LOCATION);
+        if (rectSim < 0 || minSim < 0 || maxSim < 0) return JassValue::Null();
+        auto rit = data->rects.find(rectSim);
+        auto minIt = data->locations.find(minSim), maxIt = data->locations.find(maxSim);
+        if (rit == data->rects.end() || minIt == data->locations.end() || maxIt == data->locations.end()) {
+            return JassValue::Null();
+        }
+        JassRect& r = *rit->second;
+        r.minX = std::min(minIt->second->x, maxIt->second->x);
+        r.minY = std::min(minIt->second->y, maxIt->second->y);
+        r.maxX = std::max(minIt->second->x, maxIt->second->x);
+        r.maxY = std::max(minIt->second->y, maxIt->second->y);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("MoveRectTo", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        int rectSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
+        if (rectSim < 0) return JassValue::Null();
+        auto it = data->rects.find(rectSim);
+        if (it == data->rects.end()) return JassValue::Null();
+        JassRect& r = *it->second;
+        const float halfW = (r.maxX - r.minX) * 0.5f;
+        const float halfH = (r.maxY - r.minY) * 0.5f;
+        r.minX = args[1].realVal - halfW; r.maxX = args[1].realVal + halfW;
+        r.minY = args[2].realVal - halfH; r.maxY = args[2].realVal + halfH;
+        return JassValue::Null();
+    });
+
+    static constexpr float kRegionCellSize = 32.0f;
+    vm_.RegisterNative("RegionAddCell", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        int rSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::REGION);
+        if (rSim < 0) return JassValue::Null();
+        auto it = data->regions.find(rSim);
+        if (it == data->regions.end()) return JassValue::Null();
+        JassRect cell;
+        cell.minX = args[1].realVal * kRegionCellSize;
+        cell.minY = args[2].realVal * kRegionCellSize;
+        cell.maxX = cell.minX + kRegionCellSize;
+        cell.maxY = cell.minY + kRegionCellSize;
+        it->second->cells.push_back(cell);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RegionAddCellAtLoc", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int rSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::REGION);
+        int locSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::LOCATION);
+        if (rSim < 0 || locSim < 0) return JassValue::Null();
+        auto rit = data->regions.find(rSim);
+        auto lit = data->locations.find(locSim);
+        if (rit == data->regions.end() || lit == data->locations.end()) return JassValue::Null();
+        JassRect cell;
+        cell.minX = std::floor(lit->second->x / kRegionCellSize) * kRegionCellSize;
+        cell.minY = std::floor(lit->second->y / kRegionCellSize) * kRegionCellSize;
+        cell.maxX = cell.minX + kRegionCellSize;
+        cell.maxY = cell.minY + kRegionCellSize;
+        rit->second->cells.push_back(cell);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RegionClearCell", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        int rSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::REGION);
+        if (rSim < 0) return JassValue::Null();
+        auto it = data->regions.find(rSim);
+        if (it == data->regions.end()) return JassValue::Null();
+        const float x0 = args[1].realVal * kRegionCellSize;
+        const float y0 = args[2].realVal * kRegionCellSize;
+        auto& cells = it->second->cells;
+        cells.erase(std::remove_if(cells.begin(), cells.end(), [&](const JassRect& c) {
+            return c.minX == x0 && c.minY == y0;
+        }), cells.end());
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RegionClearCellAtLoc", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int rSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::REGION);
+        int locSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::LOCATION);
+        if (rSim < 0 || locSim < 0) return JassValue::Null();
+        auto rit = data->regions.find(rSim);
+        auto lit = data->locations.find(locSim);
+        if (rit == data->regions.end() || lit == data->locations.end()) return JassValue::Null();
+        const float x0 = std::floor(lit->second->x / kRegionCellSize) * kRegionCellSize;
+        const float y0 = std::floor(lit->second->y / kRegionCellSize) * kRegionCellSize;
+        auto& cells = rit->second->cells;
+        cells.erase(std::remove_if(cells.begin(), cells.end(), [&](const JassRect& c) {
+            return c.minX == x0 && c.minY == y0;
+        }), cells.end());
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("IsPointInRegion", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        int rSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::REGION);
+        if (rSim < 0) return JassValue::Bool(false);
+        auto it = data->regions.find(rSim);
+        if (it == data->regions.end()) return JassValue::Bool(false);
+        return JassValue::Bool(IsPointInJassRegion(*it->second, args[1].realVal, args[2].realVal));
+    });
+    vm_.RegisterNative("IsLocationInRegion", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Bool(false);
+        int rSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::REGION);
+        int locSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::LOCATION);
+        if (rSim < 0 || locSim < 0) return JassValue::Bool(false);
+        auto rit = data->regions.find(rSim);
+        auto lit = data->locations.find(locSim);
+        if (rit == data->regions.end() || lit == data->locations.end()) return JassValue::Bool(false);
+        return JassValue::Bool(IsPointInJassRegion(*rit->second, lit->second->x, lit->second->y));
+    });
+    vm_.RegisterNative("GetWorldBounds", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)args;
+        auto rect = std::make_shared<JassRect>();
+        if (sim) {
+            if (const W3EMap* map = sim->GetTerrainMap()) {
+                rect->minX = map->offsetX;
+                rect->minY = map->offsetY;
+                rect->maxX = map->offsetX + (float)map->tileWidth * 128.0f;
+                rect->maxY = map->offsetY + (float)map->tileHeight * 128.0f;
+            }
+        }
+        int id = data->nextRectId++;
+        data->rects[id] = rect;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::RECT, id));
+    });
+}
+
+// ============================================================
+// 26. Player / team / start-location natives
+// ============================================================
+void JassNatives::RegisterPlayerTeamNatives() {
+    auto allPlayersForce = [data = data_, sim = sim_]() -> int {
+        auto force = std::make_shared<JassForce>();
+        if (sim) {
+            for (int i = 0; i < sim->GetPlayerCount(); i++) {
+                force->playerIds.push_back(i);
+            }
+        }
+        int id = data->nextForceId++;
+        data->forces[id] = force;
+        return data->AllocHandle(JassHandleInfo::FORCE, id);
+    };
+    vm_.RegisterNative("GetPlayers", [allPlayersForce](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(allPlayersForce());
+    });
+    vm_.RegisterNative("GetTeams", [allPlayersForce](const std::vector<JassValue>&) -> JassValue {
+        // Retail returns all slots as well; team subdivision is per-player.
+        return JassValue::Int(allPlayersForce());
+    });
+    vm_.RegisterNative("GetPlayerTeam", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim) return JassValue::Int(0);
+        if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
+            return JassValue::Int(p->GetTeam());
+        }
+        return JassValue::Int(0);
+    });
+    vm_.RegisterNative("SetPlayerTaxRate", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        const int p1 = ResolvePlayerId(data, args[0].intVal);
+        const int p2 = ResolvePlayerId(data, args[1].intVal);
+        const int64_t key = ((int64_t)(p1 + 64) * 128 + (p2 + 64)) * 16 + (args[2].intVal & 15);
+        data->playerTaxRates[key] = args[3].intVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("GetPlayerTaxRate", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Int(0);
+        const int p1 = ResolvePlayerId(data, args[0].intVal);
+        const int p2 = ResolvePlayerId(data, args[1].intVal);
+        const int64_t key = ((int64_t)(p1 + 64) * 128 + (p2 + 64)) * 16 + (args[2].intVal & 15);
+        auto it = data->playerTaxRates.find(key);
+        return JassValue::Int(it != data->playerTaxRates.end() ? it->second : 0);
+    });
+    vm_.RegisterNative("GetPlayerSelectable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(true);
+        const int p = ResolvePlayerId(data, args[0].intVal);
+        auto it = data->playerSelectable.find(p);
+        // No retail setter exists; slots are selectable unless recorded off.
+        return JassValue::Bool(it != data->playerSelectable.end() ? it->second : true);
+    });
+    vm_.RegisterNative("GetStartLocPrio", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data; (void)args;
+        // Start-location priority tables are not part of w3i; melee start
+        // positions come from the config env. Default: no priority.
+        return JassValue::Int(0);
+    });
+    vm_.RegisterNative("GetStartLocPrioSlot", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data; (void)args;
+        return JassValue::Int(-1);
+    });
+    vm_.RegisterNative("GetUnitCurrentOrder", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim) return JassValue::Int(0);
+        int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        if (uSim < 0) return JassValue::Int(0);
+        CUnit* u = sim->GetUnit(uSim);
+        return JassValue::Int(u ? u->GetLastOrderId() : 0);
+    });
+    vm_.RegisterNative("SetMapFlag", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!args.empty() && data) data->gameConfig.mapFlags |= (uint32_t)args[0].intVal;
         return JassValue::Null();
     });
 }

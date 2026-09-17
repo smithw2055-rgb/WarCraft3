@@ -140,6 +140,9 @@ struct JassRect {
 struct JassRegion {
     std::vector<int> rectIds;
     std::vector<JassRect> rects;
+    // 32x32 cell squares from RegionAddCell* (ref cells); kept apart from
+    // rects so RegionClearRect (which rebuilds from rectIds) can't wipe them.
+    std::vector<JassRect> cells;
 };
 
 struct JassSound {
@@ -432,6 +435,11 @@ public:
     JassGameConfig gameConfig;
     std::array<JassPlayerAIState, 24> playerAI;
     JassFogState fog;
+    // Resource trade tax: (player<<32 | other)<<4 | resource -> percent.
+    // (ref SetPlayerTaxRate; retail default 0 until set.)
+    std::unordered_map<int64_t, int> playerTaxRates;
+    // Per-player selectability (ref GetPlayerSelectable; default true).
+    std::unordered_map<int, bool> playerSelectable;
     // Integer game states set via SetIntegerGameState (ids other than
     // DIVINE_INTERVENTION=0 / DISCONNECTED=1, which always read 0).
     std::unordered_map<int, int> intGameStates;
@@ -630,6 +638,10 @@ private:
     void RegisterLightningNatives();
     void RegisterCameraNatives();
     void RegisterGameNatives();
+
+    void RegisterOrderIdNatives();
+    void RegisterTerrainQueryNatives();
+    void RegisterPlayerTeamNatives();
 
     void RegisterConfigPlayerNatives();
 
