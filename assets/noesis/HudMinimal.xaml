@@ -1,0 +1,84 @@
+<UserControl
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid Background="#00000000">
+    <Border
+      x:Name="MinimalMarker"
+      Width="420"
+      Height="132"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Margin="28"
+      Background="#E600C853"
+      BorderBrush="#FFFFFFFF"
+      BorderThickness="5">
+      <StackPanel VerticalAlignment="Center" Margin="18,0">
+        <TextBlock
+          Text="NOESIS MINIMAL HUD"
+          Foreground="#FFFFFFFF"
+          FontSize="30"
+          FontWeight="Bold"/>
+        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+          <TextBlock Text="Gold " Foreground="#FF102015" FontSize="18" FontWeight="Bold"/>
+          <TextBlock x:Name="GoldText" Text="0" Foreground="#FF102015" FontSize="18" FontWeight="Bold"/>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <Border
+      x:Name="ConsolePanel"
+      Height="172"
+      HorizontalAlignment="Stretch"
+      VerticalAlignment="Bottom"
+      Margin="20"
+      Background="#D8203248"
+      BorderBrush="#FFFFD54F"
+      BorderThickness="5">
+      <Grid Margin="14">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="190"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="220"/>
+        </Grid.ColumnDefinitions>
+
+        <Border
+          x:Name="MinimapViewport"
+          Background="#FF111820"
+          BorderBrush="#FFFFFFFF"
+          BorderThickness="3">
+          <Grid x:Name="MinimapContentViewport" Margin="8"/>
+        </Border>
+
+        <TextBlock
+          Grid.Column="1"
+          Text="If this marker and bottom bar are visible, Noesis XAML is rendering in-game."
+          TextWrapping="Wrap"
+          VerticalAlignment="Center"
+          Margin="24,0"
+          Foreground="#FFFFFFFF"
+          FontSize="22"
+          FontWeight="Bold"/>
+
+        <Border
+          x:Name="CommandButton0"
+          Grid.Column="2"
+          Width="76"
+          Height="76"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Center"
+          Background="#FF0E141D"
+          BorderBrush="#FFFFFFFF"
+          BorderThickness="3">
+          <TextBlock
+            x:Name="CommandText0"
+            Text="CMD"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Foreground="#FFFFFFFF"
+            FontSize="18"
+            FontWeight="Bold"/>
+        </Border>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

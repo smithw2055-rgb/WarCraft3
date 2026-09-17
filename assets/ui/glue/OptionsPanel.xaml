@@ -1,0 +1,305 @@
+<UserControl
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  x:Class="War3UI.GlueOptionsPanelControl">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="../GlueMenuResources.xaml"/>
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid Width="1536" Height="1152">
+    <Grid Width="760" Height="894" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,86,0,0">
+      <Border Style="{StaticResource GluePanelFrameStyle}"/>
+      <Border Margin="16" Background="{StaticResource GluePanelMetalPiecesExpansionBrush}" Opacity="0.78"/>
+      <Border Margin="34" Background="#EA05070A" BorderBrush="#FF283038" BorderThickness="2"/>
+      <Border Width="118" Height="54" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="36,0,0,24"
+              Style="{StaticResource GluePanelGearRailStyle}"/>
+      <Border Width="118" Height="54" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,36,24"
+              Style="{StaticResource GluePanelGearRailStyle}"/>
+
+      <Grid Margin="76,58,76,58">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="76"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="74"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="OPTIONS" Foreground="#FFFFFFFF" FontSize="31" FontWeight="Bold"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+        <Grid x:Name="GlueOptionsListPanel" Grid.Row="1">
+          <StackPanel VerticalAlignment="Top" Margin="0,14,0,0">
+            <Grid x:Name="OptionsGameplayButton" Height="70" Margin="0,0,0,8">
+              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+              <Border Margin="28,12" Style="{StaticResource GlueButtonFillStyle}"/>
+              <Border x:Name="GlueOptionsGameplaySelected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.52"/>
+              <Border x:Name="GlueMenuButtonHoverOptionsGameplayButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+              <Border x:Name="GlueMenuButtonPressedOptionsGameplayButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+              <TextBlock Text="GAMEPLAY" Foreground="#FFFCD412" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <Grid x:Name="OptionsVideoButton" Height="70" Margin="0,0,0,8">
+              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+              <Border Margin="28,12" Style="{StaticResource GlueButtonFillStyle}"/>
+              <Border x:Name="GlueOptionsVideoSelected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.52"/>
+              <Border x:Name="GlueMenuButtonHoverOptionsVideoButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+              <Border x:Name="GlueMenuButtonPressedOptionsVideoButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+              <TextBlock Text="VIDEO" Foreground="#FFFCD412" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <Grid x:Name="OptionsSoundButton" Height="70" Margin="0,0,0,8">
+              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+              <Border Margin="28,12" Style="{StaticResource GlueButtonFillStyle}"/>
+              <Border x:Name="GlueOptionsSoundSelected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.52"/>
+              <Border x:Name="GlueMenuButtonHoverOptionsSoundButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+              <Border x:Name="GlueMenuButtonPressedOptionsSoundButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+              <TextBlock Text="SOUND" Foreground="#FFFCD412" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <Grid x:Name="OptionsNetworkButton" Height="70">
+              <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+              <Border Margin="28,12" Style="{StaticResource GlueButtonFillStyle}"/>
+              <Border x:Name="GlueOptionsNetworkSelected" Background="{StaticResource GlueButton1KeyHighlightBrush}" Visibility="Collapsed" Opacity="0.52"/>
+              <Border x:Name="GlueMenuButtonHoverOptionsNetworkButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+              <Border x:Name="GlueMenuButtonPressedOptionsNetworkButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+              <TextBlock Text="NETWORK" Foreground="#FFFCD412" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+          </StackPanel>
+        </Grid>
+
+        <Grid x:Name="GlueOptionsGameplayPanel" Grid.Row="1" Visibility="Collapsed">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="58"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <TextBlock Text="GAMEPLAY OPTIONS" Foreground="#FFFFFFFF" FontSize="29" FontWeight="Bold"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <StackPanel Grid.Row="1" Margin="10,8,0,0">
+            <TextBlock Text="GAME SPEED" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold"/>
+            <Grid Width="400" Height="34" Margin="7,2,0,14" HorizontalAlignment="Left">
+              <Grid Height="22" VerticalAlignment="Center">
+                <Border Margin="3" Background="{StaticResource GlueControlFillBrush}"/>
+                <Border BorderBrush="{StaticResource GlueButton1BackdropBorderBrush}" BorderThickness="2"/>
+              </Grid>
+              <Border Width="32" Height="32" HorizontalAlignment="Center" Background="{StaticResource GlueButton1SmallBorderSingleBrush}"/>
+            </Grid>
+            <TextBlock Text="FASTEST" Foreground="#FFFFFFFF" FontSize="17" FontWeight="Bold" Width="407" TextAlignment="Right" Margin="0,-12,0,2"/>
+            <TextBlock Text="MOUSE SCROLL" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold"/>
+            <Grid Width="267" Height="34" Margin="82,2,0,10" HorizontalAlignment="Left">
+              <Grid Height="22" VerticalAlignment="Center">
+                <Border Margin="3" Background="{StaticResource GlueControlFillBrush}"/>
+                <Border BorderBrush="{StaticResource GlueButton1BackdropBorderBrush}" BorderThickness="2"/>
+              </Grid>
+              <Border Width="32" Height="32" HorizontalAlignment="Right" Background="{StaticResource GlueButton1SmallBorderSingleBrush}"/>
+            </Grid>
+            <Grid Width="350" Height="18" Margin="28,-8,0,4" HorizontalAlignment="Left">
+              <TextBlock Text="SLOW" Foreground="#FFFFFFFF" FontSize="15" FontWeight="Bold"/>
+              <TextBlock Text="FAST" Foreground="#FFFFFFFF" FontSize="15" FontWeight="Bold" HorizontalAlignment="Right"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Height="42" Margin="0,0,0,4">
+              <Grid Width="46" Height="46">
+                <Border Style="{StaticResource GlueControlFillStyle}"/>
+              </Grid>
+              <TextBlock Text="DISABLE MOUSE SCROLL" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+            <TextBlock Text="KEYBOARD SCROLL" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold"/>
+            <Grid Width="267" Height="34" Margin="82,2,0,10" HorizontalAlignment="Left">
+              <Grid Height="22" VerticalAlignment="Center">
+                <Border Margin="3" Background="{StaticResource GlueControlFillBrush}"/>
+                <Border BorderBrush="{StaticResource GlueButton1BackdropBorderBrush}" BorderThickness="2"/>
+              </Grid>
+              <Border Width="32" Height="32" HorizontalAlignment="Right" Background="{StaticResource GlueButton1SmallBorderSingleBrush}"/>
+            </Grid>
+            <Grid Width="350" Height="18" Margin="28,-8,0,4" HorizontalAlignment="Left">
+              <TextBlock Text="SLOW" Foreground="#FFFFFFFF" FontSize="15" FontWeight="Bold"/>
+              <TextBlock Text="FAST" Foreground="#FFFFFFFF" FontSize="15" FontWeight="Bold" HorizontalAlignment="Right"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Height="42">
+              <Grid Width="46" Height="46">
+                <Border Style="{StaticResource GlueControlFillStyle}"/>
+                <Border Style="{StaticResource GlueControlSelectedFillStyle}" Margin="7"/>
+              </Grid>
+              <TextBlock Text="ENHANCED TOOLTIPS" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Height="42">
+              <Grid Width="46" Height="46">
+                <Border Style="{StaticResource GlueControlFillStyle}"/>
+              </Grid>
+              <TextBlock Text="FORMATION TOGGLE" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+          </StackPanel>
+        </Grid>
+
+        <Grid x:Name="GlueOptionsVideoPanel" Grid.Row="1" Visibility="Collapsed">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="58"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <TextBlock Text="VIDEO OPTIONS" Foreground="#FFFFFFFF" FontSize="29" FontWeight="Bold"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <StackPanel Grid.Row="1" Margin="10,8,0,0">
+            <TextBlock Text="GAMMA" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold"/>
+            <Grid Width="240" Height="34" Margin="82,2,0,16" HorizontalAlignment="Left">
+              <Grid Height="22" VerticalAlignment="Center">
+                <Border Margin="3" Background="{StaticResource GlueControlFillBrush}"/>
+                <Border BorderBrush="{StaticResource GlueButton1BackdropBorderBrush}" BorderThickness="2"/>
+              </Grid>
+              <Border Width="32" Height="32" HorizontalAlignment="Center" Background="{StaticResource GlueButton1SmallBorderSingleBrush}"/>
+              <TextBlock Text="1.0" Foreground="#FFFFFFFF" FontSize="15" FontWeight="Bold" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="72,-5,0,0"/>
+            </Grid>
+            <Grid Height="44" Margin="0,0,0,4">
+              <TextBlock Text="RESOLUTION" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center"/>
+              <Border Width="264" Height="44" HorizontalAlignment="Right">
+                <Grid>
+                  <Border Margin="5" Background="{StaticResource GlueControlFillBrush}"/>
+                  <Border BorderBrush="{StaticResource GlueButton1BackdropBorderBrush}" BorderThickness="2"/>
+                  <TextBlock Text="1280 X 720" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" Margin="12,0,44,0"/>
+                  <Border Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" Background="{StaticResource GluePulldownArrowBrush}"/>
+                </Grid>
+              </Border>
+            </Grid>
+            <Grid Height="44" Margin="0,0,0,4">
+              <TextBlock Text="TEXTURE QUALITY" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center"/>
+              <TextBlock Text="HIGH" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
+            <Grid Height="44" Margin="0,0,0,4">
+              <TextBlock Text="MODEL DETAIL" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center"/>
+              <TextBlock Text="HIGH" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
+            <Grid Height="44" Margin="0,0,0,4">
+              <TextBlock Text="ANIMATION QUALITY" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center"/>
+              <TextBlock Text="HIGH" Foreground="#FFFFFFFF" FontSize="18" FontWeight="Bold" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Height="42">
+              <Grid Width="46" Height="46">
+                <Border Style="{StaticResource GlueControlFillStyle}"/>
+                <Border Style="{StaticResource GlueControlSelectedFillStyle}" Margin="7"/>
+              </Grid>
+              <TextBlock Text="FULLSCREEN" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+          </StackPanel>
+        </Grid>
+
+        <Grid x:Name="GlueOptionsSoundPanel" Grid.Row="1" Visibility="Collapsed">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="58"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <TextBlock Text="SOUND OPTIONS" Foreground="#FFFFFFFF" FontSize="29" FontWeight="Bold"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <StackPanel Grid.Row="1" Margin="10,8,0,0">
+            <StackPanel Orientation="Horizontal" Height="44">
+              <Grid Width="46" Height="46">
+                <Border Style="{StaticResource GlueControlFillStyle}"/>
+                <Border Style="{StaticResource GlueControlSelectedFillStyle}" Margin="7"/>
+              </Grid>
+              <TextBlock Text="SOUND EFFECTS VOLUME" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+            <Grid Width="267" Height="34" Margin="82,2,0,16" HorizontalAlignment="Left">
+              <Grid Height="22" VerticalAlignment="Center">
+                <Border Margin="3" Background="{StaticResource GlueControlFillBrush}"/>
+                <Border BorderBrush="{StaticResource GlueButton1BackdropBorderBrush}" BorderThickness="2"/>
+              </Grid>
+              <Border Width="32" Height="32" HorizontalAlignment="Right" Background="{StaticResource GlueButton1SmallBorderSingleBrush}"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Height="44">
+              <Grid Width="46" Height="46">
+                <Border Style="{StaticResource GlueControlFillStyle}"/>
+                <Border Style="{StaticResource GlueControlSelectedFillStyle}" Margin="7"/>
+              </Grid>
+              <TextBlock Text="MUSIC VOLUME" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+            <Grid Width="267" Height="34" Margin="82,2,0,16" HorizontalAlignment="Left">
+              <Grid Height="22" VerticalAlignment="Center">
+                <Border Margin="3" Background="{StaticResource GlueControlFillBrush}"/>
+                <Border BorderBrush="{StaticResource GlueButton1BackdropBorderBrush}" BorderThickness="2"/>
+              </Grid>
+              <Border Width="32" Height="32" HorizontalAlignment="Right" Background="{StaticResource GlueButton1SmallBorderSingleBrush}"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Height="42">
+              <Grid Width="46" Height="46"><Border Style="{StaticResource GlueControlFillStyle}"/></Grid>
+              <TextBlock Text="AMBIENT SOUNDS" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Height="42">
+              <Grid Width="46" Height="46"><Border Style="{StaticResource GlueControlFillStyle}"/></Grid>
+              <TextBlock Text="UNIT SOUNDS" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Height="42">
+              <Grid Width="46" Height="46"><Border Style="{StaticResource GlueControlFillStyle}"/></Grid>
+              <TextBlock Text="SUBTITLES" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Height="42">
+              <Grid Width="46" Height="46"><Border Style="{StaticResource GlueControlFillStyle}"/></Grid>
+              <TextBlock Text="POSITIONAL AUDIO" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+          </StackPanel>
+        </Grid>
+
+        <Grid x:Name="GlueOptionsNetworkPanel" Grid.Row="1" Visibility="Collapsed">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="58"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <TextBlock Text="NETWORK OPTIONS" Foreground="#FFFFFFFF" FontSize="29" FontWeight="Bold"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <StackPanel Grid.Row="1" Margin="10,28,0,0">
+            <TextBlock Text="NETWORK LATENCY" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold"/>
+            <TextBlock Width="432" HorizontalAlignment="Left"
+                       Text="Setting lower latency reduces the time between when you click the mouse and when a unit responds to the click."
+                       Foreground="#FFFFFFFF" TextWrapping="Wrap" FontSize="18" FontWeight="Bold" Margin="0,5,0,13"/>
+            <TextBlock Width="432" HorizontalAlignment="Left"
+                       Text="A higher latency setting increases that time, but smoothes network performance for systems with slow network connections."
+                       Foreground="#FFFFFFFF" TextWrapping="Wrap" FontSize="18" FontWeight="Bold" Margin="0,0,0,29"/>
+            <StackPanel Orientation="Horizontal" Height="37">
+              <Grid Width="31" Height="31">
+                <Border Style="{StaticResource GlueControlFillStyle}"/>
+                <Border Style="{StaticResource GlueControlSelectedFillStyle}" Margin="6"/>
+              </Grid>
+              <TextBlock Text="LOW LATENCY" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Height="37">
+              <Grid Width="31" Height="31"><Border Style="{StaticResource GlueControlFillStyle}"/></Grid>
+              <TextBlock Text="HIGH LATENCY" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Height="37">
+              <Grid Width="31" Height="31"><Border Style="{StaticResource GlueControlFillStyle}"/></Grid>
+              <TextBlock Text="EXTRA HIGH LATENCY" Foreground="#FFFCD412" FontSize="21" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0"/>
+            </StackPanel>
+          </StackPanel>
+        </Grid>
+
+        <Grid x:Name="GlueOptionsListBottomPanel" Grid.Row="2">
+          <Grid x:Name="OptionsBackButton" Height="67" VerticalAlignment="Bottom">
+            <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+            <Border Margin="28,12" Style="{StaticResource GlueButtonFillStyle}"/>
+            <Border x:Name="GlueMenuButtonHoverOptionsBackButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+            <Border x:Name="GlueMenuButtonPressedOptionsBackButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            <TextBlock Text="PREVIOUS MENU" Foreground="#FFFCD412" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Grid>
+        </Grid>
+
+        <Grid x:Name="GlueOptionsDetailBottomPanel" Grid.Row="2" Visibility="Collapsed">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="12"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <Grid x:Name="OptionsOKButton" Height="67" VerticalAlignment="Bottom">
+            <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+            <Border Margin="22,12" Style="{StaticResource GlueButtonFillStyle}"/>
+            <Border x:Name="GlueMenuButtonHoverOptionsOKButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+            <Border x:Name="GlueMenuButtonPressedOptionsOKButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            <TextBlock Text="OK" Foreground="#FFFCD412" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Grid>
+          <Grid x:Name="OptionsCancelButton" Grid.Column="2" Height="67" VerticalAlignment="Bottom">
+            <Border Style="{StaticResource GlueButtonChromeStyle}"/>
+            <Border Margin="22,12" Style="{StaticResource GlueButtonFillStyle}"/>
+            <Border x:Name="GlueMenuButtonHoverOptionsCancelButton" Background="{StaticResource GlueButtonKeyboardHighlightBrush}" Visibility="Collapsed" Opacity="0.72"/>
+            <Border x:Name="GlueMenuButtonPressedOptionsCancelButton" Style="{StaticResource GlueButtonPressedFillStyle}" Visibility="Collapsed" Opacity="0.86"/>
+            <TextBlock Text="CANCEL" Foreground="#FFFCD412" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Grid>
+        </Grid>
+      </Grid>
+    </Grid>
+  </Grid>
+</UserControl>
