@@ -117,6 +117,7 @@ static void ApplyItemTypeData(CItem& item, CSimulation& simulation) {
 } // namespace
 
 void CSimulation::Update() {
+    if (paused_) return;
     // Update units (includes regen, behavior processing, death detection)
     for (auto* unit : units_) {
         bool shouldRemove = unit->Update(*this);

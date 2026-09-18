@@ -184,11 +184,12 @@ bool TestTerrainQueryNatives() {
     TEST_ASSERT(!CallNative(vm, "IsPointBlighted", {JassValue::Real(64), JassValue::Real(64)}).boolVal);
     TEST_ASSERT(CallNative(vm, "IsTerrainPathable", {JassValue::Real(64), JassValue::Real(192), JassValue::Int(5)}).boolVal);
 
-    // Script blight circle + clear.
-    CallNative(vm, "SetBlightPoint", {JassValue::Real(64), JassValue::Real(64), JassValue::Real(100), JassValue::Bool(true)});
+    // Script blight circle + clear (player handle first, ref signature).
+    const int bp0 = CallNative(vm, "Player", {JassValue::Int(0)}).intVal;
+    CallNative(vm, "SetBlightPoint", {JassValue::Int(bp0), JassValue::Real(64), JassValue::Real(64), JassValue::Real(100), JassValue::Bool(true)});
     TEST_ASSERT(CallNative(vm, "IsPointBlighted", {JassValue::Real(64), JassValue::Real(64)}).boolVal);
     TEST_ASSERT(!CallNative(vm, "IsTerrainPathable", {JassValue::Real(64), JassValue::Real(64), JassValue::Int(3)}).boolVal); // build blocked on blight
-    CallNative(vm, "SetBlightPoint", {JassValue::Real(64), JassValue::Real(64), JassValue::Real(100), JassValue::Bool(false)});
+    CallNative(vm, "SetBlightPoint", {JassValue::Int(bp0), JassValue::Real(64), JassValue::Real(64), JassValue::Real(100), JassValue::Bool(false)});
     TEST_ASSERT(!CallNative(vm, "IsPointBlighted", {JassValue::Real(64), JassValue::Real(64)}).boolVal);
     return true;
 }
@@ -210,10 +211,11 @@ bool TestRectRegionCellNatives() {
     CallNative(vm, "SetRectFromLoc", {JassValue::Int(rect), JassValue::Int(locA), JassValue::Int(locB)});
     TEST_ASSERT(CallNative(vm, "GetRectMaxX", {JassValue::Int(rect)}).realVal == 40.0f);
 
-    // Blight-by-rect through the rect handle.
+    // Blight-by-rect through the rect handle (player first, ref signature).
     W3EMap terrain = MakeTestTerrain();
     sim.SetTerrainMap(&terrain);
-    CallNative(vm, "SetBlightRect", {JassValue::Int(rect), JassValue::Bool(true)});
+    const int br0 = CallNative(vm, "Player", {JassValue::Int(0)}).intVal;
+    CallNative(vm, "SetBlightRect", {JassValue::Int(br0), JassValue::Int(rect), JassValue::Bool(true)});
     TEST_ASSERT(CallNative(vm, "IsPointBlighted", {JassValue::Real(20), JassValue::Real(15)}).boolVal);
 
     // Region cells: cell (1,1) covers world [32,64)x[32,64).

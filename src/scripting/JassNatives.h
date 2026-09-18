@@ -76,6 +76,15 @@ struct JassTrigger {
     std::vector<std::string> conditionFuncNames;
     std::vector<std::string> actionFuncNames;
     std::vector<std::pair<int, int>> registeredEvents;
+    // Unit-state events (ref TriggerRegisterUnitStateEvent): fired by the
+    // trigger poll pass once wired; retained so registration never loses.
+    struct JassUnitStateEvent {
+        int unitHandle = 0;
+        int state = 0;
+        int opcode = 0;
+        float limit = 0.0f;
+    };
+    std::vector<JassUnitStateEvent> unitStateEvents;
     int evalCount = 0;
     int execCount = 0;
 };
@@ -147,6 +156,7 @@ struct JassRegion {
 
 struct JassSound {
     std::string label;
+    std::string file; // real filename for FilenameWithLabel sounds
     float volume = 1.0f;
     float pitch = 1.0f;
     int durationMs = 0;
@@ -165,6 +175,13 @@ struct JassSound {
     bool stackedByPosition = false;
     float stackedWidth = 0.0f;
     float stackedHeight = 0.0f;
+    // 3D cone + doppler + seek offset (ref CSound fields).
+    float coneInside = 0.0f;
+    float coneOutside = 0.0f;
+    int coneOutsideVolume = 0;
+    float orientX = 0.0f, orientY = 0.0f, orientZ = 0.0f;
+    float velX = 0.0f, velY = 0.0f, velZ = 0.0f;
+    int playPositionMs = 0;
 };
 
 // Music playback state (ref meleeUI music control).
@@ -182,6 +199,7 @@ struct JassMusicState {
 struct JassTextTag {
     std::string text;
     float x = 0, y = 0;
+    float vx = 0, vy = 0; // drift from SetTextTagVelocity
     float height = 0;
     float lifespan = 0;
     float fadepoint = 0;
@@ -480,6 +498,84 @@ public:
     };
     std::vector<JassGlobalStock> globalShopStock;
 
+    // ---- Batch 5: camera / cinematic / game-flow / UI state ----
+    struct JassCameraNoise {
+        float magnitude = 0.0f;
+        float velocity = 0.0f;
+        bool vertOnly = false;
+        bool horizOnly = false;
+    };
+    JassCameraNoise sourceNoise;
+    JassCameraNoise targetNoise;
+    struct JassCameraController {
+        int unitSimId = -1;
+        float xOffset = 0.0f;
+        float yOffset = 0.0f;
+        bool inheritOrientation = false;
+        bool active = false;
+    };
+    JassCameraController targetController;
+    JassCameraController orientController;
+    struct JassCameraRotate {
+        bool active = false;
+        float x = 0, y = 0, radians = 0, duration = 0;
+    };
+    JassCameraRotate rotateMode;
+    struct JassCinematicState {
+        bool playing = false;
+        std::string scene;
+        std::string movie;
+        std::string introModel;
+        std::string introText;
+        bool subtitles = false;
+        bool loadDialog = false;
+        int portraitUnitId = 0;
+        int portraitColor = 0;
+        std::string speakerTitle;
+        std::string text;
+        float sceneDuration = 0.0f;
+        float voiceDuration = 0.0f;
+    };
+    JassCinematicState cinematic;
+    bool gameEnded = false;
+    bool gameVictory = false;
+    bool noDefeatCheat = false;
+    bool noVictoryCheat = false;
+    bool restartDisabled = false;
+    std::unordered_set<int> crippledPlayers;
+    std::unordered_map<int, bool> compAIpaused;
+    bool triggerWaitOnSleeps = true;
+    bool syncReady = false; // TriggerSync* needs the net protocol; stays false
+    std::unordered_map<int, int> removedPlayerResults;
+    struct JassUIConfig {
+        bool dragSelect = true;
+        bool preSelect = true;
+        bool select = true;
+        bool userControl = true;
+        bool minimapFilterButtons = true;
+        bool occlusion = true;
+        bool worldFogBoundary = true;
+        bool showInterface = true;
+    };
+    JassUIConfig uiConfig;
+    bool allyColorFilter = false;
+    bool creepCampFilter = false;
+    std::unordered_set<int> supportedGameTypes;
+    int resourceDensity = 0;
+    int creatureDensity = 0;
+    std::unordered_map<int, int> volumeGroups; // ordinal -> 0..127
+    struct JassMinimapPing {
+        float x = 0, y = 0, duration = 0;
+        int red = 255, green = 0, blue = 0;
+        bool extra = false;
+    };
+    std::vector<JassMinimapPing> minimapPings;
+    struct JassDefeatCondition {
+        std::string description;
+    };
+    std::unordered_map<int, std::shared_ptr<JassDefeatCondition>> defeatConditions;
+    int nextDefeatConditionId = 0x1B000000;
+
     // Unit-attached visual/vision state without a sim consumer yet (ref
     // UnitShareVision/UnitAddIndicator/SetUnitFog): retained per unit sim id
     // for the renderer/FoW passes to consume.
@@ -728,6 +824,8 @@ private:
     void RegisterVisualNatives();
     void RegisterPoolStockNatives();
     void RegisterUnitStateNatives();
+    void RegisterCameraFlowNatives();
+    void RegisterTriggerSoundNatives();
 
     void RegisterConfigPlayerNatives();
 

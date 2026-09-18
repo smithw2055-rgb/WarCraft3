@@ -45,6 +45,10 @@ public:
     // Game loop
     void Update();
 
+    // Pause (ref PauseGame): frozen ticks; VM threads keep their own clock.
+    void SetPaused(bool v) { paused_ = v; }
+    bool IsPaused() const { return paused_; }
+
     // Unit management
     virtual CUnit* CreateUnit(War3ID typeId, int playerIndex, float x, float y, float facing);
     int AllocateHandleId() { return handleIdAlloc_.CreateId(); }
@@ -202,6 +206,7 @@ private:
     void ProcessItemRemovals();
 
     int gameTurnTick_ = 0;
+    bool paused_ = false;
 
     // Game state
     float gameTimeOfDay_ = 12.0f; // noon

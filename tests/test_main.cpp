@@ -160,6 +160,11 @@ bool TestUnitAlarmIconProgress();
 bool TestUnitBuffExFamily();
 bool TestUnitDamagePointDelayed();
 bool TestUnitIndicatorVisionFog();
+bool TestCameraFlowNatives();
+bool TestGameFlowNatives();
+bool TestTriggerExtraNatives();
+bool TestSoundStateNatives();
+bool TestGroupEnumCountedNatives();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -311,6 +316,11 @@ int main() {
         {"Unit BuffEx family", TestUnitBuffExFamily},
         {"Unit damage point delayed", TestUnitDamagePointDelayed},
         {"Unit indicator/vision/fog", TestUnitIndicatorVisionFog},
+        {"Camera flow natives", TestCameraFlowNatives},
+        {"Game flow natives", TestGameFlowNatives},
+        {"Trigger extra natives", TestTriggerExtraNatives},
+        {"Sound state natives", TestSoundStateNatives},
+        {"Group enum counted natives", TestGroupEnumCountedNatives},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif
