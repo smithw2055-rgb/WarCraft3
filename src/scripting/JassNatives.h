@@ -478,6 +478,16 @@ public:
     std::unordered_map<int, std::shared_ptr<JassUbersplat>> ubersplats;
     int nextUbersplatId = 0x18000000;
 
+    // Lightning bolts (ref lightning API): coordinates + color retained for
+    // the ribbon renderer; previously handles only.
+    struct JassLightning {
+        std::string code;
+        bool checkVisibility = false;
+        float x1 = 0, y1 = 0, z1 = 0, x2 = 0, y2 = 0, z2 = 0;
+        float r = 1, g = 1, b = 1, a = 1;
+    };
+    std::unordered_map<int, std::shared_ptr<JassLightning>> lightnings;
+
     // Weighted random pools (ref itempool/unitpool): entries keep insertion
     // order; rolls use the deterministic sim RNG so setup stays in sync.
     struct JassWeightedPool {
@@ -553,6 +563,8 @@ public:
         bool select = true;
         bool userControl = true;
         bool minimapFilterButtons = true;
+        bool minimapAllyFilter = true;
+        bool minimapCreepFilter = true;
         bool occlusion = true;
         bool worldFogBoundary = true;
         bool showInterface = true;
@@ -826,6 +838,7 @@ private:
     void RegisterUnitStateNatives();
     void RegisterCameraFlowNatives();
     void RegisterTriggerSoundNatives();
+    void RegisterUIStateNatives();
 
     void RegisterConfigPlayerNatives();
 

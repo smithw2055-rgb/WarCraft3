@@ -165,6 +165,8 @@ bool TestGameFlowNatives();
 bool TestTriggerExtraNatives();
 bool TestSoundStateNatives();
 bool TestGroupEnumCountedNatives();
+bool TestUIStateNatives();
+bool TestLightningAndIndicatorNatives();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -321,6 +323,8 @@ int main() {
         {"Trigger extra natives", TestTriggerExtraNatives},
         {"Sound state natives", TestSoundStateNatives},
         {"Group enum counted natives", TestGroupEnumCountedNatives},
+        {"UI state natives", TestUIStateNatives},
+        {"Lightning and indicator natives", TestLightningAndIndicatorNatives},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

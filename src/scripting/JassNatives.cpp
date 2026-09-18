@@ -938,6 +938,7 @@ void JassNatives::RegisterCommonNatives() {
     RegisterUnitStateNatives();
     RegisterCameraFlowNatives();
     RegisterTriggerSoundNatives();
+    RegisterUIStateNatives();
     std::cout << "JassNatives: registered common natives" << std::endl;
 }
 
@@ -3171,7 +3172,10 @@ void JassNatives::RegisterPlayerNatives() {
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("SetAllyColorFilterState", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("SetAllyColorFilterState", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!args.empty() && data) data->allyColorFilter = args[0].intVal != 0;
+        return JassValue::Null();
+    });
 }
 
 // ============================================================
@@ -4898,22 +4902,94 @@ void JassNatives::RegisterWeatherNatives() {
 }
 
 void JassNatives::RegisterLightningNatives() {
-    vm_.RegisterNative("AddLightning", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::LIGHTNING, data->nextHandleId++));
+    vm_.RegisterNative("AddLightning", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        auto bolt = std::make_shared<JassNativesData::JassLightning>();
+        if (args.size() >= 6) {
+            bolt->code = args[0].strVal;
+            bolt->checkVisibility = args[1].boolVal;
+            bolt->x1 = args[2].realVal; bolt->y1 = args[3].realVal;
+            bolt->x2 = args[4].realVal; bolt->y2 = args[5].realVal;
+        }
+        const int id = data->nextHandleId++;
+        data->lightnings[id] = bolt;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::LIGHTNING, id));
     });
-    vm_.RegisterNative("AddLightningEx", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::LIGHTNING, data->nextHandleId++));
+    vm_.RegisterNative("AddLightningEx", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        auto bolt = std::make_shared<JassNativesData::JassLightning>();
+        if (args.size() >= 8) {
+            bolt->code = args[0].strVal;
+            bolt->checkVisibility = args[1].boolVal;
+            bolt->x1 = args[2].realVal; bolt->y1 = args[3].realVal; bolt->z1 = args[4].realVal;
+            bolt->x2 = args[5].realVal; bolt->y2 = args[6].realVal; bolt->z2 = args[7].realVal;
+        }
+        const int id = data->nextHandleId++;
+        data->lightnings[id] = bolt;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::LIGHTNING, id));
     });
     vm_.RegisterNative("DestroyLightning", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::LIGHTNING);
-        if (id >= 0) data->FreeHandle(args[0].intVal);
+        if (id >= 0) {
+            data->lightnings.erase(id);
+            data->FreeHandle(args[0].intVal);
+        }
         return JassValue::Null();
     });
-    vm_.RegisterNative("MoveLightning", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
-    vm_.RegisterNative("MoveLightningEx", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
+    vm_.RegisterNative("MoveLightning", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 6) return JassValue::Bool(false);
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::LIGHTNING);
+        if (id < 0) return JassValue::Bool(false);
+        auto it = data->lightnings.find(id);
+        if (it == data->lightnings.end()) return JassValue::Bool(false);
+        it->second->checkVisibility = args[1].boolVal;
+        it->second->x1 = args[2].realVal; it->second->y1 = args[3].realVal;
+        it->second->x2 = args[4].realVal; it->second->y2 = args[5].realVal;
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("MoveLightningEx", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 8) return JassValue::Bool(false);
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::LIGHTNING);
+        if (id < 0) return JassValue::Bool(false);
+        auto it = data->lightnings.find(id);
+        if (it == data->lightnings.end()) return JassValue::Bool(false);
+        it->second->checkVisibility = args[1].boolVal;
+        it->second->x1 = args[2].realVal; it->second->y1 = args[3].realVal; it->second->z1 = args[4].realVal;
+        it->second->x2 = args[5].realVal; it->second->y2 = args[6].realVal; it->second->z2 = args[7].realVal;
+        return JassValue::Bool(true);
+    });
     vm_.RegisterNative("GetLightningColor", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Real(1.0f); });
-    vm_.RegisterNative("SetLightningColor", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
+    auto lightningColor = [data = data_](const std::vector<JassValue>& args, float JassNativesData::JassLightning::*field) -> JassValue {
+        if (args.empty()) return JassValue::Real(1.0f);
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::LIGHTNING);
+        if (id < 0) return JassValue::Real(1.0f);
+        auto it = data->lightnings.find(id);
+        if (it == data->lightnings.end()) return JassValue::Real(1.0f);
+        return JassValue::Real(it->second.get()->*field);
+    };
+    vm_.RegisterNative("GetLightningColorA", [lightningColor](const std::vector<JassValue>& args) -> JassValue {
+        return lightningColor(args, &JassNativesData::JassLightning::a);
+    });
+    vm_.RegisterNative("GetLightningColorR", [lightningColor](const std::vector<JassValue>& args) -> JassValue {
+        return lightningColor(args, &JassNativesData::JassLightning::r);
+    });
+    vm_.RegisterNative("GetLightningColorG", [lightningColor](const std::vector<JassValue>& args) -> JassValue {
+        return lightningColor(args, &JassNativesData::JassLightning::g);
+    });
+    vm_.RegisterNative("GetLightningColorB", [lightningColor](const std::vector<JassValue>& args) -> JassValue {
+        return lightningColor(args, &JassNativesData::JassLightning::b);
+    });
+    vm_.RegisterNative("SetLightningColor", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Bool(false);
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::LIGHTNING);
+        if (id < 0) return JassValue::Bool(false);
+        auto it = data->lightnings.find(id);
+        if (it == data->lightnings.end()) return JassValue::Bool(false);
+        it->second->r = args[1].realVal;
+        it->second->g = args[2].realVal;
+        it->second->b = args[3].realVal;
+        it->second->a = args[4].realVal;
+        return JassValue::Bool(true);
+    });
 }
 
 // ============================================================
@@ -8707,6 +8783,132 @@ void JassNatives::RegisterTriggerSoundNatives() {
             if (acceptUnit(uh, filter) && !cappedPush(group->unitHandles, uh, limit)) break;
         }
         data->filterUnitHandle = -1;
+        return JassValue::Null();
+    });
+}
+
+// ============================================================
+// 32. UI-state natives: input toggles, filters, pings, defeat
+// ============================================================
+// These retain script-visible UI state for the UI/renderer passes; none
+// take effect without their consumer yet (documented per native).
+void JassNatives::RegisterUIStateNatives() {
+    auto uiFlag = [data = data_](const std::vector<JassValue>& args, bool JassNativesData::JassUIConfig::*field, size_t valueIndex = 0) -> JassValue {
+        if (args.size() <= valueIndex || !data) return JassValue::Null();
+        data->uiConfig.*field = args[valueIndex].boolVal;
+        return JassValue::Null();
+    };
+    vm_.RegisterNative("EnableDragSelect", [uiFlag](const std::vector<JassValue>& args) -> JassValue {
+        return uiFlag(args, &JassNativesData::JassUIConfig::dragSelect, 0);
+    });
+    vm_.RegisterNative("EnablePreSelect", [uiFlag](const std::vector<JassValue>& args) -> JassValue {
+        return uiFlag(args, &JassNativesData::JassUIConfig::preSelect, 0);
+    });
+    vm_.RegisterNative("EnableSelect", [uiFlag](const std::vector<JassValue>& args) -> JassValue {
+        return uiFlag(args, &JassNativesData::JassUIConfig::select, 0);
+    });
+    vm_.RegisterNative("EnableUserControl", [uiFlag](const std::vector<JassValue>& args) -> JassValue {
+        return uiFlag(args, &JassNativesData::JassUIConfig::userControl, 0);
+    });
+    vm_.RegisterNative("EnableOcclusion", [uiFlag](const std::vector<JassValue>& args) -> JassValue {
+        return uiFlag(args, &JassNativesData::JassUIConfig::occlusion, 0);
+    });
+    vm_.RegisterNative("EnableWorldFogBoundary", [uiFlag](const std::vector<JassValue>& args) -> JassValue {
+        return uiFlag(args, &JassNativesData::JassUIConfig::worldFogBoundary, 0);
+    });
+    vm_.RegisterNative("ShowInterface", [uiFlag](const std::vector<JassValue>& args) -> JassValue {
+        return uiFlag(args, &JassNativesData::JassUIConfig::showInterface, 0);
+    });
+    vm_.RegisterNative("EnableMinimapFilterButtons", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !data) return JassValue::Null();
+        data->uiConfig.minimapAllyFilter = args[0].boolVal;
+        data->uiConfig.minimapCreepFilter = args[1].boolVal;
+        data->uiConfig.minimapFilterButtons = args[0].boolVal || args[1].boolVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("GetAllyColorFilterState", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Int(data && data->allyColorFilter ? 1 : 0);
+    });
+    vm_.RegisterNative("GetCreepCampFilterState", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Bool(data && data->creepCampFilter);
+    });
+    vm_.RegisterNative("SetCreepCampFilterState", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!args.empty() && data) data->creepCampFilter = args[0].boolVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ForceUICancel", [](const std::vector<JassValue>&) -> JassValue {
+        // Needs menu-focus state, which no UI pass owns yet.
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ForceUIKey", [](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("PingMinimap", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        JassNativesData::JassMinimapPing ping;
+        ping.x = args[0].realVal;
+        ping.y = args[1].realVal;
+        ping.duration = args[2].realVal;
+        data->minimapPings.push_back(ping);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("PingMinimapEx", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 7) return JassValue::Null();
+        JassNativesData::JassMinimapPing ping;
+        ping.x = args[0].realVal;
+        ping.y = args[1].realVal;
+        ping.duration = args[2].realVal;
+        ping.red = args[3].intVal;
+        ping.green = args[4].intVal;
+        ping.blue = args[5].intVal;
+        ping.extra = args[6].boolVal;
+        data->minimapPings.push_back(ping);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("IsCineFilterDisplayed", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Bool(data && data->cineFilter.displayed);
+    });
+    vm_.RegisterNative("CreateDefeatCondition", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        auto dc = std::make_shared<JassNativesData::JassDefeatCondition>();
+        int id = data->nextDefeatConditionId++;
+        data->defeatConditions[id] = dc;
+        return JassValue::Int(id);
+    });
+    vm_.RegisterNative("DefeatConditionSetDescription", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        auto it = data->defeatConditions.find(args[0].intVal);
+        if (it != data->defeatConditions.end()) it->second->description = args[1].strVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("DestroyDefeatCondition", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!args.empty()) data->defeatConditions.erase(args[0].intVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("DestroyFilter", [](const std::vector<JassValue>&) -> JassValue {
+        // Filter() is passthrough (no allocation), so nothing to free.
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("DestroyCondition", [](const std::vector<JassValue>&) -> JassValue {
+        // Condition() is passthrough (no allocation), so nothing to free.
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("AddIndicator", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        // Widget may be a unit, item or destructable; first hit wins.
+        static const JassHandleInfo::Type kinds[] = {
+            JassHandleInfo::UNIT, JassHandleInfo::ITEM, JassHandleInfo::DESTRUCTABLE,
+        };
+        for (auto kind : kinds) {
+            const int simId = data->GetSimHandle(args[0].intVal, kind);
+            if (simId < 0) continue;
+            JassNativesData::JassUnitIndicator ind;
+            ind.red = args[1].intVal;
+            ind.green = args[2].intVal;
+            ind.blue = args[3].intVal;
+            ind.alpha = args[4].intVal;
+            data->unitIndicators[simId] = ind;
+            return JassValue::Null();
+        }
         return JassValue::Null();
     });
 }
