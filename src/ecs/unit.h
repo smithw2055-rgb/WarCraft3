@@ -128,12 +128,38 @@ public:
     bool HasBuff(War3ID buffId) const;
     const std::vector<std::unique_ptr<CBuff>>& GetBuffs() const { return buffs_; }
     void UpdateBuffs(CSimulation& game);
+    // Predicate removal for UnitRemoveBuffs(Ex): matched buffs get OnRemove
+    // then erase. positive/negative/timedLife filter; pass -1/ignore flags
+    // through for categories without backing (documented at call sites).
+    void RemoveBuffsIf(CSimulation& game, bool removePositive, bool removeNegative, bool timedLifeOnly);
     // Crowd-control / summon queries (type-based so custom buff ids from
     // object data still work; canonical ids: BOhx/BUsl/BNsi/timed-life).
     bool IsHexed() const;
     bool IsSilenced() const;
     bool IsAsleep() const;
     bool IsSummoned() const;
+    // Sleep capability (ref UnitAddSleep/UnitCanSleep): Sleep effects only
+    // land when both flags hold. Both default true (retail default).
+    bool CanSleep() const { return canSleep_ && canSleepPerm_; }
+    void SetCanSleep(bool v) { canSleep_ = v; }
+    bool CanSleepPerm() const { return canSleepPerm_; }
+    void SetCanSleepPerm(bool v) { canSleepPerm_ = v; }
+    // Instance unit-type flags (ref UnitAddType/UnitRemoveType raw ids).
+    // Stored per instance; consulted by future targeting/type checks.
+    void AddUnitTypeFlag(int typeId) { addedUnitTypes_.insert(typeId); removedUnitTypes_.erase(typeId); }
+    void RemoveUnitTypeFlag(int typeId) { removedUnitTypes_.insert(typeId); addedUnitTypes_.erase(typeId); }
+    bool HasUnitTypeFlag(int typeId) const { return addedUnitTypes_.count(typeId) > 0; }
+    // Town-alarm opt-out (ref UnitIgnoreAlarm): no alarm system consumes
+    // this yet; retained so script intent survives.
+    bool IsAlarmIgnored() const { return ignoreAlarm_; }
+    void SetIgnoreAlarm(bool v) { ignoreAlarm_ = v; }
+    // Command-card alt icon (ref UnitSetUsesAltIcon): consumed by UI.
+    bool UsesAltIcon() const { return useAltIcon_; }
+    void SetUsesAltIcon(bool v) { useAltIcon_ = v; }
+    // Upgrade morph progress percent 0..100 (ref UnitSetUpgradeProgress):
+    // consumed once the morph API lands; construction twin is live.
+    float GetUpgradeProgress() const { return upgradeProgress_; }
+    void SetUpgradeProgress(float v) { upgradeProgress_ = v; }
 
     // ===== Behavior System =====
     // Current behavior
@@ -345,6 +371,15 @@ private:
 
     // Buffs
     std::vector<std::unique_ptr<CBuff>> buffs_;
+
+    // Instance unit-type flag overrides (UnitAddType/UnitRemoveType).
+    std::unordered_set<int> addedUnitTypes_;
+    std::unordered_set<int> removedUnitTypes_;
+    bool canSleep_ = true;
+    bool canSleepPerm_ = true;
+    bool ignoreAlarm_ = false;
+    bool useAltIcon_ = false;
+    float upgradeProgress_ = 0.0f;
 
     // Behavior storage (owned by unit, created by abilities)
     std::unique_ptr<CBehaviorMove> moveBehavior_;

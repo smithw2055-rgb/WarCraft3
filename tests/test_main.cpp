@@ -153,6 +153,13 @@ bool TestPoolPlaceRandomUnit();
 bool TestChooseRandomCreep();
 bool TestShopStockStateMachine();
 bool TestShopPurchaseConsumesStock();
+bool TestUnitTypeFlagsAndPermanent();
+bool TestUnitTimedLifePause();
+bool TestUnitSleepFamily();
+bool TestUnitAlarmIconProgress();
+bool TestUnitBuffExFamily();
+bool TestUnitDamagePointDelayed();
+bool TestUnitIndicatorVisionFog();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -297,6 +304,13 @@ int main() {
         {"Choose random creep", TestChooseRandomCreep},
         {"Shop stock state machine", TestShopStockStateMachine},
         {"Shop purchase consumes stock", TestShopPurchaseConsumesStock},
+        {"Unit type flags and permanent", TestUnitTypeFlagsAndPermanent},
+        {"Unit timed life pause", TestUnitTimedLifePause},
+        {"Unit sleep family", TestUnitSleepFamily},
+        {"Unit alarm/icon/progress", TestUnitAlarmIconProgress},
+        {"Unit BuffEx family", TestUnitBuffExFamily},
+        {"Unit damage point delayed", TestUnitDamagePointDelayed},
+        {"Unit indicator/vision/fog", TestUnitIndicatorVisionFog},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

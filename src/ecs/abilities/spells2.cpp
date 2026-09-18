@@ -203,7 +203,7 @@ void CAbilitySleep::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) 
     (void)caster;
     if (!target || target->IsDead()) return;
     auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (targetUnit) {
+    if (targetUnit && targetUnit->CanSleep()) {
         // Sleep: idles the target; any damage wakes it (see CUnit::Damage).
         targetUnit->AddBuff(std::make_unique<CBuffSleep>(duration_), game);
     }

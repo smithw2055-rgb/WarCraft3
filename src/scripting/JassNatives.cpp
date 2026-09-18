@@ -7,6 +7,9 @@
 #include "ecs/item.h"
 #include "ecs/abilities/ability_inventory.h"
 #include "ecs/abilities/ability_hero.h"
+#include "ecs/ability.h"
+#include "ecs/buff.h"
+#include "ecs/buffs.h"
 #include "ecs/abilities/ability_sell_items.h"
 #include "ecs/ability_factory.h"
 #include "ecs/destructable.h"
@@ -932,6 +935,7 @@ void JassNatives::RegisterCommonNatives() {
     RegisterPlayerTeamNatives();
     RegisterVisualNatives();
     RegisterPoolStockNatives();
+    RegisterUnitStateNatives();
     std::cout << "JassNatives: registered common natives" << std::endl;
 }
 
@@ -7893,6 +7897,279 @@ void JassNatives::RegisterPoolStockNatives() {
                 destructable->SetLife(*sim, destructable->GetLife() + (float)args[1].intVal);
             }
         }
+        return JassValue::Null();
+    });
+}
+
+// ============================================================
+// 29. Unit-state natives
+// ============================================================
+// Retail type ordinals (common.j): attack 0 NORMAL,1 MELEE(fallback NORMAL),
+// 2 PIERCE,3 SIEGE,4 MAGIC,5 CHAOS,6 HERO,7 SPELLS; damage uses the sparse
+// ConvertDamageType ids (same table as the UnitDamageTarget path).
+static CAttackType ToScriptAttackType(int ordinal) {
+    switch (ordinal) {
+        case 0: return CAttackType::NORMAL;
+        case 1: return CAttackType::NORMAL; // MELEE has no table column here
+        case 2: return CAttackType::PIERCE;
+        case 3: return CAttackType::SIEGE;
+        case 4: return CAttackType::MAGIC;
+        case 5: return CAttackType::CHAOS;
+        case 6: return CAttackType::HERO;
+        case 7: return CAttackType::SPELLS;
+        default: return CAttackType::NORMAL;
+    }
+}
+
+static CDamageType ToScriptDamageType(int ordinal) {
+    switch (ordinal) {
+        case 4: return CDamageType::NORMAL;
+        case 5: return CDamageType::ENHANCED;
+        case 8: return CDamageType::FIRE;
+        case 9: return CDamageType::COLD;
+        case 10: return CDamageType::LIGHTNING;
+        case 11: return CDamageType::POISON;
+        case 12: return CDamageType::DISEASE;
+        case 13: return CDamageType::DIVINE;
+        case 14: return CDamageType::MAGIC;
+        case 15: return CDamageType::SONIC;
+        case 16: return CDamageType::ACID;
+        case 17: return CDamageType::FORCE;
+        case 18: return CDamageType::DEATH;
+        case 19: return CDamageType::MIND;
+        case 20: return CDamageType::PLANT;
+        case 21: return CDamageType::DEFENSIVE;
+        case 22: return CDamageType::DEMOLITION;
+        case 23: return CDamageType::SLOW_POISON;
+        case 24: return CDamageType::SPIRIT_LINK;
+        case 25: return CDamageType::SHADOW_STRIKE;
+        case 26: return CDamageType::UNIVERSAL;
+        default: return CDamageType::NORMAL;
+    }
+}
+
+// BuffEx matching: positive/negative/timedLife are backed by CBuff state;
+// magic/physical/aura/autoDispel have no taxonomy yet and match everything
+// (documented approximation; full purge/count-all queries are exact).
+static bool BuffExMatches(const CBuff* buff, bool wantPositive, bool wantNegative, bool timedLifeOnly) {
+    if (!buff) return false;
+    if (timedLifeOnly && dynamic_cast<const CBuffTimedLife*>(buff) == nullptr) return false;
+    if (buff->IsPositive() && !wantPositive) return false;
+    if (buff->IsNegative() && !wantNegative) return false;
+    return true;
+}
+
+void JassNatives::RegisterUnitStateNatives() {
+    auto getUnit = [data = data_, sim = sim_](int unitHandle) -> CUnit* {
+        if (!sim) return nullptr;
+        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
+        return uSim >= 0 ? sim->GetUnit(uSim) : nullptr;
+    };
+
+    vm_.RegisterNative("UnitAddType", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        if (!u) return JassValue::Bool(false);
+        u->AddUnitTypeFlag(args[1].intVal);
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("UnitRemoveType", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        if (!u) return JassValue::Bool(false);
+        u->RemoveUnitTypeFlag(args[1].intVal);
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("UnitMakeAbilityPermanent", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        if (!u) return JassValue::Bool(false);
+        CAbility* ability = u->GetAbility(War3ID((uint32_t)args[2].intVal));
+        if (!ability) return JassValue::Bool(false);
+        ability->SetPermanent(args[1].boolVal);
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("UnitApplyTimedLife", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || !sim) return JassValue::Null();
+        CUnit* u = getUnit(args[0].intVal);
+        if (!u) return JassValue::Null();
+        u->AddBuff(std::make_unique<CBuffTimedLife>(War3ID((uint32_t)args[1].intVal), args[2].realVal), *sim);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitPauseTimedLife", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        CUnit* u = getUnit(args[0].intVal);
+        if (!u) return JassValue::Null();
+        for (const auto& buff : u->GetBuffs()) {
+            if (auto* timed = dynamic_cast<CBuffTimedLife*>(buff.get())) {
+                timed->SetSuspended(args[1].boolVal);
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitAddSleep", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (CUnit* u = getUnit(args[0].intVal)) u->SetCanSleep(args[1].boolVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitAddSleepPerm", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (CUnit* u = getUnit(args[0].intVal)) u->SetCanSleepPerm(args[1].boolVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitCanSleep", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        return JassValue::Bool(u && u->CanSleep());
+    });
+    vm_.RegisterNative("UnitCanSleepPerm", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        return JassValue::Bool(u && u->CanSleepPerm());
+    });
+    vm_.RegisterNative("UnitIsSleeping", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        return JassValue::Bool(u && u->IsAsleep());
+    });
+    vm_.RegisterNative("UnitWakeUp", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim) return JassValue::Null();
+        if (CUnit* u = getUnit(args[0].intVal)) u->RemoveBuff(War3ID("BUsl"), *sim);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitIgnoreAlarm", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        if (!u) return JassValue::Bool(false);
+        u->SetIgnoreAlarm(args[1].boolVal);
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("UnitIgnoreAlarmToggled", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        return JassValue::Bool(u && u->IsAlarmIgnored());
+    });
+    vm_.RegisterNative("UnitShareVision", [data = data_, getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        if (uSim < 0 || !getUnit(args[0].intVal)) return JassValue::Null();
+        // No per-player FoW consumer yet; retained for the vision pass.
+        const int player = ResolvePlayerId(data, args[1].intVal);
+        if (args[2].boolVal) {
+            data->unitSharedVision[uSim].insert(player);
+        } else {
+            data->unitSharedVision[uSim].erase(player);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitSetConstructionProgress", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        CUnit* u = getUnit(args[0].intVal);
+        if (!u) return JassValue::Null();
+        // Retail takes percent; the field stores seconds (see behavior_build).
+        float buildTime = 1.0f;
+        if (u->GetUnitType() && u->GetUnitType()->GetBuildTime() > 0) {
+            buildTime = (float)u->GetUnitType()->GetBuildTime();
+        }
+        u->SetConstructionProgress(args[1].intVal / 100.0f * buildTime);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitSetUpgradeProgress", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (CUnit* u = getUnit(args[0].intVal)) u->SetUpgradeProgress((float)args[1].intVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitSetUsesAltIcon", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (CUnit* u = getUnit(args[0].intVal)) u->SetUsesAltIcon(args[1].boolVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitCountBuffsEx", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 8) return JassValue::Int(0);
+        CUnit* u = getUnit(args[0].intVal);
+        if (!u) return JassValue::Int(0);
+        int count = 0;
+        for (const auto& buff : u->GetBuffs()) {
+            if (BuffExMatches(buff.get(), args[1].boolVal, args[2].boolVal, args[5].boolVal)) count++;
+        }
+        return JassValue::Int(count);
+    });
+    vm_.RegisterNative("UnitHasBuffsEx", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 8) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        if (!u) return JassValue::Bool(false);
+        for (const auto& buff : u->GetBuffs()) {
+            if (BuffExMatches(buff.get(), args[1].boolVal, args[2].boolVal, args[5].boolVal)) return JassValue::Bool(true);
+        }
+        return JassValue::Bool(false);
+    });
+    vm_.RegisterNative("UnitRemoveBuffs", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || !sim) return JassValue::Null();
+        if (CUnit* u = getUnit(args[0].intVal)) {
+            u->RemoveBuffsIf(*sim, args[1].boolVal, args[2].boolVal, false);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitRemoveBuffsEx", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 8 || !sim) return JassValue::Null();
+        if (CUnit* u = getUnit(args[0].intVal)) {
+            u->RemoveBuffsIf(*sim, args[1].boolVal, args[2].boolVal, args[5].boolVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("UnitDamagePoint", [data = data_, sim = sim_, getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 11 || !sim) return JassValue::Bool(false);
+        CUnit* source = getUnit(args[0].intVal);
+        const float delay = args[1].realVal;
+        const float radius = args[2].realVal;
+        const float x = args[3].realVal, y = args[4].realVal;
+        const float amount = args[5].realVal;
+        const bool isAttack = args[6].boolVal;
+        const bool isRanged = args[7].boolVal;
+        const CAttackType attackType = ToScriptAttackType(args[8].intVal);
+        const CDamageType damageType = ToScriptDamageType(args[9].intVal);
+        auto strike = [sim, source, radius, x, y, amount, isAttack, isRanged, attackType, damageType]() {
+            for (CUnit* target : sim->GetUnits()) {
+                if (!target || target->IsDead()) continue;
+                const float dx = target->GetX() - x, dy = target->GetY() - y;
+                if (dx * dx + dy * dy > radius * radius) continue;
+                target->Damage(*sim, source, isAttack, isRanged, attackType, damageType, "", amount, 0);
+            }
+        };
+        if (delay > 0.0f) {
+            sim->AddDelayedAction(delay, std::move(strike));
+        } else {
+            strike();
+        }
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("UnitAddIndicator", [data = data_, getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        if (uSim < 0 || !getUnit(args[0].intVal)) return JassValue::Null();
+        // Retained for the minimap/renderer indicator pass.
+        JassNativesData::JassUnitIndicator ind;
+        ind.red = args[1].intVal; ind.green = args[2].intVal;
+        ind.blue = args[3].intVal; ind.alpha = args[4].intVal;
+        data->unitIndicators[uSim] = ind;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetUnitFog", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        data->globalUnitFog.a = args[0].realVal;
+        data->globalUnitFog.b = args[1].realVal;
+        data->globalUnitFog.c = args[2].realVal;
+        data->globalUnitFog.d = args[3].realVal;
+        data->globalUnitFog.e = args[4].realVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("WaygateIsActive", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        CUnit* u = getUnit(args[0].intVal);
+        return JassValue::Bool(u && u->IsWaygateActive());
+    });
+    vm_.RegisterNative("CachePlayerHeroData", [](const std::vector<JassValue>&) -> JassValue {
+        // Hero persistence needs the save system, which does not exist yet.
         return JassValue::Null();
     });
 }

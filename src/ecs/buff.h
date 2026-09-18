@@ -58,6 +58,11 @@ public:
     int GetCasterHandleId() const { return casterHandleId_; }
     void SetCasterHandleId(int v) { casterHandleId_ = v; }
 
+    // Suspension (ref UnitPauseTimedLife): suspended buffs neither tick
+    // down nor fire periodic effects until resumed.
+    bool IsSuspended() const { return suspended_; }
+    void SetSuspended(bool v) { suspended_ = v; }
+
     // Lifecycle
     virtual void OnApply(CSimulation& game, CUnit* target);
     virtual void OnRemove(CSimulation& game, CUnit* target);
@@ -79,4 +84,5 @@ protected:
     float periodicInterval_ = 1.0f;
     float periodicTimer_ = 0;
     int casterHandleId_ = -1;
+    bool suspended_ = false;
 };

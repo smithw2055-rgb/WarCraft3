@@ -125,6 +125,18 @@ void CSimulation::Update() {
         }
     }
 
+    // Fire delayed script actions whose countdown elapsed.
+    for (auto it = delayedActions_.begin(); it != delayedActions_.end();) {
+        it->secondsLeft -= SIM_STEP_TIME;
+        if (it->secondsLeft <= 0.0f) {
+            auto fn = std::move(it->fn);
+            it = delayedActions_.erase(it);
+            if (fn) fn();
+        } else {
+            ++it;
+        }
+    }
+
     // Step projectiles after units so just-fired shots move the same tick.
     UpdateProjectiles();
 

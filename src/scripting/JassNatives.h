@@ -480,6 +480,20 @@ public:
     };
     std::vector<JassGlobalStock> globalShopStock;
 
+    // Unit-attached visual/vision state without a sim consumer yet (ref
+    // UnitShareVision/UnitAddIndicator/SetUnitFog): retained per unit sim id
+    // for the renderer/FoW passes to consume.
+    std::unordered_map<int, std::unordered_set<int>> unitSharedVision;
+    struct JassUnitIndicator {
+        int red = 255, green = 255, blue = 255, alpha = 255;
+    };
+    std::unordered_map<int, JassUnitIndicator> unitIndicators;
+    struct JassUnitFog {
+        float a = 0, b = 0, c = 0, d = 0, e = 0;
+    };
+    // SetUnitFog takes 5 reals (global unit-fog params, not per unit).
+    JassUnitFog globalUnitFog;
+
     std::unordered_map<int, std::shared_ptr<JassQuest>> quests;
     int nextQuestId = 0x10000000;
 
@@ -713,6 +727,7 @@ private:
     void RegisterPlayerTeamNatives();
     void RegisterVisualNatives();
     void RegisterPoolStockNatives();
+    void RegisterUnitStateNatives();
 
     void RegisterConfigPlayerNatives();
 

@@ -131,6 +131,12 @@ public:
     CCombatSystem* GetCombatSystem() { return &combatSystem_; }
     const CCombatSystem* GetCombatSystem() const { return &combatSystem_; }
 
+    // Delayed actions for timed script effects (ref UnitDamagePoint delay).
+    // Fired from Update() once their countdown elapses; deterministic.
+    void AddDelayedAction(float delaySeconds, std::function<void()> fn) {
+        delayedActions_.push_back({delaySeconds, std::move(fn)});
+    }
+
     // Deterministic synced RNG (ref GameTurnManager lockstep: every client
     // must roll the same sequence; std::rand is banned in sim code).
     // LCG, seeded fixed per game so replays stay reproducible.
@@ -234,6 +240,11 @@ private:
     const W3EMap* terrainMap_ = nullptr;  // terrain queries (owned by loader)
     std::vector<BlightRect> blightRects_; // SetBlight* overrides
     std::vector<BlightCircle> blightCircles_;
+    struct DelayedAction {
+        float secondsLeft = 0.0f;
+        std::function<void()> fn;
+    };
+    std::vector<DelayedAction> delayedActions_;
     std::unique_ptr<CWorldCollision> worldCollision_;    std::unique_ptr<CPathfindingProcessor> pathfindingProcessor_;
     AudioSystem* audio_ = nullptr;
     HandleIdAllocator handleIdAlloc_;

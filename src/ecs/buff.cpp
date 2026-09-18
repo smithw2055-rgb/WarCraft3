@@ -31,6 +31,7 @@ void CBuff::OnRemove(CSimulation& game, CUnit* target) {
 
 void CBuff::OnTick(CSimulation& game, CUnit* target) {
     (void)game; (void)target;
+    if (suspended_) return;
     // Update remaining duration
     float dt = game.GetSimStepTime();
     remaining_ -= dt;
