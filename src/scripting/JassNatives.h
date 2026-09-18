@@ -101,6 +101,9 @@ struct JassTimerDialog {
     int timerSimId = -1;
     std::string title;
     bool displayed = false;
+    float speed = 1.0f;
+    int titleColor[4] = {255, 255, 255, 255};
+    int timeColor[4] = {255, 255, 255, 255};
 };
 
 // Game setup / control state (ref CGameState / melee AI / fog).
@@ -354,6 +357,7 @@ public:
     };
     struct JassMultiboard {
         std::string title;
+        int titleColor[4] = {255, 255, 255, 255};
         int rows = 0;
         int cols = 0;
         bool displayed = false;
@@ -366,12 +370,26 @@ public:
         std::string label;
         int value = 0;
         int playerId = -1;
+        bool showLabel = true;
+        bool showValue = true;
+        bool showIcon = true;
+        int labelColor[4] = {255, 255, 255, 255};
+        int valueColor[4] = {255, 255, 255, 255};
     };
     struct JassLeaderboard {
         std::string label;
         bool displayed = false;
         std::vector<JassLeaderboardItem> items;
+        int labelColor[4] = {255, 255, 255, 255};
+        int valueColor[4] = {255, 255, 255, 255};
+        bool showLabel = true;
+        bool showNames = true;
+        bool showValues = true;
+        bool showIcons = true;
+        int sizeByItemCount = 0;
     };
+    // Player -> leaderboard sim id (ref PlayerSetLeaderboard).
+    std::unordered_map<int, int> playerLeaderboards;
 
     std::unordered_map<int, std::shared_ptr<JassDialog>> dialogs;
     int nextDialogId = 0x13000000;
@@ -839,6 +857,7 @@ private:
     void RegisterCameraFlowNatives();
     void RegisterTriggerSoundNatives();
     void RegisterUIStateNatives();
+    void RegisterBoardNatives();
 
     void RegisterConfigPlayerNatives();
 

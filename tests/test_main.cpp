@@ -167,6 +167,9 @@ bool TestSoundStateNatives();
 bool TestGroupEnumCountedNatives();
 bool TestUIStateNatives();
 bool TestLightningAndIndicatorNatives();
+bool TestLeaderboardNatives();
+bool TestMultiboardNatives();
+bool TestTimerDialogStyleNatives();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -325,6 +328,9 @@ int main() {
         {"Group enum counted natives", TestGroupEnumCountedNatives},
         {"UI state natives", TestUIStateNatives},
         {"Lightning and indicator natives", TestLightningAndIndicatorNatives},
+        {"Leaderboard natives", TestLeaderboardNatives},
+        {"Multiboard natives", TestMultiboardNatives},
+        {"Timer dialog style natives", TestTimerDialogStyleNatives},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

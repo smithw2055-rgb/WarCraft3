@@ -939,6 +939,7 @@ void JassNatives::RegisterCommonNatives() {
     RegisterCameraFlowNatives();
     RegisterTriggerSoundNatives();
     RegisterUIStateNatives();
+    RegisterBoardNatives();
     std::cout << "JassNatives: registered common natives" << std::endl;
 }
 
@@ -8788,7 +8789,255 @@ void JassNatives::RegisterTriggerSoundNatives() {
 }
 
 // ============================================================
-// 32. UI-state natives: input toggles, filters, pings, defeat
+// 32. Leaderboard / multiboard / timer-dialog setters
+// ============================================================
+// Retained script-side board state for the UI board pass; no on-screen
+// consumer yet (documented per native where relevant).
+void JassNatives::RegisterBoardNatives() {
+    auto getBoard = [data = data_](int boardHandle) -> std::shared_ptr<JassNativesData::JassLeaderboard> {
+        int simId = data->GetSimHandle(boardHandle, JassHandleInfo::LEADERBOARD);
+        if (simId < 0) return nullptr;
+        auto it = data->leaderboards.find(simId);
+        return it != data->leaderboards.end() ? it->second : nullptr;
+    };
+    auto boardItem = [](const std::shared_ptr<JassNativesData::JassLeaderboard>& board, int index)
+        -> JassNativesData::JassLeaderboardItem* {
+        if (!board || index < 0 || index >= (int)board->items.size()) return nullptr;
+        return &board->items[(size_t)index];
+    };
+    vm_.RegisterNative("LeaderboardGetLabelText", [getBoard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Str("");
+        auto board = getBoard(args[0].intVal);
+        return JassValue::Str(board ? board->label : "");
+    });
+    vm_.RegisterNative("LeaderboardRemoveItem", [getBoard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto board = getBoard(args[0].intVal)) {
+            const int index = args[1].intVal;
+            if (index >= 0 && index < (int)board->items.size()) {
+                board->items.erase(board->items.begin() + index);
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("LeaderboardSetItemLabel", [getBoard, boardItem](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        if (auto* item = boardItem(getBoard(args[0].intVal), args[1].intVal)) {
+            item->label = args[2].strVal;
+        }
+        return JassValue::Null();
+    });
+    auto itemColor = [getBoard, boardItem](const std::vector<JassValue>& args, bool label) -> JassValue {
+        if (args.size() < 6) return JassValue::Null();
+        if (auto* item = boardItem(getBoard(args[0].intVal), args[1].intVal)) {
+            int* color = label ? item->labelColor : item->valueColor;
+            color[0] = args[2].intVal; color[1] = args[3].intVal;
+            color[2] = args[4].intVal; color[3] = args[5].intVal;
+        }
+        return JassValue::Null();
+    };
+    vm_.RegisterNative("LeaderboardSetItemLabelColor", [itemColor](const std::vector<JassValue>& args) -> JassValue {
+        return itemColor(args, true);
+    });
+    vm_.RegisterNative("LeaderboardSetItemValueColor", [itemColor](const std::vector<JassValue>& args) -> JassValue {
+        return itemColor(args, false);
+    });
+    vm_.RegisterNative("LeaderboardSetItemStyle", [getBoard, boardItem](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        if (auto* item = boardItem(getBoard(args[0].intVal), args[1].intVal)) {
+            item->showLabel = args[2].boolVal;
+            item->showValue = args[3].boolVal;
+            item->showIcon = args[4].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("LeaderboardSetLabelColor", [getBoard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        if (auto board = getBoard(args[0].intVal)) {
+            board->labelColor[0] = args[1].intVal; board->labelColor[1] = args[2].intVal;
+            board->labelColor[2] = args[3].intVal; board->labelColor[3] = args[4].intVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("LeaderboardSetValueColor", [getBoard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        if (auto board = getBoard(args[0].intVal)) {
+            board->valueColor[0] = args[1].intVal; board->valueColor[1] = args[2].intVal;
+            board->valueColor[2] = args[3].intVal; board->valueColor[3] = args[4].intVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("LeaderboardSetSizeByItemCount", [getBoard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto board = getBoard(args[0].intVal)) board->sizeByItemCount = args[1].intVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("LeaderboardSetStyle", [getBoard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        if (auto board = getBoard(args[0].intVal)) {
+            board->showLabel = args[1].boolVal;
+            board->showNames = args[2].boolVal;
+            board->showValues = args[3].boolVal;
+            board->showIcons = args[4].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("LeaderboardSortItemsByValue", [getBoard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto board = getBoard(args[0].intVal)) {
+            const bool asc = args[1].boolVal;
+            std::stable_sort(board->items.begin(), board->items.end(),
+                [asc](const auto& a, const auto& b) { return asc ? a.value < b.value : a.value > b.value; });
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("LeaderboardSortItemsByPlayer", [getBoard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto board = getBoard(args[0].intVal)) {
+            const bool asc = args[1].boolVal;
+            std::stable_sort(board->items.begin(), board->items.end(),
+                [asc](const auto& a, const auto& b) { return asc ? a.playerId < b.playerId : a.playerId > b.playerId; });
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("LeaderboardSortItemsByLabel", [getBoard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto board = getBoard(args[0].intVal)) {
+            const bool asc = args[1].boolVal;
+            std::stable_sort(board->items.begin(), board->items.end(),
+                [asc](const auto& a, const auto& b) { return asc ? a.label < b.label : a.label > b.label; });
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("PlayerSetLeaderboard", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        const int player = ResolvePlayerId(data, args[0].intVal);
+        const int boardSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::LEADERBOARD);
+        if (player >= 0 && boardSim >= 0 && data->leaderboards.count(boardSim)) {
+            data->playerLeaderboards[player] = boardSim;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("PlayerGetLeaderboard", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        const int player = ResolvePlayerId(data, args[0].intVal);
+        auto it = data->playerLeaderboards.find(player);
+        if (it == data->playerLeaderboards.end()) return JassValue::Null();
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::LEADERBOARD, it->second));
+    });
+
+    auto getMultiboard = [data = data_](int boardHandle) -> std::shared_ptr<JassNativesData::JassMultiboard> {
+        int simId = data->GetSimHandle(boardHandle, JassHandleInfo::MULTIBOARD);
+        if (simId < 0) return nullptr;
+        auto it = data->multiboards.find(simId);
+        return it != data->multiboards.end() ? it->second : nullptr;
+    };
+    vm_.RegisterNative("MultiboardSetTitleTextColor", [getMultiboard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        if (auto board = getMultiboard(args[0].intVal)) {
+            board->titleColor[0] = args[1].intVal; board->titleColor[1] = args[2].intVal;
+            board->titleColor[2] = args[3].intVal; board->titleColor[3] = args[4].intVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("MultiboardSetItemsStyle", [getMultiboard, data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        if (auto board = getMultiboard(args[0].intVal)) {
+            for (const auto& [cell, itemId] : board->items) {
+                auto it = data->multiboardItems.find(itemId);
+                if (it == data->multiboardItems.end()) continue;
+                it->second->showValue = args[1].boolVal;
+                it->second->showIcon = args[2].boolVal;
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("MultiboardSetItemsValue", [getMultiboard, data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto board = getMultiboard(args[0].intVal)) {
+            for (const auto& [cell, itemId] : board->items) {
+                auto it = data->multiboardItems.find(itemId);
+                if (it != data->multiboardItems.end()) it->second->value = args[1].strVal;
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("MultiboardSetItemsValueColor", [getMultiboard](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        if (auto board = getMultiboard(args[0].intVal)) {
+            // No per-item color fields exist yet; the broadcast color is
+            // recorded on the board title color as the visible proxy until
+            // the board item pass lands (documented).
+            board->titleColor[0] = args[1].intVal; board->titleColor[1] = args[2].intVal;
+            board->titleColor[2] = args[3].intVal; board->titleColor[3] = args[4].intVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("MultiboardSetItemsWidth", [getMultiboard, data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto board = getMultiboard(args[0].intVal)) {
+            for (const auto& [cell, itemId] : board->items) {
+                auto it = data->multiboardItems.find(itemId);
+                if (it != data->multiboardItems.end()) it->second->width = args[1].realVal;
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("MultiboardSetItemsIcon", [getMultiboard, data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto board = getMultiboard(args[0].intVal)) {
+            for (const auto& [cell, itemId] : board->items) {
+                auto it = data->multiboardItems.find(itemId);
+                if (it != data->multiboardItems.end()) it->second->icon = args[1].strVal;
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("MultiboardSetItemValueColor", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 6) return JassValue::Null();
+        // Per-item colors land with the board item pass; validated handles
+        // keep the call safe until then (documented).
+        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::MULTIBOARDITEM);
+        if (simId < 0 || !data->multiboardItems.count(simId)) return JassValue::Null();
+        return JassValue::Null();
+    });
+
+    auto getTimerDialog = [data = data_](int dialogHandle) -> std::shared_ptr<JassTimerDialog> {
+        int simId = data->GetSimHandle(dialogHandle, JassHandleInfo::TIMER_DIALOG);
+        if (simId < 0) return nullptr;
+        auto it = data->timerDialogs.find(simId);
+        return it != data->timerDialogs.end() ? it->second : nullptr;
+    };
+    vm_.RegisterNative("TimerDialogSetTitleColor", [getTimerDialog](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        if (auto dialog = getTimerDialog(args[0].intVal)) {
+            dialog->titleColor[0] = args[1].intVal; dialog->titleColor[1] = args[2].intVal;
+            dialog->titleColor[2] = args[3].intVal; dialog->titleColor[3] = args[4].intVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("TimerDialogSetTimeColor", [getTimerDialog](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5) return JassValue::Null();
+        if (auto dialog = getTimerDialog(args[0].intVal)) {
+            dialog->timeColor[0] = args[1].intVal; dialog->timeColor[1] = args[2].intVal;
+            dialog->timeColor[2] = args[3].intVal; dialog->timeColor[3] = args[4].intVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("TimerDialogSetSpeed", [getTimerDialog](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto dialog = getTimerDialog(args[0].intVal)) dialog->speed = args[1].realVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("IsTimerDialogDisplayed", [getTimerDialog](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        auto dialog = getTimerDialog(args[0].intVal);
+        return JassValue::Bool(dialog && dialog->displayed);
+    });
+}
+
+// ============================================================
+// 33. UI-state natives: input toggles, filters, pings, defeat
 // ============================================================
 // These retain script-visible UI state for the UI/renderer passes; none
 // take effect without their consumer yet (documented per native).

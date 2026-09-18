@@ -35,6 +35,7 @@ add_executable(warsmash_tests
     test_jass_unitstate.cpp
     test_jass_gameflow.cpp
     test_jass_uistate.cpp
+    test_jass_boards.cpp
     test_jass_unimplemented.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
