@@ -170,6 +170,16 @@ bool TestLightningAndIndicatorNatives();
 bool TestLeaderboardNatives();
 bool TestMultiboardNatives();
 bool TestTimerDialogStyleNatives();
+bool TestStructAllocAndMembers();
+bool TestStructMethodsAndThis();
+bool TestStructStaticAndCreate();
+bool TestStructExtends();
+bool TestStructArrayMembers();
+bool TestStructDestroyAndNull();
+bool TestScopePrivacyAndInitializer();
+bool TestLibraryWrapper();
+bool TestLeadingDotAndMethodRef();
+bool TestStructMethodRefValue();
 bool TestSetTerrainType();
 bool TestSetTerrainPathable();
 bool TestWaterDeformsAndDoodadAnim();
@@ -335,6 +345,16 @@ int main() {
         {"Leaderboard natives", TestLeaderboardNatives},
         {"Multiboard natives", TestMultiboardNatives},
         {"Timer dialog style natives", TestTimerDialogStyleNatives},
+        {"Struct alloc and members", TestStructAllocAndMembers},
+        {"Struct methods and this", TestStructMethodsAndThis},
+        {"Struct static and create", TestStructStaticAndCreate},
+        {"Struct extends", TestStructExtends},
+        {"Struct array members", TestStructArrayMembers},
+        {"Struct destroy and null", TestStructDestroyAndNull},
+        {"Scope privacy and initializer", TestScopePrivacyAndInitializer},
+        {"Library wrapper", TestLibraryWrapper},
+        {"Leading dot and method ref", TestLeadingDotAndMethodRef},
+        {"Struct method ref value", TestStructMethodRefValue},
         {"Set terrain type", TestSetTerrainType},
         {"Set terrain pathable", TestSetTerrainPathable},
         {"Water deforms and doodad anim", TestWaterDeformsAndDoodadAnim},

@@ -12,6 +12,9 @@ enum class JassTokenType {
     KW_TRUE, KW_FALSE, KW_NULL,
     KW_NOT, KW_AND, KW_OR,
     KW_TYPE, KW_EXTENDS, KW_ARRAY, KW_DEBUG,
+    // vJASS block terminators (zero collisions in retail scripts; the
+    // matching openers struct/scope/library stay contextual identifiers).
+    KW_ENDSTRUCT, KW_ENDMETHOD, KW_ENDSCOPE, KW_ENDLIBRARY,
 
     // Types
     TYPE_INTEGER, TYPE_REAL, TYPE_BOOLEAN, TYPE_STRING,

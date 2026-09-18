@@ -60,6 +60,9 @@ public:
     bool LoadScript(const std::string& source);
     bool LoadScriptFromMemory(const std::string& name, const uint8_t* data, size_t size);
     void Execute(const std::string& funcName = "main");
+    // Runs scope/library initializers collected at load, in source order.
+    // Called once at map init before abilities_main/main.
+    void ExecuteInitializers();
     JassValue CallFunction(const std::string& funcName);
     ThreadRunResult RunThread(ThreadState& state, const std::string& functionName);
     bool HasFunction(const std::string& funcName) const;
@@ -96,6 +99,36 @@ private:
     void SyncThreadFromCallStack(ThreadState& state);
     JassValue ExecuteNode(const AstNode* node);
     JassValue ExecuteFunction(const AstNode* func, const std::vector<JassValue>& args);
+    // vJASS struct support: instances live outside the value type as
+    // integer ids (0 = null); members/statics in side tables.
+    struct JassStructMember {
+        std::string name;
+        std::string type;
+        bool isArray = false;
+        bool isStatic = false;
+        const AstNode* defaultExpr = nullptr;
+    };
+    struct JassStructMethod {
+        std::string name;
+        bool isStatic = false;
+        const AstNode* func = nullptr; // mangled "Type.method" in functions_
+    };
+    struct JassStructDef {
+        std::string name;
+        std::string parent;
+        std::vector<JassStructMember> members;
+        std::vector<JassStructMethod> methods;
+    };
+    struct JassStructInstance {
+        std::string type;
+        std::unordered_map<std::string, JassValue> scalars;
+        std::unordered_map<std::string, std::unordered_map<int, JassValue>> arrays;
+    };
+    const JassStructDef* FindStructDef(const std::string& name) const;
+    const JassStructMember* FindStructMember(const JassStructDef* def, const std::string& member) const;
+    const JassStructMethod* FindStructMethod(const std::string& type, const std::string& method) const;
+    int AllocateStruct(const std::string& type);
+    JassValue DefaultStructValue(const std::string& type) const;
 
     std::vector<std::unique_ptr<AstNode>> programs_;
     std::unordered_map<std::string, JassValue> globals_;
@@ -108,6 +141,12 @@ private:
     const AstNode* returnNode_ = nullptr;
     bool sleepRequested_ = false;
     float sleepSeconds_ = 0.0f;
+    // vJASS struct runtime.
+    std::unordered_map<std::string, JassStructDef> structDefs_;
+    std::unordered_map<int, JassStructInstance> structInstances_;
+    std::unordered_map<std::string, JassValue> structStatics_;
+    int nextStructId_ = 1;
+    std::vector<std::string> initializers_;
 };
 
 // Forward declare for native implementations

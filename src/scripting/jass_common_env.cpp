@@ -142,6 +142,8 @@ bool JassCommonEnv::Init(MpqManager& mpq, const std::string& mapPath, CSimulatio
 
 void JassCommonEnv::Main() {
     if (!vm_.IsValid()) return;
+    // vJASS scope/library initializers run before everything else.
+    vm_.ExecuteInitializers();
     if (natives_ && vm_.HasFunction("abilities_main")) {
         std::cout << "JASS Common: queue abilities_main" << std::endl;
         natives_->QueueFunction("abilities_main");

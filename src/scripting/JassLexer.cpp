@@ -34,6 +34,10 @@ static const std::unordered_map<std::string, JassTokenType> s_keywords = {
     {"extends", JassTokenType::KW_EXTENDS},
     {"array", JassTokenType::KW_ARRAY},
     {"debug", JassTokenType::KW_DEBUG},
+    {"endstruct", JassTokenType::KW_ENDSTRUCT},
+    {"endmethod", JassTokenType::KW_ENDMETHOD},
+    {"endscope", JassTokenType::KW_ENDSCOPE},
+    {"endlibrary", JassTokenType::KW_ENDLIBRARY},
 
     {"integer", JassTokenType::TYPE_INTEGER},
     {"real", JassTokenType::TYPE_REAL},
