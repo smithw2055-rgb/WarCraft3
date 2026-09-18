@@ -99,9 +99,20 @@ public:
 
     // Terrain reference for JASS terrain queries (GetTerrainType and
     // friends). Set by the map loader next to SetPathingMap; may be null in
-    // tests, in which case queries return safe defaults.
-    void SetTerrainMap(const W3EMap* w3e) { terrainMap_ = w3e; }
-    const W3EMap* GetTerrainMap() const { return terrainMap_; }
+    // tests, in which case queries return safe defaults. Non-const because
+    // SetTerrainType edits tiles in place (loader-owned, version-bumped).
+    void SetTerrainMap(W3EMap* w3e) { terrainMap_ = w3e; }
+    W3EMap* GetTerrainMap() const { return terrainMap_; }
+
+    // Water deformation toggle (ref SetWaterDeforms): retained for the
+    // water render pass; no consumer yet.
+    void SetWaterDeforms(bool v) { waterDeforms_ = v; }
+    bool GetWaterDeforms() const { return waterDeforms_; }
+
+    // Script pathing-cell edit (ref SetTerrainPathable). Pathing-type
+    // ordinals match IsTerrainPathable (0 any,1 walk,2 fly,3 build,
+    // 4 peon,5 blight,6 float,7 amphibious); flag=false clears the block.
+    bool SetTerrainPathableCell(float x, float y, int pathType, bool pathable);
 
     // Script blight overrides from SetBlight* natives (ref blight state).
     // W3E-baked blight bits are read from the terrain map; these add
@@ -125,7 +136,7 @@ public:
     // Pathing
     CWorldCollision* GetWorldCollision() const { return worldCollision_.get(); }
     CPathfindingProcessor* GetPathfinding() const { return pathfindingProcessor_.get(); }
-    void SetPathingMap(const WpmData* wpm, float worldOffsetX = 0.0f, float worldOffsetY = 0.0f) {
+    void SetPathingMap(WpmData* wpm, float worldOffsetX = 0.0f, float worldOffsetY = 0.0f) {
         if (pathfindingProcessor_) {
             pathfindingProcessor_->SetPathingMap(wpm, worldOffsetX, worldOffsetY);
         }
@@ -242,7 +253,8 @@ private:
 
     CCombatSystem combatSystem_;
     uint32_t simRandState_ = 0x12345678u; // deterministic sim RNG (LCG)
-    const W3EMap* terrainMap_ = nullptr;  // terrain queries (owned by loader)
+    W3EMap* terrainMap_ = nullptr;  // terrain queries (owned by loader)
+    bool waterDeforms_ = true;
     std::vector<BlightRect> blightRects_; // SetBlight* overrides
     std::vector<BlightCircle> blightCircles_;
     struct DelayedAction {

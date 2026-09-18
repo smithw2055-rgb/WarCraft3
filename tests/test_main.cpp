@@ -170,6 +170,10 @@ bool TestLightningAndIndicatorNatives();
 bool TestLeaderboardNatives();
 bool TestMultiboardNatives();
 bool TestTimerDialogStyleNatives();
+bool TestSetTerrainType();
+bool TestSetTerrainPathable();
+bool TestWaterDeformsAndDoodadAnim();
+bool TestTerrainDeformRegistry();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -331,6 +335,10 @@ int main() {
         {"Leaderboard natives", TestLeaderboardNatives},
         {"Multiboard natives", TestMultiboardNatives},
         {"Timer dialog style natives", TestTimerDialogStyleNatives},
+        {"Set terrain type", TestSetTerrainType},
+        {"Set terrain pathable", TestSetTerrainPathable},
+        {"Water deforms and doodad anim", TestWaterDeformsAndDoodadAnim},
+        {"Terrain deform registry", TestTerrainDeformRegistry},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

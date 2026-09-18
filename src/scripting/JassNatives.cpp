@@ -940,6 +940,7 @@ void JassNatives::RegisterCommonNatives() {
     RegisterTriggerSoundNatives();
     RegisterUIStateNatives();
     RegisterBoardNatives();
+    RegisterTerrainEditNatives();
     std::cout << "JassNatives: registered common natives" << std::endl;
 }
 
@@ -4838,8 +4839,30 @@ void JassNatives::RegisterEffectNatives() {
     vm_.RegisterNative("AddWeatherEffect", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
     vm_.RegisterNative("RemoveWeatherEffect", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("EnableWeatherEffect", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("TerrainDeformCrater", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
-    vm_.RegisterNative("TerrainDeformRegistration", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
+    vm_.RegisterNative("TerrainDeformCrater", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 6) return JassValue::Int(0);
+        auto deform = std::make_shared<JassNativesData::JassTerrainDeform>();
+        deform->kind = 0;
+        deform->x = args[0].realVal;
+        deform->y = args[1].realVal;
+        deform->radius = args[2].realVal;
+        deform->depth = args[3].realVal;
+        deform->duration = args[4].intVal;
+        deform->permanent = args[5].boolVal;
+        int id = data->nextTerrainDeformId++;
+        data->terrainDeforms[id] = deform;
+        return JassValue::Int(id);
+    });
+    vm_.RegisterNative("TerrainDeformRegistration", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        // Registration-only deform (no shape of its own); tracked so Stop
+        // calls resolve like any other deform.
+        (void)args;
+        auto deform = std::make_shared<JassNativesData::JassTerrainDeform>();
+        deform->kind = 4;
+        int id = data->nextTerrainDeformId++;
+        data->terrainDeforms[id] = deform;
+        return JassValue::Int(id);
+    });
 }
 
 // ============================================================
@@ -9157,6 +9180,113 @@ void JassNatives::RegisterUIStateNatives() {
             ind.alpha = args[4].intVal;
             data->unitIndicators[simId] = ind;
             return JassValue::Null();
+        }
+        return JassValue::Null();
+    });
+}
+
+// ============================================================
+// 34. Terrain-edit natives
+// ============================================================
+void JassNatives::RegisterTerrainEditNatives() {
+    vm_.RegisterNative("SetTerrainType", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 6 || !sim) return JassValue::Null();
+        W3EMap* map = sim->GetTerrainMap();
+        if (!map) return JassValue::Null();
+        // Retail area is a tile radius, shape 0 = circle, 1 = square.
+        const float radiusTiles = args[4].realVal;
+        const bool square = args[5].intVal != 0;
+        const uint32_t wantType = (uint32_t)args[2].intVal;
+        int paletteIndex = -1;
+        for (size_t i = 0; i < map->groundTilePalette.size(); i++) {
+            if (map->groundTilePalette[i] == wantType) {
+                paletteIndex = (int)i;
+                break;
+            }
+        }
+        if (paletteIndex < 0 || paletteIndex > 15) return JassValue::Null();
+        const int variation = args[3].intVal & 31;
+        const float radiusWorld = radiusTiles * 128.0f;
+        bool touched = false;
+        for (int cy = 0; cy < map->tileHeight; cy++) {
+            for (int cx = 0; cx < map->tileWidth; cx++) {
+                const float tx = map->offsetX + (cx + 0.5f) * 128.0f;
+                const float ty = map->offsetY + (cy + 0.5f) * 128.0f;
+                const float dx = tx - args[0].realVal, dy = ty - args[1].realVal;
+                if (square) {
+                    if (std::fabs(dx) > radiusWorld || std::fabs(dy) > radiusWorld) continue;
+                } else if (dx * dx + dy * dy > radiusWorld * radiusWorld) {
+                    continue;
+                }
+                W3ETileCorner& corner = map->tiles[(size_t)cy * (size_t)map->tileWidth + (size_t)cx];
+                corner.textureBits = (uint8_t)((corner.textureBits & 0xF0) | (paletteIndex & 0x0F));
+                corner.variationBits = (uint8_t)((corner.variationBits & 0xE0) | variation);
+                touched = true;
+            }
+        }
+        // The terrain render pass rebuilds when it observes this counter.
+        if (touched) map->editVersion++;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetTerrainPathable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 4 || !sim) return JassValue::Null();
+        sim->SetTerrainPathableCell(args[0].realVal, args[1].realVal, args[2].intVal, args[3].boolVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetWaterDeforms", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (!args.empty() && sim) sim->SetWaterDeforms(args[0].boolVal);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SetDoodadAnimation", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 7) return JassValue::Null();
+        // Retained for the scene doodad pass; no consumer yet.
+        JassNativesData::JassDoodadAnim req;
+        req.x = args[0].realVal;
+        req.y = args[1].realVal;
+        req.radius = args[2].realVal;
+        req.doodadId = (uint32_t)args[3].intVal;
+        req.nearestOnly = args[4].boolVal;
+        req.animName = args[5].strVal;
+        req.animRandom = args[6].boolVal;
+        data->doodadAnims.push_back(std::move(req));
+        return JassValue::Null();
+    });
+    auto newDeform = [data = data_](int kind) -> int {
+        auto deform = std::make_shared<JassNativesData::JassTerrainDeform>();
+        deform->kind = kind;
+        int id = data->nextTerrainDeformId++;
+        data->terrainDeforms[id] = deform;
+        return id;
+    };
+    vm_.RegisterNative("TerrainDeformRipple", [newDeform](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 10) return JassValue::Int(0);
+        const int id = newDeform(1);
+        return JassValue::Int(id);
+    });
+    vm_.RegisterNative("TerrainDeformWave", [newDeform](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 10) return JassValue::Int(0);
+        const int id = newDeform(2);
+        return JassValue::Int(id);
+    });
+    vm_.RegisterNative("TerrainDeformRandom", [newDeform](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 7) return JassValue::Int(0);
+        const int id = newDeform(3);
+        return JassValue::Int(id);
+    });
+    vm_.RegisterNative("TerrainDeformStop", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        auto it = data->terrainDeforms.find(args[0].intVal);
+        // Duration counts down in the terrain pass; marked stopped here.
+        if (it != data->terrainDeforms.end()) it->second->stopped = true;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("TerrainDeformStopAll", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        (void)args;
+        for (auto& [id, deform] : data->terrainDeforms) {
+            if (deform) deform->stopped = true;
         }
         return JassValue::Null();
     });

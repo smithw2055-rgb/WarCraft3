@@ -175,11 +175,59 @@ float CSimulation::SimRand01() {
     return (float)(simRandState_ >> 16) * (1.0f / 65536.0f);
 }
 
+bool CSimulation::SetTerrainPathableCell(float x, float y, int pathType, bool pathable) {
+    if (!pathfindingProcessor_ || !pathfindingProcessor_->HasPathingMap()) return false;
+    WpmData* wpm = pathfindingProcessor_->GetPathingMap();
+    if (!wpm) return false;
+    const int cx = pathfindingProcessor_->WorldToCellX(x);
+    const int cy = pathfindingProcessor_->WorldToCellY(y);
+    if (cx < 0 || cy < 0 || cx >= wpm->width || cy >= wpm->height) return false;
+    uint8_t flag = 0;
+    switch (pathType) {
+        case 1: // walk
+        case 4: // peon harvest walks like foot
+            flag = WpmData::UNWALKABLE;
+            break;
+        case 2: // fly
+            flag = WpmData::UNFLYABLE;
+            break;
+        case 3: // build
+            flag = WpmData::UNBUILDABLE;
+            break;
+        case 5: // blight
+            flag = WpmData::BLIGHTED;
+            break;
+        case 6: // float (water-bound): unreadable water blocks floaters
+            flag = WpmData::UNSWIMABLE;
+            break;
+        case 0: // any: walkability governs
+        case 7: // amphibious uses walk cells too
+        default:
+            flag = WpmData::UNWALKABLE;
+            break;
+    }
+    uint8_t& cell = wpm->pathing[(size_t)cy * (size_t)wpm->width + (size_t)cx];
+    if (pathable) {
+        cell = (uint8_t)(cell & ~flag);
+    } else {
+        cell = (uint8_t)(cell | flag);
+    }
+    return true;
+}
 bool CSimulation::IsPointBlighted(float x, float y) const {
     // W3E-baked blight bit first.
     if (terrainMap_) {
         if (const W3ETileCorner* corner = W3ECornerAt(*terrainMap_, x, y)) {
             if (corner->IsBlight()) return true;
+        }
+    }
+    // Pathing-grid blight bit (map-baked or SetTerrainPathable).
+    if (pathfindingProcessor_ && pathfindingProcessor_->HasPathingMap()) {
+        WpmData* wpm = pathfindingProcessor_->GetPathingMap();
+        if (wpm) {
+            const int cx = pathfindingProcessor_->WorldToCellX(x);
+            const int cy = pathfindingProcessor_->WorldToCellY(y);
+            if (wpm->IsBlight(cx, cy)) return true;
         }
     }
     // Script overrides apply in order; last matching rect wins.

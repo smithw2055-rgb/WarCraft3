@@ -606,6 +606,29 @@ public:
     std::unordered_map<int, std::shared_ptr<JassDefeatCondition>> defeatConditions;
     int nextDefeatConditionId = 0x1B000000;
 
+    // Terrain deformations (ref TerrainDeform*): parameters retained for
+    // the terrain render pass; no mesh effect yet (documented).
+    struct JassTerrainDeform {
+        int kind = 0; // 0 crater, 1 ripple, 2 wave, 3 random, 4 registration
+        float x = 0, y = 0, radius = 0, depth = 0;
+        int duration = 0;
+        bool permanent = false;
+        bool stopped = false;
+    };
+    std::unordered_map<int, std::shared_ptr<JassTerrainDeform>> terrainDeforms;
+    int nextTerrainDeformId = 0x1C000000;
+
+    // Doodad animation requests (ref SetDoodadAnimation): retained for the
+    // scene doodad pass; no consumer yet (documented).
+    struct JassDoodadAnim {
+        float x = 0, y = 0, radius = 0;
+        uint32_t doodadId = 0;
+        bool nearestOnly = false;
+        std::string animName;
+        bool animRandom = false;
+    };
+    std::vector<JassDoodadAnim> doodadAnims;
+
     // Unit-attached visual/vision state without a sim consumer yet (ref
     // UnitShareVision/UnitAddIndicator/SetUnitFog): retained per unit sim id
     // for the renderer/FoW passes to consume.
@@ -858,6 +881,7 @@ private:
     void RegisterTriggerSoundNatives();
     void RegisterUIStateNatives();
     void RegisterBoardNatives();
+    void RegisterTerrainEditNatives();
 
     void RegisterConfigPlayerNatives();
 

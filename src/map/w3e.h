@@ -42,6 +42,10 @@ struct W3EMap {
     std::vector<uint32_t> cliffTilePalette;   // War3ID cliff tile codes
     std::vector<W3ETileCorner> tiles;
 
+    // Script-edit counter (ref SetTerrainType): bumped on every in-place
+    // tile mutation so the terrain render pass can rebuild when it lands.
+    uint32_t editVersion = 0;
+
     int CornerCount() const { return tileWidth * tileHeight; }
 };
 

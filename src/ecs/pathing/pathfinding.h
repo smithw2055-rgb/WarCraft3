@@ -19,7 +19,7 @@ public:
     CPathfindingProcessor();
 
     // Set the pathing map data (from war3map.wpm)
-    void SetPathingMap(const WpmData* wpm, float worldOffsetX = 0.0f, float worldOffsetY = 0.0f) {
+    void SetPathingMap(WpmData* wpm, float worldOffsetX = 0.0f, float worldOffsetY = 0.0f) {
         pathingMap_ = (wpm && wpm->IsValid()) ? wpm : nullptr;
         worldOffsetX_ = worldOffsetX;
         worldOffsetY_ = worldOffsetY;
@@ -49,6 +49,9 @@ public:
     // Check if a cell is walkable (within bounds and not blocked)
     bool IsCellWalkable(int cellX, int cellY, bool allowFlying = false) const;
     bool HasPathingMap() const { return pathingMap_ && pathingMap_->IsValid(); }
+    // Mutable access for script pathing edits (ref SetTerrainPathable).
+    // The map stays loader-owned; edits are in place.
+    WpmData* GetPathingMap() const { return pathingMap_; }
     static bool IsCollisionSizeBetterSuitedForCorners(float collisionSize);
     static GridMapping SelectGridMapping(float collisionSize) {
         return IsCollisionSizeBetterSuitedForCorners(collisionSize) ? GridMapping::CORNERS
@@ -103,8 +106,7 @@ private:
     int WorldToMappedX(float worldX, GridMapping mapping) const;
     int WorldToMappedY(float worldY, GridMapping mapping) const;
 
-    const WpmData* pathingMap_ = nullptr;
-    CWorldCollision* worldCollision_ = nullptr;
+    WpmData* pathingMap_ = nullptr;    CWorldCollision* worldCollision_ = nullptr;
     float worldOffsetX_ = 0.0f;
     float worldOffsetY_ = 0.0f;
 };
