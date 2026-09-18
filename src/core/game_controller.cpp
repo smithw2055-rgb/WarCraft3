@@ -2339,6 +2339,7 @@ void GameController::StepSimulation(float dt) {
         if (jassNatives_) {
             jassNatives_->UpdateTimers(simStep);
             jassNatives_->UpdateRegions();
+            jassNatives_->UpdateAI();
             jassNatives_->PumpQueuedThreads(1024);
         }
         simulationAccumulator_ -= simStep;

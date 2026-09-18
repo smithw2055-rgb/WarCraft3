@@ -1,6 +1,7 @@
 #pragma once
 #include "JassVM.h"
 #include "resource/slk.h"
+#include "ecs/melee_ai.h"
 #include <memory>
 #include <unordered_map>
 #include <map>
@@ -124,6 +125,7 @@ struct JassPlayerAIState {
     bool meleeAI = false;
     bool campaignAI = false;
     int commandCount = 0;
+    int difficulty = 1; // AIDifficulty ordinal at StartMeleeAI time
 };
 
 struct JassFogState {
@@ -572,6 +574,8 @@ public:
     bool restartDisabled = false;
     std::unordered_set<int> crippledPlayers;
     std::unordered_map<int, bool> compAIpaused;
+    // Live melee AI controllers by player index (ref StartMeleeAI).
+    std::unordered_map<int, std::shared_ptr<MeleeAIController>> aiControllers;
     bool triggerWaitOnSleeps = true;
     bool syncReady = false; // TriggerSync* needs the net protocol; stays false
     std::unordered_map<int, int> removedPlayerResults;
@@ -828,6 +832,8 @@ public:
     void FireReviveEvent(int reviverSimHandle, int revivedSimHandle);
     void UpdateRegions();
     void ForgetItem(int itemSimHandle);
+    // Advances live melee AI controllers one sim tick.
+    void UpdateAI();
 
     int UpdateTimers(float dt);
     void QueueFunction(const std::string& functionName);

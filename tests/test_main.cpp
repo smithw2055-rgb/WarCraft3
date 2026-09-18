@@ -170,6 +170,10 @@ bool TestLightningAndIndicatorNatives();
 bool TestLeaderboardNatives();
 bool TestMultiboardNatives();
 bool TestTimerDialogStyleNatives();
+bool TestMeleeAIDiscoversHumanPlan();
+bool TestMeleeAIEconomyGrows();
+bool TestMeleeAIAttackWave();
+bool TestMeleeAINativesWiring();
 bool TestStructAllocAndMembers();
 bool TestStructMethodsAndThis();
 bool TestStructStaticAndCreate();
@@ -350,6 +354,10 @@ int main() {
         {"Leaderboard natives", TestLeaderboardNatives},
         {"Multiboard natives", TestMultiboardNatives},
         {"Timer dialog style natives", TestTimerDialogStyleNatives},
+        {"Melee AI discovers human plan", TestMeleeAIDiscoversHumanPlan},
+        {"Melee AI economy grows", TestMeleeAIEconomyGrows},
+        {"Melee AI attack wave", TestMeleeAIAttackWave},
+        {"Melee AI natives wiring", TestMeleeAINativesWiring},
         {"Struct alloc and members", TestStructAllocAndMembers},
         {"Struct methods and this", TestStructMethodsAndThis},
         {"Struct static and create", TestStructStaticAndCreate},

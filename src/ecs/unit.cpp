@@ -506,6 +506,10 @@ CBehavior* CUnit::PollNextOrderBehavior(CSimulation& simulation) {
     return nullptr;
 }
 
+bool CUnit::HasQueuedOrders() const {
+    return !orderQueue_.empty();
+}
+
 void CUnit::ApplyRegen(CSimulation& simulation) {
     if (IsDead() || IsBuilding()) return;
 

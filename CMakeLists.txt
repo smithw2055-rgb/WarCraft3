@@ -221,6 +221,7 @@ set(SOURCES
     src/ecs/destructable.cpp
     src/ecs/item.cpp
     src/ecs/csimulation.cpp
+    src/ecs/melee_ai.cpp
     src/ecs/ability.cpp
     src/ecs/abilities/ability_attack.cpp
     src/ecs/abilities/ability_move.cpp

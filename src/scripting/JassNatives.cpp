@@ -678,11 +678,17 @@ void JassNatives::FireRegionEvent(int regionSimId, int unitSimHandle, bool isEnt
     }
 }
 
+void JassNatives::UpdateAI() {
+    if (!data_) return;
+    for (auto& [playerId, controller] : data_->aiControllers) {
+        if (controller) controller->Update();
+    }
+}
+
 void JassNatives::UpdateRegions() {
     if (!sim_ || !data_) {
         return;
-    }
-    // Fast path: nothing to track.
+    }    // Fast path: nothing to track.
     if (data_->regions.empty()) {
         if (!regionMembership_.empty()) regionMembership_.clear();
         return;
@@ -5827,7 +5833,13 @@ void JassNatives::RegisterGameNatives() {
     vm_.RegisterNative("CommandAI", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !data) return JassValue::Null();
         const int playerId = ResolvePlayerId(data, args[0].intVal);
-        if (playerId >= 0 && playerId < 24) data->playerAI[playerId].commandCount++;
+        if (playerId >= 0 && playerId < 24) {
+            data->playerAI[playerId].commandCount++;
+            auto it = data->aiControllers.find(playerId);
+            if (it != data->aiControllers.end() && it->second) {
+                it->second->Command(args[1].intVal, args[2].intVal);
+            }
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("StartCampaignAI", [data = data_](const std::vector<JassValue>& args) -> JassValue {
@@ -5836,10 +5848,21 @@ void JassNatives::RegisterGameNatives() {
         if (playerId >= 0 && playerId < 24) data->playerAI[playerId].campaignAI = true;
         return JassValue::Null();
     });
-    vm_.RegisterNative("StartMeleeAI", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("StartMeleeAI", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty() || !data) return JassValue::Null();
         const int playerId = ResolvePlayerId(data, args[0].intVal);
-        if (playerId >= 0 && playerId < 24) data->playerAI[playerId].meleeAI = true;
+        if (playerId < 0 || playerId >= 24) return JassValue::Null();
+        data->playerAI[playerId].meleeAI = true;
+        data->playerAI[playerId].difficulty = data->gameConfig.defaultDifficulty;
+        if (sim) {
+            auto controller = std::make_shared<MeleeAIController>(sim, playerId);
+            controller->SetDifficulty(data->playerAI[playerId].difficulty);
+            auto paused = data->compAIpaused.find(playerId);
+            if (paused != data->compAIpaused.end() && paused->second) {
+                controller->SetEnabled(false);
+            }
+            data->aiControllers[playerId] = std::move(controller);
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("CreateBlightedGoldmine", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Int(0); });
@@ -8368,14 +8391,19 @@ void JassNatives::RegisterCameraFlowNatives() {
     });
     vm_.RegisterNative("PauseCompAI", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
-        // No AI runtime exists; retained per player for the future AI pass.
-        data->compAIpaused[ResolvePlayerId(data, args[0].intVal)] = args[1].boolVal;
+        const int playerId = ResolvePlayerId(data, args[0].intVal);
+        data->compAIpaused[playerId] = args[1].boolVal;
+        auto it = data->aiControllers.find(playerId);
+        if (it != data->aiControllers.end() && it->second) {
+            it->second->SetEnabled(!args[1].boolVal);
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("GetAIDifficulty", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        (void)args;
-        // No per-player AI exists; the lobby difficulty applies to everyone.
-        return JassValue::Int(data ? data->gameConfig.defaultDifficulty : 1);
+        if (args.empty() || !data) return JassValue::Int(1);
+        const int playerId = ResolvePlayerId(data, args[0].intVal);
+        if (playerId >= 0 && playerId < 24) return JassValue::Int(data->playerAI[playerId].difficulty);
+        return JassValue::Int(data->gameConfig.defaultDifficulty);
     });
     vm_.RegisterNative("EndGame", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (data) {

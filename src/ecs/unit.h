@@ -190,6 +190,9 @@ public:
 
     // Poll next order from queue, returns behavior or nullptr
     CBehavior* PollNextOrderBehavior(CSimulation& simulation);
+    // True when the unit has queued orders waiting (AI uses this plus an
+    // idle behavior to detect workers needing assignments).
+    bool HasQueuedOrders() const;
 
     // Update - called each simulation tick
     bool Update(CSimulation& simulation);

@@ -38,6 +38,7 @@ add_executable(warsmash_tests
     test_jass_boards.cpp
     test_jass_terrainedit.cpp
     test_jass_struct.cpp
+    test_melee_ai.cpp
     test_jass_unimplemented.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
@@ -80,6 +81,7 @@ add_executable(warsmash_tests
     ../src/ecs/unit_type.cpp
     ../src/ecs/player.cpp
     ../src/ecs/csimulation.cpp
+    ../src/ecs/melee_ai.cpp
     ../src/ecs/ability.cpp
     ../src/ecs/ability_factory.cpp
     ../src/ecs/buff.cpp
