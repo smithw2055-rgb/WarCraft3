@@ -125,7 +125,9 @@ private:
         std::unordered_map<std::string, std::unordered_map<int, JassValue>> arrays;
     };
     const JassStructDef* FindStructDef(const std::string& name) const;
-    const JassStructMember* FindStructMember(const JassStructDef* def, const std::string& member) const;
+    bool IsStructBaseOf(const std::string& base, const std::string& derived) const;
+    // Enclosing-instance id for thistype@S (0 = static context).
+    int ThistypeInstance(const std::string& structName) const;    const JassStructMember* FindStructMember(const JassStructDef* def, const std::string& member) const;
     const JassStructMethod* FindStructMethod(const std::string& type, const std::string& method) const;
     int AllocateStruct(const std::string& type);
     JassValue DefaultStructValue(const std::string& type) const;
@@ -147,6 +149,10 @@ private:
     std::unordered_map<std::string, JassValue> structStatics_;
     int nextStructId_ = 1;
     std::vector<std::string> initializers_;
+    // Enclosing method-call stack for thistype@ resolution: (struct, id),
+    // id 0 means static context. Lets `thistype.member` inside instance
+    // methods reach the current instance (ref JassHelper behavior).
+    std::vector<std::pair<std::string, int>> thistypeStack_;
 };
 
 // Forward declare for native implementations

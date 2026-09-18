@@ -187,6 +187,25 @@ const JassVM::JassStructDef* JassVM::FindStructDef(const std::string& name) cons
     return it != structDefs_.end() ? &it->second : nullptr;
 }
 
+bool JassVM::IsStructBaseOf(const std::string& base, const std::string& derived) const {
+    for (const JassStructDef* d = FindStructDef(derived); d != nullptr;) {
+        if (d->name == base) return true;
+        d = d->parent.empty() ? nullptr : FindStructDef(d->parent);
+    }
+    return false;
+}
+
+int JassVM::ThistypeInstance(const std::string& structName) const {
+    if (thistypeStack_.empty()) return 0;
+    const auto& top = thistypeStack_.back();
+    if (top.second == 0) return 0;
+    if (top.first == structName || IsStructBaseOf(structName, top.first) ||
+        IsStructBaseOf(top.first, structName)) {
+        return top.second;
+    }
+    return 0;
+}
+
 const JassVM::JassStructMember* JassVM::FindStructMember(const JassStructDef* def,
                                                         const std::string& member) const {
     for (const JassStructDef* d = def; d != nullptr;) {
@@ -688,7 +707,12 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 if (baseNode->type == AstNodeType::VARIABLE) {
                     const std::string& base = baseNode->text;
                     if (base.compare(0, 9, "thistype@") == 0) {
-                        staticType = base.substr(9);
+                        instanceId = ThistypeInstance(base.substr(9));
+                        if (instanceId != 0) {
+                            haveInstance = true;
+                        } else {
+                            staticType = base.substr(9);
+                        }
                     } else if (FindStructDef(base)) {
                         staticType = base;
                     } else {
@@ -723,6 +747,31 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 if (haveInstance) {
                     auto it = structInstances_.find(instanceId);
                     if (it != structInstances_.end()) {
+                        // Static members stay in the static table even when
+                        // reached through an instance; store under the
+                        // defining struct's key.
+                        const JassStructDef* idef = FindStructDef(it->second.type);
+                        const JassStructMember* mdef =
+                            idef ? FindStructMember(idef, target->text) : nullptr;
+                        if (mdef && mdef->isStatic) {
+                            for (const JassStructDef* d = idef; d != nullptr;) {
+                                bool declares = false;
+                                for (const auto& m : d->members) {
+                                    if (m.name == target->text && m.isStatic) {
+                                        declares = true;
+                                        break;
+                                    }
+                                }
+                                if (declares) {
+                                    const std::string k = d->name + "." + target->text +
+                                        (hasIndex ? "[" + std::to_string(index) + "]" : "");
+                                    structStatics_[k] = val;
+                                    break;
+                                }
+                                d = d->parent.empty() ? nullptr : FindStructDef(d->parent);
+                            }
+                            return val;
+                        }
                         if (hasIndex) {
                             it->second.arrays[target->text][index] = val;
                         } else {
@@ -922,7 +971,8 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
             if (baseNode->type == AstNodeType::VARIABLE) {
                 const std::string& base = baseNode->text;
                 if (base.compare(0, 9, "thistype@") == 0) {
-                    staticType = base.substr(9);
+                    instanceId = ThistypeInstance(base.substr(9));
+                    if (instanceId == 0) staticType = base.substr(9);
                 } else if (FindStructDef(base)) {
                     staticType = base;
                 } else {
@@ -953,6 +1003,24 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
             if (instanceId == 0) return JassValue::Null();
             auto it = structInstances_.find(instanceId);
             if (it == structInstances_.end()) return JassValue::Null();
+            // Static members stay in the static table even when reached
+            // through an instance (ref `obj.staticMember` / thistype).
+            if (const JassStructDef* idef = FindStructDef(it->second.type)) {
+                if (const JassStructMember* mdef = FindStructMember(idef, node->text)) {
+                    if (mdef->isStatic) {
+                        // The defining struct may be an ancestor: walk up.
+                        for (const JassStructDef* d = idef; d != nullptr;) {
+                            const std::string k = d->name + "." + node->text +
+                                (hasIndex ? "[" + std::to_string(index) + "]" : "");
+                            auto sit = structStatics_.find(k);
+                            if (sit != structStatics_.end()) return sit->second;
+                            d = d->parent.empty() ? nullptr : FindStructDef(d->parent);
+                        }
+                        return JassValue::Null();
+                    }
+                }
+            }
+            if (it == structInstances_.end()) return JassValue::Null();
             if (hasIndex) {
                 auto ait = it->second.arrays.find(node->text);
                 if (ait == it->second.arrays.end()) return JassValue::Null();
@@ -978,7 +1046,9 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
             if (baseNode->type == AstNodeType::VARIABLE) {
                 const std::string& base = baseNode->text;
                 if (base.compare(0, 9, "thistype@") == 0) {
-                    staticType = base.substr(9);
+                    // Enclosing instance when related, else static context.
+                    instanceId = ThistypeInstance(base.substr(9));
+                    if (instanceId == 0) staticType = base.substr(9);
                 } else if (FindStructDef(base)) {
                     staticType = base;
                 } else {
@@ -1000,7 +1070,10 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                         errors_.push_back("Non-static method '" + method + "' called statically");
                         return JassValue::Null();
                     }
-                    return ExecuteFunction(m->func, args);
+                    thistypeStack_.emplace_back(staticType, 0);
+                    JassValue result = ExecuteFunction(m->func, args);
+                    thistypeStack_.pop_back();
+                    return result;
                 }
                 errors_.push_back("Unknown static method: " + staticType + "." + method);
                 return JassValue::Null();
@@ -1020,14 +1093,19 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
             }
             const JassStructMethod* m = FindStructMethod(iit->second.type, method);
             if (m && m->func) {
+                thistypeStack_.emplace_back(iit->second.type, instanceId);
+                JassValue result;
                 if (m->isStatic) {
-                    return ExecuteFunction(m->func, args);
+                    result = ExecuteFunction(m->func, args);
+                } else {
+                    std::vector<JassValue> withThis;
+                    withThis.reserve(args.size() + 1);
+                    withThis.push_back(JassValue::Int(instanceId));
+                    withThis.insert(withThis.end(), args.begin(), args.end());
+                    result = ExecuteFunction(m->func, withThis);
                 }
-                std::vector<JassValue> withThis;
-                withThis.reserve(args.size() + 1);
-                withThis.push_back(JassValue::Int(instanceId));
-                withThis.insert(withThis.end(), args.begin(), args.end());
-                return ExecuteFunction(m->func, withThis);
+                thistypeStack_.pop_back();
+                return result;
             }
             errors_.push_back("Unknown method: " + method);
             return JassValue::Null();

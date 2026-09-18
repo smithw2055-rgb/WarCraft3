@@ -180,6 +180,11 @@ bool TestScopePrivacyAndInitializer();
 bool TestLibraryWrapper();
 bool TestLeadingDotAndMethodRef();
 bool TestStructMethodRefValue();
+bool TestModuleBasicImplement();
+bool TestModuleStaticPerStruct();
+bool TestModuleOverrideAndOptional();
+bool TestModuleForwardReference();
+bool TestModuleMissingError();
 bool TestSetTerrainType();
 bool TestSetTerrainPathable();
 bool TestWaterDeformsAndDoodadAnim();
@@ -355,6 +360,11 @@ int main() {
         {"Library wrapper", TestLibraryWrapper},
         {"Leading dot and method ref", TestLeadingDotAndMethodRef},
         {"Struct method ref value", TestStructMethodRefValue},
+        {"Module basic implement", TestModuleBasicImplement},
+        {"Module static per struct", TestModuleStaticPerStruct},
+        {"Module override and optional", TestModuleOverrideAndOptional},
+        {"Module forward reference", TestModuleForwardReference},
+        {"Module missing error", TestModuleMissingError},
         {"Set terrain type", TestSetTerrainType},
         {"Set terrain pathable", TestSetTerrainPathable},
         {"Water deforms and doodad anim", TestWaterDeformsAndDoodadAnim},

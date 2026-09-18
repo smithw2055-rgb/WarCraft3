@@ -16,6 +16,7 @@ enum class AstNodeType {
     VARIABLE, PARAMETER, TYPE,
     // vJASS nodes
     STRUCT_DECL,   // text=name, extendsType=parent, children=members+methods
+    MODULE_DECL,   // like STRUCT_DECL; expanded away, never reaches the VM
     MEMBER_ACCESS, // text=member, children=[baseExpr, optional indexExpr]
     METHOD_CALL,   // text=method, children=[baseExpr, args...]
 };
@@ -63,6 +64,10 @@ private:
     // private/public prefix. Returns nullptr for wrappers handled inline.
     std::unique_ptr<AstNode> ParseDecl(bool inScope);
     std::unique_ptr<AstNode> ParseStructDecl();
+    // Parses `module Name ... endmodule` into a MODULE_DECL node (kept
+    // aside for implement-expansion, never emitted to the program).
+    std::unique_ptr<AstNode> ParseModuleDecl();
+    void ParseStructOrModuleBody(AstNode* node, bool isModule);
     // Parses a scope/library body, flattens rewritten children into
     // `program`, and records initializers. Nested scopes are rejected.
     void ParseScopeOrLibrary(AstNode* program, bool isLibrary);
@@ -109,4 +114,17 @@ private:
     std::vector<std::string> initializers_;
     // Mangled struct name while parsing its body (for thistype@ rewrite).
     std::string currentStruct_;
+    // Pending `implement` records: (struct, module, optional, scope).
+    struct ImplementRecord {
+        std::string structName;
+        std::string moduleName;
+        bool optional = false;
+        std::string scopePrefix; // enclosing scope, "" at top level
+    };
+    std::vector<ImplementRecord> pendingImplements_;
+    std::vector<std::unique_ptr<AstNode>> moduleDefs_; // kept alive for expansion
+    // Expands pending implements into struct decls and drops MODULE_DECL
+    // nodes. Runs once at the end of ParseProgram.
+    void ExpandImplements(AstNode* program);
+    static std::unique_ptr<AstNode> CloneNode(const AstNode* node);
 };

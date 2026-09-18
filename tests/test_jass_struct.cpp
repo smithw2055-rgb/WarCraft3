@@ -298,3 +298,139 @@ endfunction
     TEST_ASSERT(vm.CallFunction("TestMain").intVal == 7);
     return true;
 }
+
+bool TestModuleBasicImplement() {
+    JassVM vm;
+    const std::string src = R"(
+module Counter
+    integer value = 0
+    method add takes integer amount returns nothing
+        set thistype.value = thistype.value + amount
+    endmethod
+    method get takes nothing returns integer
+        return thistype.value
+    endmethod
+endmodule
+
+struct Player
+    implement Counter
+    string name = ""
+endstruct
+
+function TestMain takes nothing returns integer
+    local Player p = Player.allocate()
+    call p.add(7)
+    return p.get()
+endfunction
+)";
+    TEST_ASSERT(Run(vm, src, "TestMain").intVal == 7);
+    return true;
+}
+
+bool TestModuleStaticPerStruct() {
+    JassVM vm;
+    const std::string src = R"(
+module Counted
+    static integer total = 0
+    method touch takes nothing returns nothing
+        set thistype.total = thistype.total + 1
+    endmethod
+    static method count takes nothing returns integer
+        return thistype.total
+    endmethod
+endmodule
+
+struct A
+    implement Counted
+endstruct
+
+struct B
+    implement Counted
+endstruct
+
+function TestMain takes nothing returns integer
+    local A a = A.allocate()
+    local B b = B.allocate()
+    call a.touch()
+    call a.touch()
+    call b.touch()
+    // Per-struct static copies: A=2, B=1.
+    return A.count() * 10 + B.count()
+endfunction
+)";
+    TEST_ASSERT(Run(vm, src, "TestMain").intVal == 21);
+    return true;
+}
+
+bool TestModuleOverrideAndOptional() {
+    JassVM vm;
+    const std::string src = R"(
+module Greeter
+    method greet takes nothing returns integer
+        return 1
+    endmethod
+    method other takes nothing returns integer
+        return 2
+    endmethod
+endmodule
+
+struct S
+    implement Greeter
+    implement optional MissingModule
+    method greet takes nothing returns integer
+        return 10
+    endmethod
+endstruct
+
+function TestMain takes nothing returns integer
+    local S s = S.allocate()
+    return s.greet() * 100 + s.other()
+endfunction
+)";
+    // Struct's own greet wins (10); module's other fills in (2).
+    TEST_ASSERT(Run(vm, src, "TestMain").intVal == 1002);
+    return true;
+}
+
+bool TestModuleForwardReference() {
+    JassVM vm;
+    const std::string src = R"(
+struct Early
+    implement Late
+endstruct
+
+module Late
+    integer v = 33
+    method get takes nothing returns integer
+        return thistype.v
+    endmethod
+endmodule
+
+function TestMain takes nothing returns integer
+    local Early e = Early.allocate()
+    return e.get()
+endfunction
+)";
+    TEST_ASSERT(Run(vm, src, "TestMain").intVal == 33);
+    return true;
+}
+
+bool TestModuleMissingError() {
+    JassVM raw;
+    const std::string src = R"(
+struct Broken
+    implement Nope
+endstruct
+
+function TestMain takes nothing returns integer
+    return 0
+endfunction
+)";
+    raw.LoadScript(src);
+    bool found = false;
+    for (const auto& e : raw.GetErrors()) {
+        if (e.find("Nope") != std::string::npos) found = true;
+    }
+    TEST_ASSERT(found);
+    return true;
+}
