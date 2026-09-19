@@ -686,6 +686,17 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         damage, bonusDamage, 0, 0);
     float actualDamage = result.damageDealt;
 
+    // Defend (Footman/Knight): timed-buff stand-in for the defend toggle;
+    // halves weapon-attack damage before it lands (ref Defend reduction).
+    if (isAttack && actualDamage > 0) {
+        for (const auto& buff : buffs_) {
+            if (dynamic_cast<CBuffDefend*>(buff.get())) {
+                actualDamage *= 0.5f;
+                break;
+            }
+        }
+    }
+
     float oldLife = life_;
     life_ -= actualDamage;
     if (life_ < 0) life_ = 0;

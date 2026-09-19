@@ -198,3 +198,36 @@ private:
     float damagePerTick_;
     float radius_;
 };
+
+// Polymorph - behaves exactly like Hex (no attack/cast, can move); a
+// subclass so IsHexed() (type-based) picks it up under its own id.
+class CBuffPolymorph : public CBuffHex {
+public:
+    explicit CBuffPolymorph(float duration);
+
+    CBuff* Clone() const override;
+};
+
+// Inner Fire - timed bonus damage and armor (ref Priest Inner Fire;
+// Roar reuses this with zero armor).
+class CBuffInnerFire : public CBuff {
+public:
+    CBuffInnerFire(float duration, int bonusDamage, int bonusArmor);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    int bonusDamage_;
+    int bonusArmor_;
+};
+
+// Defend - marker buff; weapon-attack damage is halved in CUnit::Damage.
+// (Timed approximation of the Footman/Knight defend toggle.)
+class CBuffDefend : public CBuff {
+public:
+    explicit CBuffDefend(float duration);
+
+    CBuff* Clone() const override;
+};

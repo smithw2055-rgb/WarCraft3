@@ -165,6 +165,15 @@ bool TestPurgeBurnsSummons();
 bool TestLightningShieldZaps();
 bool TestRaiseDeadSkeletons();
 bool TestSpells6FactoryCoverage();
+bool TestSerpentWardSummons();
+bool TestPolymorphHexes();
+bool TestInnerFireBuffs();
+bool TestPriestHealHeals();
+bool TestDispelMagicStripsArea();
+bool TestRejuvenationHealsOverTime();
+bool TestRoarRalliesAllies();
+bool TestDefendHalvesAttacks();
+bool TestSpells7FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -406,6 +415,15 @@ int main() {
         {"Lightning shield zaps", TestLightningShieldZaps},
         {"Raise dead skeletons", TestRaiseDeadSkeletons},
         {"Spells6 factory coverage", TestSpells6FactoryCoverage},
+        {"Serpent ward summons", TestSerpentWardSummons},
+        {"Polymorph hexes", TestPolymorphHexes},
+        {"Inner fire buffs", TestInnerFireBuffs},
+        {"Priest heal heals", TestPriestHealHeals},
+        {"Dispel magic strips area", TestDispelMagicStripsArea},
+        {"Rejuvenation heals over time", TestRejuvenationHealsOverTime},
+        {"Roar rallies allies", TestRoarRalliesAllies},
+        {"Defend halves attacks", TestDefendHalvesAttacks},
+        {"Spells7 factory coverage", TestSpells7FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

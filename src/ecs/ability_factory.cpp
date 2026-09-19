@@ -21,6 +21,7 @@
 #include "ecs/abilities/spells4.h"
 #include "ecs/abilities/spells5.h"
 #include "ecs/abilities/spells6.h"
+#include "ecs/abilities/spells7.h"
 #include "ecs/abilities/auras.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
@@ -150,6 +151,16 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("Aprg")) return std::make_unique<CAbilityPurge>(handleId);
     if (code == War3ID("Alsh")) return std::make_unique<CAbilityLightningShield>(handleId);
     if (code == War3ID("Arai")) return std::make_unique<CAbilityRaiseDead>(handleId);
+
+    // ===== Batch 7: unit abilities =====
+    if (code == War3ID("AOsw")) return std::make_unique<CAbilitySerpentWard>(handleId);
+    if (code == War3ID("Aply")) return std::make_unique<CAbilityPolymorph>(handleId);
+    if (code == War3ID("Ainf")) return std::make_unique<CAbilityInnerFire>(handleId);
+    if (code == War3ID("Ahea")) return std::make_unique<CAbilityHeal>(handleId);
+    if (code == War3ID("Adis")) return std::make_unique<CAbilityDispelMagic>(handleId);
+    if (code == War3ID("Arej")) return std::make_unique<CAbilityRejuvenation>(handleId);
+    if (code == War3ID("Aroa")) return std::make_unique<CAbilityRoar>(handleId);
+    if (code == War3ID("Adef")) return std::make_unique<CAbilityDefend>(handleId);
 
     // ===== Auras =====
     if (code == War3ID("AHad")) return std::make_unique<CAbilityDevotionAura>(handleId);

@@ -382,3 +382,50 @@ CBuff* CBuffLightningShield::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffPolymorph =====
+CBuffPolymorph::CBuffPolymorph(float duration)
+    : CBuffHex(duration) {
+    id_ = War3ID("Bply");
+}
+
+CBuff* CBuffPolymorph::Clone() const {
+    auto* copy = new CBuffPolymorph(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffInnerFire =====
+CBuffInnerFire::CBuffInnerFire(float duration, int bonusDamage, int bonusArmor)
+    : CBuff(War3ID("Binf"), duration, true)
+    , bonusDamage_(bonusDamage), bonusArmor_(bonusArmor) {}
+
+void CBuffInnerFire::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    target->AddBonusDamage(bonusDamage_);
+    target->AddBonusArmor(bonusArmor_);
+}
+
+void CBuffInnerFire::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    target->AddBonusDamage(-bonusDamage_);
+    target->AddBonusArmor(-bonusArmor_);
+}
+
+CBuff* CBuffInnerFire::Clone() const {
+    auto* copy = new CBuffInnerFire(duration_, bonusDamage_, bonusArmor_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffDefend =====
+CBuffDefend::CBuffDefend(float duration)
+    : CBuff(War3ID("Bdef"), duration, true) {}
+
+CBuff* CBuffDefend::Clone() const {
+    auto* copy = new CBuffDefend(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
