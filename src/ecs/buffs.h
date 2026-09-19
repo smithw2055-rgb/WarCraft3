@@ -183,3 +183,18 @@ public:
 private:
     float damagePerTick_;
 };
+
+// Lightning Shield - periodic Spiral damage to the bearer's enemies.
+// (ref Lightning Shield: the bearer is spared here; retail also zaps
+// the shielded unit itself, a visual-side approximation.)
+class CBuffLightningShield : public CBuff {
+public:
+    CBuffLightningShield(float duration, float damagePerTick, float radius);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float damagePerTick_;
+    float radius_;
+};

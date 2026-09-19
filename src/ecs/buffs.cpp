@@ -354,3 +354,31 @@ CBuff* CBuffDoom::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffLightningShield =====
+CBuffLightningShield::CBuffLightningShield(float duration, float damagePerTick, float radius)
+    : CBuff(War3ID("Blsh"), duration, true)
+    , damagePerTick_(damagePerTick), radius_(radius) {
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffLightningShield::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    for (auto* unit : game.GetUnits()) {
+        if (!unit || unit->IsDead() || unit == target) continue;
+        if (unit->GetPlayerIndex() == target->GetPlayerIndex()) continue;
+        const float dx = unit->GetX() - target->GetX();
+        const float dy = unit->GetY() - target->GetY();
+        if (dx * dx + dy * dy <= radius_ * radius_) {
+            unit->Damage(game, target, false, false,
+                         CAttackType::SPELLS, CDamageType::LIGHTNING,
+                         "", damagePerTick_, 0);
+        }
+    }
+}
+
+CBuff* CBuffLightningShield::Clone() const {
+    auto* copy = new CBuffLightningShield(duration_, damagePerTick_, radius_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

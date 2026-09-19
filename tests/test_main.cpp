@@ -155,6 +155,16 @@ bool TestSpikedCarapaceArmorAndReflect();
 bool TestDarkRitualGrantsMana();
 bool TestShadowStrikeSlowsAndPoisons();
 bool TestSpells5FactoryCoverage();
+bool TestHealingSprayHealsAllies();
+bool TestAcidBombCurses();
+bool TestChemicalRageHastes();
+bool TestTransmutePaysGold();
+bool TestBloodlustCastHastes();
+bool TestPurgeDispelsAndSlows();
+bool TestPurgeBurnsSummons();
+bool TestLightningShieldZaps();
+bool TestRaiseDeadSkeletons();
+bool TestSpells6FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -386,6 +396,16 @@ int main() {
         {"Dark ritual grants mana", TestDarkRitualGrantsMana},
         {"Shadow strike slows and poisons", TestShadowStrikeSlowsAndPoisons},
         {"Spells5 factory coverage", TestSpells5FactoryCoverage},
+        {"Healing spray heals allies", TestHealingSprayHealsAllies},
+        {"Acid bomb curses", TestAcidBombCurses},
+        {"Chemical rage hastes", TestChemicalRageHastes},
+        {"Transmute pays gold", TestTransmutePaysGold},
+        {"Bloodlust cast hastes", TestBloodlustCastHastes},
+        {"Purge dispels and slows", TestPurgeDispelsAndSlows},
+        {"Purge burns summons", TestPurgeBurnsSummons},
+        {"Lightning shield zaps", TestLightningShieldZaps},
+        {"Raise dead skeletons", TestRaiseDeadSkeletons},
+        {"Spells6 factory coverage", TestSpells6FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},
