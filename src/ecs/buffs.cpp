@@ -429,3 +429,23 @@ CBuff* CBuffDefend::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffClarity =====
+CBuffClarity::CBuffClarity(float duration, float regenBonus)
+    : CBuff(War3ID("Bclf"), duration, true), regenBonus_(regenBonus) {}
+
+void CBuffClarity::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->AddBonusManaRegen(regenBonus_);
+}
+
+void CBuffClarity::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->AddBonusManaRegen(-regenBonus_);
+}
+
+CBuff* CBuffClarity::Clone() const {
+    auto* copy = new CBuffClarity(duration_, regenBonus_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

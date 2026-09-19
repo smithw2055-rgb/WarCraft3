@@ -174,6 +174,15 @@ bool TestRejuvenationHealsOverTime();
 bool TestRoarRalliesAllies();
 bool TestDefendHalvesAttacks();
 bool TestSpells7FactoryCoverage();
+bool TestItemHealGroupHeals();
+bool TestItemTownPortalMovesGroup();
+bool TestItemInvulnerableShields();
+bool TestItemHealSelfCaps();
+bool TestItemManaSelfCaps();
+bool TestItemClarityRegens();
+bool TestItemManaStealDrains();
+bool TestItemProtectionArmors();
+bool TestSpells8FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -424,6 +433,15 @@ int main() {
         {"Roar rallies allies", TestRoarRalliesAllies},
         {"Defend halves attacks", TestDefendHalvesAttacks},
         {"Spells7 factory coverage", TestSpells7FactoryCoverage},
+        {"Item heal group heals", TestItemHealGroupHeals},
+        {"Item town portal moves group", TestItemTownPortalMovesGroup},
+        {"Item invulnerable shields", TestItemInvulnerableShields},
+        {"Item heal self caps", TestItemHealSelfCaps},
+        {"Item mana self caps", TestItemManaSelfCaps},
+        {"Item clarity regens", TestItemClarityRegens},
+        {"Item mana steal drains", TestItemManaStealDrains},
+        {"Item protection armors", TestItemProtectionArmors},
+        {"Spells8 factory coverage", TestSpells8FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

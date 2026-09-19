@@ -231,3 +231,16 @@ public:
 
     CBuff* Clone() const override;
 };
+
+// Clarity - timed bonus mana regen (ref Clarity Potion).
+class CBuffClarity : public CBuff {
+public:
+    CBuffClarity(float duration, float regenBonus);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float regenBonus_;
+};
