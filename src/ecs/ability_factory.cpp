@@ -17,6 +17,7 @@
 #include "ecs/abilities/ability_root.h"
 #include "ecs/abilities/spells.h"
 #include "ecs/abilities/spells2.h"
+#include "ecs/abilities/spells3.h"
 #include "ecs/abilities/auras.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
@@ -102,6 +103,18 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("ANfd")) return std::make_unique<CAbilityFingerOfDeath>(handleId);
     if (code == War3ID("ANdp")) return std::make_unique<CAbilityDarkPortal>(handleId);
     if (code == War3ID("ANrc")) return std::make_unique<CAbilityRainOfChaos>(handleId);
+
+    // ===== Batch 3 hero spells =====
+    if (code == War3ID("AHmt")) return std::make_unique<CAbilityMassTeleport>(handleId);
+    if (code == War3ID("AHwe")) return std::make_unique<CAbilitySummonWaterElemental>(handleId);
+    if (code == War3ID("AHrs")) return std::make_unique<CAbilityResurrect>(handleId);
+    if (code == War3ID("AEbl")) return std::make_unique<CAbilityBlink>(handleId);
+    if (code == War3ID("AOmi")) return std::make_unique<CAbilityMirrorImage>(handleId);
+    if (code == War3ID("AOsh")) return std::make_unique<CAbilityShockwave>(handleId);
+    if (code == War3ID("AEst")) return std::make_unique<CAbilityStarfall>(handleId);
+    if (code == War3ID("AEtr")) return std::make_unique<CAbilityTranquility>(handleId);
+    if (code == War3ID("AOre")) return std::make_unique<CAbilityReincarnation>(handleId);
+    if (code == War3ID("ANch")) return std::make_unique<CAbilityCharm>(handleId);
 
     // ===== Auras =====
     if (code == War3ID("AHad")) return std::make_unique<CAbilityDevotionAura>(handleId);

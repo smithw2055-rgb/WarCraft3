@@ -519,7 +519,7 @@ void CUnit::Revive(CSimulation& game, float x, float y) {
     RefreshMaxLifeTotal();
     RefreshMaxManaTotal();
     SetLife(game, GetMaxLife());
-    SetMana((float)maxMana_);
+    // Mana intentionally preserved (reincarnation spends it pre-revive).
 }
 
 void CUnit::ApplyRegen(CSimulation& simulation) {

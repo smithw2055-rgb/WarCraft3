@@ -125,6 +125,17 @@ bool TestJassSoundMusic();
 bool TestJassCinematicVisuals();
 bool TestJassSuspendDecayMisc();
 bool TestTimedLifeKillsBearerOnExpiry();
+bool TestMassTeleportMovesGroup();
+bool TestBlinkClampsRange();
+bool TestShockwaveLineDamage();
+bool TestStarfallDamagesArea();
+bool TestTranquilityHealsAllies();
+bool TestResurrectRevivesInRadius();
+bool TestReincarnationRevivesOnDeath();
+bool TestCharmConvertsCreep();
+bool TestSummonWaterElemental();
+bool TestMirrorImageCopiesCaster();
+bool TestSpells3FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -326,6 +337,17 @@ int main() {
         {"JASS cinematic visuals", TestJassCinematicVisuals},
         {"JASS suspend decay misc", TestJassSuspendDecayMisc},
         {"Timed life kills bearer on expiry", TestTimedLifeKillsBearerOnExpiry},
+        {"Mass teleport moves group", TestMassTeleportMovesGroup},
+        {"Blink clamps range", TestBlinkClampsRange},
+        {"Shockwave line damage", TestShockwaveLineDamage},
+        {"Starfall damages area", TestStarfallDamagesArea},
+        {"Tranquility heals allies", TestTranquilityHealsAllies},
+        {"Resurrect revives in radius", TestResurrectRevivesInRadius},
+        {"Reincarnation revives on death", TestReincarnationRevivesOnDeath},
+        {"Charm converts creep", TestCharmConvertsCreep},
+        {"Summon water elemental", TestSummonWaterElemental},
+        {"Mirror image copies caster", TestMirrorImageCopiesCaster},
+        {"Spells3 factory coverage", TestSpells3FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},
