@@ -155,3 +155,31 @@ public:
 private:
     float drainPerTick_;
 };
+
+// Armor modifier - flat bonus armor while held (Frost Armor); negative
+// values model armor-reducing curses (Faerie Fire).
+class CBuffArmor : public CBuff {
+public:
+    CBuffArmor(War3ID id, float duration, int armorDelta, bool positive);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    int armorDelta_;
+};
+
+// Doom - periodic damage; if the bearer dies while doomed, a Doom Guard
+// (nba2, ref UnitID1 of ANdo) rises for the caster's player.
+class CBuffDoom : public CBuff {
+public:
+    CBuffDoom(float duration, float damagePerTick, int casterHandle);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    void OnDeath(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float damagePerTick_;
+};

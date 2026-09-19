@@ -1,6 +1,7 @@
 #include "unit.h"
 #include "csimulation.h"
 #include "ecs/buffs.h"
+#include "ecs/abilities/spells4.h"
 #include "behaviors/behavior_move.h"
 #include "behaviors/behavior_attack.h"
 #include "behaviors/behavior_stop.h"
@@ -574,6 +575,11 @@ bool CUnit::Update(CSimulation& simulation) {
             for (auto* ab : abilities_) {
                 if (ab) ab->OnDeath(simulation, this);
             }
+            // Notify buffs of death (ref ability death listeners; e.g.
+            // Doom raises its guard when the bearer dies, not on expiry).
+            for (const auto& buff : buffs_) {
+                if (buff) buff->OnDeath(simulation, this);
+            }
             return false;
         }
 
@@ -721,6 +727,17 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                 float healed = source->GetLife() + actualDamage * leech->GetStealPercent();
                 if (healed > source->GetMaxLife()) healed = source->GetMaxLife();
                 source->SetLife(simulation, healed);
+            }
+        }
+    }
+
+    // Bash (Mountain King passive): chance to stun on attack landed.
+    // Lives here next to the thorns/lifesteal listeners (ref attack
+    // listeners); deterministic roll via the sim RNG.
+    if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
+        if (auto* bash = dynamic_cast<CAbilityBash*>(source->GetAbility(War3ID("AHbh")))) {
+            if (simulation.SimRand01() < bash->GetChance()) {
+                AddBuff(std::make_unique<CBuffStun>(bash->GetDuration()), simulation);
             }
         }
     }

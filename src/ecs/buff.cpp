@@ -49,3 +49,7 @@ void CBuff::OnTick(CSimulation& game, CUnit* target) {
 void CBuff::OnPeriodic(CSimulation& game, CUnit* target) {
     (void)game; (void)target;
 }
+
+void CBuff::OnDeath(CSimulation& game, CUnit* target) {
+    (void)game; (void)target;
+}

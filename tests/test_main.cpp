@@ -136,6 +136,16 @@ bool TestCharmConvertsCreep();
 bool TestSummonWaterElemental();
 bool TestMirrorImageCopiesCaster();
 bool TestSpells3FactoryCoverage();
+bool TestEvasionPassive();
+bool TestCriticalStrikePassive();
+bool TestBashProcsOnHit();
+bool TestSlowAppliesDebuff();
+bool TestFrostArmorAndFaerieFire();
+bool TestDeathPactHeals();
+bool TestAnimateDeadRaisesInvulnerable();
+bool TestDoomDotsAndSpawnsGuard();
+bool TestVolcanoErupts();
+bool TestSpells4FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -348,6 +358,16 @@ int main() {
         {"Summon water elemental", TestSummonWaterElemental},
         {"Mirror image copies caster", TestMirrorImageCopiesCaster},
         {"Spells3 factory coverage", TestSpells3FactoryCoverage},
+        {"Evasion passive", TestEvasionPassive},
+        {"Critical strike passive", TestCriticalStrikePassive},
+        {"Bash procs on hit", TestBashProcsOnHit},
+        {"Slow applies debuff", TestSlowAppliesDebuff},
+        {"Frost armor and faerie fire", TestFrostArmorAndFaerieFire},
+        {"Death pact heals", TestDeathPactHeals},
+        {"Animate dead raises invulnerable", TestAnimateDeadRaisesInvulnerable},
+        {"Doom DoTs and spawns guard", TestDoomDotsAndSpawnsGuard},
+        {"Volcano erupts", TestVolcanoErupts},
+        {"Spells4 factory coverage", TestSpells4FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

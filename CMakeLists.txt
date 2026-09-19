@@ -241,6 +241,7 @@ set(SOURCES
     src/ecs/abilities/spells.cpp
     src/ecs/abilities/spells2.cpp
     src/ecs/abilities/spells3.cpp
+    src/ecs/abilities/spells4.cpp
     src/ecs/abilities/ability_repair.cpp
     src/ecs/abilities/ability_transport.cpp
     src/ecs/abilities/ability_root.cpp

@@ -68,6 +68,7 @@ public:
     virtual void OnRemove(CSimulation& game, CUnit* target);
     virtual void OnTick(CSimulation& game, CUnit* target);
     virtual void OnPeriodic(CSimulation& game, CUnit* target);
+    virtual void OnDeath(CSimulation& game, CUnit* target);
 
     // Clone for stacking
     virtual CBuff* Clone() const = 0;

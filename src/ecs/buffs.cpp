@@ -257,6 +257,9 @@ void CBuffTimedLife::OnRemove(CSimulation& game, CUnit* target) {
     // Summoned unit dissipates when its timed life runs out (ref
     // CBuffTimedLife.onBuffRemove -> unit.kill). Lethal chaos damage keeps
     // death callbacks and corpse flow consistent with normal kills.
+    // Dissipation is not damage: raised (invulnerable) summons such as
+    // Animate Dead still expire, so drop invulnerability first.
+    target->SetInvulnerable(false);
     target->Damage(game, nullptr, false, false,
                    CAttackType::CHAOS, CDamageType::NORMAL,
                    "", 1e9f, 0);
@@ -291,6 +294,63 @@ void CBuffLifeDrain::OnPeriodic(CSimulation& game, CUnit* target) {
 
 CBuff* CBuffLifeDrain::Clone() const {
     auto* copy = new CBuffLifeDrain(duration_, drainPerTick_, casterHandleId_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffArmor =====
+CBuffArmor::CBuffArmor(War3ID id, float duration, int armorDelta, bool positive)
+    : CBuff(id, duration, positive), armorDelta_(armorDelta) {}
+
+void CBuffArmor::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->AddBonusArmor(armorDelta_);
+}
+
+void CBuffArmor::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->AddBonusArmor(-armorDelta_);
+}
+
+CBuff* CBuffArmor::Clone() const {
+    auto* copy = new CBuffArmor(GetId(), duration_, armorDelta_, IsPositive());
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffDoom =====
+CBuffDoom::CBuffDoom(float duration, float damagePerTick, int casterHandle)
+    : CBuff(War3ID("BNdo"), duration, false), damagePerTick_(damagePerTick) {
+    casterHandleId_ = casterHandle;
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffDoom::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    target->Damage(game, nullptr, false, false,
+                   CAttackType::SPELLS, CDamageType::DEATH,
+                   "", damagePerTick_, 0);
+}
+
+void CBuffDoom::OnDeath(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    // A unit that dies while doomed rises as a Doom Guard for the
+    // caster's side (ref Doom on-death spawn). Expiry on a living
+    // target spawns nothing, so this lives on OnDeath, not OnRemove.
+    int owner = target->GetPlayerIndex();
+    if (CUnit* caster = game.GetUnit(casterHandleId_)) {
+        if (!caster->IsDead()) owner = caster->GetPlayerIndex();
+    }
+    CUnit* guard = game.CreateUnit(War3ID("nba2"), owner, target->GetX(), target->GetY(), 0);
+    if (guard) {
+        if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
+            summonedCb(casterHandleId_, guard->GetHandleId());
+        }
+    }
+}
+
+CBuff* CBuffDoom::Clone() const {
+    auto* copy = new CBuffDoom(duration_, damagePerTick_, casterHandleId_);
     copy->remaining_ = remaining_;
     return copy;
 }
