@@ -639,6 +639,38 @@ public:
     // campaignFile -> newest cache sim id (for reload adoption).
     std::unordered_map<std::string, int> gameCacheIdsByFile;
 
+    // ---- Selection / unit display state (ref SelectUnit and friends) ----
+    std::unordered_set<int> selectedUnits; // unit sim ids
+    std::unordered_map<int, float> unitBlendTimes;
+    std::unordered_set<int> creepGuardUnits;
+    struct JassRescueInfo {
+        int player = -1;
+        bool rescuable = false;
+        float range = 0.0f;
+    };
+    std::unordered_map<int, JassRescueInfo> unitRescue;
+    // Pending map switch for the controller (ref ChangeLevel); no
+    // consumer yet because runtime map reload is unimplemented.
+    std::string pendingChangeLevel;
+    bool pendingChangeLevelScore = false;
+    bool noReplaySave = false;
+    // Campaign progression state (ref campaign API).
+    std::unordered_map<int, bool> campaignAvailable;
+    std::map<std::pair<int, int>, bool> missionAvailable;
+    std::unordered_map<int, bool> edCinematics;
+    std::unordered_map<int, bool> opCinematics;
+    bool tutorialCleared = false;
+    std::unordered_map<int, bool> customCampaignButtons;
+    bool forceCampaignSelectScreen = false;
+    // Fog-state paint requests (ref SetFogStateRadiusLoc) for the FoW pass.
+    struct JassFogRadiusRequest {
+        int player = -1;
+        int state = 0;
+        float x = 0, y = 0, radius = 0;
+        bool sharedVision = false;
+    };
+    std::vector<JassFogRadiusRequest> fogRadiusRequests;
+
     // Terrain deformations (ref TerrainDeform*): parameters retained for
     // the terrain render pass; no mesh effect yet (documented).
     struct JassTerrainDeform {
@@ -919,6 +951,7 @@ private:
     void RegisterTerrainEditNatives();
     void RegisterHashtableNatives();
     void RegisterGameCacheNatives();
+    void RegisterMiscNatives();
 
     void RegisterConfigPlayerNatives();
 

@@ -201,6 +201,12 @@ bool TestHashtableHandles();
 bool TestGameCacheValuesAndFlush();
 bool TestGameCacheDiskPersistence();
 bool TestGameCacheStoreRestoreUnit();
+bool TestReviveHero();
+bool TestAbilityLevelShift();
+bool TestSelectUnitAndFood();
+bool TestDestructableNatives();
+bool TestCampaignAndFlowNatives();
+bool TestUnitPointValue();
 bool TestSetTerrainPathable();
 bool TestWaterDeformsAndDoodadAnim();
 bool TestTerrainDeformRegistry();
@@ -396,6 +402,12 @@ int main() {
         {"GameCache values and flush", TestGameCacheValuesAndFlush},
         {"GameCache disk persistence", TestGameCacheDiskPersistence},
         {"GameCache store/restore unit", TestGameCacheStoreRestoreUnit},
+        {"Revive hero", TestReviveHero},
+        {"Ability level shift", TestAbilityLevelShift},
+        {"Select unit and food", TestSelectUnitAndFood},
+        {"Destructable natives", TestDestructableNatives},
+        {"Campaign and flow natives", TestCampaignAndFlowNatives},
+        {"Unit point value", TestUnitPointValue},
         {"Set terrain pathable", TestSetTerrainPathable},
         {"Water deforms and doodad anim", TestWaterDeformsAndDoodadAnim},
         {"Terrain deform registry", TestTerrainDeformRegistry},

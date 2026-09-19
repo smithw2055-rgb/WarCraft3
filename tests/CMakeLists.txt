@@ -41,6 +41,7 @@ add_executable(warsmash_tests
     test_melee_ai.cpp
     test_ribbons.cpp
     test_jass_cache.cpp
+    test_jass_misc.cpp
     test_jass_unimplemented.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp

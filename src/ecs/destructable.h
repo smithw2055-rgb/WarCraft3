@@ -24,10 +24,23 @@ public:
     void SetAnimation(const std::string& anim) { animation_ = anim; queuedAnimation_.clear(); }
     void QueueAnimation(const std::string& anim) { queuedAnimation_ = anim; }
     const std::string& GetQueuedAnimation() const { return queuedAnimation_; }
+    // Animation playback speed multiplier (ref SetDestructableAnimationSpeed).
+    float GetAnimationSpeed() const { return animationSpeed_; }
+    void SetAnimationSpeed(float v) { animationSpeed_ = v; }
+    void SetInvulnerable(bool v) { invulnerable_ = v; }
+    // Visibility (ref ShowDestructable; renderer hides flagged instances).
+    bool IsHidden() const { return hidden_; }
+    void SetHidden(bool v) { hidden_ = v; }
+    // Occluder height for the renderer (ref Get/SetDestructableOccluderHeight).
+    float GetOccluderHeight() const { return occluderHeight_; }
+    void SetOccluderHeight(float v) { occluderHeight_ = v; }
 
 private:
     War3ID typeId_;
     bool invulnerable_ = false;
+    bool hidden_ = false;
+    float animationSpeed_ = 1.0f;
+    float occluderHeight_ = 0.0f;
     std::string animation_;
     std::string queuedAnimation_;
 };

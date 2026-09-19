@@ -252,10 +252,17 @@ public:
                          const std::vector<CTargetType>& targetsAllowed) const override;
 
     // Resource / food
-    int GetFoodUsed() const { return foodUsed_; }
+    int GetFoodUsed() const { return useFood_ ? foodUsed_ : 0; }
     int GetFoodMade() const { return foodMade_; }
     void SetFoodUsed(int v) { foodUsed_ = v; }
     void SetFoodMade(int v) { foodMade_ = v; }
+    // Whether this unit counts toward food usage (ref SetUnitUseFood).
+    // Toggling preserves the base value; sim add/remove accounting reads
+    // through GetFoodUsed, so toggle-then-die can drift by design (noted).
+    bool UsesFood() const { return useFood_; }
+    void SetUseFood(bool v) { useFood_ = v; }
+    // Revive a dead hero at a position (ref ReviveHero).
+    void Revive(CSimulation& game, float x, float y);
 
     // Fly height
     float GetDefaultFlyHeight() const { return flyHeight_; }
@@ -345,6 +352,7 @@ private:
     bool decaySuspended_ = false;
     int foodUsed_ = 0;
     int foodMade_ = 0;
+    bool useFood_ = true;
 
     // Hero
     int heroLevel_ = 1;

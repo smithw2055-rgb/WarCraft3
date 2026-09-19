@@ -510,6 +510,18 @@ bool CUnit::HasQueuedOrders() const {
     return !orderQueue_.empty();
 }
 
+void CUnit::Revive(CSimulation& game, float x, float y) {
+    corpse_ = false;
+    boneCorpse_ = false;
+    deathTurnTick_ = 0;
+    hidden_ = false;
+    SetPosition(x, y);
+    RefreshMaxLifeTotal();
+    RefreshMaxManaTotal();
+    SetLife(game, GetMaxLife());
+    SetMana((float)maxMana_);
+}
+
 void CUnit::ApplyRegen(CSimulation& simulation) {
     if (IsDead() || IsBuilding()) return;
 
