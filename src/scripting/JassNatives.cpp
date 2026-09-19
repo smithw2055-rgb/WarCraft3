@@ -26,6 +26,11 @@
 #include <algorithm>
 #include <cstring>
 #include <cctype>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+
+namespace fs = std::filesystem;
 
 static std::mt19937 s_rng(std::random_device{}());
 
@@ -947,6 +952,8 @@ void JassNatives::RegisterCommonNatives() {
     RegisterUIStateNatives();
     RegisterBoardNatives();
     RegisterTerrainEditNatives();
+    RegisterHashtableNatives();
+    RegisterGameCacheNatives();
     std::cout << "JassNatives: registered common natives" << std::endl;
 }
 
@@ -9315,6 +9322,615 @@ void JassNatives::RegisterTerrainEditNatives() {
         (void)args;
         for (auto& [id, deform] : data->terrainDeforms) {
             if (deform) deform->stopped = true;
+        }
+        return JassValue::Null();
+    });
+}
+
+
+// ============================================================
+// 35. Hashtable natives (ref hashtable API)
+// ============================================================
+void JassNatives::RegisterHashtableNatives() {
+    auto getTable = [data = data_](int tableHandle) -> std::shared_ptr<JassNativesData::JassHashtable> {
+        int simId = data->GetSimHandle(tableHandle, JassHandleInfo::HASHTABLE);
+        if (simId < 0) return nullptr;
+        auto it = data->hashtables.find(simId);
+        return it != data->hashtables.end() ? it->second : nullptr;
+    };
+    auto cellKey = [](int parentKey, int childKey) -> int64_t {
+        return (static_cast<int64_t>(parentKey) << 32) | static_cast<uint32_t>(childKey);
+    };
+
+    vm_.RegisterNative("InitHashtable", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        auto table = std::make_shared<JassNativesData::JassHashtable>();
+        int id = data->nextHashtableId++;
+        data->hashtables[id] = table;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::HASHTABLE, id));
+    });
+    vm_.RegisterNative("SaveInteger", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto t = getTable(args[0].intVal)) {
+            t->values[cellKey(args[1].intVal, args[2].intVal)] = JassValue::Int(args[3].intVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SaveReal", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto t = getTable(args[0].intVal)) {
+            t->values[cellKey(args[1].intVal, args[2].intVal)] = JassValue::Real(args[3].realVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SaveBoolean", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto t = getTable(args[0].intVal)) {
+            t->values[cellKey(args[1].intVal, args[2].intVal)] = JassValue::Bool(args[3].boolVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("SaveStr", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Bool(false);
+        if (auto t = getTable(args[0].intVal)) {
+            t->values[cellKey(args[1].intVal, args[2].intVal)] = JassValue::Str(args[3].strVal);
+            return JassValue::Bool(true);
+        }
+        return JassValue::Bool(false);
+    });
+    vm_.RegisterNative("LoadInteger", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Int(0);
+        if (auto t = getTable(args[0].intVal)) {
+            auto it = t->values.find(cellKey(args[1].intVal, args[2].intVal));
+            if (it != t->values.end()) return JassValue::Int(it->second.intVal);
+        }
+        return JassValue::Int(0);
+    });
+    vm_.RegisterNative("LoadReal", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Real(0.0f);
+        if (auto t = getTable(args[0].intVal)) {
+            auto it = t->values.find(cellKey(args[1].intVal, args[2].intVal));
+            if (it != t->values.end()) return JassValue::Real(it->second.realVal);
+        }
+        return JassValue::Real(0.0f);
+    });
+    vm_.RegisterNative("LoadBoolean", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        if (auto t = getTable(args[0].intVal)) {
+            auto it = t->values.find(cellKey(args[1].intVal, args[2].intVal));
+            if (it != t->values.end()) return JassValue::Bool(it->second.boolVal);
+        }
+        return JassValue::Bool(false);
+    });
+    vm_.RegisterNative("LoadStr", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Str("");
+        if (auto t = getTable(args[0].intVal)) {
+            auto it = t->values.find(cellKey(args[1].intVal, args[2].intVal));
+            if (it != t->values.end()) return JassValue::Str(it->second.strVal);
+        }
+        return JassValue::Str("");
+    });
+    auto haveCell = [getTable, cellKey](const std::vector<JassValue>& args) -> bool {
+        if (args.size() < 3) return false;
+        auto t = getTable(args[0].intVal);
+        if (!t) return false;
+        const int64_t key = cellKey(args[1].intVal, args[2].intVal);
+        return t->values.count(key) > 0 || t->handles.count(key) > 0;
+    };
+    vm_.RegisterNative("HaveSavedInteger", [haveCell](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveCell(args));
+    });
+    vm_.RegisterNative("HaveSavedReal", [haveCell](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveCell(args));
+    });
+    vm_.RegisterNative("HaveSavedBoolean", [haveCell](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveCell(args));
+    });
+    vm_.RegisterNative("HaveSavedString", [haveCell](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveCell(args));
+    });
+    vm_.RegisterNative("HaveSavedHandle", [haveCell](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveCell(args));
+    });
+    auto removeCell = [getTable, cellKey](const std::vector<JassValue>& args) -> void {
+        if (args.size() < 3) return;
+        if (auto t = getTable(args[0].intVal)) {
+            const int64_t key = cellKey(args[1].intVal, args[2].intVal);
+            t->values.erase(key);
+            t->handles.erase(key);
+        }
+    };
+    vm_.RegisterNative("RemoveSavedInteger", [removeCell](const std::vector<JassValue>& args) -> JassValue {
+        removeCell(args);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RemoveSavedReal", [removeCell](const std::vector<JassValue>& args) -> JassValue {
+        removeCell(args);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RemoveSavedBoolean", [removeCell](const std::vector<JassValue>& args) -> JassValue {
+        removeCell(args);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RemoveSavedString", [removeCell](const std::vector<JassValue>& args) -> JassValue {
+        removeCell(args);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RemoveSavedHandle", [removeCell](const std::vector<JassValue>& args) -> JassValue {
+        removeCell(args);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FlushParentHashtable", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        if (auto t = getTable(args[0].intVal)) {
+            t->values.clear();
+            t->handles.clear();
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FlushChildHashtable", [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto t = getTable(args[0].intVal)) {
+            const int parent = args[1].intVal;
+            for (auto it = t->values.begin(); it != t->values.end();) {
+                if ((int)(it->first >> 32) == parent) {
+                    it = t->values.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (auto it = t->handles.begin(); it != t->handles.end();) {
+                if ((int)(it->first >> 32) == parent) {
+                    it = t->handles.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+        return JassValue::Null();
+    });
+
+    // Handle cells: every Save*Handle stores the raw handle int and
+    // reports success for non-null values; Load returns it verbatim.
+    // AGENT accepts any handle; WIDGET accepts unit/item/destructable;
+    // TRIGGERACTION/CONDITION/EVENT and FOGSTATE/BOOLEANEXPR have no
+    // allocated storage in this engine, so values round-trip as plain ints.
+    auto saveHandle = [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Bool(false);
+        auto t = getTable(args[0].intVal);
+        if (!t || args[3].intVal == 0) return JassValue::Bool(false);
+        t->handles[cellKey(args[1].intVal, args[2].intVal)] = args[3].intVal;
+        return JassValue::Bool(true);
+    };
+    auto loadHandle = [getTable, cellKey](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Int(0);
+        auto t = getTable(args[0].intVal);
+        if (!t) return JassValue::Int(0);
+        auto it = t->handles.find(cellKey(args[1].intVal, args[2].intVal));
+        return JassValue::Int(it != t->handles.end() ? it->second : 0);
+    };
+    const char* handleSaves[] = {
+        "SavePlayerHandle", "SaveWidgetHandle", "SaveDestructableHandle",
+        "SaveItemHandle", "SaveUnitHandle", "SaveAbilityHandle",
+        "SaveTimerHandle", "SaveTriggerHandle", "SaveTriggerConditionHandle",
+        "SaveTriggerActionHandle", "SaveTriggerEventHandle", "SaveForceHandle",
+        "SaveGroupHandle", "SaveLocationHandle", "SaveRectHandle",
+        "SaveBooleanExprHandle", "SaveSoundHandle", "SaveEffectHandle",
+        "SaveUnitPoolHandle", "SaveItemPoolHandle", "SaveQuestHandle",
+        "SaveQuestItemHandle", "SaveDefeatConditionHandle", "SaveTimerDialogHandle",
+        "SaveLeaderboardHandle", "SaveMultiboardHandle", "SaveMultiboardItemHandle",
+        "SaveTrackableHandle", "SaveDialogHandle", "SaveButtonHandle",
+        "SaveTextTagHandle", "SaveLightningHandle", "SaveImageHandle",
+        "SaveUbersplatHandle", "SaveRegionHandle", "SaveFogStateHandle",
+        "SaveFogModifierHandle", "SaveAgentHandle", "SaveHashtableHandle",
+    };
+    for (const char* name : handleSaves) {
+        vm_.RegisterNative(name, saveHandle);
+    }
+    const char* handleLoads[] = {
+        "LoadPlayerHandle", "LoadWidgetHandle", "LoadDestructableHandle",
+        "LoadItemHandle", "LoadUnitHandle", "LoadAbilityHandle",
+        "LoadTimerHandle", "LoadTriggerHandle", "LoadTriggerConditionHandle",
+        "LoadTriggerActionHandle", "LoadTriggerEventHandle", "LoadForceHandle",
+        "LoadGroupHandle", "LoadLocationHandle", "LoadRectHandle",
+        "LoadBooleanExprHandle", "LoadSoundHandle", "LoadEffectHandle",
+        "LoadUnitPoolHandle", "LoadItemPoolHandle", "LoadQuestHandle",
+        "LoadQuestItemHandle", "LoadDefeatConditionHandle", "LoadTimerDialogHandle",
+        "LoadLeaderboardHandle", "LoadMultiboardHandle", "LoadMultiboardItemHandle",
+        "LoadTrackableHandle", "LoadDialogHandle", "LoadButtonHandle",
+        "LoadTextTagHandle", "LoadLightningHandle", "LoadImageHandle",
+        "LoadUbersplatHandle", "LoadRegionHandle", "LoadFogStateHandle",
+        "LoadFogModifierHandle", "LoadHashtableHandle",
+    };
+    for (const char* name : handleLoads) {
+        vm_.RegisterNative(name, loadHandle);
+    }
+}
+
+// ============================================================
+// 36. GameCache natives (ref gamecache API)
+// ============================================================
+namespace {
+
+// Campaign save dir: OS temp keeps the repo clean; files are named
+// warsmash_<sanitized campaignFile>.w3v so later maps reload them.
+std::string GameCacheSaveDir() {
+    std::error_code ec;
+    fs::path dir = fs::temp_directory_path(ec) / "warsmash-save";
+    if (!ec) fs::create_directories(dir, ec);
+    return dir.string();
+}
+
+std::string GameCacheFileFor(const std::string& campaignFile) {
+    std::string safe;
+    for (char c : campaignFile) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-') {
+            safe += c;
+        } else {
+            safe += '_';
+        }
+    }
+    if (safe.empty()) safe = "default";
+    return (fs::path(GameCacheSaveDir()) / ("warsmash_" + safe + ".w3v")).string();
+}
+
+std::string EscapeCacheString(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '\\') out += "\\\\";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\t') out += "\\t";
+        else out += c;
+    }
+    return out;
+}
+
+std::string UnescapeCacheString(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '\\' && i + 1 < s.size()) {
+            const char n = s[++i];
+            out += (n == 'n') ? '\n' : (n == 't') ? '\t' : n;
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
+}
+
+bool WriteGameCacheFile(const std::string& path,
+                        const std::string& campaignFile,
+                        const JassNativesData::JassGameCache& cache) {
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (!f) return false;
+    f << "W3V1\nC " << EscapeCacheString(campaignFile) << "\n";
+    for (const auto& [mission, keys] : cache.values) {
+        for (const auto& [key, value] : keys) {
+            const std::string m = EscapeCacheString(mission);
+            const std::string k = EscapeCacheString(key);
+            switch (value.type) {
+                case JassValue::INTEGER:
+                    f << "M " << m << '\t' << k << "\tI " << value.intVal << "\n";
+                    break;
+                case JassValue::REAL:
+                    f << "M " << m << '\t' << k << "\tR " << value.realVal << "\n";
+                    break;
+                case JassValue::BOOLEAN:
+                    f << "M " << m << '\t' << k << "\tB " << (value.boolVal ? 1 : 0) << "\n";
+                    break;
+                case JassValue::STRING:
+                    f << "M " << m << '\t' << k << "\tS " << EscapeCacheString(value.strVal) << "\n";
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+    for (const auto& [mission, keys] : cache.units) {
+        for (const auto& [key, unit] : keys) {
+            f << "U " << EscapeCacheString(mission) << '\t' << EscapeCacheString(key) << ' '
+              << unit.typeId << ' ' << unit.level << ' ' << unit.lifeFraction << ' ' << unit.owner << "\n";
+        }
+    }
+    f.flush();
+    return (bool)f;
+}
+
+bool ReadGameCacheFile(const std::string& path, JassNativesData::JassGameCache& cache) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::string line;
+    if (!std::getline(f, line) || line != "W3V1") return false;
+    // Drop trailing \r from CRLF reads.
+    bool ok = false;
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.size() < 2) continue;
+        if (line[0] == 'M' && line[1] == ' ') {
+            // M mission\tkey\tTYPE payload (mission/key escape-free of tabs)
+            const size_t t1 = line.find('\t', 2);
+            const size_t t2 = (t1 == std::string::npos) ? std::string::npos : line.find('\t', t1 + 1);
+            if (t1 == std::string::npos || t2 == std::string::npos || t2 + 3 >= line.size()) continue;
+            const std::string mission = UnescapeCacheString(line.substr(2, t1 - 2));
+            const std::string key = UnescapeCacheString(line.substr(t1 + 1, t2 - t1 - 1));
+            const char type = line[t2 + 1];
+            const std::string payload = line.substr(t2 + 3);
+            if (type == 'I') {
+                cache.values[mission][key] = JassValue::Int(std::atoi(payload.c_str()));
+            } else if (type == 'R') {
+                cache.values[mission][key] = JassValue::Real((float)std::atof(payload.c_str()));
+            } else if (type == 'B') {
+                cache.values[mission][key] = JassValue::Bool(payload == "1");
+            } else if (type == 'S') {
+                cache.values[mission][key] = JassValue::Str(UnescapeCacheString(payload));
+            }
+            ok = true;
+        } else if (line[0] == 'U' && line[1] == ' ') {
+            const size_t t1 = line.find('\t', 2);
+            const size_t sp = (t1 == std::string::npos) ? std::string::npos : line.find(' ', t1 + 1);
+            if (t1 == std::string::npos || sp == std::string::npos) continue;
+            const std::string mission = UnescapeCacheString(line.substr(2, t1 - 2));
+            const std::string key = UnescapeCacheString(line.substr(t1 + 1, sp - t1 - 1));
+            unsigned typeId = 0;
+            int level = 1, owner = -1;
+            float lifeFraction = 1.0f;
+            if (std::sscanf(line.c_str() + sp, "%u %d %f %d", &typeId, &level, &lifeFraction, &owner) == 4) {
+                JassNativesData::JassStoredUnit unit;
+                unit.typeId = typeId;
+                unit.level = level;
+                unit.lifeFraction = lifeFraction;
+                unit.owner = owner;
+                cache.units[mission][key] = unit;
+                ok = true;
+            }
+        }
+    }
+    return ok;
+}
+
+} // namespace
+
+void JassNatives::RegisterGameCacheNatives() {
+    auto getCache = [data = data_](int cacheHandle) -> std::shared_ptr<JassNativesData::JassGameCache> {
+        int simId = data->GetSimHandle(cacheHandle, JassHandleInfo::GAMECACHE);
+        if (simId < 0) return nullptr;
+        auto it = data->gameCaches.find(simId);
+        return it != data->gameCaches.end() ? it->second : nullptr;
+    };
+
+    vm_.RegisterNative("InitGameCache", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        auto cache = std::make_shared<JassNativesData::JassGameCache>();
+        cache->campaignFile = args[0].strVal;
+        // Restore a previous session when the file exists.
+        ReadGameCacheFile(GameCacheFileFor(cache->campaignFile), *cache);
+        int id = data->nextGameCacheId++;
+        data->gameCaches[id] = cache;
+        data->gameCacheIdsByFile[cache->campaignFile] = id;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::GAMECACHE, id));
+    });
+    vm_.RegisterNative("SaveGameCache", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.empty()) return JassValue::Bool(false);
+        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GAMECACHE);
+        if (simId < 0) return JassValue::Bool(false);
+        auto it = data->gameCaches.find(simId);
+        if (it == data->gameCaches.end()) return JassValue::Bool(false);
+        return JassValue::Bool(WriteGameCacheFile(GameCacheFileFor(it->second->campaignFile),
+                                                  it->second->campaignFile, *it->second));
+    });
+    vm_.RegisterNative("ReloadGameCachesFromDisk", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        bool any = false;
+        // Re-read files for known caches.
+        for (auto& [id, cache] : data->gameCaches) {
+            if (!cache || cache->campaignFile.empty()) continue;
+            JassNativesData::JassGameCache fresh;
+            fresh.campaignFile = cache->campaignFile;
+            if (ReadGameCacheFile(GameCacheFileFor(cache->campaignFile), fresh)) {
+                *cache = std::move(fresh);
+                any = true;
+            }
+        }
+        // Adopt files with no live cache so a later InitGameCache finds them.
+        std::error_code ec;
+        fs::path dir(GameCacheSaveDir());
+        if (fs::is_directory(dir, ec)) {
+            for (const auto& entry : fs::directory_iterator(dir, ec)) {
+                if (!entry.is_regular_file()) continue;
+                const std::string name = entry.path().filename().string();
+                if (name.compare(0, 9, "warsmash_") != 0) continue;
+                bool known = false;
+                for (const auto& [id, cache] : data->gameCaches) {
+                    if (cache && GameCacheFileFor(cache->campaignFile) == entry.path().string()) {
+                        known = true;
+                        break;
+                    }
+                }
+                if (known) continue;
+                auto cache = std::make_shared<JassNativesData::JassGameCache>();
+                if (ReadGameCacheFile(entry.path().string(), *cache)) {
+                    int id = data->nextGameCacheId++;
+                    data->gameCacheIdsByFile[cache->campaignFile] = id;
+                    data->gameCaches[id] = cache;
+                    any = true;
+                }
+            }
+        }
+        return JassValue::Bool(any);
+    });
+
+    vm_.RegisterNative("StoreInteger", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto c = getCache(args[0].intVal)) {
+            c->values[args[1].strVal][args[2].strVal] = JassValue::Int(args[3].intVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("StoreReal", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto c = getCache(args[0].intVal)) {
+            c->values[args[1].strVal][args[2].strVal] = JassValue::Real(args[3].realVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("StoreBoolean", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto c = getCache(args[0].intVal)) {
+            c->values[args[1].strVal][args[2].strVal] = JassValue::Bool(args[3].boolVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("StoreString", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Bool(false);
+        if (auto c = getCache(args[0].intVal)) {
+            c->values[args[1].strVal][args[2].strVal] = JassValue::Str(args[3].strVal);
+            return JassValue::Bool(true);
+        }
+        return JassValue::Bool(false);
+    });
+    vm_.RegisterNative("StoreUnit", [data = data_, sim = sim_, getCache](const std::vector<JassValue>& args) -> JassValue {
+        (void)data;
+        if (args.size() < 4 || !sim) return JassValue::Bool(false);
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Bool(false);
+        int uSim = data->GetSimHandle(args[3].intVal, JassHandleInfo::UNIT);
+        CUnit* unit = uSim >= 0 ? sim->GetUnit(uSim) : nullptr;
+        if (!unit) return JassValue::Bool(false);
+        JassNativesData::JassStoredUnit stored;
+        stored.typeId = unit->GetTypeId().value;
+        stored.level = unit->GetHeroLevel();
+        const float maxLife = unit->GetMaxLife();
+        stored.lifeFraction = maxLife > 0.0f ? unit->GetLife() / maxLife : 1.0f;
+        stored.owner = unit->GetPlayerIndex();
+        c->units[args[1].strVal][args[2].strVal] = stored;
+        return JassValue::Bool(true);
+    });
+    auto haveValue = [getCache](const std::vector<JassValue>& args) -> bool {
+        if (args.size() < 3) return false;
+        auto c = getCache(args[0].intVal);
+        if (!c) return false;
+        auto mit = c->values.find(args[1].strVal);
+        return mit != c->values.end() && mit->second.count(args[2].strVal) > 0;
+    };
+    auto haveUnit = [getCache](const std::vector<JassValue>& args) -> bool {
+        if (args.size() < 3) return false;
+        auto c = getCache(args[0].intVal);
+        if (!c) return false;
+        auto mit = c->units.find(args[1].strVal);
+        return mit != c->units.end() && mit->second.count(args[2].strVal) > 0;
+    };
+    vm_.RegisterNative("HaveStoredInteger", [haveValue](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveValue(args));
+    });
+    vm_.RegisterNative("HaveStoredReal", [haveValue](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveValue(args));
+    });
+    vm_.RegisterNative("HaveStoredBoolean", [haveValue](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveValue(args));
+    });
+    vm_.RegisterNative("HaveStoredString", [haveValue](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveValue(args));
+    });
+    vm_.RegisterNative("HaveStoredUnit", [haveUnit](const std::vector<JassValue>& args) -> JassValue {
+        return JassValue::Bool(haveUnit(args));
+    });
+    vm_.RegisterNative("GetStoredInteger", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Int(0);
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Int(0);
+        auto mit = c->values.find(args[1].strVal);
+        if (mit == c->values.end()) return JassValue::Int(0);
+        auto it = mit->second.find(args[2].strVal);
+        return JassValue::Int(it != mit->second.end() ? it->second.intVal : 0);
+    });
+    vm_.RegisterNative("GetStoredReal", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Real(0.0f);
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Real(0.0f);
+        auto mit = c->values.find(args[1].strVal);
+        if (mit == c->values.end()) return JassValue::Real(0.0f);
+        auto it = mit->second.find(args[2].strVal);
+        return JassValue::Real(it != mit->second.end() ? it->second.realVal : 0.0f);
+    });
+    vm_.RegisterNative("GetStoredBoolean", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Bool(false);
+        auto mit = c->values.find(args[1].strVal);
+        if (mit == c->values.end()) return JassValue::Bool(false);
+        auto it = mit->second.find(args[2].strVal);
+        return JassValue::Bool(it != mit->second.end() ? it->second.boolVal : false);
+    });
+    vm_.RegisterNative("GetStoredString", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Str("");
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Str("");
+        auto mit = c->values.find(args[1].strVal);
+        if (mit == c->values.end()) return JassValue::Str("");
+        auto it = mit->second.find(args[2].strVal);
+        return JassValue::Str(it != mit->second.end() ? it->second.strVal : "");
+    });
+    vm_.RegisterNative("RestoreUnit", [data = data_, sim = sim_, getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 7 || !sim) return JassValue::Null();
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Null();
+        auto mit = c->units.find(args[1].strVal);
+        if (mit == c->units.end()) return JassValue::Null();
+        auto it = mit->second.find(args[2].strVal);
+        if (it == mit->second.end()) return JassValue::Null();
+        const auto& stored = it->second;
+        const int playerId = ResolvePlayerId(data, args[3].intVal);
+        CUnit* unit = sim->CreateUnit(War3ID(stored.typeId), playerId,
+                                      args[4].realVal, args[5].realVal, args[6].realVal);
+        if (!unit) return JassValue::Null();
+        if (stored.level > 1) unit->SetHeroLevel(stored.level);
+        unit->SetLife(*sim, unit->GetMaxLife() * stored.lifeFraction);
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
+    });
+    auto flushKey = [getCache](const std::vector<JassValue>& args, bool units) -> void {
+        if (args.size() < 3) return;
+        if (auto c = getCache(args[0].intVal)) {
+            if (units) {
+                auto mit = c->units.find(args[1].strVal);
+                if (mit != c->units.end()) mit->second.erase(args[2].strVal);
+            } else {
+                auto mit = c->values.find(args[1].strVal);
+                if (mit != c->values.end()) mit->second.erase(args[2].strVal);
+            }
+        }
+    };
+    vm_.RegisterNative("FlushStoredMission", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto c = getCache(args[0].intVal)) {
+            c->values.erase(args[1].strVal);
+            c->units.erase(args[1].strVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FlushStoredInteger", [flushKey](const std::vector<JassValue>& args) -> JassValue {
+        flushKey(args, false);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FlushStoredReal", [flushKey](const std::vector<JassValue>& args) -> JassValue {
+        flushKey(args, false);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FlushStoredBoolean", [flushKey](const std::vector<JassValue>& args) -> JassValue {
+        flushKey(args, false);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FlushStoredString", [flushKey](const std::vector<JassValue>& args) -> JassValue {
+        flushKey(args, false);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FlushStoredUnit", [flushKey](const std::vector<JassValue>& args) -> JassValue {
+        flushKey(args, true);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FlushGameCache", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        if (auto c = getCache(args[0].intVal)) {
+            c->values.clear();
+            c->units.clear();
         }
         return JassValue::Null();
     });

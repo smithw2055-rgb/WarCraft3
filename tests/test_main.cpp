@@ -196,6 +196,11 @@ bool TestModuleOverrideAndOptional();
 bool TestModuleForwardReference();
 bool TestModuleMissingError();
 bool TestSetTerrainType();
+bool TestHashtableValues();
+bool TestHashtableHandles();
+bool TestGameCacheValuesAndFlush();
+bool TestGameCacheDiskPersistence();
+bool TestGameCacheStoreRestoreUnit();
 bool TestSetTerrainPathable();
 bool TestWaterDeformsAndDoodadAnim();
 bool TestTerrainDeformRegistry();
@@ -386,6 +391,11 @@ int main() {
         {"Module forward reference", TestModuleForwardReference},
         {"Module missing error", TestModuleMissingError},
         {"Set terrain type", TestSetTerrainType},
+        {"Hashtable values", TestHashtableValues},
+        {"Hashtable handles", TestHashtableHandles},
+        {"GameCache values and flush", TestGameCacheValuesAndFlush},
+        {"GameCache disk persistence", TestGameCacheDiskPersistence},
+        {"GameCache store/restore unit", TestGameCacheStoreRestoreUnit},
         {"Set terrain pathable", TestSetTerrainPathable},
         {"Water deforms and doodad anim", TestWaterDeformsAndDoodadAnim},
         {"Terrain deform registry", TestTerrainDeformRegistry},

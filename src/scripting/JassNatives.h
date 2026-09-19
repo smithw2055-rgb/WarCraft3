@@ -290,7 +290,7 @@ struct JassHandleInfo {
         EFFECT, LIGHTNING, WEATHER, FOG_MODIFIER, QUEST, QUEST_ITEM, CAMERA_SETUP, ABILITY,
         PRIMARY_TAG, SECONDARY_TAG, PRIMARY_TAGS, SECONDARY_TAGS,
         DIALOG, BUTTON, MULTIBOARD, MULTIBOARDITEM, LEADERBOARD,
-        IMAGE, TRACKABLE, UBERSPLAT
+        IMAGE, TRACKABLE, UBERSPLAT, HASHTABLE, GAMECACHE
     };
     Type type;
     int id;
@@ -610,6 +610,35 @@ public:
     std::unordered_map<int, std::shared_ptr<JassDefeatCondition>> defeatConditions;
     int nextDefeatConditionId = 0x1B000000;
 
+    // Hashtables (ref hashtable API): two cells per key — typed values
+    // (int/real/bool/string) and raw handle ints. Keyed by
+    // ((int64)parent << 32) | child.
+    struct JassHashtable {
+        std::unordered_map<int64_t, JassValue> values;
+        std::unordered_map<int64_t, int> handles;
+    };
+    std::unordered_map<int, std::shared_ptr<JassHashtable>> hashtables;
+    int nextHashtableId = 0x1D000000;
+
+    // Game caches (ref gamecache API): per-mission string-keyed values
+    // plus stored-unit snapshots. SaveGameCache persists to disk.
+    struct JassStoredUnit {
+        uint32_t typeId = 0;
+        int level = 1;
+        float lifeFraction = 1.0f;
+        int owner = -1;
+    };
+    struct JassGameCache {
+        std::string campaignFile;
+        std::unordered_map<std::string, std::unordered_map<std::string, JassValue>> values;
+        std::unordered_map<std::string, std::unordered_map<std::string, int>> handles;
+        std::unordered_map<std::string, std::unordered_map<std::string, JassStoredUnit>> units;
+    };
+    std::unordered_map<int, std::shared_ptr<JassGameCache>> gameCaches;
+    int nextGameCacheId = 0x1E000000;
+    // campaignFile -> newest cache sim id (for reload adoption).
+    std::unordered_map<std::string, int> gameCacheIdsByFile;
+
     // Terrain deformations (ref TerrainDeform*): parameters retained for
     // the terrain render pass; no mesh effect yet (documented).
     struct JassTerrainDeform {
@@ -888,6 +917,8 @@ private:
     void RegisterUIStateNatives();
     void RegisterBoardNatives();
     void RegisterTerrainEditNatives();
+    void RegisterHashtableNatives();
+    void RegisterGameCacheNatives();
 
     void RegisterConfigPlayerNatives();
 
