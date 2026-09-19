@@ -77,7 +77,9 @@ public:
     bool IsObjectVisible(int objectId) const;
     bool GetObjectWorldTransformYUp(int objectId, Mat4& outMatrix, Vec3* outScale = nullptr) const;
     bool GetObjectWorldLocationYUp(int objectId, Vec3& outPosition) const;
-    bool GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const;
+    // Ribbon emitters need the node pivot (as a Y-up point, untransformed)
+    // plus the Y-up world matrix to freeze above/below verts at emit time.
+    bool GetObjectPivotAndWorldTransformYUp(int objectId, Vec3& outPivot, Mat4& outMatrix) const;    bool GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const;
     const std::vector<MdxEventTrigger>& GetTriggeredEvents() const { return triggeredEvents_; }
 
     // Bone matrices for skinning

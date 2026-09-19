@@ -1273,6 +1273,10 @@ void MdxViewer::Release() {
     cachedBoneTexId_ = 0;
     batches_.clear();
     shader_ = {0};
+    if (hasRibbons_) {
+        ribbons_.Destroy();
+        hasRibbons_ = false;
+    }
     if (hasParticles_) {
         if (traceRelease) {
             std::fprintf(stderr, "MdxViewer::Release destroy particles begin\n");
@@ -1887,6 +1891,14 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
         hasParticles_ = false;
     }
 
+    if (enableParticles && !sourceModel.ribbonEmitters.empty()) {
+        ribbons_.Init(sourceModel, mpq);
+        ribbons_.SetWorldOffset(Vec3{0.0f, 0.0f, 0.0f});
+        hasRibbons_ = true;
+    } else {
+        hasRibbons_ = false;
+    }
+
     triggeredEventCount_ = 0;
     resolvedEventEffectCount_ = 0;
     resolvedEventEffects_.clear();
@@ -2423,6 +2435,11 @@ void MdxViewer::Update(float dt) {
                           initializedAnimator_ ? &animator_ : nullptr,
                           initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
                           elapsedMs_);
+    if (hasRibbons_)
+        ribbons_.Update(dt, ribbons_.GetWorldOffset(), modelSource_,
+                        initializedAnimator_ ? &animator_ : nullptr,
+                        initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
+                        elapsedMs_);
     if (hasParticleEmitter1_ && modelSource_) {
         MdxCollectParticleEmitter1Spawns(*modelSource_,
                                          initializedAnimator_ ? &animator_ : nullptr,
@@ -2455,6 +2472,11 @@ void MdxViewer::Update(float dt, const Mat4& view) {
                           initializedAnimator_ ? &animator_ : nullptr,
                           initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
                           elapsedMs_);
+    if (hasRibbons_)
+        ribbons_.Update(dt, ribbons_.GetWorldOffset(), modelSource_,
+                        initializedAnimator_ ? &animator_ : nullptr,
+                        initializedAnimator_ ? animator_.GetCurrentFrame() : 0,
+                        elapsedMs_);
     if (hasParticleEmitter1_ && modelSource_) {
         MdxCollectParticleEmitter1Spawns(*modelSource_,
                                          initializedAnimator_ ? &animator_ : nullptr,
@@ -2971,5 +2993,9 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
     if (hasParticles_) {
         particles_.SetWorldOffset(Vec3{model.m[12], model.m[13], model.m[14]});
         particles_.Render(view, proj);
+    }
+    if (hasRibbons_) {
+        ribbons_.SetWorldOffset(Vec3{model.m[12], model.m[13], model.m[14]});
+        ribbons_.Render(view, proj);
     }
 }

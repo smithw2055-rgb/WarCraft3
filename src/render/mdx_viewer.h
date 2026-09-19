@@ -5,6 +5,7 @@
 #include "render/mdx_animator.h"
 #include "render/mdx_event_effects.h"
 #include "render/mdx_particles.h"
+#include "render/mdx_ribbons.h"
 #include "render/mdx_prem_particles.h"
 #include "render/mdx_skinning.h"
 #include "render/picking.h"
@@ -216,6 +217,9 @@ private:
     // Particle system
     MdxParticleSystem particles_;
     bool hasParticles_ = false;
+    // Ribbon trail system (RIBB emitters)
+    MdxRibbonSystem ribbons_;
+    bool hasRibbons_ = false;
     bool hasParticleEmitter1_ = false;
     std::vector<MdxParticleEmitter1RuntimeState> particleEmitter1States_;
     std::vector<MdxParticleEmitter1Spawn> particleEmitter1Spawns_;

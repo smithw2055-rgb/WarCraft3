@@ -1642,3 +1642,60 @@ bool TestMdxSkipsFaceFxAndBindPose() {
     TEST_ASSERT(model.sequences[0].name == "Stand");
     return true;
 }
+
+bool TestMdxParsesRibbonEmitter() {
+    std::vector<uint8_t> data;
+    PushMdxTag(data, 'M', 'D', 'L', 'X');
+    PushMdxTag(data, 'R', 'I', 'B', 'B');
+    // Entry: 4 (size) + 96 (generic, no timelines) + 44 (fields) + 24 (KRAL timeline) = 168.
+    PushLE32(data, 168); // chunk size
+    PushLE32(data, 168); // entry size (includes this field)
+    PushLE32(data, 96);  // generic object size
+    PushFixedString(data, "Ribbon01", 80);
+    PushLE32(data, 7);            // object id
+    PushLE32(data, 0xffffffffu);  // parent id
+    PushLE32(data, 0);            // flags
+    PushLE32(data, 0x40a00000u);  // heightAbove = 5.0
+    PushLE32(data, 0x40800000u);  // heightBelow = 4.0
+    PushLE32(data, 0x3f000000u);  // alpha = 0.5
+    PushLE32(data, 0x3f800000u);  // color r = 1.0
+    PushLE32(data, 0x3f000000u);  // color g = 0.5
+    PushLE32(data, 0x00000000u);  // color b = 0.0
+    PushLE32(data, 0x3f800000u);  // lifeSpan = 1.0
+    PushLE32(data, 2);            // textureSlot
+    PushLE32(data, 10);           // emissionRate (uint)
+    PushLE32(data, 2);            // rows
+    PushLE32(data, 4);            // columns
+    PushLE32(data, 3);            // materialId
+    PushLE32(data, 0x41200000u);  // gravity = 10.0
+
+    PushMdxTag(data, 'K', 'R', 'A', 'L');
+    PushLE32(data, 1);            // keyframe count
+    PushLE32(data, 0);            // interpolation: none
+    PushLE32(data, 0xffffffffu);  // global sequence id
+    PushLE32(data, 0);            // frame
+    PushLE32(data, 0x3f400000u);  // value = 0.75
+
+    MdxModel model;
+    TEST_ASSERT(MdxLoad(data.data(), data.size(), model));
+    TEST_ASSERT(model.ribbonEmitters.size() == 1);
+    const MdxRibbonEmitter& rb = model.ribbonEmitters[0];
+    TEST_ASSERT(rb.name == "Ribbon01");
+    TEST_ASSERT(rb.objectId == 7);
+    TEST_ASSERT(Near(rb.heightAbove, 5.0f));
+    TEST_ASSERT(Near(rb.heightBelow, 4.0f));
+    TEST_ASSERT(Near(rb.alpha, 0.5f));
+    TEST_ASSERT(Near(rb.color[0], 1.0f));
+    TEST_ASSERT(Near(rb.color[1], 0.5f));
+    TEST_ASSERT(Near(rb.color[2], 0.0f));
+    TEST_ASSERT(Near(rb.lifeSpan, 1.0f));
+    TEST_ASSERT(rb.textureSlot == 2);
+    TEST_ASSERT(Near(rb.emissionRate, 10.0f));
+    TEST_ASSERT(rb.rows == 2);
+    TEST_ASSERT(rb.columns == 4);
+    TEST_ASSERT(rb.materialId == 3);
+    TEST_ASSERT(Near(rb.gravity, 10.0f));
+    TEST_ASSERT(rb.timelines.size() == 1);
+    TEST_ASSERT(rb.timelines[0].tag == TestMdxTag('K', 'R', 'A', 'L'));
+    return true;
+}

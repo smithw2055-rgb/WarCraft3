@@ -195,6 +195,7 @@ set(SOURCES
     src/render/mdx_skinning.cpp
     src/render/mdx_particles.cpp
     src/render/mdx_prem_particles.cpp
+    src/render/mdx_ribbons.cpp
     src/render/light_manager.cpp
     src/render/scene.cpp
     src/render/replaceable_ids.cpp

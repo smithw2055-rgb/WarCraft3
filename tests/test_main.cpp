@@ -174,6 +174,12 @@ bool TestMeleeAIDiscoversHumanPlan();
 bool TestMeleeAIEconomyGrows();
 bool TestMeleeAIAttackWave();
 bool TestMeleeAINativesWiring();
+bool TestMdxParsesRibbonEmitter();
+bool TestRibbonEmissionAndQuads();
+bool TestRibbonAboveBelowGeometry();
+bool TestRibbonAgeOut();
+bool TestRibbonGravitySinksVerts();
+bool TestRibbonParseAndAnimateRealModel();
 bool TestStructAllocAndMembers();
 bool TestStructMethodsAndThis();
 bool TestStructStaticAndCreate();
@@ -358,6 +364,12 @@ int main() {
         {"Melee AI economy grows", TestMeleeAIEconomyGrows},
         {"Melee AI attack wave", TestMeleeAIAttackWave},
         {"Melee AI natives wiring", TestMeleeAINativesWiring},
+        {"MDX parses ribbon emitter", TestMdxParsesRibbonEmitter},
+        {"Ribbon emission and quads", TestRibbonEmissionAndQuads},
+        {"Ribbon above/below geometry", TestRibbonAboveBelowGeometry},
+        {"Ribbon age out", TestRibbonAgeOut},
+        {"Ribbon gravity sinks verts", TestRibbonGravitySinksVerts},
+        {"Ribbon parse and animate real model", TestRibbonParseAndAnimateRealModel},
         {"Struct alloc and members", TestStructAllocAndMembers},
         {"Struct methods and this", TestStructMethodsAndThis},
         {"Struct static and create", TestStructStaticAndCreate},

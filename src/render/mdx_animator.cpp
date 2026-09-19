@@ -398,8 +398,23 @@ bool MdxAnimator::GetObjectWorldLocationYUp(int objectId, Vec3& outPosition) con
     return false;
 }
 
-bool MdxAnimator::GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const {
-    Mat4 matrix;
+bool MdxAnimator::GetObjectPivotAndWorldTransformYUp(int objectId, Vec3& outPivot, Mat4& outMatrix) const {
+    for (const auto& node : nodes_) {
+        if (node.objectId != objectId) {
+            continue;
+        }
+        if (node.pivotIndex >= 0 && pivotPoints_ && node.pivotIndex < (int)pivotPoints_->size()) {
+            const auto& mdxPivot = (*pivotPoints_)[(size_t)node.pivotIndex];
+            outPivot = {mdxPivot[0], mdxPivot[2], -mdxPivot[1]};
+        } else {
+            outPivot = {0, 0, 0};
+        }
+        return GetObjectWorldTransformYUp(objectId, outMatrix);
+    }
+    return false;
+}
+
+bool MdxAnimator::GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const {    Mat4 matrix;
     if (!GetObjectWorldTransformYUp(objectId, matrix)) {
         return false;
     }

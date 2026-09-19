@@ -39,6 +39,7 @@ add_executable(warsmash_tests
     test_jass_terrainedit.cpp
     test_jass_struct.cpp
     test_melee_ai.cpp
+    test_ribbons.cpp
     test_jass_unimplemented.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
@@ -47,6 +48,7 @@ add_executable(warsmash_tests
     ../src/map/unitsdoo.cpp
     ../src/map/wts.cpp
     ../src/asset/BLP.cpp
+    ../src/asset/DDS.cpp
     ../src/asset/stb_image.cpp
     ../src/core/map_path_resolver.cpp
     ../src/model/mdx.cpp
@@ -58,6 +60,8 @@ add_executable(warsmash_tests
     ../src/render/mdx_sequence_select.cpp
     ../src/render/mdx_skinning.cpp
     ../src/render/mdx_prem_particles.cpp
+    ../src/render/mdx_ribbons.cpp
+    ../src/render/replaceable_ids.cpp
     ../src/scripting/jass_animation_tags.cpp
     ../src/scripting/JassNatives.cpp
     ../src/scripting/JassLexer.cpp
