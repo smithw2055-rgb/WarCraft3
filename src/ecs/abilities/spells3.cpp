@@ -195,8 +195,8 @@ void CAbilityTranquility::DoEffect(CSimulation& game, CUnit* caster) {
 }
 
 // ===== Reincarnation =====
-CAbilityReincarnation::CAbilityReincarnation(int handleId)
-    : CAbilitySpellBase(handleId, War3ID("AOre"), CAbilityCategory::SPELL) {
+CAbilityReincarnation::CAbilityReincarnation(int handleId, War3ID code, int manaCost)
+    : CAbilitySpellBase(handleId, code, CAbilityCategory::SPELL), manaCost_(manaCost) {
     SetTargetType(CSpellTargetType::NO_TARGET);
     SetCooldown(0.0f);
     SetManaCost(0);

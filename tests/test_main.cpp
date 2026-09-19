@@ -183,6 +183,15 @@ bool TestItemClarityRegens();
 bool TestItemManaStealDrains();
 bool TestItemProtectionArmors();
 bool TestSpells8FactoryCoverage();
+bool TestOrbOfFrostChills();
+bool TestOrbOfCorruptionStrips();
+bool TestOrbOfFireProcs();
+bool TestIllusionCopiesTarget();
+bool TestLightningShieldWandZaps();
+bool TestAnkhReincarnates();
+bool TestBeastScrollRallies();
+bool TestHealingWardHeals();
+bool TestSpells9FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -442,6 +451,15 @@ int main() {
         {"Item mana steal drains", TestItemManaStealDrains},
         {"Item protection armors", TestItemProtectionArmors},
         {"Spells8 factory coverage", TestSpells8FactoryCoverage},
+        {"Orb of frost chills", TestOrbOfFrostChills},
+        {"Orb of corruption strips", TestOrbOfCorruptionStrips},
+        {"Orb of fire procs", TestOrbOfFireProcs},
+        {"Illusion copies target", TestIllusionCopiesTarget},
+        {"Lightning shield wand zaps", TestLightningShieldWandZaps},
+        {"Ankh reincarnates", TestAnkhReincarnates},
+        {"Beast scroll rallies", TestBeastScrollRallies},
+        {"Healing ward heals", TestHealingWardHeals},
+        {"Spells9 factory coverage", TestSpells9FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

@@ -449,3 +449,31 @@ CBuff* CBuffClarity::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffHealingWard =====
+CBuffHealingWard::CBuffHealingWard(float duration, float healPerTick, float radius)
+    : CBuff(War3ID("Bhwd"), duration, true)
+    , healPerTick_(healPerTick), radius_(radius) {
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffHealingWard::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    for (auto* unit : game.GetUnits()) {
+        if (!unit || unit->IsDead()) continue;
+        if (unit->GetPlayerIndex() != target->GetPlayerIndex()) continue;
+        const float dx = unit->GetX() - target->GetX();
+        const float dy = unit->GetY() - target->GetY();
+        if (dx * dx + dy * dy <= radius_ * radius_) {
+            float life = unit->GetLife() + healPerTick_;
+            if (life > unit->GetMaxLife()) life = unit->GetMaxLife();
+            unit->SetLife(game, life);
+        }
+    }
+}
+
+CBuff* CBuffHealingWard::Clone() const {
+    auto* copy = new CBuffHealingWard(duration_, healPerTick_, radius_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

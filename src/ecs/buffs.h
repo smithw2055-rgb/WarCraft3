@@ -244,3 +244,17 @@ public:
 private:
     float regenBonus_;
 };
+
+// Healing Ward - periodic heal for the bearer's allies in radius.
+// (Mirrors CBuffLightningShield with the opposite sign.)
+class CBuffHealingWard : public CBuff {
+public:
+    CBuffHealingWard(float duration, float healPerTick, float radius);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float healPerTick_;
+    float radius_;
+};

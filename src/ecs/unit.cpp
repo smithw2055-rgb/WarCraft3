@@ -3,6 +3,7 @@
 #include "ecs/buffs.h"
 #include "ecs/abilities/spells4.h"
 #include "ecs/abilities/spells5.h"
+#include "ecs/abilities/spells9.h"
 #include "behaviors/behavior_move.h"
 #include "behaviors/behavior_attack.h"
 #include "behaviors/behavior_stop.h"
@@ -761,6 +762,25 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
             if (simulation.SimRand01() < bash->GetChance()) {
                 AddBuff(std::make_unique<CBuffStun>(bash->GetDuration()), simulation);
             }
+        }
+    }
+
+    // Orb attack modifiers (ref orb listeners): frost chills, corruption
+    // strips armor, fire adds a spell-damage proc. Same isAttack guard as
+    // Bash; procs deal non-attack damage so they never re-proc.
+    if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
+        if (auto* frost = dynamic_cast<CAbilityOrbOfFrost*>(source->GetAbility(War3ID("AIob")))) {
+            AddBuff(std::make_unique<CBuffSlow>(
+                frost->GetDuration(), frost->GetSlowPercent(), source->GetHandleId()), simulation);
+        }
+        if (auto* corr = dynamic_cast<CAbilityOrbOfCorruption*>(source->GetAbility(War3ID("AIcb")))) {
+            AddBuff(std::make_unique<CBuffArmor>(
+                War3ID("AIcb"), corr->GetDuration(), corr->GetArmorPenalty(), false), simulation);
+        }
+        if (auto* fire = dynamic_cast<CAbilityOrbOfFire*>(source->GetAbility(War3ID("AIfb")))) {
+            Damage(simulation, source, false, false,
+                   CAttackType::SPELLS, CDamageType::FIRE,
+                   "", fire->GetBonusDamage(), 0);
         }
     }
 

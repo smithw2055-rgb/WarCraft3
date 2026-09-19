@@ -90,13 +90,15 @@ private:
 };
 
 // ===== Reincarnation (Tauren Chieftain) - revive on death =====
+// Generalized for Ankh of Reincarnation (AIrc, no mana cost);
+// single-use consumption stays inventory-side.
 class CAbilityReincarnation : public CAbilitySpellBase {
 public:
-    CAbilityReincarnation(int handleId);
+    CAbilityReincarnation(int handleId, War3ID code = War3ID("AOre"), int manaCost = 150);
     void OnDeath(CSimulation& game, CUnit* unit) override;
     void OnTick(CSimulation& game, CUnit* unit) override;
 private:
-    int manaCost_ = 150;
+    int manaCost_;
     float reincarnateCooldown_ = 240.0f;
     float reincarnateRemaining_ = 0.0f;
 };
