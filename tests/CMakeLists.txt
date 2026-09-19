@@ -29,6 +29,7 @@ add_executable(warsmash_tests
     test_ability_builder.cpp
     test_spells3.cpp
     test_spells4.cpp
+    test_spells5.cpp
     test_vfs_overlay.cpp
     test_map_data.cpp
     test_jass_orders_terrain.cpp
@@ -139,6 +140,7 @@ add_executable(warsmash_tests
     ../src/ecs/abilities/spells2.cpp
     ../src/ecs/abilities/spells3.cpp
     ../src/ecs/abilities/spells4.cpp
+    ../src/ecs/abilities/spells5.cpp
     ../src/ecs/abilities/spells3.cpp
     ../src/ecs/abilities/auras.cpp
     ../src/ecs/abilities/ability_builder.cpp

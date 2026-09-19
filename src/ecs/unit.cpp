@@ -2,6 +2,7 @@
 #include "csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/abilities/spells4.h"
+#include "ecs/abilities/spells5.h"
 #include "behaviors/behavior_move.h"
 #include "behaviors/behavior_attack.h"
 #include "behaviors/behavior_stop.h"
@@ -711,6 +712,16 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                                "", reflected, 0);
             }
             break;
+        }
+        // Spiked Carapace (Crypt Lord passive): same melee-only reflect
+        // terms as thorns; the armor half rides the unit bonus field.
+        if (auto* carapace = dynamic_cast<CAbilitySpikedCarapace*>(GetAbility(War3ID("AUts")))) {
+            float reflected = actualDamage * carapace->GetReflectPercent();
+            if (reflected > 0) {
+                source->Damage(simulation, nullptr, false, false,
+                               CAttackType::SPELLS, CDamageType::DEFENSIVE,
+                               "", reflected, 0);
+            }
         }
     }
 

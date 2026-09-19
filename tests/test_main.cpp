@@ -146,6 +146,15 @@ bool TestAnimateDeadRaisesInvulnerable();
 bool TestDoomDotsAndSpawnsGuard();
 bool TestVolcanoErupts();
 bool TestSpells4FactoryCoverage();
+bool TestFlameStrikeWaves();
+bool TestDeathAndDecayHitsAll();
+bool TestImpaleLineStuns();
+bool TestFanOfKnivesHitsEnemiesOnly();
+bool TestRainOfFireWaves();
+bool TestSpikedCarapaceArmorAndReflect();
+bool TestDarkRitualGrantsMana();
+bool TestShadowStrikeSlowsAndPoisons();
+bool TestSpells5FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -368,6 +377,15 @@ int main() {
         {"Doom DoTs and spawns guard", TestDoomDotsAndSpawnsGuard},
         {"Volcano erupts", TestVolcanoErupts},
         {"Spells4 factory coverage", TestSpells4FactoryCoverage},
+        {"Flame strike waves", TestFlameStrikeWaves},
+        {"Death and decay hits all", TestDeathAndDecayHitsAll},
+        {"Impale line stuns", TestImpaleLineStuns},
+        {"Fan of knives hits enemies only", TestFanOfKnivesHitsEnemiesOnly},
+        {"Rain of fire waves", TestRainOfFireWaves},
+        {"Spiked carapace armor and reflect", TestSpikedCarapaceArmorAndReflect},
+        {"Dark ritual grants mana", TestDarkRitualGrantsMana},
+        {"Shadow strike slows and poisons", TestShadowStrikeSlowsAndPoisons},
+        {"Spells5 factory coverage", TestSpells5FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},
