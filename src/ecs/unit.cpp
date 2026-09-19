@@ -4,6 +4,7 @@
 #include "ecs/abilities/spells4.h"
 #include "ecs/abilities/spells5.h"
 #include "ecs/abilities/spells9.h"
+#include "ecs/abilities/spells10.h"
 #include "behaviors/behavior_move.h"
 #include "behaviors/behavior_attack.h"
 #include "behaviors/behavior_stop.h"
@@ -781,6 +782,33 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
             Damage(simulation, source, false, false,
                    CAttackType::SPELLS, CDamageType::FIRE,
                    "", fire->GetBonusDamage(), 0);
+        }
+        // Searing Arrows (Priestess toggle): same fire-proc shape as the
+        // orb; per-shot mana cost is behavior-side.
+        if (auto* searing = dynamic_cast<CAbilitySearingArrows*>(source->GetAbility(War3ID("AHfa")))) {
+            Damage(simulation, source, false, false,
+                   CAttackType::SPELLS, CDamageType::FIRE,
+                   "", searing->GetBonusDamage(), 0);
+        }
+        // Cleaving Attack (Pit Lord): share of the landed damage splashes
+        // to the victim's neighbors (ref cleave). Non-attack damage so the
+        // splash itself never re-procs.
+        if (auto* cleave = dynamic_cast<CAbilityCleavingAttack*>(source->GetAbility(War3ID("ANca")))) {
+            const float splash = actualDamage * cleave->GetSplashFraction();
+            const float radius = cleave->GetSplashRadius();
+            if (splash > 0) {
+                for (auto* unit : simulation.GetUnits()) {
+                    if (!unit || unit->IsDead() || unit == this || unit == source) continue;
+                    if (unit->GetPlayerIndex() == source->GetPlayerIndex()) continue;
+                    const float dx = unit->GetX() - GetX();
+                    const float dy = unit->GetY() - GetY();
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        unit->Damage(simulation, source, false, false,
+                                     CAttackType::SPELLS, CDamageType::NORMAL,
+                                     "", splash, 0);
+                    }
+                }
+            }
         }
     }
 

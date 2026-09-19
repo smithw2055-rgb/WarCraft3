@@ -192,6 +192,15 @@ bool TestAnkhReincarnates();
 bool TestBeastScrollRallies();
 bool TestHealingWardHeals();
 bool TestSpells9FactoryCoverage();
+bool TestCleavingAttackSplashes();
+bool TestSearingArrowsProc();
+bool TestEnsnareRoots();
+bool TestAncestralSpiritRevives();
+bool TestHealingWardUnitHeals();
+bool TestUnstableConcoctionBlasts();
+bool TestAbolishMagicStripsArea();
+bool TestClusterRocketsBlast();
+bool TestSpells10FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -460,6 +469,15 @@ int main() {
         {"Beast scroll rallies", TestBeastScrollRallies},
         {"Healing ward heals", TestHealingWardHeals},
         {"Spells9 factory coverage", TestSpells9FactoryCoverage},
+        {"Cleaving attack splashes", TestCleavingAttackSplashes},
+        {"Searing arrows proc", TestSearingArrowsProc},
+        {"Ensnare roots", TestEnsnareRoots},
+        {"Ancestral spirit revives", TestAncestralSpiritRevives},
+        {"Healing ward unit heals", TestHealingWardUnitHeals},
+        {"Unstable concoction blasts", TestUnstableConcoctionBlasts},
+        {"Abolish magic strips area", TestAbolishMagicStripsArea},
+        {"Cluster rockets blast", TestClusterRocketsBlast},
+        {"Spells10 factory coverage", TestSpells10FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

@@ -477,3 +477,23 @@ CBuff* CBuffHealingWard::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffEnsnare =====
+CBuffEnsnare::CBuffEnsnare(float duration)
+    : CBuff(War3ID("Bena"), duration, false) {}
+
+void CBuffEnsnare::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->SetRooted(true);
+}
+
+void CBuffEnsnare::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->SetRooted(false);
+}
+
+CBuff* CBuffEnsnare::Clone() const {
+    auto* copy = new CBuffEnsnare(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

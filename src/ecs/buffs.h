@@ -258,3 +258,14 @@ private:
     float healPerTick_;
     float radius_;
 };
+
+// Ensnare - roots the bearer in place (movement behaviors honor
+// IsRooted(); cf. Ancient root). Attacking still works.
+class CBuffEnsnare : public CBuff {
+public:
+    explicit CBuffEnsnare(float duration);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+};
