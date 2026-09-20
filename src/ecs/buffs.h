@@ -310,3 +310,57 @@ public:
     void OnRemove(CSimulation& game, CUnit* target) override;
     CBuff* Clone() const override;
 };
+
+// Alternate-form morph (Metamorphosis, Bear/Raven/Robo): swaps the
+// bearer's type snapshot, restoring it on removal. Graceful without
+// unit data (ref summon-without-data).
+class CBuffTransform : public CBuff {
+public:
+    CBuffTransform(War3ID id, float duration, War3ID formId);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    War3ID formId_;
+};
+
+// Avatar - god-rage: bonus damage and life plus spell immunity (the
+// immunity hook lives in CUnit::Damage).
+class CBuffAvatar : public CBuff {
+public:
+    CBuffAvatar(float duration, int bonusDamage, int bonusLife);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    int bonusDamage_;
+    int bonusLife_;
+};
+
+// Stone Form - living statue: invulnerable and rooted (cf. Burrow
+// without the stealth).
+class CBuffStoneForm : public CBuff {
+public:
+    explicit CBuffStoneForm(float duration);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+};
+
+// Mana siphon - periodic mana drain, feeding the caster (cf. Life Drain
+// with mana instead of life).
+class CBuffManaSiphon : public CBuff {
+public:
+    CBuffManaSiphon(float duration, float manaPerTick, int casterHandle);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float manaPerTick_;
+};

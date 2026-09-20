@@ -2,6 +2,7 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/behaviors/behavior_stun.h"
+#include "data/unitdata.h"
 #include <memory>
 
 // ===== CBuffSlow =====
@@ -549,6 +550,109 @@ void CBuffBurrow::OnRemove(CSimulation& game, CUnit* target) {
 
 CBuff* CBuffBurrow::Clone() const {
     auto* copy = new CBuffBurrow(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffTransform =====
+CBuffTransform::CBuffTransform(War3ID id, float duration, War3ID formId)
+    : CBuff(id, duration, true), formId_(formId) {}
+
+void CBuffTransform::OnApply(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    CUnitData* data = game.GetUnitData();
+    if (!data) return;
+    if (CUnitType* form = data->GetUnitType(formId_)) {
+        target->MorphTo(form, formId_);
+    }
+}
+
+void CBuffTransform::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->Unmorph();
+}
+
+CBuff* CBuffTransform::Clone() const {
+    auto* copy = new CBuffTransform(GetId(), duration_, formId_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffAvatar =====
+CBuffAvatar::CBuffAvatar(float duration, int bonusDamage, int bonusLife)
+    : CBuff(War3ID("BAvt"), duration, true)
+    , bonusDamage_(bonusDamage), bonusLife_(bonusLife) {}
+
+void CBuffAvatar::OnApply(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    target->AddBonusDamage(bonusDamage_);
+    target->AddBonusMaxLife((float)bonusLife_);
+    float life = target->GetLife() + (float)bonusLife_;
+    if (life > target->GetMaxLife()) life = target->GetMaxLife();
+    target->SetLife(game, life);
+}
+
+void CBuffAvatar::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    target->AddBonusDamage(-bonusDamage_);
+    target->AddBonusMaxLife(-(float)bonusLife_);
+}
+
+CBuff* CBuffAvatar::Clone() const {
+    auto* copy = new CBuffAvatar(duration_, bonusDamage_, bonusLife_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffStoneForm =====
+CBuffStoneForm::CBuffStoneForm(float duration)
+    : CBuff(War3ID("Bstm"), duration, true) {}
+
+void CBuffStoneForm::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    target->SetInvulnerable(true);
+    target->SetRooted(true);
+}
+
+void CBuffStoneForm::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    target->SetInvulnerable(false);
+    target->SetRooted(false);
+}
+
+CBuff* CBuffStoneForm::Clone() const {
+    auto* copy = new CBuffStoneForm(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffManaSiphon =====
+CBuffManaSiphon::CBuffManaSiphon(float duration, float manaPerTick, int casterHandle)
+    : CBuff(War3ID("Bsip"), duration, false), manaPerTick_(manaPerTick) {
+    casterHandleId_ = casterHandle;
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffManaSiphon::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    float drained = manaPerTick_;
+    if (drained > target->GetMana()) drained = target->GetMana();
+    if (drained <= 0) return;
+    target->SetMana(target->GetMana() - drained);
+    if (CUnit* caster = game.GetUnit(casterHandleId_)) {
+        if (!caster->IsDead()) {
+            float mana = caster->GetMana() + drained;
+            if (mana > (float)caster->GetMaxMana()) mana = (float)caster->GetMaxMana();
+            caster->SetMana(mana);
+        }
+    }
+}
+
+CBuff* CBuffManaSiphon::Clone() const {
+    auto* copy = new CBuffManaSiphon(duration_, manaPerTick_, casterHandleId_);
     copy->remaining_ = remaining_;
     return copy;
 }

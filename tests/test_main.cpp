@@ -220,6 +220,15 @@ bool TestCannibalizeEats();
 bool TestCarrionBeetlesRise();
 bool TestWebGroundsFlyers();
 bool TestSpells12FactoryCoverage();
+bool TestMetamorphosisMorphs();
+bool TestBearFormMorphs();
+bool TestRavenFormMorphs();
+bool TestRoboGoblinMorphs();
+bool TestStoneFormStatues();
+bool TestAvatarRages();
+bool TestSiphonManaDrains();
+bool TestBigBadVoodooShields();
+bool TestSpells13FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -516,6 +525,15 @@ int main() {
         {"Carrion beetles rise", TestCarrionBeetlesRise},
         {"Web grounds flyers", TestWebGroundsFlyers},
         {"Spells12 factory coverage", TestSpells12FactoryCoverage},
+        {"Metamorphosis morphs", TestMetamorphosisMorphs},
+        {"Bear form morphs", TestBearFormMorphs},
+        {"Raven form morphs", TestRavenFormMorphs},
+        {"Robo-goblin morphs", TestRoboGoblinMorphs},
+        {"Stone form statues", TestStoneFormStatues},
+        {"Avatar rages", TestAvatarRages},
+        {"Siphon mana drains", TestSiphonManaDrains},
+        {"Big bad voodoo shields", TestBigBadVoodooShields},
+        {"Spells13 factory coverage", TestSpells13FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

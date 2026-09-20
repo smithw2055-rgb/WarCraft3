@@ -132,6 +132,57 @@ void CUnit::RefreshMaxManaTotal() {
     if (mana_ > (float)maxMana_) mana_ = (float)maxMana_;
 }
 
+void CUnit::MorphTo(CUnitType* form, War3ID formId) {
+    if (!form) return;
+    if (!morphed_) {
+        morphed_ = true;
+        originalType_ = unitType_;
+        originalTypeId_ = typeId_;
+        savedSpeed_ = speed_;
+        savedBaseMaxLife_ = baseMaxLife_;
+        savedBaseMaxMana_ = baseMaxMana_;
+        savedDefense_ = currentDefense_;
+        savedTurnRate_ = turnRate_;
+        savedMovementType_ = movementType_;
+        savedCollisionSize_ = collisionSize_;
+        savedBuilding_ = isBuilding_;
+        savedFlyHeight_ = GetFlyHeight();
+    }
+    // Attacks read unitType_ live, so the form's arsenal (and model,
+    // render-side) applies immediately. Hero/ability state is untouched.
+    unitType_ = form;
+    typeId_ = formId;
+    speed_ = form->GetSpeed();
+    baseMaxLife_ = form->GetMaxLife();
+    baseMaxMana_ = form->GetManaMaximum();
+    currentDefense_ = form->GetDefense();
+    turnRate_ = form->GetTurnRate();
+    movementType_ = form->GetMovementType();
+    collisionSize_ = form->GetCollisionSize();
+    isBuilding_ = form->IsBuilding();
+    SetFlyHeight(form->GetDefaultFlyingHeight());
+    RefreshMaxLifeTotal();
+    RefreshMaxManaTotal();
+}
+
+void CUnit::Unmorph() {
+    if (!morphed_) return;
+    morphed_ = false;
+    unitType_ = originalType_;
+    typeId_ = originalTypeId_;
+    speed_ = savedSpeed_;
+    baseMaxLife_ = savedBaseMaxLife_;
+    baseMaxMana_ = savedBaseMaxMana_;
+    currentDefense_ = savedDefense_;
+    turnRate_ = savedTurnRate_;
+    movementType_ = savedMovementType_;
+    collisionSize_ = savedCollisionSize_;
+    isBuilding_ = savedBuilding_;
+    SetFlyHeight(savedFlyHeight_);
+    RefreshMaxLifeTotal();
+    RefreshMaxManaTotal();
+}
+
 void CUnit::AddBonusMaxLife(float v) {
     bonusMaxLife_ += v;
     RefreshMaxLifeTotal();
@@ -705,6 +756,9 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                     const std::string& weaponSoundType,
                     float damage, float bonusDamage) {
     if (invulnerable_) return 0;
+
+    // Avatar (Mountain King): spell immunity while the god-rage holds.
+    if (attackType == CAttackType::SPELLS && GetBuff(War3ID("BAvt"))) return 0;
 
     // Single shared formula (ref CUnit.damage): attack-type table always
     // applies; armor value only matters for Normal damage type.

@@ -272,6 +272,11 @@ public:
     void SetUseFood(bool v) { useFood_ = v; }
     // Revive a dead hero at a position (ref ReviveHero).
     void Revive(CSimulation& game, float x, float y);
+    // Alternate-form morph (Metamorphosis, Bear/Raven/Robo forms):
+    // swaps the type snapshot, saving the original for Unmorph().
+    void MorphTo(CUnitType* form, War3ID formId);
+    void Unmorph();
+    bool IsMorphed() const { return morphed_; }
 
     // Fly height
     float GetDefaultFlyHeight() const { return flyHeight_; }
@@ -355,6 +360,19 @@ private:
     bool rooted_ = false;
     bool invisible_ = false;
     bool detector_ = false;
+    // Morph snapshot (ref alternate-form units).
+    bool morphed_ = false;
+    CUnitType* originalType_ = nullptr;
+    War3ID originalTypeId_ = War3ID();
+    int savedSpeed_ = 0;
+    int savedBaseMaxLife_ = 0;
+    int savedBaseMaxMana_ = 0;
+    int savedDefense_ = 0;
+    float savedTurnRate_ = 0.0f;
+    PathingGridMovementType savedMovementType_ = PathingGridMovementType::FOOT;
+    float savedCollisionSize_ = 0.0f;
+    bool savedBuilding_ = false;
+    float savedFlyHeight_ = 0.0f;
     bool constructionPaused_ = false;
     float constructionProgress_ = 0;
     int deathTurnTick_ = 0;
