@@ -1,6 +1,8 @@
 #pragma once
 #include "ecs/ability.h"
 
+struct CAbilityDefFull;
+
 // Spell targeting type
 enum class CSpellTargetType : uint8_t {
     NO_TARGET,      // Instant cast, no target needed
@@ -40,9 +42,13 @@ public:
     int GetManaCost() const { return manaCost_; }
     void SetManaCost(int v) { manaCost_ = v; }
     int GetLevel() const { return level_; }
-    void SetLevel(int v) { level_ = v; }
+    void SetLevel(int v);
     int GetMaxLevel() const { return maxLevel_; }
     void SetMaxLevel(int v) { maxLevel_ = v; }
+    // Retail per-level numbers (cooldown/mana/range/cast point) override
+    // the hardcoded constructor defaults; the def pointer is cached so
+    // hero skill level-ups re-apply the new level's row.
+    void ApplyData(const CAbilityDefFull& def);
 
     // Order validation
     bool CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const override;
@@ -75,4 +81,5 @@ protected:
     int level_ = 1;
     int maxLevel_ = 3;
     float cooldownRemaining_ = 0;
+    const CAbilityDefFull* dataDef_ = nullptr;
 };

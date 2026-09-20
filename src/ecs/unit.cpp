@@ -1,6 +1,8 @@
 #include "unit.h"
 #include "csimulation.h"
 #include "ecs/buffs.h"
+#include "ecs/abilities/ability_spell_base.h"
+#include "data/abilitydata.h"
 #include "ecs/abilities/spells4.h"
 #include "ecs/abilities/spells5.h"
 #include "ecs/abilities/spells9.h"
@@ -260,6 +262,16 @@ void CUnit::AddAbility(CSimulation& game, std::unique_ptr<CAbility> ability) {
     CAbility* rawPtr = ability.get();
     ownedAbilities_.push_back(std::move(ability));
     abilities_.push_back(rawPtr);
+
+    // Retail per-level numbers override the hardcoded constructor
+    // defaults when ability data is loaded (ref AbilityData.slk).
+    if (auto* spell = dynamic_cast<CAbilitySpellBase*>(rawPtr)) {
+        if (CAbilityData* data = game.GetAbilityData()) {
+            if (const CAbilityDefFull* def = data->GetAbility(spell->GetAlias())) {
+                spell->ApplyData(*def);
+            }
+        }
+    }
 
     // Call OnAdd if not disabled
     if (!rawPtr->IsDisabled()) {

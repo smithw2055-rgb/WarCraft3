@@ -31,6 +31,23 @@ struct CAbilityDefFull {
     int levels = 1;
     int race = 0;
 
+    // Per-level combat fields (level 1 at index 0; retail repeats the
+    // last level into higher blocks, so over-long vectors are normal).
+    // Missing blocks fall back to the level-1 scalar above.
+    std::vector<float> cooldowns;
+    std::vector<int> manaCosts;
+    std::vector<float> castTimes;
+    std::vector<float> durations;
+    std::vector<float> areas;
+    std::vector<float> ranges;
+
+    float CooldownAt(int level) const;
+    int ManaCostAt(int level) const;
+    float CastTimeAt(int level) const;
+    float DurationAt(int level) const;
+    float AreaAt(int level) const;
+    float RangeAt(int level) const;
+
     // Effect/sound art per effecttype ordinal (ref ConvertEffectType 0..6:
     // EFFECT/TARGET/CASTER/SPECIAL/AREA_EFFECT/MISSILE/LIGHTNING), from the
     // ability Func profile skin tables. Empty when the profile has none.

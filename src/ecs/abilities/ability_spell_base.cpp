@@ -2,11 +2,26 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/behaviors/behavior_spell.h"
+#include "data/abilitydata.h"
 #include <iostream>
 
 CAbilitySpellBase::CAbilitySpellBase(int handleId, War3ID code, CAbilityCategory category)
     : CAbility(handleId, code, category) {
     iconShowing_ = true;
+}
+
+void CAbilitySpellBase::SetLevel(int v) {
+    level_ = v;
+    if (dataDef_) ApplyData(*dataDef_);
+}
+
+void CAbilitySpellBase::ApplyData(const CAbilityDefFull& def) {
+    dataDef_ = &def;
+    maxLevel_ = def.levels;
+    cooldown_ = def.CooldownAt(level_);
+    manaCost_ = def.ManaCostAt(level_);
+    castRange_ = def.RangeAt(level_);
+    castPoint_ = def.CastTimeAt(level_);
 }
 
 bool CAbilitySpellBase::CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const {

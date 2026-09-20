@@ -39,6 +39,7 @@ add_executable(warsmash_tests
     test_spells12.cpp
     test_spells13.cpp
     test_spells14.cpp
+    test_ability_levels.cpp
     test_vfs_overlay.cpp
     test_map_data.cpp
     test_jass_orders_terrain.cpp

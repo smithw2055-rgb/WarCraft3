@@ -323,6 +323,29 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq, const std::string&
         if (colArea1 >= 0) def->area = (float)std::atof(abilitySlk.GetString(r, colArea1, "0").c_str());
         if (colRng1 >= 0) def->range = (float)std::atof(abilitySlk.GetString(r, colRng1, "0").c_str());
         if (colLevels >= 0) def->levels = std::max(1, abilitySlk.GetInt(r, colLevels, 1));
+
+        // Per-level combat fields (Cast/Dur/Cool/Cost/Area/Rng blocks 1..N;
+        // retail pads past `levels`, so over-long vectors are normal).
+        for (int level = 1; level <= 12; level++) {
+            const std::string n = std::to_string(level);
+            const int colCool = col("Cool" + n);
+            if (colCool < 0) break;
+            const int colCost = col("Cost" + n);
+            const int colCast = col("Cast" + n);
+            const int colDur = col("Dur" + n);
+            const int colArea = col("Area" + n);
+            const int colRng = col("Rng" + n);
+            def->cooldowns.push_back((float)std::atof(abilitySlk.GetString(r, colCool, "0").c_str()));
+            def->manaCosts.push_back((colCost >= 0) ? abilitySlk.GetInt(r, colCost, 0) : 0);
+            def->castTimes.push_back((colCast >= 0)
+                ? (float)std::atof(abilitySlk.GetString(r, colCast, "0").c_str()) : 0.0f);
+            def->durations.push_back((colDur >= 0)
+                ? (float)std::atof(abilitySlk.GetString(r, colDur, "0").c_str()) : 0.0f);
+            def->areas.push_back((colArea >= 0)
+                ? (float)std::atof(abilitySlk.GetString(r, colArea, "0").c_str()) : 0.0f);
+            def->ranges.push_back((colRng >= 0)
+                ? (float)std::atof(abilitySlk.GetString(r, colRng, "0").c_str()) : 0.0f);
+        }
         if (colRace >= 0) {
             std::string raceStr = abilitySlk.GetString(r, colRace, "");
             if (raceStr == "human") def->race = 1;
@@ -387,6 +410,50 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq, const std::string&
 
 bool CAbilityData::HasAbility(War3ID id) const {
     return abilities_.find(id) != abilities_.end();
+}
+
+namespace {
+
+int ClampAbilityLevel(const CAbilityDefFull* def, int level) {
+    if (!def || def->levels <= 0) return 1;
+    if (level < 1) return 1;
+    if (level > def->levels) return def->levels;
+    return level;
+}
+
+template <typename T>
+T LevelOr(const std::vector<T>& values, int level, T fallback) {
+    if (values.empty()) return fallback;
+    int index = level - 1;
+    if (index < 0) index = 0;
+    if (index >= (int)values.size()) index = (int)values.size() - 1;
+    return values[(size_t)index];
+}
+
+} // namespace
+
+float CAbilityDefFull::CooldownAt(int level) const {
+    return LevelOr(cooldowns, ClampAbilityLevel(this, level), cooldown);
+}
+
+int CAbilityDefFull::ManaCostAt(int level) const {
+    return LevelOr(manaCosts, ClampAbilityLevel(this, level), manaCost);
+}
+
+float CAbilityDefFull::CastTimeAt(int level) const {
+    return LevelOr(castTimes, ClampAbilityLevel(this, level), castTime);
+}
+
+float CAbilityDefFull::DurationAt(int level) const {
+    return LevelOr(durations, ClampAbilityLevel(this, level), duration);
+}
+
+float CAbilityDefFull::AreaAt(int level) const {
+    return LevelOr(areas, ClampAbilityLevel(this, level), area);
+}
+
+float CAbilityDefFull::RangeAt(int level) const {
+    return LevelOr(ranges, ClampAbilityLevel(this, level), range);
 }
 
 const CAbilityDefFull* CAbilityData::GetAbility(War3ID id) const {

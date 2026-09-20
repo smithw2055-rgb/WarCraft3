@@ -238,6 +238,10 @@ bool TestDiseaseCloudSickens();
 bool TestPulverizeSlams();
 bool TestForkedLightningChains();
 bool TestSpells14FactoryCoverage();
+bool TestAbilityLevelsParse();
+bool TestAbilityLevelsApplyOnAdd();
+bool TestAbilityLevelsFollowSkillLevel();
+bool TestAbilityLevelsFallbackWithoutData();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -552,6 +556,10 @@ int main() {
         {"Pulverize slams", TestPulverizeSlams},
         {"Forked lightning chains", TestForkedLightningChains},
         {"Spells14 factory coverage", TestSpells14FactoryCoverage},
+        {"Ability levels parse", TestAbilityLevelsParse},
+        {"Ability levels apply on add", TestAbilityLevelsApplyOnAdd},
+        {"Ability levels follow skill level", TestAbilityLevelsFollowSkillLevel},
+        {"Ability levels fallback without data", TestAbilityLevelsFallbackWithoutData},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},
