@@ -264,6 +264,7 @@ bool TestAbilityEffectDataFollowsLevel();
 bool TestAbilityEffectDataRoundTwo();
 bool TestAbilityEffectDataRoundThree();
 bool TestAbilityEffectDataRoundFour();
+bool TestAbilityEffectDataRoundFive();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -604,6 +605,7 @@ int main() {
         {"Ability effect data round two", TestAbilityEffectDataRoundTwo},
         {"Ability effect data round three", TestAbilityEffectDataRoundThree},
         {"Ability effect data round four", TestAbilityEffectDataRoundFour},
+        {"Ability effect data round five", TestAbilityEffectDataRoundFive},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

@@ -427,3 +427,91 @@ bool TestAbilityEffectDataRoundFour() {
     TEST_ASSERT(regular->GetLife() == regularBefore);
     return true;
 }
+
+bool TestAbilityEffectDataRoundFive() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    CAbilityData abilityData;
+    LoadAbilityData(mpq, abilityData);
+
+    // Parse spot-checks for the converted old abilities.
+    TEST_ASSERT(abilityData.GetAbility(War3ID("AOsf"))->DataIntAt(1, 1, 0) == 2);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("AOeq"))->DataFloatAt(1, 1, 0.0f) == 50.0f);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("AOeq"))->DataFloatAt(1, 3, 0.0f) == 250.0f);
+    // Single-level ultimates clamp higher requests to level 1.
+    TEST_ASSERT(abilityData.GetAbility(War3ID("AOeq"))->DataFloatAt(2, 1, 0.0f) == 50.0f);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANfd"))->DataFloatAt(1, 2, 0.0f) == 500.0f);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANdp"))->DataIntAt(1, 1, 0) == 3);
+
+    CSimulation sim;
+    AddPlayers(sim);
+    sim.SetAbilityData(&abilityData);
+    auto* caster = AdoptAt(sim, 1571, 0, 0, 0);
+    auto* target = AdoptAt(sim, 1572, 1, 100, 0);
+    Settle(sim);
+
+    // Divine Shield level 2 lasts 30.
+    caster->AddAbility(sim, std::make_unique<CAbilityDivineShield>(15701));
+    auto* shield = dynamic_cast<CAbilityDivineShield*>(caster->GetAbility(War3ID("AHds")));
+    TEST_ASSERT(shield != nullptr);
+    shield->SetLevel(2);
+    shield->DoEffect(sim, caster);
+    TEST_ASSERT(caster->GetBuff(War3ID("Bdsh")) != nullptr);
+    TEST_ASSERT(caster->GetBuff(War3ID("Bdsh"))->GetRemaining() == 30.0f);
+
+    // Roots pin and burn.
+    CAbilityEntanglingRoots roots(15702);
+    roots.DoEffect(sim, caster, target);
+    TEST_ASSERT(target->GetBuff(War3ID("Bena")) != nullptr);
+    TEST_ASSERT(target->GetBuff(War3ID("Bpoi")) != nullptr);
+    TEST_ASSERT(target->IsRooted());
+
+    // Silence level 2: 20 seconds of quiet.
+    caster->AddAbility(sim, std::make_unique<CAbilitySilence>(15703));
+    auto* silence = dynamic_cast<CAbilitySilence*>(caster->GetAbility(War3ID("ANsi")));
+    TEST_ASSERT(silence != nullptr);
+    silence->SetLevel(2);
+    silence->DoEffect(sim, caster, 100, 0);
+    TEST_ASSERT(target->GetBuff(War3ID("BNsi")) != nullptr);
+    TEST_ASSERT(target->GetBuff(War3ID("BNsi"))->GetRemaining() == 20.0f);
+
+    // Black Arrow level 3: DataA 20, pierce vs unarmored x1.5.
+    caster->AddAbility(sim, std::make_unique<CAbilityBlackArrow>(15704));
+    // Black Arrow level 2: DataA 10, pierce vs none x1.0.
+    auto* arrow = dynamic_cast<CAbilityBlackArrow*>(caster->GetAbility(War3ID("ANba")));
+    TEST_ASSERT(arrow != nullptr);
+    arrow->SetLevel(2);
+    const float arrowBefore = target->GetLife();
+    arrow->DoEffect(sim, caster, target);
+    TEST_ASSERT(arrowBefore - target->GetLife() == 10.0f);
+
+    // Life Drain level 2: exactly one 40-tick in 25 updates.
+    caster->AddAbility(sim, std::make_unique<CAbilityLifeDrain>(15705));
+    auto* drain = dynamic_cast<CAbilityLifeDrain*>(caster->GetAbility(War3ID("ANdr")));
+    TEST_ASSERT(drain != nullptr);
+    drain->SetLevel(2);
+    // Life Drain: level 2 out-drains level 1 over identical ticks
+    // (twin targets cancel regen noise).
+    auto* leech = AdoptAt(sim, 1576, 0, 400, 0);
+    auto* drained1 = AdoptAt(sim, 1577, 1, 500, 0);
+    auto* drained2 = AdoptAt(sim, 1578, 1, 600, 0);
+    Settle(sim);
+    CAbilityLifeDrain drain1(15709);
+    drain1.DoEffect(sim, leech, drained1);
+    drain->DoEffect(sim, leech, drained2);
+    const float before1 = drained1->GetLife();
+    const float before2 = drained2->GetLife();
+    for (int i = 0; i < 25; i++) sim.Update();
+    const float loss1 = before1 - drained1->GetLife();
+    const float loss2 = before2 - drained2->GetLife();
+    TEST_ASSERT(loss1 > 0.0f && loss2 > 0.0f);
+    TEST_ASSERT(loss2 > loss1); // L2 40/tick beats L1 25/tick
+
+    // Finger of Death still executes non-heroes.
+    auto* doomed = AdoptAt(sim, 1573, 1, 200, 0);
+    Settle(sim);
+    CAbilityFingerOfDeath finger(15706);
+    finger.DoEffect(sim, caster, doomed);
+    TEST_ASSERT(doomed->IsDead());
+    return true;
+}

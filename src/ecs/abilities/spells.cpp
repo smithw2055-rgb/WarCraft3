@@ -73,6 +73,10 @@ void CAbilityDivineShield::DoEffect(CSimulation& game, CUnit* caster) {
     caster->AddBuff(std::make_unique<CBuffDivineShield>(duration_), game);
 }
 
+void CAbilityDivineShield::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    duration_ = def.DurationAt(level);
+}
+
 // ===== Thunder Clap =====
 CAbilityThunderClap::CAbilityThunderClap(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AHtc"), CAbilityCategory::SPELL) {
@@ -270,13 +274,17 @@ CAbilityEntanglingRoots::CAbilityEntanglingRoots(int handleId)
 
 void CAbilityEntanglingRoots::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || target->IsDead()) return;
-    float totalDamage = damagePerSecond_ * duration_;
-    target->Damage(game, caster, false, false,
-                   CAttackType::SPELLS, CDamageType::POISON,
-                   "", totalDamage, 0);
-    // Apply periodic damage as a buff
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {
-        targetUnit->AddBuff(std::make_unique<CBuffPoison>(duration_, damagePerSecond_, caster->GetHandleId()), game);
+        // Roots pin the victim in place (ref immobilize) and burn over
+        // the duration (previously double-counted an upfront nuke).
+        targetUnit->AddBuff(std::make_unique<CBuffEnsnare>(duration_), game);
+        targetUnit->AddBuff(std::make_unique<CBuffPoison>(
+            duration_, damagePerSecond_, caster ? caster->GetHandleId() : -1), game);
     }
+}
+
+void CAbilityEntanglingRoots::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damagePerSecond_ = def.DataFloatAt(level, 0, damagePerSecond_);
+    duration_ = def.DurationAt(level);
 }

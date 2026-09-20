@@ -115,7 +115,7 @@ CAbilityFeralSpirit::CAbilityFeralSpirit(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AOsf"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::NO_TARGET);
     SetCooldown(30.0f);
-    SetManaCost(100);
+    SetManaCost(75); // ref Cost1
 }
 
 void CAbilityFeralSpirit::DoEffect(CSimulation& game, CUnit* caster) {
@@ -128,6 +128,10 @@ void CAbilityFeralSpirit::DoEffect(CSimulation& game, CUnit* caster) {
         SummonTimedUnit(game, caster, wolfType_, War3ID("AOsf"),
                         x, y, caster->GetFacing(), summonDuration_);
     }
+}
+
+void CAbilityFeralSpirit::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    count_ = def.DataIntAt(level, 1, count_);
 }
 
 // ===== Earthquake =====
@@ -151,6 +155,12 @@ void CAbilityEarthquake::DoEffect(CSimulation& game, CUnit* caster, float x, flo
                          "", damagePerSecond_ * duration_, 0);
         }
     }
+}
+
+void CAbilityEarthquake::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damagePerSecond_ = def.DataFloatAt(level, 1, damagePerSecond_);
+    radius_ = def.AreaAt(level);
+    duration_ = def.DurationAt(level);
 }
 
 // ===== Carrion Swarm =====
@@ -244,7 +254,7 @@ void CAbilityInferno::ApplyEffectData(const CAbilityDefFull& def, int level) {
 CAbilitySilence::CAbilitySilence(int handleId)
     : CAbilitySpellBase(handleId, War3ID("ANsi"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::TARGET_POINT);
-    SetCastRange(700.0f);
+    SetCastRange(900.0f); // ref Rng1
     SetCooldown(15.0f);
     SetManaCost(75);
 }
@@ -260,6 +270,11 @@ void CAbilitySilence::DoEffect(CSimulation& game, CUnit* caster, float x, float 
             unit->AddBuff(std::make_unique<CBuffSilence>(duration_), game);
         }
     }
+}
+
+void CAbilitySilence::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    duration_ = def.DurationAt(level);
+    radius_ = def.AreaAt(level);
 }
 
 // ===== Black Arrow =====
@@ -278,11 +293,15 @@ void CAbilityBlackArrow::DoEffect(CSimulation& game, CUnit* caster, CWidget* tar
                    "", bonusDamage_, 0);
 }
 
+void CAbilityBlackArrow::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    bonusDamage_ = def.DataFloatAt(level, 0, bonusDamage_);
+}
+
 // ===== Life Drain =====
 CAbilityLifeDrain::CAbilityLifeDrain(int handleId)
     : CAbilitySpellBase(handleId, War3ID("ANdr"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::TARGET_UNIT);
-    SetCastRange(600.0f);
+    SetCastRange(500.0f); // ref Rng1
     SetCooldown(8.0f);
     SetManaCost(75);
 }
@@ -296,52 +315,68 @@ void CAbilityLifeDrain::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
         duration_, drainPerSecond_ * 1.0f, caster->GetHandleId()), game);
 }
 
+void CAbilityLifeDrain::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    drainPerSecond_ = def.DataFloatAt(level, 0, drainPerSecond_);
+    duration_ = def.DurationAt(level);
+}
+
 // ===== Finger of Death =====
 CAbilityFingerOfDeath::CAbilityFingerOfDeath(int handleId)
     : CAbilitySpellBase(handleId, War3ID("ANfd"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::TARGET_UNIT);
     SetCastRange(800.0f);
-    SetCooldown(0);
+    SetCooldown(15.0f); // ref Cool1
     SetManaCost(0);
 }
 
 void CAbilityFingerOfDeath::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target) return;
+    float damage = damage_;
+    if (auto* targetUnit = dynamic_cast<CUnit*>(target)) {
+        // Heroes withstand the finger for DataC instead of dying (ref).
+        if (targetUnit->IsHero()) damage = heroDamage_;
+    }
     target->Damage(game, caster, false, false,
                    CAttackType::SPELLS, CDamageType::DEATH,
-                   "", damage_, 0);
+                   "", damage, 0);
+}
+
+void CAbilityFingerOfDeath::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    heroDamage_ = def.DataFloatAt(level, 2, heroDamage_);
 }
 
 // ===== Dark Portal =====
 CAbilityDarkPortal::CAbilityDarkPortal(int handleId)
     : CAbilitySpellBase(handleId, War3ID("ANdp"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::TARGET_POINT);
-    SetCastRange(900.0f);
-    SetCooldown(180.0f);
+    SetCastRange(800.0f); // ref Rng1
+    SetCooldown(100.0f); // ref Cool1
     SetManaCost(0);
 }
 
 void CAbilityDarkPortal::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     if (!caster) return;
-    // First spell on the AbilityBuilder path: register the summon chain once,
-    // then run it like the ref .j doEffect (summon + fired summoned events).
-    if (!chainRegistered_) {
-        ABEffectChain chain;
-        chain.Add(std::make_unique<ABActionSummon>(
-            portalUnitType_, War3ID("ANdp"), summonCount_, summonDuration_));
-        AbilityBuilderRegistry::Instance().Register(War3ID("ANdp"), std::move(chain));
-        chainRegistered_ = true;
+    // First spell on the AbilityBuilder path: (re)register the summon
+    // chain with the current level's numbers, then run it like the ref
+    // .j doEffect (summon + fired summoned events).
+    ABEffectChain chain;
+    chain.Add(std::make_unique<ABActionSummon>(
+        portalUnitType_, War3ID("ANdp"), summonCount_, summonDuration_));
+    AbilityBuilderRegistry::Instance().Register(War3ID("ANdp"), std::move(chain));
+    if (const ABEffectChain* found = AbilityBuilderRegistry::Instance().Find(War3ID("ANdp"))) {
+        found->Run(game, caster, nullptr, true, x, y);
     }
-    if (const ABEffectChain* chain = AbilityBuilderRegistry::Instance().Find(War3ID("ANdp"))) {
-        chain->Run(game, caster, nullptr, true, x, y);
-    }
+}
+
+void CAbilityDarkPortal::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    summonCount_ = def.DataIntAt(level, 1, summonCount_);
 }
 
 // ===== Rain of Chaos =====
 CAbilityRainOfChaos::CAbilityRainOfChaos(int handleId)
     : CAbilitySpellBase(handleId, War3ID("ANrc"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::TARGET_POINT);
-    SetCastRange(900.0f);
+    SetCastRange(1000.0f); // ref Rng1
     SetCooldown(120.0f);
     SetManaCost(0);
 }
@@ -362,4 +397,8 @@ void CAbilityRainOfChaos::DoEffect(CSimulation& game, CUnit* caster, float x, fl
             }
         }
     }
+}
+
+void CAbilityRainOfChaos::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    radius_ = def.AreaAt(level);
 }

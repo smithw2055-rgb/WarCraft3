@@ -30,8 +30,10 @@ class CAbilityDivineShield : public CAbilitySpellBase {
 public:
     CAbilityDivineShield(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float duration_ = 15.0f;
+    float duration_ = 15.0f; // ref Dur1 (15/30/45)
 };
 
 // ===== Thunder Clap (Mountain King) - AOE damage + slow =====
@@ -119,7 +121,9 @@ class CAbilityEntanglingRoots : public CAbilitySpellBase {
 public:
     CAbilityEntanglingRoots(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float damagePerSecond_ = 15.0f;
-    float duration_ = 3.0f;
+    float damagePerSecond_ = 15.0f; // ref DataA level 1
+    float duration_ = 9.0f; // ref Dur1 (9/24/36)
 };
