@@ -5,6 +5,7 @@
 #include "ecs/abilities/spells5.h"
 #include "ecs/abilities/spells9.h"
 #include "ecs/abilities/spells10.h"
+#include "ecs/abilities/spells14.h"
 #include "behaviors/behavior_move.h"
 #include "behaviors/behavior_attack.h"
 #include "behaviors/behavior_stop.h"
@@ -906,6 +907,26 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                     Damage(simulation, source, false, false,
                            CAttackType::SPELLS, CDamageType::NORMAL,
                            "", backstab, 0);
+                }
+            }
+        }
+        // Pulverize (Mountain Giant): chance for the landed damage to
+        // slam the victim's neighbors too (ref). Non-attack, no re-proc.
+        if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
+            if (auto* pulv = dynamic_cast<CAbilityPulverize*>(source->GetAbility(War3ID("Awar")))) {
+                if (simulation.SimRand01() < pulv->GetChance()) {
+                    const float radius = pulv->GetRadius();
+                    for (auto* unit : simulation.GetUnits()) {
+                        if (!unit || unit->IsDead() || unit == this || unit == source) continue;
+                        if (unit->GetPlayerIndex() == source->GetPlayerIndex()) continue;
+                        const float dx = unit->GetX() - GetX();
+                        const float dy = unit->GetY() - GetY();
+                        if (dx * dx + dy * dy <= radius * radius) {
+                            unit->Damage(simulation, source, false, false,
+                                         CAttackType::SPELLS, CDamageType::NORMAL,
+                                         "", actualDamage, 0);
+                        }
+                    }
                 }
             }
         }

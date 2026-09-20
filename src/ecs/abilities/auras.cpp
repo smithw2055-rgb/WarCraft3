@@ -136,3 +136,26 @@ CAbilityCommandAura::CAbilityCommandAura(int handleId)
     damage.isPercent = true;
     AddBonus(damage);
 }
+
+// ===== Disease Cloud =====
+CAbilityDiseaseCloud::CAbilityDiseaseCloud(int handleId)
+    : CAbilityAura(handleId, War3ID("Aapl")) {
+    SetRadius(250.0f);
+    SetEnemyOnly(true);
+    SetAffectsSelf(false);
+}
+
+void CAbilityDiseaseCloud::ApplyAura(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    // Level-1 object data (DataB1=10): 10 dps while in the cloud.
+    if (CBuff* existing = target->GetBuff(War3ID("Bapl"))) {
+        existing->RefreshDuration();
+    } else {
+        target->AddBuff(std::make_unique<CBuffDisease>(War3ID("Bapl"), 10.0f, 10.0f), game);
+    }
+}
+
+void CAbilityDiseaseCloud::RemoveAura(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    target->RemoveBuff(War3ID("Bapl"), game);
+}

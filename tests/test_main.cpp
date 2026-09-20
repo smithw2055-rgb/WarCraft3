@@ -229,6 +229,15 @@ bool TestAvatarRages();
 bool TestSiphonManaDrains();
 bool TestBigBadVoodooShields();
 bool TestSpells13FactoryCoverage();
+bool TestPocketFactoryBuilds();
+bool TestLavaSpawnSplits();
+bool TestSoulBurnBurns();
+bool TestQuilbeastSummons();
+bool TestFrostBreathChills();
+bool TestDiseaseCloudSickens();
+bool TestPulverizeSlams();
+bool TestForkedLightningChains();
+bool TestSpells14FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -534,6 +543,15 @@ int main() {
         {"Siphon mana drains", TestSiphonManaDrains},
         {"Big bad voodoo shields", TestBigBadVoodooShields},
         {"Spells13 factory coverage", TestSpells13FactoryCoverage},
+        {"Pocket factory builds", TestPocketFactoryBuilds},
+        {"Lava spawn splits", TestLavaSpawnSplits},
+        {"Soul burn burns", TestSoulBurnBurns},
+        {"Quilbeast summons", TestQuilbeastSummons},
+        {"Frost breath chills", TestFrostBreathChills},
+        {"Disease cloud sickens", TestDiseaseCloudSickens},
+        {"Pulverize slams", TestPulverizeSlams},
+        {"Forked lightning chains", TestForkedLightningChains},
+        {"Spells14 factory coverage", TestSpells14FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

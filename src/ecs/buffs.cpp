@@ -656,3 +656,107 @@ CBuff* CBuffManaSiphon::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffSpawner =====
+CBuffSpawner::CBuffSpawner(float duration, War3ID spawnType, float interval,
+                           float explodeDamage, float explodeRadius)
+    : CBuff(War3ID("Bspy"), duration, true), spawnType_(spawnType)
+    , explodeDamage_(explodeDamage), explodeRadius_(explodeRadius) {
+    SetPeriodic(true, interval);
+}
+
+void CBuffSpawner::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    CUnit* spawned = game.CreateUnit(spawnType_, target->GetPlayerIndex(),
+                                     target->GetX() + 64.0f, target->GetY(), 0);
+    if (!spawned) return;
+    if (explodeDamage_ > 0) {
+        spawned->AddBuff(std::make_unique<CBuffExplode>(
+            explodeDamage_, explodeRadius_), game);
+    }
+    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
+        summonedCb(target->GetHandleId(), spawned->GetHandleId());
+    }
+}
+
+CBuff* CBuffSpawner::Clone() const {
+    auto* copy = new CBuffSpawner(duration_, spawnType_, periodicInterval_,
+                                  explodeDamage_, explodeRadius_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffSplit =====
+CBuffSplit::CBuffSplit(War3ID splitType, int count, War3ID childType, int childCount)
+    // Death-triggered: a session-long duration so expiry never preempts
+    // the split (expiry is a silent removal).
+    : CBuff(War3ID("Bspl"), 3600.0f, false)
+    , splitType_(splitType), count_(count)
+    , childType_(childType), childCount_(childCount) {}
+void CBuffSplit::OnDeath(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    for (int i = 0; i < count_; i++) {
+        CUnit* child = game.CreateUnit(splitType_, target->GetPlayerIndex(),
+                                       target->GetX() + (i - count_ / 2) * 64.0f,
+                                       target->GetY(), 0);
+        if (!child) continue;
+        if (childCount_ > 0) {
+            child->AddBuff(std::make_unique<CBuffSplit>(
+                childType_, childCount_, War3ID(), 0), game);
+        }
+        if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
+            summonedCb(target->GetHandleId(), child->GetHandleId());
+        }
+    }
+}
+
+CBuff* CBuffSplit::Clone() const {
+    auto* copy = new CBuffSplit(splitType_, count_, childType_, childCount_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffExplode =====
+CBuffExplode::CBuffExplode(float damage, float radius)
+    : CBuff(War3ID("Bexp"), 3600.0f, false), damage_(damage), radius_(radius) {}
+
+void CBuffExplode::OnDeath(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    for (auto* unit : game.GetUnits()) {
+        if (!unit || unit->IsDead() || unit == target) continue;
+        if (unit->GetPlayerIndex() == target->GetPlayerIndex()) continue;
+        const float dx = unit->GetX() - target->GetX();
+        const float dy = unit->GetY() - target->GetY();
+        if (dx * dx + dy * dy <= radius_ * radius_) {
+            unit->Damage(game, target, false, false,
+                         CAttackType::SPELLS, CDamageType::FIRE,
+                         "", damage_, 0);
+        }
+    }
+}
+
+CBuff* CBuffExplode::Clone() const {
+    auto* copy = new CBuffExplode(damage_, radius_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffDisease =====
+CBuffDisease::CBuffDisease(War3ID id, float duration, float damagePerTick)
+    : CBuff(id, duration, false), damagePerTick_(damagePerTick) {
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffDisease::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (target && !target->IsDead()) {
+        target->Damage(game, nullptr, false, false,
+                       CAttackType::SPELLS, CDamageType::DISEASE,
+                       "", damagePerTick_, 0);
+    }
+}
+
+CBuff* CBuffDisease::Clone() const {
+    auto* copy = new CBuffDisease(GetId(), duration_, damagePerTick_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

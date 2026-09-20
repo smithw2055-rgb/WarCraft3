@@ -56,3 +56,13 @@ class CAbilityCommandAura : public CAbilityAura {
 public:
     CAbilityCommandAura(int handleId);
 };
+
+// ===== Disease Cloud (Abomination) - damage aura =====
+class CAbilityDiseaseCloud : public CAbilityAura {
+public:
+    CAbilityDiseaseCloud(int handleId);
+
+protected:
+    void ApplyAura(CSimulation& game, CUnit* target) override;
+    void RemoveAura(CSimulation& game, CUnit* target) override;
+};

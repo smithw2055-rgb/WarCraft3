@@ -364,3 +364,61 @@ public:
 private:
     float manaPerTick_;
 };
+
+// Spawner (Pocket Factory) - periodically builds a unit for the
+// bearer's player next to the bearer. A positive explode damage also
+// arms each spawn with CBuffExplode (Clockwerk Goblins).
+class CBuffSpawner : public CBuff {
+public:
+    CBuffSpawner(float duration, War3ID spawnType, float interval,
+                 float explodeDamage = 0.0f, float explodeRadius = 0.0f);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    War3ID spawnType_;
+    float explodeDamage_;
+    float explodeRadius_;
+};
+
+// Split (Lava Spawn) - on death, breaks into smaller spawn (each
+// carrying the next split down the chain).
+class CBuffSplit : public CBuff {
+public:
+    CBuffSplit(War3ID splitType, int count, War3ID childType, int childCount);
+
+    void OnDeath(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    War3ID splitType_;
+    int count_;
+    War3ID childType_;
+    int childCount_;
+};
+
+// Explode (Clockwerk Goblin) - on death, burns nearby enemies.
+class CBuffExplode : public CBuff {
+public:
+    CBuffExplode(float damage, float radius);
+
+    void OnDeath(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float damage_;
+    float radius_;
+};
+
+// Disease - periodic damage (cf. Poison with its own id).
+class CBuffDisease : public CBuff {
+public:
+    CBuffDisease(War3ID id, float duration, float damagePerTick);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float damagePerTick_;
+};
