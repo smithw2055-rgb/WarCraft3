@@ -247,6 +247,14 @@ bool TestMonsoonWaves();
 bool TestAbsorbManaPops();
 bool TestUnholyFrenzyHastes();
 bool TestSpells16FactoryCoverage();
+bool TestHowlWeakens();
+bool TestBreathOfFireBurns();
+bool TestDrunkenHazeMisses();
+bool TestManaShieldAbsorbs();
+bool TestLocustSwarmDevours();
+bool TestCycloneSuspends();
+bool TestVengeanceRises();
+bool TestSpells17FactoryCoverage();
 bool TestAbilityLevelsParse();
 bool TestAbilityLevelsApplyOnAdd();
 bool TestAbilityLevelsFollowSkillLevel();
@@ -577,6 +585,14 @@ int main() {
         {"Absorb mana pops", TestAbsorbManaPops},
         {"Unholy frenzy hastes", TestUnholyFrenzyHastes},
         {"Spells16 factory coverage", TestSpells16FactoryCoverage},
+        {"Howl weakens", TestHowlWeakens},
+        {"Breath of fire burns", TestBreathOfFireBurns},
+        {"Drunken haze misses", TestDrunkenHazeMisses},
+        {"Mana shield absorbs", TestManaShieldAbsorbs},
+        {"Locust swarm devours", TestLocustSwarmDevours},
+        {"Cyclone suspends", TestCycloneSuspends},
+        {"Vengeance rises", TestVengeanceRises},
+        {"Spells17 factory coverage", TestSpells17FactoryCoverage},
         {"Ability levels parse", TestAbilityLevelsParse},
         {"Ability levels apply on add", TestAbilityLevelsApplyOnAdd},
         {"Ability levels follow skill level", TestAbilityLevelsFollowSkillLevel},

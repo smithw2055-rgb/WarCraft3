@@ -461,3 +461,48 @@ public:
 private:
     float damagePerTick_;
 };
+
+// Howl of Terror - the bearer's attacks land weakened (retail DataA
+// 0.3 read as a 30% reduction; the factor itself is explicit).
+class CBuffHowl : public CBuff {
+public:
+    CBuffHowl(float duration, float damageFactor);
+
+    float GetDamageFactor() const { return damageFactor_; }
+    CBuff* Clone() const override;
+
+private:
+    float damageFactor_;
+};
+
+// Drunken Haze - the bearer's attacks may miss outright (retail
+// DataB 0.45 miss chance).
+class CBuffHaze : public CBuff {
+public:
+    CBuffHaze(float duration, float missChance);
+
+    float GetMissChance() const { return missChance_; }
+    CBuff* Clone() const override;
+
+private:
+    float missChance_;
+};
+
+// Mana Shield - incoming damage drains mana instead of life while
+// mana remains.
+class CBuffManaShield : public CBuff {
+public:
+    explicit CBuffManaShield(float duration);
+
+    CBuff* Clone() const override;
+};
+
+// Cyclone - like a stun, but the tossed unit cannot be harmed either.
+class CBuffCyclone : public CBuffStun {
+public:
+    explicit CBuffCyclone(float duration);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+};

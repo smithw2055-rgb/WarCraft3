@@ -829,3 +829,55 @@ CBuff* CBuffDigest::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffHowl =====
+CBuffHowl::CBuffHowl(float duration, float damageFactor)
+    : CBuff(War3ID("BNht"), duration, false), damageFactor_(damageFactor) {}
+
+CBuff* CBuffHowl::Clone() const {
+    auto* copy = new CBuffHowl(duration_, damageFactor_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffHaze =====
+CBuffHaze::CBuffHaze(float duration, float missChance)
+    : CBuff(War3ID("BNdh"), duration, false), missChance_(missChance) {}
+
+CBuff* CBuffHaze::Clone() const {
+    auto* copy = new CBuffHaze(duration_, missChance_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffManaShield =====
+CBuffManaShield::CBuffManaShield(float duration)
+    : CBuff(War3ID("BNms"), duration, true) {}
+
+CBuff* CBuffManaShield::Clone() const {
+    auto* copy = new CBuffManaShield(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffCyclone =====
+CBuffCyclone::CBuffCyclone(float duration)
+    : CBuffStun(duration) {
+    id_ = War3ID("Bcyc");
+}
+
+void CBuffCyclone::OnApply(CSimulation& game, CUnit* target) {
+    CBuffStun::OnApply(game, target);
+    if (target) target->SetInvulnerable(true);
+}
+
+void CBuffCyclone::OnRemove(CSimulation& game, CUnit* target) {
+    CBuffStun::OnRemove(game, target);
+    if (target) target->SetInvulnerable(false);
+}
+
+CBuff* CBuffCyclone::Clone() const {
+    auto* copy = new CBuffCyclone(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

@@ -769,7 +769,32 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                     CAttackType attackType, CDamageType damageType,
                     const std::string& weaponSoundType,
                     float damage, float bonusDamage) {
+    // Drunken Haze (Brewmaster): the swing may miss outright and land
+    // nothing at all (ref miss chance). Checked before everything,
+    // including invulnerability and callbacks.
+    if (isAttack && source && source != this) {
+        if (auto* haze = dynamic_cast<CBuffHaze*>(source->GetBuff(War3ID("BNdh")))) {
+            if (simulation.SimRand01() < haze->GetMissChance()) return 0;
+        }
+    }
+
     if (invulnerable_) return 0;
+
+    // Mana Shield (Sea Witch): incoming damage drains mana first.
+    if (damage > 0 && GetMana() > 0 && GetBuff(War3ID("BNms"))) {
+        float absorbed = damage;
+        if (absorbed > GetMana()) absorbed = GetMana();
+        SetMana(GetMana() - absorbed);
+        damage -= absorbed;
+        if (damage <= 0) return 0;
+    }
+
+    // Howl of Terror (Pit Lord): the attacker's blows land weakened.
+    if (isAttack && source && source != this) {
+        if (auto* howl = dynamic_cast<CBuffHowl*>(source->GetBuff(War3ID("BNht")))) {
+            damage *= howl->GetDamageFactor();
+        }
+    }
 
     // Avatar (Mountain King): spell immunity while the god-rage holds.
     if (attackType == CAttackType::SPELLS && GetBuff(War3ID("BAvt"))) return 0;
