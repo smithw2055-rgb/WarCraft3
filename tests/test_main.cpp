@@ -240,6 +240,13 @@ bool TestForkedLightningChains();
 bool TestSpells14FactoryCoverage();
 bool TestPhoenixRebirths();
 bool TestSpells15FactoryCoverage();
+bool TestDevourSwallows();
+bool TestDevourMagicDispels();
+bool TestColdArrowsProc();
+bool TestMonsoonWaves();
+bool TestAbsorbManaPops();
+bool TestUnholyFrenzyHastes();
+bool TestSpells16FactoryCoverage();
 bool TestAbilityLevelsParse();
 bool TestAbilityLevelsApplyOnAdd();
 bool TestAbilityLevelsFollowSkillLevel();
@@ -563,6 +570,13 @@ int main() {
         {"Spells14 factory coverage", TestSpells14FactoryCoverage},
         {"Phoenix rebirths", TestPhoenixRebirths},
         {"Spells15 factory coverage", TestSpells15FactoryCoverage},
+        {"Devour swallows", TestDevourSwallows},
+        {"Devour magic dispels", TestDevourMagicDispels},
+        {"Cold arrows proc", TestColdArrowsProc},
+        {"Monsoon waves", TestMonsoonWaves},
+        {"Absorb mana pops", TestAbsorbManaPops},
+        {"Unholy frenzy hastes", TestUnholyFrenzyHastes},
+        {"Spells16 factory coverage", TestSpells16FactoryCoverage},
         {"Ability levels parse", TestAbilityLevelsParse},
         {"Ability levels apply on add", TestAbilityLevelsApplyOnAdd},
         {"Ability levels follow skill level", TestAbilityLevelsFollowSkillLevel},

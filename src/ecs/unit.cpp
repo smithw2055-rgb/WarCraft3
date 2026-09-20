@@ -8,6 +8,7 @@
 #include "ecs/abilities/spells9.h"
 #include "ecs/abilities/spells10.h"
 #include "ecs/abilities/spells14.h"
+#include "ecs/abilities/spells16.h"
 #include "behaviors/behavior_move.h"
 #include "behaviors/behavior_attack.h"
 #include "behaviors/behavior_stop.h"
@@ -881,6 +882,17 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
             Damage(simulation, source, false, false,
                    CAttackType::SPELLS, CDamageType::FIRE,
                    "", fire->GetBonusDamage(), 0);
+        }
+        // Cold/Frost Arrows (AHca/ANfa): chilling poison proc on attack.
+        CAbilityColdArrows* arrows = dynamic_cast<CAbilityColdArrows*>(
+            source->GetAbility(War3ID("AHca")));
+        if (!arrows) arrows = dynamic_cast<CAbilityColdArrows*>(
+            source->GetAbility(War3ID("ANfa")));
+        if (arrows) {
+            AddBuff(std::make_unique<CBuffSlow>(
+                arrows->GetSlowDuration(), arrows->GetSlowPercent(), source->GetHandleId()), simulation);
+            AddBuff(std::make_unique<CBuffPoison>(
+                arrows->GetPoisonDuration(), arrows->GetPoisonPerTick(), source->GetHandleId()), simulation);
         }
         // Searing Arrows (Priestess toggle): same fire-proc shape as the
         // orb; per-shot mana cost is behavior-side.

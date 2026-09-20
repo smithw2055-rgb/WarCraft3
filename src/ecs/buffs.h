@@ -448,3 +448,16 @@ private:
     War3ID hatchType_;
     bool chainRebirth_;
 };
+
+// Digest (Kodo Devour) - the swallowed victim takes damage over time
+// inside the devourer (retail DataA 5 dps).
+class CBuffDigest : public CBuff {
+public:
+    CBuffDigest(float duration, float damagePerTick);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float damagePerTick_;
+};

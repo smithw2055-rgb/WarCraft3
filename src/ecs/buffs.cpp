@@ -809,3 +809,23 @@ CBuff* CBuffHatchAfter::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffDigest =====
+CBuffDigest::CBuffDigest(float duration, float damagePerTick)
+    : CBuff(War3ID("Bdig"), duration, false), damagePerTick_(damagePerTick) {
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffDigest::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (target && !target->IsDead()) {
+        target->Damage(game, nullptr, false, false,
+                       CAttackType::SPELLS, CDamageType::NORMAL,
+                       "", damagePerTick_, 0);
+    }
+}
+
+CBuff* CBuffDigest::Clone() const {
+    auto* copy = new CBuffDigest(duration_, damagePerTick_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
