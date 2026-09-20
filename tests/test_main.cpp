@@ -201,6 +201,16 @@ bool TestUnstableConcoctionBlasts();
 bool TestAbolishMagicStripsArea();
 bool TestClusterRocketsBlast();
 bool TestSpells10FactoryCoverage();
+bool TestWindWalkHidesAndBreaks();
+bool TestSorceressInvisibility();
+bool TestPermanentInvisibility();
+bool TestShadowmeldNeedsStillness();
+bool TestDustRevealsArea();
+bool TestFaerieFireReveals();
+bool TestBerserkHastesAndSoftens();
+bool TestSummonBearStands();
+bool TestBattleRoarRallies();
+bool TestSpells11FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -478,6 +488,16 @@ int main() {
         {"Abolish magic strips area", TestAbolishMagicStripsArea},
         {"Cluster rockets blast", TestClusterRocketsBlast},
         {"Spells10 factory coverage", TestSpells10FactoryCoverage},
+        {"Wind walk hides and breaks", TestWindWalkHidesAndBreaks},
+        {"Sorceress invisibility", TestSorceressInvisibility},
+        {"Permanent invisibility", TestPermanentInvisibility},
+        {"Shadowmeld needs stillness", TestShadowmeldNeedsStillness},
+        {"Dust reveals area", TestDustRevealsArea},
+        {"Faerie fire reveals", TestFaerieFireReveals},
+        {"Berserk hastes and softens", TestBerserkHastesAndSoftens},
+        {"Summon bear stands", TestSummonBearStands},
+        {"Battle roar rallies", TestBattleRoarRallies},
+        {"Spells11 factory coverage", TestSpells11FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

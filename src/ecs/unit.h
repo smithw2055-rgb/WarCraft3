@@ -221,6 +221,12 @@ public:
     // still attack; movement behaviors complete immediately while rooted.
     bool IsRooted() const { return rooted_; }
     void SetRooted(bool v) { rooted_ = v; }
+    // Invisibility (Wind Walk buff, Permanent Invisibility/Shadowmeld
+    // flag): hidden from other players unless revealed (Faerie Fire).
+    // Detectors (shades, owls) are not modeled yet.
+    bool IsInvisible() const { return invisible_; }
+    void SetInvisible(bool v) { invisible_ = v; }
+    bool IsInvisibleTo(int viewerPlayerIndex) const;
     bool IsConstructionPaused() const { return constructionPaused_; }
     void SetConstructionPaused(bool v) { constructionPaused_ = v; }
     float GetConstructionProgress() const { return constructionProgress_; }
@@ -344,6 +350,7 @@ private:
     bool invulnerable_ = false;
     bool constructing_ = false;
     bool rooted_ = false;
+    bool invisible_ = false;
     bool constructionPaused_ = false;
     float constructionProgress_ = 0;
     int deathTurnTick_ = 0;

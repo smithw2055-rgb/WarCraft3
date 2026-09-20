@@ -57,6 +57,14 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
         propelling_ = false;
         return false;
     }
+    // A target that turns invisible mid-chase is lost (ref invisibility).
+    if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+        if (targetUnit->IsInvisibleTo(unit_->GetPlayerIndex())) {
+            ResetAttackSwingState();
+            propelling_ = false;
+            return true;
+        }
+    }
     const CUnitAttack* attack = GetPrimaryAttack();
     if (!attack) {
         return true;

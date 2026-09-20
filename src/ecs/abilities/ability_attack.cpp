@@ -36,6 +36,11 @@ bool CAbilityAttack::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
     if (!target || target->IsDead()) return false;
     if (target == unit) return false; // no self-attack
 
+    // Invisible units cannot be ordered against (ref invisibility).
+    if (auto* targetUnit = dynamic_cast<CUnit*>(target)) {
+        if (targetUnit->IsInvisibleTo(unit->GetPlayerIndex())) return false;
+    }
+
     // Check if target is an enemy (not allied)
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {

@@ -323,6 +323,17 @@ bool CUnit::IsHexed() const {
     return false;
 }
 
+bool CUnit::IsInvisibleTo(int viewerPlayerIndex) const {
+    if (viewerPlayerIndex == playerIndex_) return false;
+    // Faerie Fire reveals invisible units (ref reveal-invisible half).
+    if (GetBuff(War3ID("Bfae"))) return false;
+    if (invisible_) return true;
+    for (const auto& buff : buffs_) {
+        if (buff && dynamic_cast<const CBuffWindWalk*>(buff.get())) return true;
+    }
+    return false;
+}
+
 bool CUnit::IsSilenced() const {
     for (const auto& buff : buffs_) {
         if (buff && dynamic_cast<const CBuffSilence*>(buff.get())) return true;
@@ -690,10 +701,17 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
 
     // Defend (Footman/Knight): timed-buff stand-in for the defend toggle;
     // halves weapon-attack damage before it lands (ref Defend reduction).
+    // Berserk runs the same gate with the opposite sign (ref Beserk).
     if (isAttack && actualDamage > 0) {
         for (const auto& buff : buffs_) {
             if (dynamic_cast<CBuffDefend*>(buff.get())) {
                 actualDamage *= 0.5f;
+                break;
+            }
+        }
+        for (const auto& buff : buffs_) {
+            if (auto* berserk = dynamic_cast<CBuffBerserk*>(buff.get())) {
+                actualDamage *= berserk->GetDamageTakenMultiplier();
                 break;
             }
         }
@@ -807,6 +825,19 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                                      CAttackType::SPELLS, CDamageType::NORMAL,
                                      "", splash, 0);
                     }
+                }
+            }
+        }
+        // Wind Walk break (ref): landing an attack reveals the attacker;
+        // the strike carries a backstab bonus while the victim stands.
+        if (isAttack && source && source != this && actualDamage > 0) {
+            if (auto* walk = dynamic_cast<CBuffWindWalk*>(source->GetBuff(War3ID("BOwk")))) {
+                const float backstab = walk->GetBackstabDamage();
+                source->RemoveBuff(War3ID("BOwk"), simulation);
+                if (backstab > 0 && !IsDead()) {
+                    Damage(simulation, source, false, false,
+                           CAttackType::SPELLS, CDamageType::NORMAL,
+                           "", backstab, 0);
                 }
             }
         }

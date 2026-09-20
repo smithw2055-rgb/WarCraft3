@@ -497,3 +497,34 @@ CBuff* CBuffEnsnare::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffWindWalk =====
+CBuffWindWalk::CBuffWindWalk(float duration, float backstabDamage)
+    : CBuff(War3ID("BOwk"), duration, true), backstabDamage_(backstabDamage) {}
+
+CBuff* CBuffWindWalk::Clone() const {
+    auto* copy = new CBuffWindWalk(duration_, backstabDamage_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffBerserk =====
+CBuffBerserk::CBuffBerserk(float duration, float attackSpeedMul, float damageTakenMul)
+    : CBuff(War3ID("Babr"), duration, true)
+    , attackSpeedMul_(attackSpeedMul), damageTakenMul_(damageTakenMul) {}
+
+void CBuffBerserk::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->MultiplyAttackSpeed(attackSpeedMul_);
+}
+
+void CBuffBerserk::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->DivideAttackSpeed(attackSpeedMul_);
+}
+
+CBuff* CBuffBerserk::Clone() const {
+    auto* copy = new CBuffBerserk(duration_, attackSpeedMul_, damageTakenMul_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

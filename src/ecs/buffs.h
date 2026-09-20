@@ -269,3 +269,32 @@ public:
     void OnRemove(CSimulation& game, CUnit* target) override;
     CBuff* Clone() const override;
 };
+
+// Wind Walk - timed invisibility (visibility reads buff presence in
+// CUnit::IsInvisibleTo); attacking breaks it with a backstab bonus.
+class CBuffWindWalk : public CBuff {
+public:
+    CBuffWindWalk(float duration, float backstabDamage);
+
+    float GetBackstabDamage() const { return backstabDamage_; }
+    CBuff* Clone() const override;
+
+private:
+    float backstabDamage_;
+};
+
+// Berserk - faster attacks, weaker skin (cf. Defend's damage hook with
+// the opposite sign).
+class CBuffBerserk : public CBuff {
+public:
+    CBuffBerserk(float duration, float attackSpeedMul, float damageTakenMul);
+
+    float GetDamageTakenMultiplier() const { return damageTakenMul_; }
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float attackSpeedMul_;
+    float damageTakenMul_;
+};
