@@ -226,7 +226,10 @@ public:
     // Detectors (shades, owls) are not modeled yet.
     bool IsInvisible() const { return invisible_; }
     void SetInvisible(bool v) { invisible_ = v; }
-    bool IsInvisibleTo(int viewerPlayerIndex) const;
+    // Detectors (shades, sentry wards) pierce stealth within sight range.
+    bool IsDetector() const { return detector_; }
+    void SetDetector(bool v) { detector_ = v; }
+    bool IsInvisibleTo(const CUnit* viewer) const;
     bool IsConstructionPaused() const { return constructionPaused_; }
     void SetConstructionPaused(bool v) { constructionPaused_ = v; }
     float GetConstructionProgress() const { return constructionProgress_; }
@@ -351,6 +354,7 @@ private:
     bool constructing_ = false;
     bool rooted_ = false;
     bool invisible_ = false;
+    bool detector_ = false;
     bool constructionPaused_ = false;
     float constructionProgress_ = 0;
     int deathTurnTick_ = 0;

@@ -298,3 +298,15 @@ private:
     float attackSpeedMul_;
     float damageTakenMul_;
 };
+
+// Burrow - underground: invisible and rooted (movement honors both).
+// Burrowed units cannot be ordered to attack (ref, checked in
+// CAbilityAttack::CheckCanTarget).
+class CBuffBurrow : public CBuff {
+public:
+    explicit CBuffBurrow(float duration);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+};

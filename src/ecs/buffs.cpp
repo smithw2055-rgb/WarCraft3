@@ -528,3 +528,27 @@ CBuff* CBuffBerserk::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffBurrow =====
+CBuffBurrow::CBuffBurrow(float duration)
+    : CBuff(War3ID("Bbur"), duration, true) {}
+
+void CBuffBurrow::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    target->SetInvisible(true);
+    target->SetRooted(true);
+}
+
+void CBuffBurrow::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    target->SetInvisible(false);
+    target->SetRooted(false);
+}
+
+CBuff* CBuffBurrow::Clone() const {
+    auto* copy = new CBuffBurrow(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

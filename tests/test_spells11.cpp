@@ -103,8 +103,8 @@ bool TestWindWalkHidesAndBreaks() {
     CAbilityWindWalk spell(11001);
     spell.DoEffect(sim, walker);
     TEST_ASSERT(walker->GetBuff(War3ID("BOwk")) != nullptr);
-    TEST_ASSERT(walker->IsInvisibleTo(1));
-    TEST_ASSERT(!walker->IsInvisibleTo(0)); // own side still sees
+    TEST_ASSERT(walker->IsInvisibleTo(targetA));
+    TEST_ASSERT(!walker->IsInvisibleTo(plain)); // own side still sees
     // Attack orders cannot be issued against the unseen.
     CAbilityAttack attack(11002);
     TEST_ASSERT(!attack.CheckCanTarget(sim, targetA, OrderIds::ATTACK, walker));
@@ -117,7 +117,7 @@ bool TestWindWalkHidesAndBreaks() {
     targetB->Damage(sim, walker, true, false, CAttackType::NORMAL,
                     CDamageType::NORMAL, "", 100.0f, 0);
     TEST_ASSERT(walker->GetBuff(War3ID("BOwk")) == nullptr);
-    TEST_ASSERT(!walker->IsInvisibleTo(1));
+    TEST_ASSERT(!walker->IsInvisibleTo(targetA));
     TEST_NEAR((beforeB - targetB->GetLife()) - (beforeA - targetA->GetLife()),
               40.0f, 0.01f);
     return true;
@@ -128,11 +128,12 @@ bool TestSorceressInvisibility() {
     AddPlayers(sim);
     auto* caster = AdoptAt(sim, 1111, 0, 0, 0);
     auto* ally = AdoptAt(sim, 1112, 0, 100, 0);
+    auto* foe = AdoptAt(sim, 1113, 1, 200, 0);
     Settle(sim);
     CAbilityInvisibility spell(11101);
     spell.DoEffect(sim, caster, ally);
     TEST_ASSERT(ally->GetBuff(War3ID("BOwk")) != nullptr);
-    TEST_ASSERT(ally->IsInvisibleTo(1));
+    TEST_ASSERT(ally->IsInvisibleTo(foe));
     return true;
 }
 
@@ -140,12 +141,13 @@ bool TestPermanentInvisibility() {
     CSimulation sim;
     AddPlayers(sim);
     auto* unit = AdoptAt(sim, 1121, 0, 0, 0);
+    auto* foe = AdoptAt(sim, 1122, 1, 200, 0);
     Settle(sim);
-    TEST_ASSERT(!unit->IsInvisibleTo(1));
+    TEST_ASSERT(!unit->IsInvisibleTo(foe));
     unit->AddAbility(sim, std::make_unique<CAbilityPermanentInvisibility>(11201));
-    TEST_ASSERT(unit->IsInvisibleTo(1));
+    TEST_ASSERT(unit->IsInvisibleTo(foe));
     TEST_ASSERT(unit->RemoveAbility(sim, War3ID("Apiv")));
-    TEST_ASSERT(!unit->IsInvisibleTo(1));
+    TEST_ASSERT(!unit->IsInvisibleTo(foe));
     return true;
 }
 
@@ -153,13 +155,14 @@ bool TestShadowmeldNeedsStillness() {
     CSimulation sim;
     AddPlayers(sim);
     auto* unit = AdoptAt(sim, 1131, 0, 0, 0);
+    auto* foe = AdoptAt(sim, 1132, 1, 200, 0);
     Settle(sim);
     unit->AddAbility(sim, std::make_unique<CAbilityShadowmeld>(11301));
     Settle(sim); // no movement: the meld settles in
-    TEST_ASSERT(unit->IsInvisibleTo(1));
+    TEST_ASSERT(unit->IsInvisibleTo(foe));
     unit->SetPosition(500.0f, 500.0f);
     sim.Update(); // movement breaks the meld
-    TEST_ASSERT(!unit->IsInvisibleTo(1));
+    TEST_ASSERT(!unit->IsInvisibleTo(foe));
     return true;
 }
 
@@ -171,11 +174,11 @@ bool TestDustRevealsArea() {
     auto* far = AdoptAt(sim, 1143, 1, 5000, 5000);
     Settle(sim);
     hidden->AddAbility(sim, std::make_unique<CAbilityPermanentInvisibility>(11401));
-    TEST_ASSERT(hidden->IsInvisibleTo(0));
+    TEST_ASSERT(hidden->IsInvisibleTo(caster));
     CAbilityDustOfAppearance spell(11402);
     spell.DoEffect(sim, caster, 100, 100);
     TEST_ASSERT(hidden->GetBuff(War3ID("Bfae")) != nullptr);
-    TEST_ASSERT(!hidden->IsInvisibleTo(0)); // dusted: targetable again
+    TEST_ASSERT(!hidden->IsInvisibleTo(caster)); // dusted: targetable again
     TEST_ASSERT(far->GetBuff(War3ID("Bfae")) == nullptr);
     return true;
 }
@@ -187,12 +190,11 @@ bool TestFaerieFireReveals() {
     auto* hidden = AdoptAt(sim, 1152, 1, 100, 0);
     Settle(sim);
     hidden->AddAbility(sim, std::make_unique<CAbilityPermanentInvisibility>(11501));
-    TEST_ASSERT(hidden->IsInvisibleTo(0));
+    TEST_ASSERT(hidden->IsInvisibleTo(caster));
     // Faerie Fire's reveal half now has a system to counter (ref note).
     hidden->AddBuff(std::make_unique<CBuffArmor>(
         War3ID("Bfae"), 20.0f, -2, false), sim);
-    TEST_ASSERT(!hidden->IsInvisibleTo(0));
-    (void)caster;
+    TEST_ASSERT(!hidden->IsInvisibleTo(caster));
     return true;
 }
 

@@ -211,6 +211,15 @@ bool TestBerserkHastesAndSoftens();
 bool TestSummonBearStands();
 bool TestBattleRoarRallies();
 bool TestSpells11FactoryCoverage();
+bool TestDetectorsPierceStealth();
+bool TestTrueSightPassive();
+bool TestSentryWardDetects();
+bool TestFlareRevealsArea();
+bool TestBurrowHidesAndRoots();
+bool TestCannibalizeEats();
+bool TestCarrionBeetlesRise();
+bool TestWebGroundsFlyers();
+bool TestSpells12FactoryCoverage();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -498,6 +507,15 @@ int main() {
         {"Summon bear stands", TestSummonBearStands},
         {"Battle roar rallies", TestBattleRoarRallies},
         {"Spells11 factory coverage", TestSpells11FactoryCoverage},
+        {"Detectors pierce stealth", TestDetectorsPierceStealth},
+        {"True sight passive", TestTrueSightPassive},
+        {"Sentry ward detects", TestSentryWardDetects},
+        {"Flare reveals area", TestFlareRevealsArea},
+        {"Burrow hides and roots", TestBurrowHidesAndRoots},
+        {"Cannibalize eats", TestCannibalizeEats},
+        {"Carrion beetles rise", TestCarrionBeetlesRise},
+        {"Web grounds flyers", TestWebGroundsFlyers},
+        {"Spells12 factory coverage", TestSpells12FactoryCoverage},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

@@ -323,15 +323,29 @@ bool CUnit::IsHexed() const {
     return false;
 }
 
-bool CUnit::IsInvisibleTo(int viewerPlayerIndex) const {
-    if (viewerPlayerIndex == playerIndex_) return false;
+bool CUnit::IsInvisibleTo(const CUnit* viewer) const {
+    if (!viewer || viewer->GetPlayerIndex() == playerIndex_) return false;
     // Faerie Fire reveals invisible units (ref reveal-invisible half).
     if (GetBuff(War3ID("Bfae"))) return false;
-    if (invisible_) return true;
-    for (const auto& buff : buffs_) {
-        if (buff && dynamic_cast<const CBuffWindWalk*>(buff.get())) return true;
+    bool hidden = invisible_;
+    if (!hidden) {
+        for (const auto& buff : buffs_) {
+            if (buff && dynamic_cast<const CBuffWindWalk*>(buff.get())) {
+                hidden = true;
+                break;
+            }
+        }
     }
-    return false;
+    if (!hidden) return false;
+    // Detectors (shades, sentry wards) pierce stealth within their
+    // sight range (ref true sight).
+    if (viewer->IsDetector() && viewer->GetUnitType()) {
+        const float sight = static_cast<float>(viewer->GetUnitType()->GetSightRadiusDay());
+        const float dx = GetX() - viewer->GetX();
+        const float dy = GetY() - viewer->GetY();
+        if (dx * dx + dy * dy <= sight * sight) return false;
+    }
+    return true;
 }
 
 bool CUnit::IsSilenced() const {

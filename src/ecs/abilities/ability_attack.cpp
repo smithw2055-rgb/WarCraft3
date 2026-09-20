@@ -36,9 +36,13 @@ bool CAbilityAttack::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
     if (!target || target->IsDead()) return false;
     if (target == unit) return false; // no self-attack
 
+    // Burrowed units cannot attack (ref crypt fiend).
+    if (unit->GetBuff(War3ID("Bbur"))) return false;
+
     // Invisible units cannot be ordered against (ref invisibility).
+    // Detectors (shades, sentry wards) see through stealth in range.
     if (auto* targetUnit = dynamic_cast<CUnit*>(target)) {
-        if (targetUnit->IsInvisibleTo(unit->GetPlayerIndex())) return false;
+        if (targetUnit->IsInvisibleTo(unit)) return false;
     }
 
     // Check if target is an enemy (not allied)
