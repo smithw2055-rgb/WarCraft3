@@ -3,6 +3,7 @@
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/player.h"
+#include "data/abilitydata.h"
 #include <cmath>
 
 // ===== Howl of Terror =====
@@ -25,6 +26,11 @@ void CAbilityHowlOfTerror::DoEffect(CSimulation& game, CUnit* caster) {
                 duration_, damageFactor_), game);
         }
     }
+}
+
+void CAbilityHowlOfTerror::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    // DataA is the reduction amount; the engine stores the factor.
+    damageFactor_ = 1.0f - def.DataFloatAt(level, 0, 1.0f - damageFactor_);
 }
 
 // ===== Breath of Fire =====
@@ -56,6 +62,12 @@ void CAbilityBreathOfFire::DoEffect(CSimulation& game, CUnit* caster, CWidget* t
     }
 }
 
+void CAbilityBreathOfFire::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damage_ = def.DataFloatAt(level, 0, damage_);
+    burnPerTick_ = def.DataFloatAt(level, 4, burnPerTick_);
+    burnDuration_ = def.DurationAt(level);
+}
+
 // ===== Drunken Haze =====
 CAbilityDrunkenHaze::CAbilityDrunkenHaze(int handleId)
     : CAbilitySpellBase(handleId, War3ID("ANdh"), CAbilityCategory::SPELL) {
@@ -79,6 +91,11 @@ void CAbilityDrunkenHaze::DoEffect(CSimulation& game, CUnit* caster, float x, fl
                 duration_, slowPercent_, caster->GetHandleId()), game);
         }
     }
+}
+
+void CAbilityDrunkenHaze::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    missChance_ = def.DataFloatAt(level, 1, missChance_);
+    slowPercent_ = def.DataFloatAt(level, 2, slowPercent_);
 }
 
 // ===== Mana Shield =====
@@ -119,6 +136,10 @@ void CAbilityLocustSwarm::DoEffect(CSimulation& game, CUnit* caster) {
     }
 }
 
+void CAbilityLocustSwarm::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damagePerWave_ = def.DataFloatAt(level, 0, damagePerWave_);
+}
+
 // ===== Cyclone =====
 CAbilityCyclone::CAbilityCyclone(int handleId)
     : CAbilitySpellBase(handleId, War3ID("Acyc"), CAbilityCategory::SPELL) {
@@ -134,6 +155,10 @@ void CAbilityCyclone::DoEffect(CSimulation& game, CUnit* caster, CWidget* target
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (!targetUnit) return;
     targetUnit->AddBuff(std::make_unique<CBuffCyclone>(duration_), game);
+}
+
+void CAbilityCyclone::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    duration_ = def.DurationAt(level);
 }
 
 // ===== Vengeance =====

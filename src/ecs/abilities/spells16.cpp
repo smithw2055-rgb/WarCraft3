@@ -4,6 +4,7 @@
 #include "ecs/buffs.h"
 #include "ecs/player.h"
 #include "ecs/unit_type.h"
+#include "data/abilitydata.h"
 #include <cmath>
 
 // ===== Devour =====
@@ -24,6 +25,10 @@ void CAbilityDevour::DoEffect(CSimulation& game, CUnit* caster, CWidget* target)
     if (!caster->LoadUnit(targetUnit)) return;
     targetUnit->AddBuff(std::make_unique<CBuffDigest>(
         digestDuration_, digestPerTick_), game);
+}
+
+void CAbilityDevour::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    digestPerTick_ = def.DataFloatAt(level, 0, digestPerTick_);
 }
 
 // ===== Devour Magic =====
@@ -55,6 +60,13 @@ CAbilityColdArrows::CAbilityColdArrows(int handleId)
     SetTargetType(CSpellTargetType::NO_TARGET);
 }
 
+void CAbilityColdArrows::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    poisonPerTick_ = def.DataFloatAt(level, 0, poisonPerTick_);
+    slowPercent_ = def.DataFloatAt(level, 1, slowPercent_);
+    slowDuration_ = def.DurationAt(level);
+    poisonDuration_ = def.DataFloatAt(level, 3, poisonDuration_);
+}
+
 // ===== Monsoon =====
 CAbilityMonsoon::CAbilityMonsoon(int handleId)
     : CAbilitySpellBase(handleId, War3ID("ANmo"), CAbilityCategory::SPELL) {
@@ -79,6 +91,11 @@ void CAbilityMonsoon::DoEffect(CSimulation& game, CUnit* caster, float x, float 
             }
         }
     }
+}
+
+void CAbilityMonsoon::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damagePerWave_ = def.DataFloatAt(level, 0, damagePerWave_);
+    radius_ = def.AreaAt(level);
 }
 
 // ===== Absorb Mana =====

@@ -12,6 +12,8 @@ class CAbilityDevour : public CAbilitySpellBase {
 public:
     CAbilityDevour(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float digestPerTick_ = 5.0f;
     float digestDuration_ = 3600.0f; // session-long: no release
@@ -36,6 +38,8 @@ public:
     float GetSlowDuration() const { return slowDuration_; }
     float GetPoisonPerTick() const { return poisonPerTick_; }
     float GetPoisonDuration() const { return poisonDuration_; }
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float slowPercent_ = 0.3f;
     float slowDuration_ = 3.0f;
@@ -50,6 +54,8 @@ class CAbilityMonsoon : public CAbilitySpellBase {
 public:
     CAbilityMonsoon(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damagePerWave_ = 50.0f;
     float radius_ = 300.0f;

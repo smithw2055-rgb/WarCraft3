@@ -262,6 +262,7 @@ bool TestAbilityLevelsFallbackWithoutData();
 bool TestAbilityDataFieldsParse();
 bool TestAbilityEffectDataFollowsLevel();
 bool TestAbilityEffectDataRoundTwo();
+bool TestAbilityEffectDataRoundThree();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -600,6 +601,7 @@ int main() {
         {"Ability data fields parse", TestAbilityDataFieldsParse},
         {"Ability effect data follows level", TestAbilityEffectDataFollowsLevel},
         {"Ability effect data round two", TestAbilityEffectDataRoundTwo},
+        {"Ability effect data round three", TestAbilityEffectDataRoundThree},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

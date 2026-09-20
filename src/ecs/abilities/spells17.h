@@ -12,6 +12,8 @@ class CAbilityHowlOfTerror : public CAbilitySpellBase {
 public:
     CAbilityHowlOfTerror(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float duration_ = 15.0f;
     float radius_ = 500.0f;
@@ -25,6 +27,8 @@ class CAbilityBreathOfFire : public CAbilitySpellBase {
 public:
     CAbilityBreathOfFire(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damage_ = 65.0f;
     float radius_ = 125.0f;
@@ -39,6 +43,8 @@ class CAbilityDrunkenHaze : public CAbilitySpellBase {
 public:
     CAbilityDrunkenHaze(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float duration_ = 12.0f;
     float radius_ = 200.0f;
@@ -62,6 +68,8 @@ class CAbilityLocustSwarm : public CAbilitySpellBase {
 public:
     CAbilityLocustSwarm(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damagePerWave_ = 20.0f;
     float radius_ = 300.0f;
@@ -73,6 +81,8 @@ class CAbilityCyclone : public CAbilitySpellBase {
 public:
     CAbilityCyclone(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float duration_ = 20.0f; // ref Dur1
 };

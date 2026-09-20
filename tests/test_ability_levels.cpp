@@ -11,6 +11,7 @@
 #include "ecs/abilities/ability_hero.h"
 #include "ecs/abilities/spells.h"
 #include "ecs/abilities/spells2.h"
+#include "ecs/abilities/spells16.h"
 #include "ecs/abilities/spells3.h"
 #include "ecs/abilities/spells5.h"
 #include "ecs/csimulation.h"
@@ -311,5 +312,48 @@ bool TestAbilityEffectDataRoundTwo() {
     const float clapBefore = clapVictim->GetLife();
     clap->DoEffect(sim, caster);
     TEST_ASSERT(clapBefore - clapVictim->GetLife() == 100.0f);
+    return true;
+}
+
+bool TestAbilityEffectDataRoundThree() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    CAbilityData abilityData;
+    LoadAbilityData(mpq, abilityData);
+
+    // Cold Arrows scale per level (ref DataA/B/C/D).
+    const CAbilityDefFull* arrows = abilityData.GetAbility(War3ID("AHca"));
+    TEST_ASSERT(arrows != nullptr);
+    TEST_ASSERT(arrows->DataFloatAt(3, 0, 0.0f) == 15.0f);
+    TEST_ASSERT(arrows->DataFloatAt(3, 1, 0.0f) == 0.7f);
+    TEST_ASSERT(arrows->DataFloatAt(3, 2, 0.0f) == 0.7f);
+    TEST_ASSERT(arrows->DataFloatAt(1, 3, 0.0f) == 7.0f);
+    // Monsoon radius grows per level (Area 300/400/500).
+    const CAbilityDefFull* monsoonDef = abilityData.GetAbility(War3ID("ANmo"));
+    TEST_ASSERT(monsoonDef != nullptr);
+    TEST_ASSERT(monsoonDef->AreaAt(1) == 300.0f);
+    TEST_ASSERT(monsoonDef->AreaAt(2) == 400.0f);
+    // Howl/Breath reference rows are present with expected magnitudes.
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANht"))->DataFloatAt(1, 0, 0.0f) == 0.3f);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANbf"))->DataFloatAt(1, 4, 0.0f) == 7.0f);
+
+    CSimulation sim;
+    AddPlayers(sim);
+    sim.SetAbilityData(&abilityData);
+    auto* caster = AdoptAt(sim, 1551, 0, 0, 0);
+    auto* edge = AdoptAt(sim, 1552, 1, 350, 0);
+    Settle(sim);
+
+    // Level 1 (radius 300): the edge target stands dry.
+    caster->AddAbility(sim, std::make_unique<CAbilityMonsoon>(15501));
+    auto* monsoon = dynamic_cast<CAbilityMonsoon*>(caster->GetAbility(War3ID("ANmo")));
+    TEST_ASSERT(monsoon != nullptr);
+    const float dryBefore = edge->GetLife();
+    monsoon->DoEffect(sim, caster, 0, 0);
+    TEST_ASSERT(edge->GetLife() == dryBefore);
+    // Level 2 (radius 400): the same storm reaches, 4 waves of DataA 20.
+    monsoon->SetLevel(2);
+    monsoon->DoEffect(sim, caster, 0, 0);
+    TEST_ASSERT(dryBefore - edge->GetLife() == 80.0f);
     return true;
 }
