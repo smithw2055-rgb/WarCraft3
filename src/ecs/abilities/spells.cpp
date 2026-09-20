@@ -2,6 +2,7 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
+#include "data/abilitydata.h"
 #include <cmath>
 #include <iostream>
 
@@ -48,6 +49,10 @@ void CAbilityHolyLight::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
         if (newLife > targetUnit->GetMaxLife()) newLife = targetUnit->GetMaxLife();
         targetUnit->SetLife(game, newLife);
     }
+}
+
+void CAbilityHolyLight::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    healAmount_ = def.DataFloatAt(level, 0, healAmount_);
 }
 
 // ===== Divine Shield =====
@@ -110,6 +115,10 @@ void CAbilityStormBolt::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
     }
 }
 
+void CAbilityStormBolt::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damage_ = def.DataFloatAt(level, 0, damage_);
+}
+
 // ===== War Stomp =====
 CAbilityWarStomp::CAbilityWarStomp(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AOws"), CAbilityCategory::SPELL) {
@@ -169,6 +178,10 @@ void CAbilityDeathCoil::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
     }
 }
 
+void CAbilityDeathCoil::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    healAmount_ = def.DataFloatAt(level, 0, healAmount_);
+}
+
 // ===== Frost Nova =====
 CAbilityFrostNova::CAbilityFrostNova(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AUfn"), CAbilityCategory::SPELL) {
@@ -198,6 +211,11 @@ void CAbilityFrostNova::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
             unit->AddBuff(std::make_unique<CBuffSlow>(slowDuration_, slowPercent_, caster->GetHandleId()), game);
         }
     }
+}
+
+void CAbilityFrostNova::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damage_ = def.DataFloatAt(level, 1, damage_);
+    aoeDamage_ = def.DataFloatAt(level, 0, aoeDamage_);
 }
 
 // ===== Mana Burn =====

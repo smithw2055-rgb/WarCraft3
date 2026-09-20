@@ -73,6 +73,10 @@ public:
     float GetCooldownRemaining() const { return cooldownRemaining_; }
 
 protected:
+    // Per-class effect numbers (damage, bounces, heal...) from the def's
+    // DataA-I fields; runs inside ApplyData, so level-ups re-apply too.
+    virtual void ApplyEffectData(const CAbilityDefFull& def, int level);
+
     CSpellTargetType targetType_ = CSpellTargetType::NO_TARGET;
     float castRange_ = 600.0f;
     float castPoint_ = 0.3f;

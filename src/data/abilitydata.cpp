@@ -345,6 +345,20 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq, const std::string&
                 ? (float)std::atof(abilitySlk.GetString(r, colArea, "0").c_str()) : 0.0f);
             def->ranges.push_back((colRng >= 0)
                 ? (float)std::atof(abilitySlk.GetString(r, colRng, "0").c_str()) : 0.0f);
+            // Raw effect fields DataA-I for the same level.
+            std::array<std::string, 9> dataRow;
+            dataRow.fill("");
+            static const char* kDataCols[9] = {
+                "DataA", "DataB", "DataC", "DataD", "DataE",
+                "DataF", "DataG", "DataH", "DataI",
+            };
+            for (int f = 0; f < 9; f++) {
+                const int colData = col(std::string(kDataCols[f]) + n);
+                if (colData < 0) break;
+                std::string val = abilitySlk.GetString(r, colData, "");
+                if (val != "-") dataRow[(size_t)f] = val;
+            }
+            def->dataLevels.push_back(dataRow);
         }
         if (colRace >= 0) {
             std::string raceStr = abilitySlk.GetString(r, colRace, "");
@@ -454,6 +468,26 @@ float CAbilityDefFull::AreaAt(int level) const {
 
 float CAbilityDefFull::RangeAt(int level) const {
     return LevelOr(ranges, ClampAbilityLevel(this, level), range);
+}
+
+std::string CAbilityDefFull::DataAt(int level, int field) const {
+    if (field < 0 || field > 8 || dataLevels.empty()) return "";
+    int index = ClampAbilityLevel(this, level) - 1;
+    if (index < 0) index = 0;
+    if (index >= (int)dataLevels.size()) index = (int)dataLevels.size() - 1;
+    return dataLevels[(size_t)index][(size_t)field];
+}
+
+float CAbilityDefFull::DataFloatAt(int level, int field, float fallback) const {
+    const std::string val = DataAt(level, field);
+    if (val.empty()) return fallback;
+    return (float)std::atof(val.c_str());
+}
+
+int CAbilityDefFull::DataIntAt(int level, int field, int fallback) const {
+    const std::string val = DataAt(level, field);
+    if (val.empty()) return fallback;
+    return std::atoi(val.c_str());
 }
 
 const CAbilityDefFull* CAbilityData::GetAbility(War3ID id) const {

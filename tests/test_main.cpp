@@ -242,6 +242,8 @@ bool TestAbilityLevelsParse();
 bool TestAbilityLevelsApplyOnAdd();
 bool TestAbilityLevelsFollowSkillLevel();
 bool TestAbilityLevelsFallbackWithoutData();
+bool TestAbilityDataFieldsParse();
+bool TestAbilityEffectDataFollowsLevel();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -560,6 +562,8 @@ int main() {
         {"Ability levels apply on add", TestAbilityLevelsApplyOnAdd},
         {"Ability levels follow skill level", TestAbilityLevelsFollowSkillLevel},
         {"Ability levels fallback without data", TestAbilityLevelsFallbackWithoutData},
+        {"Ability data fields parse", TestAbilityDataFieldsParse},
+        {"Ability effect data follows level", TestAbilityEffectDataFollowsLevel},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

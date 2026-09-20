@@ -17,6 +17,8 @@ class CAbilityHolyLight : public CAbilitySpellBase {
 public:
     CAbilityHolyLight(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float healAmount_ = 200.0f;
 };
@@ -47,6 +49,8 @@ class CAbilityStormBolt : public CAbilitySpellBase {
 public:
     CAbilityStormBolt(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damage_ = 100.0f;
     float stunDuration_ = 2.0f;
@@ -68,6 +72,10 @@ class CAbilityDeathCoil : public CAbilitySpellBase {
 public:
     CAbilityDeathCoil(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    // Heal follows DataA (200/400/600); enemy damage has no Data field
+    // and stays hardcoded.
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damage_ = 100.0f;
     float healAmount_ = 200.0f;
@@ -78,6 +86,9 @@ class CAbilityFrostNova : public CAbilitySpellBase {
 public:
     CAbilityFrostNova(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    // Primary damage follows DataB (flat 100), splash follows DataA.
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damage_ = 100.0f;
     float aoeDamage_ = 50.0f;

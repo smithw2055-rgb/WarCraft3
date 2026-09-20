@@ -11,8 +11,8 @@ CAbilityPocketFactory::CAbilityPocketFactory(int handleId)
     : CAbilitySpellBase(handleId, War3ID("ANsy"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::TARGET_POINT);
     SetCastRange(500.0f);
-    SetCooldown(125.0f);
-    SetManaCost(150);
+    SetCooldown(35.0f);
+    SetManaCost(125);
 }
 
 void CAbilityPocketFactory::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {

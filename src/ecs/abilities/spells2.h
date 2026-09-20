@@ -16,6 +16,8 @@ class CAbilityHealingWave : public CAbilitySpellBase {
 public:
     CAbilityHealingWave(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float healAmount_ = 100.0f;
     int bounces_ = 3;
@@ -36,6 +38,8 @@ class CAbilityChainLightning : public CAbilitySpellBase {
 public:
     CAbilityChainLightning(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damage_ = 85.0f;
     int bounces_ = 4;

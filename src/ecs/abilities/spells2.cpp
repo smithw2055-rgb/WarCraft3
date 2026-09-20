@@ -3,6 +3,7 @@
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/abilities/ability_builder.h"
+#include "data/abilitydata.h"
 #include <cmath>
 #include <iostream>
 
@@ -66,6 +67,11 @@ void CAbilityHealingWave::DoEffect(CSimulation& game, CUnit* caster, CWidget* ta
     }
 }
 
+void CAbilityHealingWave::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    healAmount_ = def.DataFloatAt(level, 0, healAmount_);
+    bounces_ = def.DataIntAt(level, 1, bounces_);
+}
+
 // ===== Hex =====
 CAbilityHex::CAbilityHex(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AOhx"), CAbilityCategory::SPELL) {
@@ -114,6 +120,12 @@ void CAbilityChainLightning::DoEffect(CSimulation& game, CUnit* caster, CWidget*
         }
         current = next;
     }
+}
+
+void CAbilityChainLightning::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damage_ = def.DataFloatAt(level, 0, damage_);
+    bounces_ = def.DataIntAt(level, 1, bounces_);
+    damageReduction_ = def.DataFloatAt(level, 2, damageReduction_);
 }
 
 // ===== Feral Spirit =====

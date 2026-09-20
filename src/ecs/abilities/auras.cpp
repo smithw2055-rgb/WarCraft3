@@ -140,14 +140,14 @@ CAbilityCommandAura::CAbilityCommandAura(int handleId)
 // ===== Disease Cloud =====
 CAbilityDiseaseCloud::CAbilityDiseaseCloud(int handleId)
     : CAbilityAura(handleId, War3ID("Aapl")) {
-    SetRadius(250.0f);
+    SetRadius(176.0f); // ref Area1
     SetEnemyOnly(true);
     SetAffectsSelf(false);
 }
 
 void CAbilityDiseaseCloud::ApplyAura(CSimulation& game, CUnit* target) {
     if (!target) return;
-    // Level-1 object data (DataB1=10): 10 dps while in the cloud.
+    // Level-1 object data (DataC 10 dps, ref) while in the cloud.
     if (CBuff* existing = target->GetBuff(War3ID("Bapl"))) {
         existing->RefreshDuration();
     } else {

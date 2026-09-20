@@ -10,6 +10,7 @@
 #include "data/abilitydata.h"
 #include "ecs/abilities/ability_hero.h"
 #include "ecs/abilities/spells.h"
+#include "ecs/abilities/spells2.h"
 #include "ecs/abilities/spells3.h"
 #include "ecs/abilities/spells5.h"
 #include "ecs/csimulation.h"
@@ -171,5 +172,66 @@ bool TestAbilityLevelsFallbackWithoutData() {
     TEST_ASSERT(holy != nullptr);
     TEST_ASSERT(holy->GetCastRange() == 600.0f);
     TEST_ASSERT(holy->GetManaCost() == 65);
+    return true;
+}
+
+bool TestAbilityDataFieldsParse() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    CAbilityData abilityData;
+    LoadAbilityData(mpq, abilityData);
+
+    // Storm Bolt damage steps 100/225/350 (ref DataA).
+    const CAbilityDefFull* bolt = abilityData.GetAbility(War3ID("AHtb"));
+    TEST_ASSERT(bolt != nullptr);
+    TEST_ASSERT(bolt->DataFloatAt(1, 0, 0.0f) == 100.0f);
+    TEST_ASSERT(bolt->DataFloatAt(2, 0, 0.0f) == 225.0f);
+    TEST_ASSERT(bolt->DataFloatAt(3, 0, 0.0f) == 350.0f);
+    // Chain Lightning: damage, bounces, reduction (ref DataA/B/C).
+    const CAbilityDefFull* chain = abilityData.GetAbility(War3ID("AOcl"));
+    TEST_ASSERT(chain != nullptr);
+    TEST_ASSERT(chain->DataFloatAt(1, 0, 0.0f) == 85.0f);
+    TEST_ASSERT(chain->DataFloatAt(3, 0, 0.0f) == 180.0f);
+    TEST_ASSERT(chain->DataIntAt(2, 1, 0) == 6);
+    TEST_ASSERT(chain->DataFloatAt(1, 2, 0.0f) == 0.15f);
+    // Missing fields fall back instead of parsing air.
+    TEST_ASSERT(bolt->DataAt(1, 8) == "");
+    TEST_ASSERT(bolt->DataFloatAt(2, 8, 1.5f) == 1.5f);
+    return true;
+}
+
+bool TestAbilityEffectDataFollowsLevel() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    CAbilityData abilityData;
+    LoadAbilityData(mpq, abilityData);
+
+    CSimulation sim;
+    AddPlayers(sim);
+    sim.SetAbilityData(&abilityData);
+    auto* caster = AdoptAt(sim, 1531, 0, 0, 0);
+    auto* target = AdoptAt(sim, 1532, 1, 100, 0);
+    auto* splash = AdoptAt(sim, 1533, 1, 200, 0);
+    (void)splash;
+
+    // Storm Bolt level 3 hits for the DataA 350.
+    caster->AddAbility(sim, std::make_unique<CAbilityStormBolt>(15301));
+    auto* bolt = dynamic_cast<CAbilityStormBolt*>(caster->GetAbility(War3ID("AHtb")));
+    TEST_ASSERT(bolt != nullptr);
+    bolt->SetLevel(3);
+    const float before = target->GetLife();
+    bolt->DoEffect(sim, caster, target);
+    TEST_ASSERT(before - target->GetLife() == 350.0f);
+
+    // Healing Wave level 2 opens for DataA 215.
+    caster->AddAbility(sim, std::make_unique<CAbilityHealingWave>(15302));
+    auto* wave = dynamic_cast<CAbilityHealingWave*>(caster->GetAbility(War3ID("AOhw")));
+    TEST_ASSERT(wave != nullptr);
+    target->Damage(sim, nullptr, false, false, CAttackType::SPELLS,
+                   CDamageType::NORMAL, "", 5000.0f, 0);
+    wave->SetLevel(2);
+    const float woundBefore = target->GetLife();
+    wave->DoEffect(sim, caster, target);
+    TEST_ASSERT(target->GetLife() - woundBefore == 215.0f);
     return true;
 }

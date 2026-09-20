@@ -22,6 +22,11 @@ void CAbilitySpellBase::ApplyData(const CAbilityDefFull& def) {
     manaCost_ = def.ManaCostAt(level_);
     castRange_ = def.RangeAt(level_);
     castPoint_ = def.CastTimeAt(level_);
+    ApplyEffectData(def, level_);
+}
+
+void CAbilitySpellBase::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    (void)def; (void)level;
 }
 
 bool CAbilitySpellBase::CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const {

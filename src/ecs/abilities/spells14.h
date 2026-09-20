@@ -7,8 +7,8 @@
 // against retail AbilityData.slk.
 
 // ===== Pocket Factory (Tinker, ANsy) - goblin factory =====
-// Level-1 numbers from retail (Dur 40 factory life, DataB 12s spawn
-// interval, DataA ncgb goblin, DataI nfac factory).
+// Level-1 numbers from retail (Dur 40 factory life, Cool 35, Cost 125,
+// DataB ncgb goblin, DataC 12s spawn interval, UnitID nfac factory).
 class CAbilityPocketFactory : public CAbilitySpellBase {
 public:
     CAbilityPocketFactory(int handleId);
@@ -21,13 +21,14 @@ private:
 };
 
 // ===== Summon Lava Spawn (Firelord, ANlm) - splitting summon =====
-// DataI1 nlv1; the spawn splits nlv1 -> 2x nlv2 -> 2x nlv3 (ref tiers).
+// UnitID1 nlv1; the spawn splits nlv1 -> 2x nlv2 -> 2x nlv3 (ref tiers);
+// Dur 70 is the summon lifespan.
 class CAbilityLavaSpawn : public CAbilitySpellBase {
 public:
     CAbilityLavaSpawn(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
 private:
-    float summonDuration_ = 60.0f;
+    float summonDuration_ = 70.0f;
 };
 
 // ===== Soul Burn (Firelord, ANsb) - burning strike =====
@@ -42,25 +43,25 @@ private:
 };
 
 // ===== Summon Quilbeast (Beastmaster, ANsq) - timed beast =====
-// DataI1 nqb1; timed like the Feral wolves (documented guess).
+// UnitID1 nqb1; timed like the Feral wolves (Dur 70, documented guess).
 class CAbilityQuilbeast : public CAbilitySpellBase {
 public:
     CAbilityQuilbeast(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
 private:
     War3ID beastType_ = War3ID("nqb1");
-    float summonDuration_ = 60.0f;
+    float summonDuration_ = 70.0f;
 };
 
 // ===== Frost Breath (Frost Wyrm, Afsh) - chilling cone =====
-// Cone approximated as target + splash (ref DataA 250 damage band).
+// Cone approximated as target + splash (DataA 275 damage, Area 100).
 class CAbilityFrostBreath : public CAbilitySpellBase {
 public:
     CAbilityFrostBreath(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
 private:
-    float damage_ = 100.0f;
-    float radius_ = 200.0f;
+    float damage_ = 275.0f;
+    float radius_ = 100.0f;
     float slowPercent_ = 0.5f;
     float slowDuration_ = 4.0f;
 };

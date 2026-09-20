@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <array>
 #include <unordered_map>
 #include <memory>
 #include "resource/slk.h"
@@ -55,6 +56,13 @@ struct CAbilityDefFull {
     std::string effectSound;
 
     std::vector<std::string> dataFields; // raw data fields A-I
+
+    // Per-level raw data fields A-I (level 1 at index 0).
+    std::vector<std::array<std::string, 9>> dataLevels;
+
+    std::string DataAt(int level, int field) const;
+    float DataFloatAt(int level, int field, float fallback) const;
+    int DataIntAt(int level, int field, int fallback) const;
 };
 
 struct CBuffDefFull {
