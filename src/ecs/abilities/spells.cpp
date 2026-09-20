@@ -30,6 +30,11 @@ void CAbilityBlizzard::DoEffect(CSimulation& game, CUnit* caster, float x, float
     }
 }
 
+void CAbilityBlizzard::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    waves_ = def.DataIntAt(level, 0, waves_);
+    damagePerWave_ = def.DataFloatAt(level, 1, damagePerWave_);
+}
+
 // ===== Holy Light =====
 CAbilityHolyLight::CAbilityHolyLight(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AHhb"), CAbilityCategory::SPELL) {
@@ -94,6 +99,10 @@ void CAbilityThunderClap::DoEffect(CSimulation& game, CUnit* caster) {
     }
 }
 
+void CAbilityThunderClap::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damage_ = def.DataFloatAt(level, 0, damage_);
+}
+
 // ===== Storm Bolt =====
 CAbilityStormBolt::CAbilityStormBolt(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AHtb"), CAbilityCategory::SPELL) {
@@ -143,6 +152,10 @@ void CAbilityWarStomp::DoEffect(CSimulation& game, CUnit* caster) {
             unit->AddBuff(std::make_unique<CBuffStun>(stunDuration_), game);
         }
     }
+}
+
+void CAbilityWarStomp::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damage_ = def.DataFloatAt(level, 0, damage_);
 }
 
 // ===== Death Coil =====
@@ -239,6 +252,10 @@ void CAbilityManaBurn::DoEffect(CSimulation& game, CUnit* caster, CWidget* targe
     targetUnit->Damage(game, caster, false, false,
                        CAttackType::SPELLS, CDamageType::MIND,
                        "", (float)manaToBurn, 0);
+}
+
+void CAbilityManaBurn::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    manaBurned_ = def.DataIntAt(level, 0, manaBurned_);
 }
 
 // ===== Entangling Roots =====

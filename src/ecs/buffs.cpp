@@ -760,3 +760,52 @@ CBuff* CBuffDisease::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffPhoenixRebirth =====
+CBuffPhoenixRebirth::CBuffPhoenixRebirth(float eggHatchDelay)
+    : CBuff(War3ID("Bphx"), 3600.0f, true), eggHatchDelay_(eggHatchDelay) {}
+
+void CBuffPhoenixRebirth::OnDeath(CSimulation& game, CUnit* target) {
+    if (!target) return;
+    // The fallen phoenix leaves an egg; the egg hatches on expiry and
+    // the cycle chains (ref Phoenix rebirth).
+    CUnit* egg = game.CreateUnit(War3ID("hpxe"), target->GetPlayerIndex(),
+                                 target->GetX(), target->GetY(), 0);
+    if (!egg) return;
+    egg->AddBuff(std::make_unique<CBuffHatchAfter>(
+        eggHatchDelay_, War3ID("hphx"), true), game);
+    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
+        summonedCb(target->GetHandleId(), egg->GetHandleId());
+    }
+}
+
+CBuff* CBuffPhoenixRebirth::Clone() const {
+    auto* copy = new CBuffPhoenixRebirth(eggHatchDelay_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffHatchAfter =====
+CBuffHatchAfter::CBuffHatchAfter(float duration, War3ID hatchType, bool chainRebirth)
+    : CBuff(War3ID("Bhch"), duration, true)
+    , hatchType_(hatchType), chainRebirth_(chainRebirth) {}
+
+void CBuffHatchAfter::OnRemove(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return; // a killed egg hatches nothing
+    CUnit* hatched = game.CreateUnit(hatchType_, target->GetPlayerIndex(),
+                                     target->GetX(), target->GetY(), 0);
+    if (!hatched) return;
+    if (chainRebirth_) {
+        hatched->AddBuff(std::make_unique<CBuffPhoenixRebirth>(), game);
+    }
+    game.RemoveUnit(target); // the shell is consumed
+    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
+        summonedCb(target->GetHandleId(), hatched->GetHandleId());
+    }
+}
+
+CBuff* CBuffHatchAfter::Clone() const {
+    auto* copy = new CBuffHatchAfter(duration_, hatchType_, chainRebirth_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

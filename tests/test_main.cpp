@@ -238,12 +238,15 @@ bool TestDiseaseCloudSickens();
 bool TestPulverizeSlams();
 bool TestForkedLightningChains();
 bool TestSpells14FactoryCoverage();
+bool TestPhoenixRebirths();
+bool TestSpells15FactoryCoverage();
 bool TestAbilityLevelsParse();
 bool TestAbilityLevelsApplyOnAdd();
 bool TestAbilityLevelsFollowSkillLevel();
 bool TestAbilityLevelsFallbackWithoutData();
 bool TestAbilityDataFieldsParse();
 bool TestAbilityEffectDataFollowsLevel();
+bool TestAbilityEffectDataRoundTwo();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -558,12 +561,15 @@ int main() {
         {"Pulverize slams", TestPulverizeSlams},
         {"Forked lightning chains", TestForkedLightningChains},
         {"Spells14 factory coverage", TestSpells14FactoryCoverage},
+        {"Phoenix rebirths", TestPhoenixRebirths},
+        {"Spells15 factory coverage", TestSpells15FactoryCoverage},
         {"Ability levels parse", TestAbilityLevelsParse},
         {"Ability levels apply on add", TestAbilityLevelsApplyOnAdd},
         {"Ability levels follow skill level", TestAbilityLevelsFollowSkillLevel},
         {"Ability levels fallback without data", TestAbilityLevelsFallbackWithoutData},
         {"Ability data fields parse", TestAbilityDataFieldsParse},
         {"Ability effect data follows level", TestAbilityEffectDataFollowsLevel},
+        {"Ability effect data round two", TestAbilityEffectDataRoundTwo},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},

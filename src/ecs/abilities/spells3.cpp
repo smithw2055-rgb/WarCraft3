@@ -4,6 +4,7 @@
 #include "ecs/buffs.h"
 #include "ecs/abilities/ability_builder.h"
 #include "ecs/player.h"
+#include "data/abilitydata.h"
 #include <cmath>
 
 static float Dist2(float ax, float ay, float bx, float by) {
@@ -142,6 +143,10 @@ void CAbilityShockwave::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
                          "", damage_, 0);
         }
     }
+}
+
+void CAbilityShockwave::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damage_ = def.DataFloatAt(level, 0, damage_);
 }
 
 // ===== Starfall =====

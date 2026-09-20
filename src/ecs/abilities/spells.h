@@ -6,6 +6,8 @@ class CAbilityBlizzard : public CAbilitySpellBase {
 public:
     CAbilityBlizzard(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     int waves_ = 6;
     float damagePerWave_ = 30.0f;
@@ -37,6 +39,8 @@ class CAbilityThunderClap : public CAbilitySpellBase {
 public:
     CAbilityThunderClap(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damage_ = 60.0f;
     float radius_ = 250.0f;
@@ -61,6 +65,8 @@ class CAbilityWarStomp : public CAbilitySpellBase {
 public:
     CAbilityWarStomp(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damage_ = 25.0f;
     float radius_ = 250.0f;
@@ -102,6 +108,8 @@ class CAbilityManaBurn : public CAbilitySpellBase {
 public:
     CAbilityManaBurn(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     int manaBurned_ = 100;
 };

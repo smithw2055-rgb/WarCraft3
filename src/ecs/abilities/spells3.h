@@ -61,6 +61,8 @@ class CAbilityShockwave : public CAbilitySpellBase {
 public:
     CAbilityShockwave(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damage_ = 100.0f;
     float range_ = 700.0f;

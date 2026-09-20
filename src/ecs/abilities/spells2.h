@@ -74,6 +74,8 @@ class CAbilityCarrionSwarm : public CAbilitySpellBase {
 public:
     CAbilityCarrionSwarm(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float damage_ = 75.0f;
     float range_ = 700.0f;
@@ -94,6 +96,8 @@ class CAbilityInferno : public CAbilitySpellBase {
 public:
     CAbilityInferno(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     War3ID infernalType_ = War3ID("ninf");
     float stunDuration_ = 2.0f;

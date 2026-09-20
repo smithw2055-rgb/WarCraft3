@@ -202,6 +202,10 @@ void CAbilityCarrionSwarm::DoEffect(CSimulation& game, CUnit* caster, CWidget* t
     }
 }
 
+void CAbilityCarrionSwarm::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damage_ = def.DataFloatAt(level, 0, damage_);
+}
+
 // ===== Sleep =====
 CAbilitySleep::CAbilitySleep(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AUsl"), CAbilityCategory::SPELL) {
@@ -244,6 +248,10 @@ void CAbilityInferno::DoEffect(CSimulation& game, CUnit* caster, float x, float 
     // Summon infernal with timed life (ref CBuffTimedLife).
     SummonTimedUnit(game, caster, infernalType_, War3ID("AUin"),
                     x, y, caster->GetFacing(), summonDuration_);
+}
+
+void CAbilityInferno::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    summonDuration_ = def.DataFloatAt(level, 1, summonDuration_);
 }
 
 // ===== Silence =====

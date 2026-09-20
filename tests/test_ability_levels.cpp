@@ -67,6 +67,10 @@ CUnit* AdoptAt(CSimulation& sim, int handle, int player, float x, float y) {
                                                  War3ID("hfoo"), x, y, 0));
 }
 
+void Settle(CSimulation& sim, int ticks = 2) {
+    for (int i = 0; i < ticks; i++) sim.Update();
+}
+
 void AddPlayers(CSimulation& sim) {
     sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
     sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
@@ -233,5 +237,79 @@ bool TestAbilityEffectDataFollowsLevel() {
     const float woundBefore = target->GetLife();
     wave->DoEffect(sim, caster, target);
     TEST_ASSERT(target->GetLife() - woundBefore == 215.0f);
+    return true;
+}
+
+bool TestAbilityEffectDataRoundTwo() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    CAbilityData abilityData;
+    LoadAbilityData(mpq, abilityData);
+
+    CSimulation sim;
+    AddPlayers(sim);
+    sim.SetAbilityData(&abilityData);
+    auto* caster = AdoptAt(sim, 1541, 0, 0, 0);
+    auto* lineTarget = AdoptAt(sim, 1542, 1, 300, 0);
+    Settle(sim); // adopted units join the sim on update
+
+    // Shockwave level 3: DataA 200 down the line.
+    caster->AddAbility(sim, std::make_unique<CAbilityShockwave>(15401));
+    auto* shock = dynamic_cast<CAbilityShockwave*>(caster->GetAbility(War3ID("AOsh")));
+    TEST_ASSERT(shock != nullptr);
+    shock->SetLevel(3);
+    const float shockBefore = lineTarget->GetLife();
+    shock->DoEffect(sim, caster, lineTarget);
+    TEST_ASSERT(shockBefore - lineTarget->GetLife() == 200.0f);
+
+    // Blizzard level 2: 8 waves of DataB 40.
+    caster->AddAbility(sim, std::make_unique<CAbilityBlizzard>(15402));
+    auto* blizzard = dynamic_cast<CAbilityBlizzard*>(caster->GetAbility(War3ID("AHbz")));
+    TEST_ASSERT(blizzard != nullptr);
+    blizzard->SetLevel(2);
+    const float blizBefore = lineTarget->GetLife();
+    blizzard->DoEffect(sim, caster, 300, 0);
+    TEST_ASSERT(blizBefore - lineTarget->GetLife() == 320.0f);
+
+    // Mana Burn level 1: DataA 50 (retail corrected our 100).
+    caster->AddAbility(sim, std::make_unique<CAbilityManaBurn>(15403));
+    auto* burn = dynamic_cast<CAbilityManaBurn*>(caster->GetAbility(War3ID("AEmb")));
+    TEST_ASSERT(burn != nullptr);
+    lineTarget->SetMana(200.0f);
+    burn->DoEffect(sim, caster, lineTarget);
+    TEST_ASSERT(lineTarget->GetMana() == 150.0f);
+
+    // War Stomp level 3: DataA 75 around the caster.
+    caster->AddAbility(sim, std::make_unique<CAbilityWarStomp>(15404));
+    auto* stomp = dynamic_cast<CAbilityWarStomp*>(caster->GetAbility(War3ID("AOws")));
+    TEST_ASSERT(stomp != nullptr);
+    stomp->SetLevel(3);
+    auto* near = AdoptAt(sim, 1543, 1, 100, 0);
+    for (int i = 0; i < 2; i++) sim.Update();
+    const float stompBefore = near->GetLife();
+    stomp->DoEffect(sim, caster);
+    TEST_ASSERT(stompBefore - near->GetLife() == 75.0f);
+
+    // Carrion Swarm level 2: DataA 125 down the line.
+    caster->AddAbility(sim, std::make_unique<CAbilityCarrionSwarm>(15405));
+    auto* swarm = dynamic_cast<CAbilityCarrionSwarm*>(caster->GetAbility(War3ID("AUcs")));
+    TEST_ASSERT(swarm != nullptr);
+    swarm->SetLevel(2);
+    auto* swarmTarget = AdoptAt(sim, 1544, 1, 300, 100);
+    for (int i = 0; i < 2; i++) sim.Update();
+    const float swarmBefore = swarmTarget->GetLife();
+    swarm->DoEffect(sim, caster, swarmTarget);
+    TEST_ASSERT(swarmBefore - swarmTarget->GetLife() == 125.0f);
+
+    // Thunder Clap level 2: DataA 100.
+    caster->AddAbility(sim, std::make_unique<CAbilityThunderClap>(15406));
+    auto* clap = dynamic_cast<CAbilityThunderClap*>(caster->GetAbility(War3ID("AHtc")));
+    TEST_ASSERT(clap != nullptr);
+    clap->SetLevel(2);
+    auto* clapVictim = AdoptAt(sim, 1545, 1, 100, 100);
+    for (int i = 0; i < 2; i++) sim.Update();
+    const float clapBefore = clapVictim->GetLife();
+    clap->DoEffect(sim, caster);
+    TEST_ASSERT(clapBefore - clapVictim->GetLife() == 100.0f);
     return true;
 }

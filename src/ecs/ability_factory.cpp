@@ -29,6 +29,7 @@
 #include "ecs/abilities/spells12.h"
 #include "ecs/abilities/spells13.h"
 #include "ecs/abilities/spells14.h"
+#include "ecs/abilities/spells15.h"
 #include "ecs/abilities/auras.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
@@ -247,6 +248,9 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("Aapl")) return std::make_unique<CAbilityDiseaseCloud>(handleId);
     if (code == War3ID("Awar")) return std::make_unique<CAbilityPulverize>(handleId);
     if (code == War3ID("ANfl")) return std::make_unique<CAbilityForkedLightning>(handleId);
+
+    // ===== Batch 15 (abilities): phoenix =====
+    if (code == War3ID("AHpx")) return std::make_unique<CAbilityPhoenix>(handleId);
 
     // ===== Auras =====
     if (code == War3ID("AHad")) return std::make_unique<CAbilityDevotionAura>(handleId);

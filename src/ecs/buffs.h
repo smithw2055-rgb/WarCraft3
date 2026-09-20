@@ -422,3 +422,29 @@ public:
 private:
     float damagePerTick_;
 };
+
+// Phoenix rebirth - on death, leaves an egg that hatches later.
+class CBuffPhoenixRebirth : public CBuff {
+public:
+    CBuffPhoenixRebirth(float eggHatchDelay = 10.0f);
+
+    void OnDeath(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float eggHatchDelay_;
+};
+
+// Hatch-after - on expiry of a living bearer, replaces it with the
+// hatch type (Phoenix egg). A killed bearer hatches nothing.
+class CBuffHatchAfter : public CBuff {
+public:
+    CBuffHatchAfter(float duration, War3ID hatchType, bool chainRebirth);
+
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    War3ID hatchType_;
+    bool chainRebirth_;
+};
