@@ -124,7 +124,7 @@ void CAbilityAbolishMagic::DoEffect(CSimulation& game, CUnit* caster, float x, f
         const float dx = unit->GetX() - x;
         const float dy = unit->GetY() - y;
         if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->RemoveBuffsIf(game, true, true, false);
+            unit->RemoveBuffsIf(game, true, true, false, true);
         }
     }
 }
