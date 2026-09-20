@@ -124,6 +124,7 @@ void CAbilityHero::LearnSkill(CSimulation& game, CUnit* unit, War3ID skillCode) 
     if (existingAbility) {
         // Level up the existing ability (ref hero skill levels 1-3).
         existingAbility->SetLevel(existingAbility->GetLevel() + 1);
+        existingAbility->OnLevelChanged(game, unit);
         skillPoints_--;
         std::cout << "Hero leveled skill: " << skillCode.ToString()
                   << " to " << existingAbility->GetLevel() << std::endl;

@@ -1,16 +1,6 @@
 #pragma once
 #include "ecs/abilities/ability_spell_base.h"
 
-// ===== Serenity (Archmage) - AOE mana restore =====
-class CAbilitySerenity : public CAbilitySpellBase {
-public:
-    CAbilitySerenity(int handleId);
-    void DoEffect(CSimulation& game, CUnit* caster) override;
-private:
-    float manaRestore_ = 100.0f;
-    float radius_ = 250.0f;
-};
-
 // ===== Healing Wave (Shadow Hunter) - chain heal =====
 class CAbilityHealingWave : public CAbilitySpellBase {
 public:
@@ -29,6 +19,8 @@ class CAbilityHex : public CAbilitySpellBase {
 public:
     CAbilityHex(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float duration_ = 15.0f;
 };
@@ -87,6 +79,8 @@ class CAbilitySleep : public CAbilitySpellBase {
 public:
     CAbilitySleep(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float duration_ = 20.0f;
 };

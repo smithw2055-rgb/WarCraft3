@@ -3,6 +3,7 @@
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/player.h"
+#include "data/abilitydata.h"
 #include <cmath>
 
 // ===== Evasion =====
@@ -21,6 +22,10 @@ void CAbilityEvasion::OnRemove(CSimulation& game, CUnit* unit) {
     if (unit) unit->SetEvasionChance(0.0f);
 }
 
+void CAbilityEvasion::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    chance_ = def.DataFloatAt(level, 0, chance_);
+}
+
 // ===== Critical Strike =====
 CAbilityCriticalStrike::CAbilityCriticalStrike(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AOcr"), CAbilityCategory::SPELL) {
@@ -37,10 +42,20 @@ void CAbilityCriticalStrike::OnRemove(CSimulation& game, CUnit* unit) {
     if (unit) unit->SetCriticalStrike(0.0f, 1.0f);
 }
 
+void CAbilityCriticalStrike::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    chance_ = def.DataFloatAt(level, 0, chance_ * 100.0f) / 100.0f;
+    multiplier_ = def.DataFloatAt(level, 1, multiplier_);
+}
+
 // ===== Bash =====
 CAbilityBash::CAbilityBash(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AHbh"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::NO_TARGET);
+}
+
+void CAbilityBash::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    chance_ = def.DataFloatAt(level, 0, chance_ * 100.0f) / 100.0f;
+    duration_ = def.DurationAt(level);
 }
 
 // ===== Slow =====
@@ -58,6 +73,11 @@ void CAbilitySlow::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!targetUnit) return;
     targetUnit->AddBuff(std::make_unique<CBuffSlow>(
         duration_, slowPercent_, caster ? caster->GetHandleId() : -1), game);
+}
+
+void CAbilitySlow::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    slowPercent_ = def.DataFloatAt(level, 0, slowPercent_);
+    duration_ = def.DurationAt(level);
 }
 
 // ===== Frost Armor =====
@@ -78,6 +98,11 @@ void CAbilityFrostArmor::DoEffect(CSimulation& game, CUnit* caster, CWidget* tar
         War3ID("BUfa"), duration_, armorBonus_, true), game);
 }
 
+void CAbilityFrostArmor::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    duration_ = def.DurationAt(level);
+    armorBonus_ = def.DataIntAt(level, 1, armorBonus_);
+}
+
 // ===== Faerie Fire =====
 CAbilityFaerieFire::CAbilityFaerieFire(int handleId)
     : CAbilitySpellBase(handleId, War3ID("Afae"), CAbilityCategory::SPELL) {
@@ -94,6 +119,11 @@ void CAbilityFaerieFire::DoEffect(CSimulation& game, CUnit* caster, CWidget* tar
     if (!targetUnit) return;
     targetUnit->AddBuff(std::make_unique<CBuffArmor>(
         War3ID("Bfae"), duration_, armorPenalty_, false), game);
+}
+
+void CAbilityFaerieFire::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    duration_ = def.DurationAt(level);
+    armorPenalty_ = -def.DataIntAt(level, 0, -armorPenalty_);
 }
 
 // ===== Death Pact =====

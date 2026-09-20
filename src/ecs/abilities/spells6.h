@@ -51,10 +51,12 @@ class CAbilityBloodlustCast : public CAbilitySpellBase {
 public:
     CAbilityBloodlustCast(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float duration_ = 30.0f;
-    float speedBonus_ = 0.4f;
-    float attackSpeedBonus_ = 0.5f;
+    float duration_ = 60.0f; // ref Dur1
+    float speedBonus_ = 0.4f; // ref DataA level 1
+    float attackSpeedBonus_ = 0.25f; // ref DataB level 1
 };
 
 // ===== Purge (Shaman) - dispel magic, slow, burn summons =====
@@ -84,8 +86,10 @@ class CAbilityRaiseDead : public CAbilitySpellBase {
 public:
     CAbilityRaiseDead(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     War3ID skeletonType_ = War3ID("uske"); // Skeleton Warrior, ref UnitData
     float radius_ = 500.0f;
-    int maxTargets_ = 2;
+    int maxTargets_ = 2; // ref DataA level 1
 };

@@ -74,6 +74,11 @@ public:
     virtual void OnRemove(CSimulation& game, CUnit* unit);
     virtual void OnTick(CSimulation& game, CUnit* unit);
     virtual void OnDeath(CSimulation& game, CUnit* unit);
+    // Hero skill level-up refresh: unapply then re-apply so passives
+    // that pushed member values at OnAdd time (evasion, crit, carapace)
+    // pick up the new level's numbers. Implementations must keep the
+    // OnRemove/OnAdd pair idempotent.
+    virtual void OnLevelChanged(CSimulation& game, CUnit* unit);
 
     // Order validation
     virtual bool CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const;

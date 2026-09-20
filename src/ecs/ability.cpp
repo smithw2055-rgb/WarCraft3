@@ -29,6 +29,13 @@ void CAbility::OnDeath(CSimulation& game, CUnit* unit) {
     (void)game; (void)unit;
 }
 
+void CAbility::OnLevelChanged(CSimulation& game, CUnit* unit) {
+    OnRemove(game, unit);
+    if (!IsDisabled()) {
+        OnAdd(game, unit);
+    }
+}
+
 bool CAbility::CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const {
     (void)game; (void)unit; (void)orderId;
     if (IsDisabled()) return false;

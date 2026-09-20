@@ -21,8 +21,10 @@ class CAbilityPolymorph : public CAbilitySpellBase {
 public:
     CAbilityPolymorph(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float duration_ = 20.0f;
+    float duration_ = 60.0f;
 };
 
 // ===== Inner Fire (Priest, Ainf) - timed damage + armor =====
@@ -50,8 +52,11 @@ class CAbilityDispelMagic : public CAbilitySpellBase {
 public:
     CAbilityDispelMagic(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float radius_ = 200.0f;
+    float radius_ = 250.0f; // ref Area1
+    float summonDamage_ = 250.0f; // ref DataB level 1
 };
 
 // ===== Rejuvenation (Druid of the Claw, Arej) - heal over time =====
@@ -70,10 +75,12 @@ class CAbilityRoar : public CAbilitySpellBase {
 public:
     CAbilityRoar(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float duration_ = 20.0f;
     int bonusDamage_ = 5;
-    float radius_ = 300.0f;
+    float radius_ = 50.0f; // ref Area1 (tight rally, not an aura)
 };
 
 // ===== Defend (Footman/Knight, Adef) - halve weapon damage taken =====

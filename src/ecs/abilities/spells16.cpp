@@ -45,7 +45,7 @@ void CAbilityDevourMagic::DoEffect(CSimulation& game, CUnit* caster, CWidget* ta
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (!targetUnit) return;
     const size_t before = targetUnit->GetBuffs().size();
-    targetUnit->RemoveBuffsIf(game, true, true, false);
+    targetUnit->RemoveBuffsIf(game, true, true, false, true);
     const size_t eaten = before - targetUnit->GetBuffs().size();
     if (eaten > 0 && caster && !caster->IsDead()) {
         float mana = caster->GetMana() + manaPerBuff_ * (float)eaten;

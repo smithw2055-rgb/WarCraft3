@@ -3,6 +3,7 @@
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/player.h"
+#include "data/abilitydata.h"
 #include <cmath>
 
 // ===== Healing Spray =====
@@ -107,6 +108,12 @@ void CAbilityBloodlustCast::DoEffect(CSimulation& game, CUnit* caster, CWidget* 
         duration_, speedBonus_, attackSpeedBonus_), game);
 }
 
+void CAbilityBloodlustCast::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    duration_ = def.DurationAt(level);
+    speedBonus_ = def.DataFloatAt(level, 0, speedBonus_);
+    attackSpeedBonus_ = def.DataFloatAt(level, 1, attackSpeedBonus_);
+}
+
 // ===== Purge =====
 CAbilityPurge::CAbilityPurge(int handleId)
     : CAbilitySpellBase(handleId, War3ID("Aprg"), CAbilityCategory::SPELL) {
@@ -128,7 +135,7 @@ void CAbilityPurge::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) 
                            "", summonDamage_, 0);
         if (targetUnit->IsDead()) return;
     }
-    targetUnit->RemoveBuffsIf(game, true, true, false);
+    targetUnit->RemoveBuffsIf(game, true, true, false, true);
     targetUnit->AddBuff(std::make_unique<CBuffSlow>(
         slowDuration_, slowPercent_, caster ? caster->GetHandleId() : -1), game);
 }
@@ -180,4 +187,8 @@ void CAbilityRaiseDead::DoEffect(CSimulation& game, CUnit* caster) {
             }
         }
     }
+}
+
+void CAbilityRaiseDead::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    maxTargets_ = def.DataIntAt(level, 0, maxTargets_);
 }

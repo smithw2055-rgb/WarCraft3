@@ -25,7 +25,7 @@ private:
     float summonDuration_ = 60.0f;
 };
 
-// ===== Resurrect (Paladin) - revive dead units in area =====
+// ===== Resurrect (Paladin Resurrection, AHre) - revive dead units in area =====
 class CAbilityResurrect : public CAbilitySpellBase {
 public:
     CAbilityResurrect(int handleId);
@@ -40,8 +40,10 @@ class CAbilityBlink : public CAbilitySpellBase {
 public:
     CAbilityBlink(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float maxRange_ = 1000.0f;
+    float maxRange_ = 1000.0f; // ref DataA level 1
 };
 
 // ===== Mirror Image (Blademaster) - timed copies of the caster =====
@@ -49,8 +51,10 @@ class CAbilityMirrorImage : public CAbilitySpellBase {
 public:
     CAbilityMirrorImage(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    int count_ = 2;
+    int count_ = 1; // ref DataA level 1
     float duration_ = 60.0f;
     // Images deal no bonus damage in retail; without a damage-suppression
     // flag they hit at full strength here (documented approximation).
@@ -85,9 +89,11 @@ class CAbilityTranquility : public CAbilitySpellBase {
 public:
     CAbilityTranquility(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float healPerTick_ = 20.0f;
-    float radius_ = 400.0f;
+    float radius_ = 900.0f; // ref Area1
     float duration_ = 10.0f;
 };
 
@@ -110,6 +116,8 @@ class CAbilityCharm : public CAbilitySpellBase {
 public:
     CAbilityCharm(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    int maxLevel_ = 5;
+    int maxLevel_ = 5; // ref DataA level 1
 };

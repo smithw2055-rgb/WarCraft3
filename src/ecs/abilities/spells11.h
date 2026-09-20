@@ -84,8 +84,10 @@ class CAbilityBattleRoar : public CAbilitySpellBase {
 public:
     CAbilityBattleRoar(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float duration_ = 30.0f;
     int bonusDamage_ = 6;
-    float radius_ = 300.0f;
+    float radius_ = 650.0f; // ref Area1
 };

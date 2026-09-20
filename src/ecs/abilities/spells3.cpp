@@ -51,9 +51,9 @@ void CAbilitySummonWaterElemental::DoEffect(CSimulation& game, CUnit* caster) {
     }
 }
 
-// ===== Resurrect =====
+// ===== Resurrect (Paladin Resurrection, AHre) =====
 CAbilityResurrect::CAbilityResurrect(int handleId)
-    : CAbilitySpellBase(handleId, War3ID("AHrs"), CAbilityCategory::SPELL) {
+    : CAbilitySpellBase(handleId, War3ID("AHre"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::TARGET_POINT);
     SetCastRange(800.0f);
     SetCooldown(180.0f);
@@ -96,6 +96,10 @@ void CAbilityBlink::DoEffect(CSimulation& game, CUnit* caster, float x, float y)
     caster->SetPosition(x, y);
 }
 
+void CAbilityBlink::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    maxRange_ = def.DataFloatAt(level, 0, maxRange_);
+}
+
 // ===== Mirror Image =====
 CAbilityMirrorImage::CAbilityMirrorImage(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AOmi"), CAbilityCategory::SPELL) {
@@ -112,6 +116,10 @@ void CAbilityMirrorImage::DoEffect(CSimulation& game, CUnit* caster) {
         SummonTimedUnit(game, caster, caster->GetTypeId(), War3ID("AOmi"),
                         x, y, caster->GetFacing(), duration_);
     }
+}
+
+void CAbilityMirrorImage::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    count_ = def.DataIntAt(level, 0, count_);
 }
 
 // ===== Shockwave =====
@@ -199,6 +207,11 @@ void CAbilityTranquility::DoEffect(CSimulation& game, CUnit* caster) {
     }
 }
 
+void CAbilityTranquility::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    healPerTick_ = def.DataFloatAt(level, 0, healPerTick_);
+    radius_ = def.AreaAt(level);
+}
+
 // ===== Reincarnation =====
 CAbilityReincarnation::CAbilityReincarnation(int handleId, War3ID code, int manaCost)
     : CAbilitySpellBase(handleId, code, CAbilityCategory::SPELL), manaCost_(manaCost) {
@@ -244,4 +257,8 @@ void CAbilityCharm::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) 
     if (oldOwner) oldOwner->RemoveUnit(targetUnit);
     targetUnit->SetPlayerIndex(caster->GetPlayerIndex());
     if (newOwner) newOwner->AddUnit(targetUnit);
+}
+
+void CAbilityCharm::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    maxLevel_ = def.DataIntAt(level, 0, maxLevel_);
 }

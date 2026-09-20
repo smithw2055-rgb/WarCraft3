@@ -89,7 +89,7 @@ bool TestEvasionPassive() {
     Settle(sim);
     TEST_ASSERT(unit->GetEvasionChance() == 0.0f);
     unit->AddAbility(sim, std::make_unique<CAbilityEvasion>(4001));
-    TEST_ASSERT(unit->GetEvasionChance() == 0.15f);
+    TEST_ASSERT(unit->GetEvasionChance() == 0.10f); // ref DataA level 1
     TEST_ASSERT(unit->RemoveAbility(sim, War3ID("AEev")));
     TEST_ASSERT(unit->GetEvasionChance() == 0.0f);
     return true;
@@ -162,7 +162,7 @@ bool TestFrostArmorAndFaerieFire() {
     CAbilityFaerieFire faerie(4402);
     faerie.DoEffect(sim, caster, target);
     TEST_ASSERT(target->GetBuff(War3ID("Bfae")) != nullptr);
-    TEST_ASSERT(target->GetTotalDefense() == base + 3 - 2);
+    TEST_ASSERT(target->GetTotalDefense() == base + 3 - 4); // ref DataA
     return true;
 }
 

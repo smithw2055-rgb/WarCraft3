@@ -3,6 +3,7 @@
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/player.h"
+#include "data/abilitydata.h"
 #include <cmath>
 
 // ===== Serpent Ward =====
@@ -40,6 +41,10 @@ void CAbilityPolymorph::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (!targetUnit) return;
     targetUnit->AddBuff(std::make_unique<CBuffPolymorph>(duration_), game);
+}
+
+void CAbilityPolymorph::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    duration_ = def.DurationAt(level);
 }
 
 // ===== Inner Fire =====
@@ -95,9 +100,23 @@ void CAbilityDispelMagic::DoEffect(CSimulation& game, CUnit* caster, float x, fl
         const float dx = unit->GetX() - x;
         const float dy = unit->GetY() - y;
         if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->RemoveBuffsIf(game, true, true, false);
+            // Summon check runs pre-dispel: dispel strips the timed-life
+            // marker that IsSummoned reads (cf. Purge ordering).
+            const bool wasSummoned = unit->IsSummoned();
+            unit->RemoveBuffsIf(game, true, true, false, true);
+            // Dispel burns summoned units (ref DataB).
+            if (wasSummoned) {
+                unit->Damage(game, caster, false, false,
+                             CAttackType::SPELLS, CDamageType::MAGIC,
+                             "", summonDamage_, 0);
+            }
         }
     }
+}
+
+void CAbilityDispelMagic::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    radius_ = def.AreaAt(level);
+    summonDamage_ = def.DataFloatAt(level, 1, summonDamage_);
 }
 
 // ===== Rejuvenation =====
@@ -138,6 +157,10 @@ void CAbilityRoar::DoEffect(CSimulation& game, CUnit* caster) {
                 duration_, bonusDamage_, 0), game);
         }
     }
+}
+
+void CAbilityRoar::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    radius_ = def.AreaAt(level);
 }
 
 // ===== Defend =====

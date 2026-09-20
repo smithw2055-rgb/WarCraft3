@@ -10,8 +10,10 @@ public:
     CAbilityEvasion(int handleId);
     void OnAdd(CSimulation& game, CUnit* unit) override;
     void OnRemove(CSimulation& game, CUnit* unit) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float chance_ = 0.15f; // level-1 value; per-level tables are data work
+    float chance_ = 0.10f; // ref DataA level 1
 };
 
 // ===== Critical Strike (Blade Master, AOcr) - passive crit =====
@@ -20,9 +22,11 @@ public:
     CAbilityCriticalStrike(int handleId);
     void OnAdd(CSimulation& game, CUnit* unit) override;
     void OnRemove(CSimulation& game, CUnit* unit) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float chance_ = 0.15f;
-    float multiplier_ = 2.0f;
+    float chance_ = 0.15f; // ref DataA level 1
+    float multiplier_ = 2.0f; // ref DataB level 1
 };
 
 // ===== Bash (Mountain King, AHbh) - stun on attack landed =====
@@ -35,9 +39,11 @@ public:
     float GetDuration() const { return duration_; }
     void SetChance(float v) { chance_ = v; }
     void SetDuration(float v) { duration_ = v; }
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float chance_ = 0.15f;
-    float duration_ = 2.0f;
+    float chance_ = 0.20f; // ref DataA level 1 (percent / 100)
+    float duration_ = 2.0f; // ref Dur1
 };
 
 // ===== Slow (Sorceress, Aslo) - slow a unit =====
@@ -45,9 +51,11 @@ class CAbilitySlow : public CAbilitySpellBase {
 public:
     CAbilitySlow(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float duration_ = 10.0f;
-    float slowPercent_ = 0.3f;
+    float duration_ = 60.0f;
+    float slowPercent_ = 0.6f;
 };
 
 // ===== Frost Armor (Lich, AUfa) - armor buff =====
@@ -55,9 +63,11 @@ class CAbilityFrostArmor : public CAbilitySpellBase {
 public:
     CAbilityFrostArmor(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float duration_ = 30.0f;
-    int armorBonus_ = 3;
+    float duration_ = 5.0f; // ref Dur1 (spammed on a 2s cooldown)
+    int armorBonus_ = 3; // ref DataB level 1
 };
 
 // ===== Faerie Fire (Druid of the Talon, Afae) - armor curse =====
@@ -65,10 +75,11 @@ class CAbilityFaerieFire : public CAbilitySpellBase {
 public:
     CAbilityFaerieFire(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float duration_ = 20.0f;
-    int armorPenalty_ = -2;
-    // Reveal-invisible half has no invisibility system to counter yet.
+    float duration_ = 90.0f; // ref Dur1
+    int armorPenalty_ = -4; // ref DataA level 1
 };
 
 // ===== Death Pact (Death Knight, AUdp) - sacrifice for health =====

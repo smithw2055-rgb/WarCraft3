@@ -276,13 +276,13 @@ bool TestMirrorImageCopiesCaster() {
     CAbilityMirrorImage spell(3901);
     spell.DoEffect(sim, caster);
     for (int i = 0; i < 3; i++) sim.Update();
-    TEST_ASSERT(sim.GetUnits().size() == before + 2);
+    TEST_ASSERT(sim.GetUnits().size() == before + 1); // ref DataA level 1
     TEST_ASSERT(sim.GetUnits().back()->IsSummoned());
     return true;
 }
 
 bool TestSpells3FactoryCoverage() {
-    const char* codes[] = {"AHmt", "AHwe", "AHrs", "AEbl", "AOmi",
+    const char* codes[] = {"AHmt", "AHwe", "AHre", "AEbl", "AOmi",
                            "AOsh", "AEst", "AEtr", "AOre", "ANch"};
     for (auto code : codes) {
         auto ability = AbilityFactory::CreateAbility(4000, War3ID(code));

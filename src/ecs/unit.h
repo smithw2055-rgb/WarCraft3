@@ -131,7 +131,11 @@ public:
     // Predicate removal for UnitRemoveBuffs(Ex): matched buffs get OnRemove
     // then erase. positive/negative/timedLife filter; pass -1/ignore flags
     // through for categories without backing (documented at call sites).
-    void RemoveBuffsIf(CSimulation& game, bool removePositive, bool removeNegative, bool timedLifeOnly);
+    // Timed life is never dispellable magic: dispels pass keepTimedLife so
+    // unsummoning stays on Banish-style effects, since stripping timed
+    // life via OnRemove kills the bearer.
+    void RemoveBuffsIf(CSimulation& game, bool removePositive, bool removeNegative,
+                       bool timedLifeOnly, bool keepTimedLife = false);
     // Crowd-control / summon queries (type-based so custom buff ids from
     // object data still work; canonical ids: BOhx/BUsl/BNsi/timed-life).
     bool IsHexed() const;

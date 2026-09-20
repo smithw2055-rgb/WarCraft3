@@ -3,6 +3,7 @@
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/player.h"
+#include "data/abilitydata.h"
 #include <cmath>
 
 // ===== Wind Walk =====
@@ -156,4 +157,8 @@ void CAbilityBattleRoar::DoEffect(CSimulation& game, CUnit* caster) {
                 duration_, bonusDamage_, 0), game);
         }
     }
+}
+
+void CAbilityBattleRoar::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    radius_ = def.AreaAt(level);
 }

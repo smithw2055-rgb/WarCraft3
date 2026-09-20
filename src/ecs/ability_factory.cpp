@@ -89,7 +89,6 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("AHds")) return std::make_unique<CAbilityDivineShield>(handleId);
     if (code == War3ID("AHtc")) return std::make_unique<CAbilityThunderClap>(handleId);
     if (code == War3ID("AHtb")) return std::make_unique<CAbilityStormBolt>(handleId);
-    if (code == War3ID("AHre")) return std::make_unique<CAbilitySerenity>(handleId);
 
     // ===== Orc Spells =====
     if (code == War3ID("AOws")) return std::make_unique<CAbilityWarStomp>(handleId);
@@ -121,7 +120,7 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     // ===== Batch 3 hero spells =====
     if (code == War3ID("AHmt")) return std::make_unique<CAbilityMassTeleport>(handleId);
     if (code == War3ID("AHwe")) return std::make_unique<CAbilitySummonWaterElemental>(handleId);
-    if (code == War3ID("AHrs")) return std::make_unique<CAbilityResurrect>(handleId);
+    if (code == War3ID("AHre")) return std::make_unique<CAbilityResurrect>(handleId);
     if (code == War3ID("AEbl")) return std::make_unique<CAbilityBlink>(handleId);
     if (code == War3ID("AOmi")) return std::make_unique<CAbilityMirrorImage>(handleId);
     if (code == War3ID("AOsh")) return std::make_unique<CAbilityShockwave>(handleId);

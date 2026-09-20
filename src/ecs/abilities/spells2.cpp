@@ -7,28 +7,6 @@
 #include <cmath>
 #include <iostream>
 
-// ===== Serenity =====
-CAbilitySerenity::CAbilitySerenity(int handleId)
-    : CAbilitySpellBase(handleId, War3ID("AHre"), CAbilityCategory::SPELL) {
-    SetTargetType(CSpellTargetType::NO_TARGET);
-    SetCooldown(5.0f);
-    SetManaCost(75);
-}
-
-void CAbilitySerenity::DoEffect(CSimulation& game, CUnit* caster) {
-    if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (unit->IsDead()) continue;
-        float dx = unit->GetX() - caster->GetX();
-        float dy = unit->GetY() - caster->GetY();
-        if (dx*dx + dy*dy <= radius_*radius_) {
-            float newMana = unit->GetMana() + manaRestore_;
-            if (newMana > unit->GetMaxMana()) newMana = (float)unit->GetMaxMana();
-            unit->SetMana(newMana);
-        }
-    }
-}
-
 // ===== Healing Wave =====
 CAbilityHealingWave::CAbilityHealingWave(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AOhw"), CAbilityCategory::SPELL) {
@@ -89,6 +67,10 @@ void CAbilityHex::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
         // Hex: cannot attack or cast, but can move (canonical buff BOhx).
         targetUnit->AddBuff(std::make_unique<CBuffHex>(duration_), game);
     }
+}
+
+void CAbilityHex::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    duration_ = def.DurationAt(level);
 }
 
 // ===== Chain Lightning =====
@@ -223,6 +205,10 @@ void CAbilitySleep::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) 
         // Sleep: idles the target; any damage wakes it (see CUnit::Damage).
         targetUnit->AddBuff(std::make_unique<CBuffSleep>(duration_), game);
     }
+}
+
+void CAbilitySleep::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    duration_ = def.DurationAt(level);
 }
 
 // ===== Inferno =====

@@ -13,7 +13,12 @@
 #include "ecs/abilities/spells2.h"
 #include "ecs/abilities/spells16.h"
 #include "ecs/abilities/spells3.h"
+#include "ecs/abilities/spells4.h"
 #include "ecs/abilities/spells5.h"
+#include "ecs/abilities/spells6.h"
+#include "ecs/abilities/spells7.h"
+#include "ecs/buff.h"
+#include "ecs/buffs.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
 #include "ecs/unit.h"
@@ -355,5 +360,70 @@ bool TestAbilityEffectDataRoundThree() {
     monsoon->SetLevel(2);
     monsoon->DoEffect(sim, caster, 0, 0);
     TEST_ASSERT(dryBefore - edge->GetLife() == 80.0f);
+    return true;
+}
+
+bool TestAbilityEffectDataRoundFour() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    CAbilityData abilityData;
+    LoadAbilityData(mpq, abilityData);
+
+    CSimulation sim;
+    AddPlayers(sim);
+    sim.SetAbilityData(&abilityData);
+    auto* caster = AdoptAt(sim, 1561, 0, 0, 0);
+    auto* target = AdoptAt(sim, 1562, 1, 100, 0);
+    Settle(sim);
+
+    // Retail durations ride the buffs.
+    CAbilitySleep sleep(15601);
+    sleep.DoEffect(sim, caster, target);
+    TEST_ASSERT(target->GetBuff(War3ID("BUsl"))->GetRemaining() == 20.0f);
+    CAbilityHex hex(15602);
+    hex.DoEffect(sim, caster, target);
+    TEST_ASSERT(target->GetBuff(War3ID("BOhx"))->GetRemaining() == 15.0f);
+    CAbilityPolymorph poly(15603);
+    poly.DoEffect(sim, caster, target);
+    TEST_ASSERT(target->GetBuff(War3ID("Bply"))->GetRemaining() == 60.0f);
+    CAbilitySlow slow(15604);
+    slow.DoEffect(sim, caster, target);
+    TEST_ASSERT(target->GetBuff(War3ID("Bslo"))->GetRemaining() == 60.0f);
+    CAbilityFrostArmor frost(15605);
+    frost.DoEffect(sim, caster, target);
+    TEST_ASSERT(target->GetBuff(War3ID("BUfa"))->GetRemaining() == 5.0f);
+    CAbilityFaerieFire faerie(15606);
+    faerie.DoEffect(sim, caster, target);
+    TEST_ASSERT(target->GetBuff(War3ID("Bfae"))->GetRemaining() == 90.0f);
+    CAbilityBloodlustCast lust(15607);
+    lust.DoEffect(sim, caster, target);
+    TEST_ASSERT(target->GetBuff(War3ID("Bblo"))->GetRemaining() == 60.0f);
+
+    // Critical Strike level 2 via the real hero-skill path: 15%, x3.
+    auto* lucky = AdoptAt(sim, 1563, 0, 200, 0);
+    Settle(sim);
+    CAbilityHero skill(15610);
+    skill.AddLearnableSkill(War3ID("AOcr"));
+    skill.SetSkillPoints(3);
+    TEST_ASSERT(skill.SelectHeroSkill(sim, lucky, War3ID("AOcr")));
+    TEST_ASSERT(skill.SelectHeroSkill(sim, lucky, War3ID("AOcr")));
+    auto* crit = dynamic_cast<CAbilityCriticalStrike*>(lucky->GetAbility(War3ID("AOcr")));
+    TEST_ASSERT(crit != nullptr);
+    TEST_ASSERT(crit->GetLevel() == 2);
+    TEST_ASSERT(lucky->GetCritChance() == 0.15f);
+    TEST_ASSERT(lucky->GetCritMultiplier() == 3.0f);
+
+    // Dispel burns summoned units for DataB 250.
+    auto* summoned = AdoptAt(sim, 1564, 1, 150, 100);
+    auto* regular = AdoptAt(sim, 1565, 1, 160, 100);
+    Settle(sim);
+    summoned->AddBuff(std::make_unique<CBuffTimedLife>(War3ID("AOsf"), 120.0f), sim);
+    TEST_ASSERT(summoned->IsSummoned());
+    CAbilityDispelMagic dispel(15609);
+    const float summonedBefore = summoned->GetLife();
+    const float regularBefore = regular->GetLife();
+    dispel.DoEffect(sim, caster, 155, 100);
+    TEST_ASSERT(summonedBefore - summoned->GetLife() == 250.0f);
+    TEST_ASSERT(regular->GetLife() == regularBefore);
     return true;
 }

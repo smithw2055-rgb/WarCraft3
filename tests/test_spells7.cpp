@@ -200,9 +200,9 @@ bool TestRoarRalliesAllies() {
     CSimulation sim;
     AddPlayers(sim);
     auto* caster = AdoptAt(sim, 761, 0, 0, 0);
-    auto* near = AdoptAt(sim, 762, 0, 100, 0);
-    auto* far = AdoptAt(sim, 763, 0, 5000, 5000);
-    auto* foe = AdoptAt(sim, 764, 1, 100, 100);
+    auto* near = AdoptAt(sim, 762, 0, 30, 0);
+    auto* far = AdoptAt(sim, 763, 0, 100, 0);
+    auto* foe = AdoptAt(sim, 764, 1, 30, 30);
     Settle(sim);
     const int nearBefore = near->GetBonusDamage();
     const int farBefore = far->GetBonusDamage();
@@ -210,7 +210,7 @@ bool TestRoarRalliesAllies() {
     CAbilityRoar spell(7601);
     spell.DoEffect(sim, caster);
     TEST_ASSERT(near->GetBonusDamage() == nearBefore + 5);
-    TEST_ASSERT(far->GetBonusDamage() == farBefore);
+    TEST_ASSERT(far->GetBonusDamage() == farBefore); // outside the 50 radius
     TEST_ASSERT(foe->GetBonusDamage() == foeBefore);
     return true;
 }

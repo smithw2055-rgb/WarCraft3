@@ -350,13 +350,16 @@ void CUnit::RemoveBuff(War3ID buffId, CSimulation& game) {
     }
 }
 
-void CUnit::RemoveBuffsIf(CSimulation& game, bool removePositive, bool removeNegative, bool timedLifeOnly) {
+void CUnit::RemoveBuffsIf(CSimulation& game, bool removePositive, bool removeNegative,
+                          bool timedLifeOnly, bool keepTimedLife) {
     for (auto it = buffs_.begin(); it != buffs_.end();) {
         CBuff* buff = it->get();
         bool match = buff != nullptr;
+        const bool isTimedLife = dynamic_cast<CBuffTimedLife*>(buff) != nullptr;
         if (match && timedLifeOnly) {
-            match = dynamic_cast<CBuffTimedLife*>(buff) != nullptr;
+            match = isTimedLife;
         }
+        if (match && keepTimedLife && isTimedLife) match = false;
         if (match && buff->IsPositive() && !removePositive) match = false;
         if (match && buff->IsNegative() && !removeNegative) match = false;
         if (match) {
