@@ -83,6 +83,10 @@ static std::string ResolvePrimaryTagName(const std::shared_ptr<JassNativesData>&
 }
 
 static int ParseOrderString(const std::string& orderStr) {
+    // Retail order table first (case-insensitive, ref OrderIdUtils);
+    // 4-char rawcodes and legacy UI orders fall through below.
+    const int tableId = OrderIdFromString(orderStr);
+    if (tableId != 0) return tableId;
     if (orderStr == "smart") return OrderIds::SMART;
     if (orderStr == "move") return OrderIds::MOVE;
     if (orderStr == "attack") return OrderIds::ATTACK;
@@ -92,7 +96,7 @@ static int ParseOrderString(const std::string& orderStr) {
     if (orderStr == "patrol") return OrderIds::PATROL;
     if (orderStr == "harvest") return OrderIds::HARVEST;
     if (orderStr == "returnresources") return OrderIds::RETURN_RESOURCES;
-    if (orderStr == "repair") return War3ID("Arep").value;
+    if (orderStr == "repair") return OrderIds::REPAIR;
     if (orderStr == "setrally") return OrderIds::SET_RALLY;
     if (orderStr == "rally") return OrderIds::RALLY;
 
@@ -969,10 +973,15 @@ void JassNatives::RegisterHandleNatives() {
     });
     vm_.RegisterNative("OrderId", [](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);
+        if (args[0].type == JassValue::STRING) {
+            return JassValue::Int(OrderIdFromString(args[0].strVal));
+        }
         return JassValue::Int(args[0].intVal);
     });
     vm_.RegisterNative("OrderId2String", [](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Str("");
+        const std::string tableName = OrderStringFromId(args[0].intVal);
+        if (!tableName.empty()) return JassValue::Str(tableName);
         return JassValue::Str(RawcodeToString(args[0].intVal));
     });
     vm_.RegisterNative("UnitId", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
@@ -2647,7 +2656,15 @@ void JassNatives::RegisterUnitNatives() {
         if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Bool(unit->IsHidden()); }
         return JassValue::Bool(false);
     });
-    vm_.RegisterNative("IsUnitVisible", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(true); });
+    vm_.RegisterNative("IsUnitVisible", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2 || !sim) return JassValue::Bool(true);
+        const int unitId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
+        const int player = ResolvePlayerId(data, args[1].intVal);
+        CUnit* unit = sim->GetUnit(unitId);
+        if (!unit || player < 0) return JassValue::Bool(true);
+        if (!data->fog.fogEnabled) return JassValue::Bool(true);
+        return JassValue::Bool(sim->GetFogSystem()->IsVisibleTo(player, unit->GetX(), unit->GetY()));
+    });
     vm_.RegisterNative("IsUnitInvisible", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
     vm_.RegisterNative("IsUnitSelected", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
     vm_.RegisterNative("IsUnitAlly", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
@@ -4896,36 +4913,126 @@ void JassNatives::RegisterEffectNatives() {
 // 22. Fog natives
 // ============================================================
 void JassNatives::RegisterFogNatives() {
-    vm_.RegisterNative("CreateFogModifierRect", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::FOG_MODIFIER, data->nextHandleId++));
+    auto fogStateOf = [](int v) {
+        return static_cast<CFogState>(std::clamp(v, 0, 2));
+    };
+    // sharedVision fans the entry out to SHARED_VISION allies (ref allies).
+    auto fogPlayers = [data = data_, sim = sim_](int player, bool shared) {
+        std::vector<int> players;
+        if (player >= 0) players.push_back(player);
+        if (shared && sim) {
+            const CPlayer* self = sim->GetPlayer(player);
+            for (int i = 0; i < sim->GetPlayerCount(); i++) {
+                if (i == player) continue;
+                const CPlayer* other = sim->GetPlayer(i);
+                if (self && other && self->HasAlliance(*other, CAllianceType::SHARED_VISION)) {
+                    players.push_back(i);
+                }
+            }
+        }
+        return players;
+    };
+    vm_.RegisterNative("CreateFogModifierRect", [data = data_, sim = sim_, fogStateOf](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 6 || !sim) return JassValue::Int(0);
+        const int player = ResolvePlayerId(data, args[0].intVal);
+        if (player < 0) return JassValue::Int(0);
+        const int fogId = sim->GetFogSystem()->AddModifier(
+            player,
+            CFogArea::Rect(args[2].realVal, args[3].realVal, args[4].realVal, args[5].realVal),
+            fogStateOf(args[1].intVal));
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::FOG_MODIFIER, fogId));
     });
-    vm_.RegisterNative("CreateFogModifierRadius", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::FOG_MODIFIER, data->nextHandleId++));
+    vm_.RegisterNative("CreateFogModifierRadius", [data = data_, sim = sim_, fogStateOf](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 5 || !sim) return JassValue::Int(0);
+        const int player = ResolvePlayerId(data, args[0].intVal);
+        if (player < 0) return JassValue::Int(0);
+        const int fogId = sim->GetFogSystem()->AddModifier(
+            player,
+            CFogArea::Circle(args[2].realVal, args[3].realVal, args[4].realVal),
+            fogStateOf(args[1].intVal));
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::FOG_MODIFIER, fogId));
     });
-    vm_.RegisterNative("CreateFogModifierRadiusLoc", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::FOG_MODIFIER, data->nextHandleId++));
+    vm_.RegisterNative("CreateFogModifierRadiusLoc", [data = data_, sim = sim_, fogStateOf](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4 || !sim) return JassValue::Int(0);
+        const int player = ResolvePlayerId(data, args[0].intVal);
+        if (player < 0) return JassValue::Int(0);
+        const int locSim = data->GetSimHandle(args[2].intVal, JassHandleInfo::LOCATION);
+        auto it = data->locations.find(locSim);
+        if (it == data->locations.end()) return JassValue::Int(0);
+        const int fogId = sim->GetFogSystem()->AddModifier(
+            player,
+            CFogArea::Circle(it->second->x, it->second->y, args[3].realVal),
+            fogStateOf(args[1].intVal));
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::FOG_MODIFIER, fogId));
     });
-    vm_.RegisterNative("DestroyFogModifier", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("DestroyFogModifier", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::FOG_MODIFIER);
-        if (id >= 0) data->FreeHandle(args[0].intVal);
+        const int fogId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FOG_MODIFIER);
+        if (fogId >= 0 && sim) sim->GetFogSystem()->RemoveModifier(fogId);
+        if (fogId >= 0) data->FreeHandle(args[0].intVal);
         return JassValue::Null();
     });
-    vm_.RegisterNative("FogModifierStart", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("FogModifierStop", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("FogModifierStart", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim) return JassValue::Null();
+        const int fogId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FOG_MODIFIER);
+        if (fogId >= 0) sim->GetFogSystem()->SetModifierEnabled(fogId, true);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("FogModifierStop", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty() || !sim) return JassValue::Null();
+        const int fogId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FOG_MODIFIER);
+        if (fogId >= 0) sim->GetFogSystem()->SetModifierEnabled(fogId, false);
+        return JassValue::Null();
+    });
     vm_.RegisterNative("SetTerrainFog", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("ResetTerrainFog", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("SetFogStateRect", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        // Recorded for renderer consumption; full per-cell fog comes later.
-        (void)args; (void)data;
+    vm_.RegisterNative("SetFogStateRect", [data = data_, sim = sim_, fogPlayers, fogStateOf](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 7 || !sim) return JassValue::Null();
+        const int player = ResolvePlayerId(data, args[0].intVal);
+        if (player < 0) return JassValue::Null();
+        const CFogArea area = CFogArea::Rect(args[2].realVal, args[3].realVal,
+                                             args[4].realVal, args[5].realVal);
+        for (int p : fogPlayers(player, args[6].boolVal)) {
+            sim->GetFogSystem()->AddOverride(p, area, fogStateOf(args[1].intVal));
+        }
         return JassValue::Null();
     });
-    vm_.RegisterNative("SetFogStateRadius", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        (void)args; (void)data;
+    vm_.RegisterNative("SetFogStateRadius", [data = data_, sim = sim_, fogPlayers, fogStateOf](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 6 || !sim) return JassValue::Null();
+        const int player = ResolvePlayerId(data, args[0].intVal);
+        if (player < 0) return JassValue::Null();
+        const CFogArea area = CFogArea::Circle(args[2].realVal, args[3].realVal, args[4].realVal);
+        for (int p : fogPlayers(player, args[5].boolVal)) {
+            sim->GetFogSystem()->AddOverride(p, area, fogStateOf(args[1].intVal));
+        }
         return JassValue::Null();
     });
-    vm_.RegisterNative("IsLocationVisibleToPlayer", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(true); });
-    vm_.RegisterNative("IsLocationMaskedToPlayer", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
+    auto fogVisibleTo = [data = data_, sim = sim_](int player, float x, float y) {
+        if (!sim || player < 0) return true;
+        if (!data->fog.fogEnabled) return true;
+        return sim->GetFogSystem()->IsVisibleTo(player, x, y);
+    };
+    auto fogMaskedTo = [data = data_, sim = sim_](int player, float x, float y) {
+        if (!sim || player < 0) return false;
+        if (!data->fog.fogEnabled || !data->fog.maskEnabled) return false;
+        return sim->GetFogSystem()->IsMaskedTo(player, x, y);
+    };
+    vm_.RegisterNative("IsLocationVisibleToPlayer", [data = data_, fogVisibleTo](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Bool(true);
+        const int player = ResolvePlayerId(data, args[0].intVal);
+        const int locSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::LOCATION);
+        auto it = data->locations.find(locSim);
+        if (it == data->locations.end()) return JassValue::Bool(true);
+        return JassValue::Bool(fogVisibleTo(player, it->second->x, it->second->y));
+    });
+    vm_.RegisterNative("IsLocationMaskedToPlayer", [data = data_, fogMaskedTo](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Bool(false);
+        const int player = ResolvePlayerId(data, args[0].intVal);
+        const int locSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::LOCATION);
+        auto it = data->locations.find(locSim);
+        if (it == data->locations.end()) return JassValue::Bool(false);
+        return JassValue::Bool(fogMaskedTo(player, it->second->x, it->second->y));
+    });
     vm_.RegisterNative("FogMaskEnable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (!args.empty() && data) data->fog.maskEnabled = args[0].boolVal;
         return JassValue::Null();
@@ -10157,13 +10264,13 @@ void JassNatives::RegisterMiscNatives() {
         return JassValue::Null();
     });
 
-    vm_.RegisterNative("SetFogStateRadiusLoc", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("SetFogStateRadiusLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 5) return JassValue::Null();
         int locSim = data->GetSimHandle(args[2].intVal, JassHandleInfo::LOCATION);
         if (locSim < 0) return JassValue::Null();
         auto it = data->locations.find(locSim);
         if (it == data->locations.end()) return JassValue::Null();
-        // Retained for the FoW paint pass; fog modifiers stay stubs.
+        // Retained for the FoW paint pass; mirrored into the sim fog system.
         JassNativesData::JassFogRadiusRequest req;
         req.player = ResolvePlayerId(data, args[0].intVal);
         req.state = args[1].intVal;
@@ -10172,6 +10279,21 @@ void JassNatives::RegisterMiscNatives() {
         req.radius = args[3].realVal;
         req.sharedVision = args[4].boolVal;
         data->fogRadiusRequests.push_back(req);
+        if (sim && req.player >= 0) {
+            const CFogArea area = CFogArea::Circle(req.x, req.y, req.radius);
+            const auto state = static_cast<CFogState>(std::clamp(req.state, 0, 2));
+            sim->GetFogSystem()->AddOverride(req.player, area, state);
+            if (req.sharedVision) {
+                const CPlayer* self = sim->GetPlayer(req.player);
+                for (int i = 0; i < sim->GetPlayerCount(); i++) {
+                    if (i == req.player) continue;
+                    const CPlayer* other = sim->GetPlayer(i);
+                    if (self && other && self->HasAlliance(*other, CAllianceType::SHARED_VISION)) {
+                        sim->GetFogSystem()->AddOverride(i, area, state);
+                    }
+                }
+            }
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("SetDefaultDifficulty", [data = data_](const std::vector<JassValue>& args) -> JassValue {

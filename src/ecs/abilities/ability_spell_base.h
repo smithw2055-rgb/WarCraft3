@@ -51,6 +51,9 @@ public:
     void ApplyData(const CAbilityDefFull& def);
 
     // Order validation
+    // Base engine order (retail id, e.g. whirlwind=852128); drives both
+    // JASS order dispatch and the future command-card buttons.
+    int GetBaseOrderId() const override;
     bool CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const override;
     bool CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const override;
     bool CheckCanTargetPoint(CSimulation& game, CUnit* unit, int orderId, float x, float y) const override;

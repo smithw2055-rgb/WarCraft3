@@ -1,6 +1,8 @@
 #pragma once
 #include "ecs/fwd.h"
+#include "resource/slk.h"
 #include <cstdint>
+#include <string>
 
 class COrder {
 public:
@@ -45,7 +47,8 @@ struct OrderIds {
     static constexpr int MOVE = 851986;
     static constexpr int ATTACK = 851983;
     static constexpr int ATTACK_GROUND = 851984;
-    static constexpr int HOLD_POSITION = 851973;
+    // Retail stunned is 851973; hold position is 851993 (ref OrderIds).
+    static constexpr int HOLD_POSITION = 851993;
     static constexpr int FOLLOW = 851972;
     static constexpr int PATROL = 851990;
     static constexpr int MOVE_ATTACK = 851983;
@@ -66,9 +69,12 @@ struct OrderIds {
     static constexpr int UNDEAD_BUILD = 852003;
     static constexpr int NIGHT_ELF_BUILD = 852004;
 
-    // Harvest / Return Resources
-    static constexpr int HARVEST = 852010;
-    static constexpr int RETURN_RESOURCES = 852011;
+    // Harvest / Return Resources (retail ids, ref OrderIds).
+    static constexpr int HARVEST = 852018;
+    static constexpr int RETURN_RESOURCES = 852020;
+
+    // Repair (retail id, ref OrderIds).
+    static constexpr int REPAIR = 852024;
 
     // Build structure (when placing a building from the build menu)
     static constexpr int BUILD_HUMAN = 852020;
@@ -76,9 +82,10 @@ struct OrderIds {
     static constexpr int BUILD_UNDEAD = 852022;
     static constexpr int BUILD_NIGHT_ELF = 852023;
 
-    // Inventory
-    static constexpr int ITEM_USE = 852097;
-    static constexpr int ITEM_DROP = 852098;
+    // Inventory (slot-0 retail ids; avoids colliding with ability orders
+    // such as waterelemental=852097, ref OrderIds itemuse00/dropitem).
+    static constexpr int ITEM_USE = 852008;
+    static constexpr int ITEM_DROP = 852001;
     static constexpr int ITEM_GIVE = 852099;
 
     // Hero
@@ -102,3 +109,21 @@ struct OrderIds {
     // Ability-based orders start at a higher range
     static constexpr int ABILITY_ORDER = 852000;
 };
+
+// ============================================================
+// Retail order tables (see order.cpp, generated from ref
+// OrderIds.java field names/values; JASS order strings are the
+// lowercase field names, cf. ref OrderIdUtils).
+// ============================================================
+
+// JASS order string ("whirlwind") -> retail id (852128); 0 when unknown.
+int OrderIdFromString(const std::string& order);
+// Retail id -> JASS order string; empty when unknown.
+std::string OrderStringFromId(int orderId);
+// Base order id for a spell ability code ("AOww" -> 852128 whirlwind);
+// 0 when the ability has no engine order (passives, item powers).
+int SpellBaseOrderId(War3ID code);
+// Whether an incoming order id may trigger the spell: exact base-order
+// match, the Immolation toggle pair, or legacy id 0 (item use and
+// pre-table callers pass 0; positional dispatch is preserved there).
+bool SpellMatchesOrder(War3ID code, int orderId);

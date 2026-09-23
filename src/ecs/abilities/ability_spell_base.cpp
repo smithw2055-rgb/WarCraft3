@@ -2,6 +2,7 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/behaviors/behavior_spell.h"
+#include "ecs/orders/order.h"
 #include "data/abilitydata.h"
 #include <iostream>
 
@@ -29,11 +30,18 @@ void CAbilitySpellBase::ApplyEffectData(const CAbilityDefFull& def, int level) {
     (void)def; (void)level;
 }
 
+int CAbilitySpellBase::GetBaseOrderId() const {
+    return SpellBaseOrderId(code_);
+}
+
 bool CAbilitySpellBase::CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const {
-    (void)orderId;
     if (IsDisabled()) return false;
     if (IsOnCooldown()) return false;
     if (!unit) return false;
+    // Order routing (ref ability order checks): a nonzero order must be
+    // this spell's base order (or toggle pair). Id 0 preserves legacy
+    // callers (item use, direct UI-less casts) via positional matching.
+    if (!SpellMatchesOrder(code_, orderId)) return false;
     // Silenced units cannot cast; hexed units can neither attack nor cast
     // (ref target checks ABConditionIsUnitPassAllAbilityTargetChecks).
     if (unit->IsSilenced() || unit->IsHexed()) return false;

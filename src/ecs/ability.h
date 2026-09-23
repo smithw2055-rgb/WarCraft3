@@ -69,6 +69,10 @@ public:
     void SetPermanent(bool v) { permanent_ = v; }
     void SetIconShowing(bool v) { iconShowing_ = v; }
 
+    // Base engine order id for this ability (ref getBaseOrderId); 0 when
+    // the ability is not triggered by orders (passives, item powers).
+    virtual int GetBaseOrderId() const { return 0; }
+
     // Lifecycle hooks
     virtual void OnAdd(CSimulation& game, CUnit* unit);
     virtual void OnRemove(CSimulation& game, CUnit* unit);
