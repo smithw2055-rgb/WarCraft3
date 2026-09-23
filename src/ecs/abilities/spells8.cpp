@@ -1,4 +1,5 @@
 #include "spells8.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
@@ -13,18 +14,14 @@ CAbilityItemHealGroup::CAbilityItemHealGroup(int handleId)
 }
 
 void CAbilityItemHealGroup::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto an AbilityBuilder iteration: same-player units in radius
+    // of the effect point are healed (caster included when in range).
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead()) continue;
-        if (unit->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - x;
-        const float dy = unit->GetY() - y;
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            float life = unit->GetLife() + healAmount_;
-            if (life > unit->GetMaxLife()) life = unit->GetMaxLife();
-            unit->SetLife(game, life);
-        }
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionHealTarget>(healAmount_));
+    ABActionForEachInRange heal(radius_, std::move(perUnit), true);
+    heal.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    heal.Run(game, caster, nullptr, true, x, y);
 }
 
 // ===== Scroll of Town Portal =====
@@ -35,16 +32,15 @@ CAbilityItemTownPortal::CAbilityItemTownPortal(int handleId)
 }
 
 void CAbilityItemTownPortal::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto an AbilityBuilder iteration: same-player units around
+    // the caster relocate to the spell destination (carried by the teleport
+    // action itself, since iteration repoints the effect point).
     if (!caster) return;
-    const float cx = caster->GetX(), cy = caster->GetY();
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - cx;
-        const float dy = unit->GetY() - cy;
-        if (dx * dx + dy * dy > radius_ * radius_) continue;
-        unit->SetPosition(x, y);
-    }
+    ABEffectChain group;
+    group.Add(std::make_unique<ABActionTeleportTarget>(x, y));
+    ABActionForEachInRange portal(radius_, std::move(group));
+    portal.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    portal.Run(game, caster, nullptr, false, 0, 0);
     caster->SetPosition(x, y);
 }
 
@@ -55,8 +51,11 @@ CAbilityItemInvulnerable::CAbilityItemInvulnerable(int handleId)
 }
 
 void CAbilityItemInvulnerable::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder buff attach.
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffDivineShield>(duration_), game);
+    ABActionAddBuffTarget shield(
+        [duration = duration_]() { return std::make_unique<CBuffDivineShield>(duration); });
+    shield.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Potion of Healing =====
@@ -66,10 +65,10 @@ CAbilityItemHealSelf::CAbilityItemHealSelf(int handleId)
 }
 
 void CAbilityItemHealSelf::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder heal.
     if (!caster) return;
-    float life = caster->GetLife() + healAmount_;
-    if (life > caster->GetMaxLife()) life = caster->GetMaxLife();
-    caster->SetLife(game, life);
+    ABActionHealTarget heal(healAmount_);
+    heal.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Potion of Mana =====
@@ -79,13 +78,14 @@ CAbilityItemManaSelf::CAbilityItemManaSelf(int handleId)
 }
 
 void CAbilityItemManaSelf::DoEffect(CSimulation& game, CUnit* caster) {
-    (void)game;
+    // Migrated onto a single AbilityBuilder mana set (clamped like the hand loop).
     if (!caster) return;
     float mana = caster->GetMana() + manaAmount_;
     if (mana > static_cast<float>(caster->GetMaxMana())) {
         mana = static_cast<float>(caster->GetMaxMana());
     }
-    caster->SetMana(mana);
+    ABActionSetManaTarget setMana(mana);
+    setMana.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Lesser Clarity Potion =====
@@ -95,8 +95,13 @@ CAbilityItemClarity::CAbilityItemClarity(int handleId)
 }
 
 void CAbilityItemClarity::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder buff attach.
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffClarity>(duration_, regenBonus_), game);
+    ABActionAddBuffTarget clarity(
+        [duration = duration_, regen = regenBonus_]() {
+            return std::make_unique<CBuffClarity>(duration, regen);
+        });
+    clarity.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Wand of Mana Stealing =====
@@ -107,18 +112,10 @@ CAbilityItemManaSteal::CAbilityItemManaSteal(int handleId)
 }
 
 void CAbilityItemManaSteal::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)game;
-    if (!target || !caster || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    float stolen = stealAmount_;
-    if (stolen > targetUnit->GetMana()) stolen = targetUnit->GetMana();
-    targetUnit->SetMana(targetUnit->GetMana() - stolen);
-    float mana = caster->GetMana() + stolen;
-    if (mana > static_cast<float>(caster->GetMaxMana())) {
-        mana = static_cast<float>(caster->GetMaxMana());
-    }
-    caster->SetMana(mana);
+    // Migrated onto a single AbilityBuilder mana steal (no damage, unlike
+    // Mana Burn).
+    ABActionManaSteal steal(stealAmount_);
+    steal.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Scroll of Protection =====
@@ -128,7 +125,11 @@ CAbilityItemProtection::CAbilityItemProtection(int handleId)
 }
 
 void CAbilityItemProtection::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder buff attach.
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffArmor>(
-        War3ID("AIda"), duration_, armorBonus_, true), game);
+    ABActionAddBuffTarget armor(
+        [duration = duration_, bonus = armorBonus_]() {
+            return std::make_unique<CBuffArmor>(War3ID("AIda"), duration, bonus, true);
+        });
+    armor.Run(game, caster, caster, false, 0, 0);
 }

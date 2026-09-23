@@ -1,9 +1,10 @@
 #include "spells9.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/player.h"
-#include "ecs/abilities/ability_builder.h"
+#include "data/abilitydata.h"
 #include <cmath>
 
 // ===== Orb of Frost =====
@@ -32,12 +33,9 @@ CAbilityIllusion::CAbilityIllusion(int handleId)
 }
 
 void CAbilityIllusion::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    if (!target || !caster || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    SummonTimedUnit(game, caster, targetUnit->GetTypeId(), War3ID("AIil"),
-                    targetUnit->GetX() + 64.0f, targetUnit->GetY(),
-                    targetUnit->GetFacing(), duration_);
+    // Migrated onto a single AbilityBuilder copy summon.
+    ABActionSummonCopyOfTarget illusion(War3ID("AIil"), duration_);
+    illusion.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Wand of Lightning Shield =====
@@ -48,12 +46,12 @@ CAbilityLightningShieldWand::CAbilityLightningShieldWand(int handleId)
 }
 
 void CAbilityLightningShieldWand::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffLightningShield>(
-        duration_, damagePerTick_, radius_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget shield(
+        [duration = duration_, tick = damagePerTick_, radius = radius_]() {
+            return std::make_unique<CBuffLightningShield>(duration, tick, radius);
+        });
+    shield.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Scroll of the Beast =====
@@ -63,17 +61,17 @@ CAbilityBeastScroll::CAbilityBeastScroll(int handleId)
 }
 
 void CAbilityBeastScroll::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto an AbilityBuilder iteration: same-player units around
+    // the caster gain bonus damage (Roar pattern, armor-less Inner Fire).
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - caster->GetX();
-        const float dy = unit->GetY() - caster->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->AddBuff(std::make_unique<CBuffInnerFire>(
-                duration_, bonusDamage_, 0), game);
-        }
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, damage = bonusDamage_]() {
+            return std::make_unique<CBuffInnerFire>(duration, damage, 0);
+        }));
+    ABActionForEachInRange rally(radius_, std::move(perUnit));
+    rally.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    rally.Run(game, caster, nullptr, false, 0, 0);
 }
 
 // ===== Healing Wards =====
@@ -84,13 +82,14 @@ CAbilityHealingWard::CAbilityHealingWard(int handleId)
 }
 
 void CAbilityHealingWard::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto a single AbilityBuilder create-and-buff (the ward is
+    // born already radiating; graceful without unit data).
     if (!caster) return;
-    // Graceful without unit data (ref summon-without-data).
-    CUnit* ward = game.CreateUnit(wardType_, caster->GetPlayerIndex(), x, y, 0);
-    if (!ward) return;
-    ward->AddBuff(std::make_unique<CBuffHealingWard>(
-        auraDuration_, healPerTick_, radius_), game);
-    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-        summonedCb(caster->GetHandleId(), ward->GetHandleId());
-    }
+    ABActionCreateUnitWithBuff ward(
+        wardType_, x, y,
+        {ABActionCreateUnitWithBuff::BuffFactory(
+            [duration = auraDuration_, tick = healPerTick_, radius = radius_]() {
+                return std::make_unique<CBuffHealingWard>(duration, tick, radius);
+            })});
+    ward.Run(game, caster, nullptr, true, x, y);
 }

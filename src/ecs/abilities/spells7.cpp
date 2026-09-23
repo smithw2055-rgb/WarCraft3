@@ -1,4 +1,5 @@
 #include "spells7.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
@@ -16,14 +17,11 @@ CAbilitySerpentWard::CAbilitySerpentWard(int handleId)
 }
 
 void CAbilitySerpentWard::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto a single AbilityBuilder exact-point summon (no timed
+    // life; graceful without unit data like the code replaced).
     if (!caster) return;
-    // Graceful without unit data (ref summon-without-data).
-    CUnit* ward = game.CreateUnit(wardType_, caster->GetPlayerIndex(), x, y, 0);
-    if (ward) {
-        if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-            summonedCb(caster->GetHandleId(), ward->GetHandleId());
-        }
-    }
+    ABActionCreateUnitAtPoint ward(wardType_, x, y, 0);
+    ward.Run(game, caster, nullptr, true, x, y);
 }
 
 // ===== Polymorph =====
@@ -36,11 +34,10 @@ CAbilityPolymorph::CAbilityPolymorph(int handleId)
 }
 
 void CAbilityPolymorph::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffPolymorph>(duration_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget morph(
+        [duration = duration_]() { return std::make_unique<CBuffPolymorph>(duration); });
+    morph.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityPolymorph::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -57,12 +54,12 @@ CAbilityInnerFire::CAbilityInnerFire(int handleId)
 }
 
 void CAbilityInnerFire::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffInnerFire>(
-        duration_, bonusDamage_, bonusArmor_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget fire(
+        [duration = duration_, damage = bonusDamage_, armor = bonusArmor_]() {
+            return std::make_unique<CBuffInnerFire>(duration, damage, armor);
+        });
+    fire.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Heal =====
@@ -75,13 +72,9 @@ CAbilityHeal::CAbilityHeal(int handleId)
 }
 
 void CAbilityHeal::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    float life = targetUnit->GetLife() + healAmount_;
-    if (life > targetUnit->GetMaxLife()) life = targetUnit->GetMaxLife();
-    targetUnit->SetLife(game, life);
+    // Migrated onto a single AbilityBuilder heal.
+    ABActionHealTarget heal(healAmount_);
+    heal.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Dispel Magic =====
@@ -94,24 +87,24 @@ CAbilityDispelMagic::CAbilityDispelMagic(int handleId)
 }
 
 void CAbilityDispelMagic::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto an AbilityBuilder iteration: per unit, summoned victims
+    // burn first (the summon check reads the timed-life marker pre-dispel),
+    // then buffs are stripped.
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        const float dx = unit->GetX() - x;
-        const float dy = unit->GetY() - y;
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            // Summon check runs pre-dispel: dispel strips the timed-life
-            // marker that IsSummoned reads (cf. Purge ordering).
-            const bool wasSummoned = unit->IsSummoned();
-            unit->RemoveBuffsIf(game, true, true, false, true);
-            // Dispel burns summoned units (ref DataB).
-            if (wasSummoned) {
-                unit->Damage(game, caster, false, false,
-                             CAttackType::SPELLS, CDamageType::MAGIC,
-                             "", summonDamage_, 0);
-            }
-        }
-    }
+    ABEffectChain burn;
+    burn.Add(std::make_unique<ABActionDamageTarget>(summonDamage_, CAttackType::SPELLS,
+                                                    CDamageType::MAGIC));
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionIf>(
+        std::make_shared<ABCondFunc>(
+            [](CSimulation&, CUnit*, CWidget* target, bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(target);
+                return unit != nullptr && unit->IsSummoned();
+            }),
+        std::move(burn)));
+    perUnit.Add(std::make_unique<ABActionDispelTarget>(true, true));
+    ABActionForEachInRange dispel(radius_, std::move(perUnit));
+    dispel.Run(game, caster, nullptr, true, x, y);
 }
 
 void CAbilityDispelMagic::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -129,12 +122,12 @@ CAbilityRejuvenation::CAbilityRejuvenation(int handleId)
 }
 
 void CAbilityRejuvenation::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffRejuvenation>(
-        duration_, healPerTick_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget rejuv(
+        [duration = duration_, tick = healPerTick_]() {
+            return std::make_unique<CBuffRejuvenation>(duration, tick);
+        });
+    rejuv.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Roar =====
@@ -146,17 +139,17 @@ CAbilityRoar::CAbilityRoar(int handleId)
 }
 
 void CAbilityRoar::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto an AbilityBuilder iteration: same-player units around
+    // the caster gain bonus damage (no armor, unlike Inner Fire proper).
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - caster->GetX();
-        const float dy = unit->GetY() - caster->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->AddBuff(std::make_unique<CBuffInnerFire>(
-                duration_, bonusDamage_, 0), game);
-        }
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, damage = bonusDamage_]() {
+            return std::make_unique<CBuffInnerFire>(duration, damage, 0);
+        }));
+    ABActionForEachInRange roar(radius_, std::move(perUnit));
+    roar.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    roar.Run(game, caster, nullptr, false, 0, 0);
 }
 
 void CAbilityRoar::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -172,6 +165,9 @@ CAbilityDefend::CAbilityDefend(int handleId)
 }
 
 void CAbilityDefend::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder buff attach.
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffDefend>(duration_), game);
+    ABActionAddBuffTarget defend(
+        [duration = duration_]() { return std::make_unique<CBuffDefend>(duration); });
+    defend.Run(game, caster, caster, false, 0, 0);
 }

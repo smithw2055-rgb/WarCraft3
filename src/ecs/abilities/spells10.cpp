@@ -1,4 +1,5 @@
 #include "spells10.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
@@ -27,11 +28,10 @@ CAbilityEnsnare::CAbilityEnsnare(int handleId)
 }
 
 void CAbilityEnsnare::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffEnsnare>(duration_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget snare(
+        [duration = duration_]() { return std::make_unique<CBuffEnsnare>(duration); });
+    snare.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Ancestral Spirit =====
@@ -44,21 +44,10 @@ CAbilityAncestralSpirit::CAbilityAncestralSpirit(int handleId)
 }
 
 void CAbilityAncestralSpirit::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    if (!target || !caster || !target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    const War3ID typeId = targetUnit->GetTypeId();
-    if (typeId != War3ID("otau") && typeId != War3ID("Otch")) return;
-    targetUnit->Revive(game, targetUnit->GetX(), targetUnit->GetY());
-    if (targetUnit->GetPlayerIndex() != caster->GetPlayerIndex()) {
-        if (CPlayer* oldOwner = game.GetPlayer(targetUnit->GetPlayerIndex())) {
-            oldOwner->RemoveUnit(targetUnit);
-        }
-        targetUnit->SetPlayerIndex(caster->GetPlayerIndex());
-        if (CPlayer* newOwner = game.GetPlayer(caster->GetPlayerIndex())) {
-            newOwner->AddUnit(targetUnit);
-        }
-    }
+    // Migrated onto a single AbilityBuilder tauren revive (ownership
+    // transfer included).
+    ABActionAncestralRevive spirit;
+    spirit.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Healing Ward (unit) =====
@@ -71,15 +60,16 @@ CAbilityHealingWardUnit::CAbilityHealingWardUnit(int handleId)
 }
 
 void CAbilityHealingWardUnit::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto a single AbilityBuilder create-and-buff (same shape as
+    // the item Healing Ward).
     if (!caster) return;
-    // Graceful without unit data (ref summon-without-data).
-    CUnit* ward = game.CreateUnit(wardType_, caster->GetPlayerIndex(), x, y, 0);
-    if (!ward) return;
-    ward->AddBuff(std::make_unique<CBuffHealingWard>(
-        auraDuration_, healPerTick_, radius_), game);
-    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-        summonedCb(caster->GetHandleId(), ward->GetHandleId());
-    }
+    ABActionCreateUnitWithBuff ward(
+        wardType_, x, y,
+        {ABActionCreateUnitWithBuff::BuffFactory(
+            [duration = auraDuration_, tick = healPerTick_, radius = radius_]() {
+                return std::make_unique<CBuffHealingWard>(duration, tick, radius);
+            })});
+    ward.Run(game, caster, nullptr, true, x, y);
 }
 
 // ===== Unstable Concoction =====
@@ -92,20 +82,16 @@ CAbilityUnstableConcoction::CAbilityUnstableConcoction(int handleId)
 
 void CAbilityUnstableConcoction::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - caster->GetX();
-        const float dy = unit->GetY() - caster->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->Damage(game, caster, false, false,
-                         CAttackType::SPELLS, CDamageType::FIRE,
-                         "", damage_, 0);
-        }
-    }
-    caster->Damage(game, caster, false, false,
-                   CAttackType::SPELLS, CDamageType::FIRE,
-                   "", selfDamage_, 0);
+    // Migrated onto an AbilityBuilder iteration (enemies around the caster)
+    // plus a self-hit. Same coverage as the loop replaced.
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionDamageTarget>(
+        damage_, CAttackType::SPELLS, CDamageType::FIRE));
+    ABActionForEachInRange blast(radius_, std::move(perUnit));
+    blast.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    blast.Run(game, caster, nullptr, false, 0, 0);
+    ABActionDamageTarget selfHit(selfDamage_, CAttackType::SPELLS, CDamageType::FIRE);
+    selfHit.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Abolish Magic =====
@@ -119,14 +105,12 @@ CAbilityAbolishMagic::CAbilityAbolishMagic(int handleId)
 
 void CAbilityAbolishMagic::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        const float dx = unit->GetX() - x;
-        const float dy = unit->GetY() - y;
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->RemoveBuffsIf(game, true, true, false, true);
-        }
-    }
+    // Migrated onto an AbilityBuilder iteration (dispel per unit in radius;
+    // caster excluded via includeCaster=false, matching the loop replaced).
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionDispelTarget>(true, true));
+    ABActionForEachInRange strip(radius_, std::move(perUnit));
+    strip.Run(game, caster, nullptr, true, x, y);
 }
 
 // ===== Cluster Rockets =====
@@ -141,19 +125,18 @@ CAbilityClusterRockets::CAbilityClusterRockets(int handleId)
 void CAbilityClusterRockets::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     if (!caster) return;
     // Two clusters straddling the target point (ref twin-rocket spread).
-    const float offsets[2][2] = {{-75.0f, 0.0f}, {75.0f, 0.0f}};
-    for (const auto& off : offsets) {
-        const float wx = x + off[0], wy = y + off[1];
-        for (auto* unit : game.GetUnits()) {
-            if (!unit || unit->IsDead() || unit == caster) continue;
-            if (unit->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
-            const float dx = unit->GetX() - wx;
-            const float dy = unit->GetY() - wy;
-            if (dx * dx + dy * dy <= radius_ * radius_) {
-                unit->Damage(game, caster, false, false,
-                             CAttackType::SPELLS, CDamageType::FIRE,
-                             "", damage_, 0);
-            }
-        }
-    }
+    // Migrated onto two AbilityBuilder iterations centered at (x-75,y) and
+    // (x+75,y). Same enemy-only FIRE coverage as the loops replaced.
+    ABEffectChain westHit;
+    westHit.Add(std::make_unique<ABActionDamageTarget>(
+        damage_, CAttackType::SPELLS, CDamageType::FIRE));
+    ABActionForEachInRange west(radius_, std::move(westHit));
+    west.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    west.Run(game, caster, nullptr, true, x - 75.0f, y);
+    ABEffectChain eastHit;
+    eastHit.Add(std::make_unique<ABActionDamageTarget>(
+        damage_, CAttackType::SPELLS, CDamageType::FIRE));
+    ABActionForEachInRange east(radius_, std::move(eastHit));
+    east.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    east.Run(game, caster, nullptr, true, x + 75.0f, y);
 }

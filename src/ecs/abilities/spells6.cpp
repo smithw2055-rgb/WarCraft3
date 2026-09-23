@@ -1,4 +1,5 @@
 #include "spells6.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
@@ -16,18 +17,14 @@ CAbilityHealingSpray::CAbilityHealingSpray(int handleId)
 }
 
 void CAbilityHealingSpray::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto an AbilityBuilder iteration: same-player units
+    // (caster included) around the point are healed.
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead()) continue;
-        if (unit->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - x;
-        const float dy = unit->GetY() - y;
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            float life = unit->GetLife() + healAmount_;
-            if (life > unit->GetMaxLife()) life = unit->GetMaxLife();
-            unit->SetLife(game, life);
-        }
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionHealTarget>(healAmount_));
+    ABActionForEachInRange spray(radius_, std::move(perUnit), true);
+    spray.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    spray.Run(game, caster, nullptr, true, x, y);
 }
 
 // ===== Acid Bomb =====
@@ -40,13 +37,18 @@ CAbilityAcidBomb::CAbilityAcidBomb(int handleId)
 }
 
 void CAbilityAcidBomb::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffArmor>(
-        War3ID("Bacb"), duration_, armorPenalty_, false), game);
-    targetUnit->AddBuff(std::make_unique<CBuffPoison>(
-        duration_, poisonPerTick_, caster ? caster->GetHandleId() : -1), game);
+    // Migrated onto an AbilityBuilder chain: armor curse plus poison.
+    const int casterHandle = caster ? caster->GetHandleId() : -1;
+    ABEffectChain chain;
+    chain.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, penalty = armorPenalty_]() {
+            return std::make_unique<CBuffArmor>(War3ID("Bacb"), duration, penalty, false);
+        }));
+    chain.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, tick = poisonPerTick_, casterHandle]() {
+            return std::make_unique<CBuffPoison>(duration, tick, casterHandle);
+        }));
+    chain.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Chemical Rage =====
@@ -58,9 +60,13 @@ CAbilityChemicalRage::CAbilityChemicalRage(int handleId)
 }
 
 void CAbilityChemicalRage::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto an AbilityBuilder buff attach on the caster itself.
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffBloodlust>(
-        duration_, speedBonus_, attackSpeedBonus_), game);
+    ABActionAddBuffTarget rage(
+        [duration = duration_, speed = speedBonus_, attack = attackSpeedBonus_]() {
+            return std::make_unique<CBuffBloodlust>(duration, speed, attack);
+        });
+    rage.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Transmute =====
@@ -73,16 +79,24 @@ CAbilityTransmute::CAbilityTransmute(int handleId)
 }
 
 void CAbilityTransmute::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder branch: an enemy non-hero is slain
+    // and its gold goes to the caster's player.
     if (!target || !caster || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit || targetUnit->IsHero()) return;
-    if (targetUnit->GetPlayerIndex() == caster->GetPlayerIndex()) return;
-    targetUnit->Damage(game, caster, false, false,
-                       CAttackType::SPELLS, CDamageType::NORMAL,
-                       "", 1e9f, 0);
-    if (CPlayer* owner = game.GetPlayer(caster->GetPlayerIndex())) {
-        owner->AddGold(goldYield_);
-    }
+    auto* victim = dynamic_cast<CUnit*>(target);
+    if (!victim) return;
+    ABEffectChain kill;
+    kill.Add(std::make_unique<ABActionDamageTarget>(
+        1e9f, CAttackType::SPELLS, CDamageType::NORMAL));
+    kill.Add(std::make_unique<ABActionAddGoldToCaster>(goldYield_));
+    ABActionIf transmute(
+        std::make_shared<ABCondFunc>(
+            [caster](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                return unit != nullptr && !unit->IsHero() &&
+                       unit->GetPlayerIndex() != caster->GetPlayerIndex();
+            }),
+        std::move(kill));
+    transmute.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Bloodlust =====
@@ -95,17 +109,24 @@ CAbilityBloodlustCast::CAbilityBloodlustCast(int handleId)
 }
 
 void CAbilityBloodlustCast::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    // No haste for the mechanical (ref unit-type immunity).
-    if (targetUnit->GetUnitType()) {
-        const auto& classes = targetUnit->GetUnitType()->GetClassifications();
-        if (classes.find(CUnitClassification::MECHANICAL) != classes.end()) return;
-    }
-    targetUnit->AddBuff(std::make_unique<CBuffBloodlust>(
-        duration_, speedBonus_, attackSpeedBonus_), game);
+    // Migrated onto an AbilityBuilder branch: no haste for the mechanical
+    // (ref unit-type immunity).
+    ABEffectChain haste;
+    haste.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, speed = speedBonus_, attack = attackSpeedBonus_]() {
+            return std::make_unique<CBuffBloodlust>(duration, speed, attack);
+        }));
+    ABActionIf blood(
+        std::make_shared<ABCondFunc>(
+            [](CSimulation&, CUnit*, CWidget* target, bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(target);
+                if (!unit || unit->IsDead()) return false;
+                auto* type = unit->GetUnitType();
+                return type == nullptr ||
+                       type->GetClassifications().count(CUnitClassification::MECHANICAL) == 0;
+            }),
+        std::move(haste));
+    blood.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityBloodlustCast::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -124,20 +145,28 @@ CAbilityPurge::CAbilityPurge(int handleId)
 }
 
 void CAbilityPurge::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    // Summoned things burn first (checked pre-dispel: dispel strips the
-    // timed-life marker that IsSummoned reads).
-    if (targetUnit->IsSummoned()) {
-        targetUnit->Damage(game, caster, false, false,
-                           CAttackType::SPELLS, CDamageType::MAGIC,
-                           "", summonDamage_, 0);
-        if (targetUnit->IsDead()) return;
-    }
-    targetUnit->RemoveBuffsIf(game, true, true, false, true);
-    targetUnit->AddBuff(std::make_unique<CBuffSlow>(
-        slowDuration_, slowPercent_, caster ? caster->GetHandleId() : -1), game);
+    // Migrated onto an AbilityBuilder chain: summoned victims burn first
+    // (checked pre-dispel), then buffs are stripped and slow applied. A
+    // burn kill leaves a corpse the later steps skip, matching the legacy
+    // early-out.
+    const int casterHandle = caster ? caster->GetHandleId() : -1;
+    ABEffectChain burn;
+    burn.Add(std::make_unique<ABActionDamageTarget>(summonDamage_, CAttackType::SPELLS,
+                                                    CDamageType::MAGIC));
+    ABEffectChain chain;
+    chain.Add(std::make_unique<ABActionIf>(
+        std::make_shared<ABCondFunc>(
+            [](CSimulation&, CUnit*, CWidget* target, bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(target);
+                return unit != nullptr && unit->IsSummoned();
+            }),
+        std::move(burn)));
+    chain.Add(std::make_unique<ABActionDispelTarget>(true, true));
+    chain.Add(std::make_unique<ABActionAddBuffTarget>(
+        [slowDuration = slowDuration_, slowPercent = slowPercent_, casterHandle]() {
+            return std::make_unique<CBuffSlow>(slowDuration, slowPercent, casterHandle);
+        }));
+    chain.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Lightning Shield =====
@@ -150,12 +179,12 @@ CAbilityLightningShield::CAbilityLightningShield(int handleId)
 }
 
 void CAbilityLightningShield::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffLightningShield>(
-        duration_, damagePerTick_, radius_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget shield(
+        [duration = duration_, tick = damagePerTick_, radius = radius_]() {
+            return std::make_unique<CBuffLightningShield>(duration, tick, radius);
+        });
+    shield.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Raise Dead =====
@@ -167,26 +196,15 @@ CAbilityRaiseDead::CAbilityRaiseDead(int handleId)
 }
 
 void CAbilityRaiseDead::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto an AbilityBuilder iteration: corpses around the caster
+    // rise as skeletons (no timed life), capped at maxTargets. Graceful
+    // without unit data, like the loop replaced.
     if (!caster) return;
-    int raised = 0;
-    for (auto* unit : game.GetUnits()) {
-        if (raised >= maxTargets_) break;
-        auto* corpse = dynamic_cast<CUnit*>(unit);
-        if (!corpse || !corpse->IsDead()) continue;
-        const float dx = corpse->GetX() - caster->GetX();
-        const float dy = corpse->GetY() - caster->GetY();
-        if (dx * dx + dy * dy > radius_ * radius_) continue;
-        // Retail skeletons stand until killed (no timed life). Graceful
-        // without unit data (ref summon-without-data): no corpse, no crash.
-        CUnit* skeleton = game.CreateUnit(skeletonType_, caster->GetPlayerIndex(),
-                                          corpse->GetX(), corpse->GetY(), 0);
-        if (skeleton) {
-            raised++;
-            if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-                summonedCb(caster->GetHandleId(), skeleton->GetHandleId());
-            }
-        }
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionCreateUnitAtTarget>(skeletonType_));
+    ABActionForEachInRange raising(radius_, std::move(perUnit), false, maxTargets_);
+    raising.SetLifeFilter(ABLifeFilter::DEAD);
+    raising.Run(game, caster, nullptr, false, 0, 0);
 }
 
 void CAbilityRaiseDead::ApplyEffectData(const CAbilityDefFull& def, int level) {

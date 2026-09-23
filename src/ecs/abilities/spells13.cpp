@@ -1,4 +1,5 @@
 #include "spells13.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
@@ -14,9 +15,15 @@ CAbilityMetamorphosis::CAbilityMetamorphosis(int handleId)
 }
 
 void CAbilityMetamorphosis::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder buff attach (the type swap
+    // lives in CBuffTransform itself).
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffTransform>(
-        War3ID("BEme"), duration_, War3ID("Edem")), game);
+    ABActionAddBuffTarget morph(
+        [duration = duration_]() {
+            return std::make_unique<CBuffTransform>(
+                War3ID("BEme"), duration, War3ID("Edem"));
+        });
+    morph.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Bear Form =====
@@ -27,9 +34,14 @@ CAbilityBearForm::CAbilityBearForm(int handleId)
 }
 
 void CAbilityBearForm::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder buff attach.
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffTransform>(
-        War3ID("Abrf"), duration_, War3ID("edcm")), game);
+    ABActionAddBuffTarget morph(
+        [duration = duration_]() {
+            return std::make_unique<CBuffTransform>(
+                War3ID("Abrf"), duration, War3ID("edcm"));
+        });
+    morph.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Raven Form =====
@@ -40,9 +52,14 @@ CAbilityRavenForm::CAbilityRavenForm(int handleId)
 }
 
 void CAbilityRavenForm::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder buff attach.
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffTransform>(
-        War3ID("Arav"), duration_, War3ID("edot")), game);
+    ABActionAddBuffTarget morph(
+        [duration = duration_]() {
+            return std::make_unique<CBuffTransform>(
+                War3ID("Arav"), duration, War3ID("edot"));
+        });
+    morph.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Robo-Goblin =====
@@ -54,9 +71,14 @@ CAbilityRoboGoblin::CAbilityRoboGoblin(int handleId)
 }
 
 void CAbilityRoboGoblin::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder buff attach.
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffTransform>(
-        War3ID("ANrg"), duration_, War3ID("Ntin")), game);
+    ABActionAddBuffTarget morph(
+        [duration = duration_]() {
+            return std::make_unique<CBuffTransform>(
+                War3ID("ANrg"), duration, War3ID("Ntin"));
+        });
+    morph.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Stone Form =====
@@ -67,8 +89,11 @@ CAbilityStoneForm::CAbilityStoneForm(int handleId)
 }
 
 void CAbilityStoneForm::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder buff attach.
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffStoneForm>(duration_), game);
+    ABActionAddBuffTarget statue(
+        [duration = duration_]() { return std::make_unique<CBuffStoneForm>(duration); });
+    statue.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Avatar =====
@@ -81,8 +106,12 @@ CAbilityAvatar::CAbilityAvatar(int handleId)
 
 void CAbilityAvatar::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffAvatar>(
-        duration_, bonusDamage_, bonusLife_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget avatar(
+        [duration = duration_, damage = bonusDamage_, life = bonusLife_]() {
+            return std::make_unique<CBuffAvatar>(duration, damage, life);
+        });
+    avatar.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Siphon Mana =====
@@ -95,11 +124,14 @@ CAbilitySiphonMana::CAbilitySiphonMana(int handleId)
 }
 
 void CAbilitySiphonMana::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffManaSiphon>(
-        duration_, manaPerTick_, caster ? caster->GetHandleId() : -1), game);
+    // Migrated onto a single AbilityBuilder buff attach (the caster handle
+    // rides in the factory; dead/non-unit targets are skipped by the action).
+    const int casterHandle = caster ? caster->GetHandleId() : -1;
+    ABActionAddBuffTarget siphon(
+        [duration = duration_, tick = manaPerTick_, casterHandle]() {
+            return std::make_unique<CBuffManaSiphon>(duration, tick, casterHandle);
+        });
+    siphon.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Big Bad Voodoo =====
@@ -112,13 +144,15 @@ CAbilityBigBadVoodoo::CAbilityBigBadVoodoo(int handleId)
 
 void CAbilityBigBadVoodoo::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead()) continue;
-        if (unit->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - caster->GetX();
-        const float dy = unit->GetY() - caster->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->AddBuff(std::make_unique<CBuffDivineShield>(duration_), game);
-        }
-    }
+    // Migrated onto an AbilityBuilder iteration: same-player units around
+    // the caster gain Divine Shield. The caster is included (distance 0 is
+    // inside the radius), matching the hand-rolled loop this replaces.
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_]() {
+            return std::make_unique<CBuffDivineShield>(duration);
+        }));
+    ABActionForEachInRange voodoo(radius_, std::move(perUnit), true);
+    voodoo.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    voodoo.Run(game, caster, nullptr, false, 0, 0);
 }

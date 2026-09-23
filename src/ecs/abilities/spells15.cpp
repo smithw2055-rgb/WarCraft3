@@ -1,4 +1,5 @@
 #include "spells15.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
@@ -13,13 +14,13 @@ CAbilityPhoenix::CAbilityPhoenix(int handleId)
 }
 
 void CAbilityPhoenix::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder create-and-buff (the rebirth
+    // egg hatches later; graceful without unit data like the code
+    // replaced).
     if (!caster) return;
-    // Graceful without unit data (ref summon-without-data).
-    CUnit* bird = game.CreateUnit(phoenixType_, caster->GetPlayerIndex(),
-                                  caster->GetX() + 64.0f, caster->GetY(), 0);
-    if (!bird) return;
-    bird->AddBuff(std::make_unique<CBuffPhoenixRebirth>(), game);
-    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-        summonedCb(caster->GetHandleId(), bird->GetHandleId());
-    }
+    using BF = ABActionCreateUnitWithBuff::BuffFactory;
+    ABActionCreateUnitWithBuff bird(
+        phoenixType_, caster->GetX() + 64.0f, caster->GetY(),
+        {BF([]() { return std::make_unique<CBuffPhoenixRebirth>(); })});
+    bird.Run(game, caster, nullptr, false, 0, 0);
 }

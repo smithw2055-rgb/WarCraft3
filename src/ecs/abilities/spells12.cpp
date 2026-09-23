@@ -1,4 +1,5 @@
 #include "spells12.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
@@ -32,16 +33,17 @@ CAbilitySentryWard::CAbilitySentryWard(int handleId)
 }
 
 void CAbilitySentryWard::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto a single AbilityBuilder create-and-grant (born with
+    // True Sight; graceful without unit data like the code replaced).
     if (!caster) return;
-    // Graceful without unit data (ref summon-without-data).
-    CUnit* ward = game.CreateUnit(wardType_, caster->GetPlayerIndex(), x, y, 0);
-    if (!ward) return;
-    auto detect = std::make_unique<CAbilityTrueSight>(ward->GetHandleId());
-    detect->SetAlias(War3ID("Adet"));
-    ward->AddAbility(game, std::move(detect));
-    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-        summonedCb(caster->GetHandleId(), ward->GetHandleId());
-    }
+    ABActionCreateUnitWithAbility ward(
+        wardType_, x, y,
+        [](CSimulation&, CUnit* newborn) -> std::unique_ptr<CAbility> {
+            auto detect = std::make_unique<CAbilityTrueSight>(newborn->GetHandleId());
+            detect->SetAlias(War3ID("Adet"));
+            return detect;
+        });
+    ward.Run(game, caster, nullptr, true, x, y);
 }
 
 // ===== Flare =====
@@ -55,16 +57,16 @@ CAbilityFlare::CAbilityFlare(int handleId)
 
 void CAbilityFlare::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead()) continue;
-        if (unit->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - x;
-        const float dy = unit->GetY() - y;
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->AddBuff(std::make_unique<CBuffArmor>(
-                War3ID("Bfae"), duration_, 0, false), game);
-        }
-    }
+    // Migrated onto an AbilityBuilder iteration: enemies in radius gain the
+    // Faerie Fire marker (same pattern as Dust of Appearance).
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_]() {
+            return std::make_unique<CBuffArmor>(War3ID("Bfae"), duration, 0, false);
+        }));
+    ABActionForEachInRange flare(radius_, std::move(perUnit));
+    flare.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    flare.Run(game, caster, nullptr, true, x, y);
 }
 
 // ===== Burrow =====
@@ -76,7 +78,10 @@ CAbilityBurrow::CAbilityBurrow(int handleId)
 
 void CAbilityBurrow::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffBurrow>(duration_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget dig(
+        [duration = duration_]() { return std::make_unique<CBuffBurrow>(duration); });
+    dig.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Cannibalize =====
@@ -88,13 +93,23 @@ CAbilityCannibalize::CAbilityCannibalize(int handleId)
 }
 
 void CAbilityCannibalize::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder branch: a corpse (never the caster)
+    // is consumed and its hunger heals the caster, clamped to max.
     if (!target || !caster || !target->IsDead()) return;
     auto* corpse = dynamic_cast<CUnit*>(target);
     if (!corpse || corpse == caster) return;
-    float life = caster->GetLife() + healAmount_;
-    if (life > caster->GetMaxLife()) life = caster->GetMaxLife();
-    caster->SetLife(game, life);
-    game.RemoveUnit(corpse); // the corpse is consumed
+    const float heal = healAmount_;
+    ABEffectChain feast;
+    feast.Add(std::make_unique<ABActionHealCaster>(heal));
+    feast.Add(std::make_unique<ABActionRemoveTarget>());
+    ABActionIf cannibal(
+        std::make_shared<ABCondFunc>(
+            [caster](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                return unit != nullptr && unit->IsDead() && unit != caster;
+            }),
+        std::move(feast));
+    cannibal.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Carrion Beetles =====
@@ -107,20 +122,19 @@ CAbilityCarrionBeetles::CAbilityCarrionBeetles(int handleId)
 }
 
 void CAbilityCarrionBeetles::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder branch: corpses rise beetles spaced
+    // along +X (no timed life; graceful without unit data).
     if (!target || !caster || !target->IsDead()) return;
-    auto* corpse = dynamic_cast<CUnit*>(target);
-    if (!corpse) return;
-    // Retail beetles stand until killed (no timed life). Graceful
-    // without unit data (ref summon-without-data).
-    for (int i = 0; i < count_; i++) {
-        CUnit* beetle = game.CreateUnit(beetleType_, caster->GetPlayerIndex(),
-                                        corpse->GetX() + i * 64.0f, corpse->GetY(), 0);
-        if (beetle) {
-            if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-                summonedCb(caster->GetHandleId(), beetle->GetHandleId());
-            }
-        }
-    }
+    ABEffectChain rise;
+    rise.Add(std::make_unique<ABActionCreateUnitAtTarget>(beetleType_, count_, 64.0f));
+    ABActionIf beetles(
+        std::make_shared<ABCondFunc>(
+            [](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
+                auto* corpse = dynamic_cast<CUnit*>(unitTarget);
+                return corpse != nullptr && corpse->IsDead();
+            }),
+        std::move(rise));
+    beetles.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Web =====
@@ -133,11 +147,18 @@ CAbilityWeb::CAbilityWeb(int handleId)
 }
 
 void CAbilityWeb::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit || !targetUnit->GetUnitType()) return;
-    // Web only grounds flyers (ref).
-    if (targetUnit->GetUnitType()->GetMovementType() != PathingGridMovementType::FLY) return;
-    targetUnit->AddBuff(std::make_unique<CBuffEnsnare>(duration_), game);
+    // Migrated onto an AbilityBuilder branch: only flyers are snared
+    // (ref). Same guard as the code replaced.
+    ABEffectChain snare;
+    snare.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_]() { return std::make_unique<CBuffEnsnare>(duration); }));
+    ABActionIf web(
+        std::make_shared<ABCondFunc>(
+            [](CSimulation&, CUnit*, CWidget* target, bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(target);
+                if (!unit || unit->IsDead() || !unit->GetUnitType()) return false;
+                return unit->GetUnitType()->GetMovementType() == PathingGridMovementType::FLY;
+            }),
+        std::move(snare));
+    web.Run(game, caster, target, false, 0, 0);
 }

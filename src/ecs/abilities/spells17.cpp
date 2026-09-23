@@ -1,4 +1,5 @@
 #include "spells17.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
@@ -16,16 +17,17 @@ CAbilityHowlOfTerror::CAbilityHowlOfTerror(int handleId)
 
 void CAbilityHowlOfTerror::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - caster->GetX();
-        const float dy = unit->GetY() - caster->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->AddBuff(std::make_unique<CBuffHowl>(
-                duration_, damageFactor_), game);
-        }
-    }
+    // Migrated onto an AbilityBuilder iteration: other-player units around
+    // the caster gain the Howl debuff. The caster is excluded, matching the
+    // hand-rolled loop this replaces.
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, factor = damageFactor_]() {
+            return std::make_unique<CBuffHowl>(duration, factor);
+        }));
+    ABActionForEachInRange howl(radius_, std::move(perUnit));
+    howl.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    howl.Run(game, caster, nullptr, false, 0, 0);
 }
 
 void CAbilityHowlOfTerror::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -44,22 +46,31 @@ CAbilityBreathOfFire::CAbilityBreathOfFire(int handleId)
 
 void CAbilityBreathOfFire::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || target->IsDead()) return;
-    const float tx = target->GetX(), ty = target->GetY();
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - tx;
-        const float dy = unit->GetY() - ty;
-        const bool isPrimary = (unit == target);
-        if (!isPrimary && dx * dx + dy * dy > radius_ * radius_) continue;
-        unit->Damage(game, caster, false, false,
-                     CAttackType::SPELLS, CDamageType::FIRE,
-                     "", damage_, 0);
-        if (auto* burning = dynamic_cast<CUnit*>(unit)) {
-            burning->AddBuff(std::make_unique<CBuffPoison>(
-                burnDuration_, burnPerTick_, caster->GetHandleId()), game);
-        }
-    }
+    // Migrated onto an AbilityBuilder pair (ref cone-approximated-as-splash):
+    // the primary target always takes the full FIRE hit plus the burn, then
+    // other-player units around it splash. The primary is excluded from the
+    // splash (it is NOT exempt -- it is hit once via the direct chain), and
+    // the caster stays out, both matching the hand-rolled loop.
+    const int casterHandle = caster->GetHandleId();
+    ABEffectChain direct;
+    direct.Add(std::make_unique<ABActionDamageTarget>(
+        damage_, CAttackType::SPELLS, CDamageType::FIRE));
+    direct.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = burnDuration_, tick = burnPerTick_, casterHandle]() {
+            return std::make_unique<CBuffPoison>(duration, tick, casterHandle);
+        }));
+    direct.Run(game, caster, target, false, 0, 0);
+    ABEffectChain splash;
+    splash.Add(std::make_unique<ABActionDamageTarget>(
+        damage_, CAttackType::SPELLS, CDamageType::FIRE));
+    splash.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = burnDuration_, tick = burnPerTick_, casterHandle]() {
+            return std::make_unique<CBuffPoison>(duration, tick, casterHandle);
+        }));
+    ABActionForEachInRange breath(radius_, std::move(splash));
+    breath.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    breath.SetExclude(target);
+    breath.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityBreathOfFire::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -79,18 +90,22 @@ CAbilityDrunkenHaze::CAbilityDrunkenHaze(int handleId)
 
 void CAbilityDrunkenHaze::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead()) continue;
-        if (unit->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - x;
-        const float dy = unit->GetY() - y;
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->AddBuff(std::make_unique<CBuffHaze>(
-                duration_, missChance_), game);
-            unit->AddBuff(std::make_unique<CBuffSlow>(
-                duration_, slowPercent_, caster->GetHandleId()), game);
-        }
-    }
+    // Migrated onto an AbilityBuilder iteration: other-player units at the
+    // impact point gain Haze plus Slow. The caster falls out via the
+    // faction filter, matching the hand-rolled loop this replaces.
+    const int casterHandle = caster->GetHandleId();
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, miss = missChance_]() {
+            return std::make_unique<CBuffHaze>(duration, miss);
+        }));
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, slow = slowPercent_, casterHandle]() {
+            return std::make_unique<CBuffSlow>(duration, slow, casterHandle);
+        }));
+    ABActionForEachInRange haze(radius_, std::move(perUnit));
+    haze.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    haze.Run(game, caster, nullptr, true, x, y);
 }
 
 void CAbilityDrunkenHaze::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -108,7 +123,12 @@ CAbilityManaShield::CAbilityManaShield(int handleId)
 
 void CAbilityManaShield::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffManaShield>(duration_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget shield(
+        [duration = duration_]() {
+            return std::make_unique<CBuffManaShield>(duration);
+        });
+    shield.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Locust Swarm =====
@@ -121,18 +141,16 @@ CAbilityLocustSwarm::CAbilityLocustSwarm(int handleId)
 
 void CAbilityLocustSwarm::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
+    // Migrated onto AbilityBuilder waves: each wave runs a per-unit POISON
+    // damage chain over other-player units around the caster. Waves resolve
+    // instantly; the total matches the old loop.
     for (int w = 0; w < waves_; w++) {
-        for (auto* unit : game.GetUnits()) {
-            if (!unit || unit->IsDead() || unit == caster) continue;
-            if (unit->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
-            const float dx = unit->GetX() - caster->GetX();
-            const float dy = unit->GetY() - caster->GetY();
-            if (dx * dx + dy * dy <= radius_ * radius_) {
-                unit->Damage(game, caster, false, false,
-                             CAttackType::SPELLS, CDamageType::POISON,
-                             "", damagePerWave_, 0);
-            }
-        }
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTarget>(
+            damagePerWave_, CAttackType::SPELLS, CDamageType::POISON));
+        ABActionForEachInRange swarm(radius_, std::move(perUnit));
+        swarm.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+        swarm.Run(game, caster, nullptr, false, 0, 0);
     }
 }
 
@@ -150,11 +168,10 @@ CAbilityCyclone::CAbilityCyclone(int handleId)
 }
 
 void CAbilityCyclone::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffCyclone>(duration_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget storm(
+        [duration = duration_]() { return std::make_unique<CBuffCyclone>(duration); });
+    storm.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityCyclone::ApplyEffectData(const CAbilityDefFull& def, int level) {

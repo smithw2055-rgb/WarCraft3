@@ -1,4 +1,5 @@
 #include "spells11.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
@@ -16,7 +17,12 @@ CAbilityWindWalk::CAbilityWindWalk(int handleId)
 
 void CAbilityWindWalk::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffWindWalk>(duration_, backstabDamage_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget walk(
+        [duration = duration_, backstab = backstabDamage_]() {
+            return std::make_unique<CBuffWindWalk>(duration, backstab);
+        });
+    walk.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Invisibility =====
@@ -29,11 +35,10 @@ CAbilityInvisibility::CAbilityInvisibility(int handleId)
 }
 
 void CAbilityInvisibility::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffWindWalk>(duration_, 0.0f), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget hide(
+        [duration = duration_]() { return std::make_unique<CBuffWindWalk>(duration, 0.0f); });
+    hide.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Permanent Invisibility =====
@@ -91,16 +96,16 @@ CAbilityDustOfAppearance::CAbilityDustOfAppearance(int handleId)
 
 void CAbilityDustOfAppearance::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead()) continue;
-        if (unit->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - x;
-        const float dy = unit->GetY() - y;
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->AddBuff(std::make_unique<CBuffArmor>(
-                War3ID("Bfae"), duration_, 0, false), game);
-        }
-    }
+    // Migrated onto an AbilityBuilder iteration: enemies in radius gain the
+    // Faerie Fire marker. Same coverage as the loop replaced.
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_]() {
+            return std::make_unique<CBuffArmor>(War3ID("Bfae"), duration, 0, false);
+        }));
+    ABActionForEachInRange dust(radius_, std::move(perUnit));
+    dust.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    dust.Run(game, caster, nullptr, true, x, y);
 }
 
 // ===== Berserk =====
@@ -113,8 +118,12 @@ CAbilityBerserk::CAbilityBerserk(int handleId)
 
 void CAbilityBerserk::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    caster->AddBuff(std::make_unique<CBuffBerserk>(
-        duration_, attackSpeedMul_, damageTakenMul_), game);
+    // Migrated onto a single AbilityBuilder buff attach.
+    ABActionAddBuffTarget rage(
+        [duration = duration_, attack = attackSpeedMul_, taken = damageTakenMul_]() {
+            return std::make_unique<CBuffBerserk>(duration, attack, taken);
+        });
+    rage.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Summon Bear =====
@@ -126,15 +135,16 @@ CAbilitySummonBear::CAbilitySummonBear(int handleId)
 }
 
 void CAbilitySummonBear::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto a single AbilityBuilder exact-point summon (no timed
+    // life; graceful without unit data like the code replaced).
     if (!caster) return;
-    // Spirit bears stand until killed (ref, no timed life). Graceful
-    // without unit data (ref summon-without-data).
-    CUnit* bear = game.CreateUnit(bearType_, caster->GetPlayerIndex(),
-                                  caster->GetX() + 64.0f, caster->GetY(), 0);
-    if (!bear) return;
-    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-        summonedCb(caster->GetHandleId(), bear->GetHandleId());
-    }
+    ABActionCreateUnitAtPoint bear(bearType_, caster->GetX() + 64.0f,
+                                   caster->GetY(), 0);
+    bear.Run(game, caster, nullptr, false, 0, 0);
+}
+
+void CAbilitySummonBear::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    bearType_ = def.UnitIdAt(level, bearType_);
 }
 
 // ===== Battle Roar =====
@@ -147,16 +157,17 @@ CAbilityBattleRoar::CAbilityBattleRoar(int handleId)
 
 void CAbilityBattleRoar::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - caster->GetX();
-        const float dy = unit->GetY() - caster->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->AddBuff(std::make_unique<CBuffInnerFire>(
-                duration_, bonusDamage_, 0), game);
-        }
-    }
+    // Migrated onto an AbilityBuilder iteration: same-player units around
+    // the caster gain Inner Fire bonus damage. Caster excluded via
+    // includeCaster=false, matching the loop replaced.
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, damage = bonusDamage_]() {
+            return std::make_unique<CBuffInnerFire>(duration, damage, 0);
+        }));
+    ABActionForEachInRange roar(radius_, std::move(perUnit));
+    roar.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    roar.Run(game, caster, nullptr, false, 0, 0);
 }
 
 void CAbilityBattleRoar::ApplyEffectData(const CAbilityDefFull& def, int level) {
