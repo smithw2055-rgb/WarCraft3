@@ -274,6 +274,32 @@ bool TestBuilderRegistryRoundTrip();
 bool TestSimRandIsDeterministic();
 bool TestSummonWithoutUnitDataIsGraceful();
 bool TestHeroSkillLevelsAndGrants();
+bool TestABSingleTargetNukeAndStun();
+bool TestABForEachInRangeBlizzardWave();
+bool TestABTeleportTarget();
+bool TestABIfBranch();
+bool TestABMissileStun();
+bool TestABDispelArea();
+bool TestABKillAndResurrect();
+bool TestABCreateUnit();
+bool TestStormBoltChainParity();
+bool TestHolyLightUndeadBranch();
+bool TestWarStompChainParity();
+bool TestDeathCoilAllyUndeadHealed();
+bool TestBlizzardWavesTotal();
+bool TestFrostNovaChainParity();
+bool TestFanOfKnivesChainParity();
+bool TestRainOfFireChainParity();
+bool TestFlameStrikeChainParity();
+bool TestDeathAndDecayChainParity();
+bool TestShockwaveChainParity();
+bool TestImpaleChainParity();
+bool TestChainLightningBounceParity();
+bool TestHealingWaveBounceParity();
+bool TestResurrectChainParity();
+bool TestThunderClapChainParity();
+bool TestManaBurnChainParity();
+bool TestEntanglingRootsChainParity();
 bool TestVfsFolderLastAddedWins();
 bool TestVfsFolderShadowsArchive();
 bool TestVfsLastOpenedArchiveWins();
@@ -615,6 +641,32 @@ int main() {
         {"Sim rand is deterministic", TestSimRandIsDeterministic},
         {"Summon without unit data is graceful", TestSummonWithoutUnitDataIsGraceful},
         {"Hero skill levels and grants", TestHeroSkillLevelsAndGrants},
+        {"AB single-target nuke and stun", TestABSingleTargetNukeAndStun},
+        {"AB foreach-in-range blizzard wave", TestABForEachInRangeBlizzardWave},
+        {"AB teleport target", TestABTeleportTarget},
+        {"AB if branch", TestABIfBranch},
+        {"AB missile stun", TestABMissileStun},
+        {"AB dispel area", TestABDispelArea},
+        {"AB kill and resurrect", TestABKillAndResurrect},
+        {"AB create unit", TestABCreateUnit},
+        {"StormBolt chain parity", TestStormBoltChainParity},
+        {"HolyLight undead branch", TestHolyLightUndeadBranch},
+        {"WarStomp chain parity", TestWarStompChainParity},
+        {"DeathCoil ally undead healed", TestDeathCoilAllyUndeadHealed},
+        {"Blizzard waves total", TestBlizzardWavesTotal},
+        {"FrostNova chain parity", TestFrostNovaChainParity},
+        {"FanOfKnives chain parity", TestFanOfKnivesChainParity},
+        {"RainOfFire chain parity", TestRainOfFireChainParity},
+        {"FlameStrike chain parity", TestFlameStrikeChainParity},
+        {"DeathAndDecay chain parity", TestDeathAndDecayChainParity},
+        {"Shockwave chain parity", TestShockwaveChainParity},
+        {"Impale chain parity", TestImpaleChainParity},
+        {"ChainLightning bounce parity", TestChainLightningBounceParity},
+        {"HealingWave bounce parity", TestHealingWaveBounceParity},
+        {"Resurrect chain parity", TestResurrectChainParity},
+        {"ThunderClap chain parity", TestThunderClapChainParity},
+        {"ManaBurn chain parity", TestManaBurnChainParity},
+        {"EntanglingRoots chain parity", TestEntanglingRootsChainParity},
         {"VFS folder last-added wins", TestVfsFolderLastAddedWins},
         {"VFS folder shadows archive", TestVfsFolderShadowsArchive},
         {"VFS game archive order and map mount", TestVfsLastOpenedArchiveWins},
