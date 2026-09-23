@@ -13,7 +13,11 @@ class CAbilityPocketFactory : public CAbilitySpellBase {
 public:
     CAbilityPocketFactory(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
+    War3ID factoryType_ = War3ID("nfac"); // ref UnitID progression
+    War3ID goblinType_ = War3ID("ncgb"); // ref DataB progression
     float factoryLife_ = 40.0f;
     float spawnInterval_ = 12.0f;
     float explodeDamage_ = 50.0f;
@@ -27,7 +31,14 @@ class CAbilityLavaSpawn : public CAbilitySpellBase {
 public:
     CAbilityLavaSpawn(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
+    War3ID spawnType_ = War3ID("nlv1"); // ref UnitID progression
+    War3ID splitType_ = War3ID("nlv2");
+    int splitCount_ = 2;
+    War3ID childType_ = War3ID("nlv3");
+    int childCount_ = 2;
     float summonDuration_ = 70.0f;
 };
 
@@ -48,8 +59,10 @@ class CAbilityQuilbeast : public CAbilitySpellBase {
 public:
     CAbilityQuilbeast(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    War3ID beastType_ = War3ID("nqb1");
+    War3ID beastType_ = War3ID("nqb1"); // ref UnitID progression
     float summonDuration_ = 70.0f;
 };
 
@@ -84,9 +97,11 @@ class CAbilityForkedLightning : public CAbilitySpellBase {
 public:
     CAbilityForkedLightning(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float damage_ = 60.0f;
-    int bounces_ = 2;
+    float damage_ = 85.0f; // ref DataA level 1
+    int bounces_ = 3; // ref DataB level 1
     float bounceRange_ = 500.0f;
     float damageReduction_ = 0.25f;
 };

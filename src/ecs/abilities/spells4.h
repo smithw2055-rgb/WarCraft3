@@ -104,9 +104,11 @@ class CAbilityDoom : public CAbilitySpellBase {
 public:
     CAbilityDoom(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float duration_ = 20.0f;
-    float damagePerSecond_ = 25.0f;
+    float duration_ = 120.0f; // ref DataC level 1
+    float damagePerSecond_ = 40.0f; // ref DataA level 1
 };
 
 // ===== Volcano (Firelord, ANvc) - eruption damage waves =====
@@ -114,8 +116,10 @@ class CAbilityVolcano : public CAbilitySpellBase {
 public:
     CAbilityVolcano(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float damage_ = 75.0f;
-    float radius_ = 250.0f;
-    int waves_ = 6;
+    float damage_ = 100.0f; // ref DataE level 1
+    float radius_ = 500.0f; // ref Area1
+    int waves_ = 6; // wave count undocumented; scatter model guess
 };

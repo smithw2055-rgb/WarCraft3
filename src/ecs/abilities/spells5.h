@@ -23,9 +23,11 @@ class CAbilityDeathAndDecay : public CAbilitySpellBase {
 public:
     CAbilityDeathAndDecay(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float damagePerWave_ = 40.0f;
-    float radius_ = 250.0f;
+    float damageFraction_ = 0.04f; // ref DataA: fraction of max life per wave
+    float radius_ = 300.0f; // ref Area1 (300/400)
     int waves_ = 4;
 };
 

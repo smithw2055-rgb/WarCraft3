@@ -70,11 +70,13 @@ private:
     float damageTakenMul_ = 1.25f;
 };
 
-// ===== Summon Bear (Beastmaster, ANsg) - permanent bear =====
+// ===== Summon Bear (Beastmaster grizzly, ANsg) - permanent bear =====
 class CAbilitySummonBear : public CAbilitySpellBase {
 public:
     CAbilitySummonBear(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     War3ID bearType_ = War3ID("ngz1");
 };

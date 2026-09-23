@@ -63,6 +63,11 @@ struct CAbilityDefFull {
     std::string DataAt(int level, int field) const;
     float DataFloatAt(int level, int field, float fallback) const;
     int DataIntAt(int level, int field, int fallback) const;
+
+    // Per-level summon/morph unit ids (UnitID column).
+    std::vector<War3ID> unitIds;
+
+    War3ID UnitIdAt(int level, War3ID fallback) const;
 };
 
 struct CBuffDefFull {

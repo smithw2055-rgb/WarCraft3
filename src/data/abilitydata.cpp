@@ -359,6 +359,12 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq, const std::string&
                 if (val != "-") dataRow[(size_t)f] = val;
             }
             def->dataLevels.push_back(dataRow);
+            const int colUnit = col("UnitID" + n);
+            if (colUnit >= 0) {
+                std::string idStr = abilitySlk.GetString(r, colUnit, "");
+                def->unitIds.push_back(idStr.empty() || idStr == "-"
+                    ? War3ID() : War3ID::FromString(idStr));
+            }
         }
         if (colRace >= 0) {
             std::string raceStr = abilitySlk.GetString(r, colRace, "");
@@ -488,6 +494,16 @@ int CAbilityDefFull::DataIntAt(int level, int field, int fallback) const {
     const std::string val = DataAt(level, field);
     if (val.empty()) return fallback;
     return std::atoi(val.c_str());
+}
+
+War3ID CAbilityDefFull::UnitIdAt(int level, War3ID fallback) const {
+    if (unitIds.empty()) return fallback;
+    int index = ClampAbilityLevel(this, level) - 1;
+    if (index < 0) index = 0;
+    if (index >= (int)unitIds.size()) index = (int)unitIds.size() - 1;
+    const War3ID id = unitIds[(size_t)index];
+    if (id == War3ID()) return fallback;
+    return id;
 }
 
 const CAbilityDefFull* CAbilityData::GetAbility(War3ID id) const {
