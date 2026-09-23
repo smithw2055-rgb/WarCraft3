@@ -881,3 +881,93 @@ CBuff* CBuffCyclone::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+// ===== CBuffWhirlwind =====
+CBuffWhirlwind::CBuffWhirlwind(float duration, float damagePerSecond, float radius)
+    : CBuff(War3ID("BOww"), duration, true),
+      damagePerSecond_(damagePerSecond), radius_(radius) {
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffWhirlwind::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    for (auto* unit : game.GetUnits()) {
+        if (!unit || unit->IsDead() || unit == target) continue;
+        if (unit->GetPlayerIndex() == target->GetPlayerIndex()) continue;
+        const float dx = unit->GetX() - target->GetX();
+        const float dy = unit->GetY() - target->GetY();
+        if (dx * dx + dy * dy > radius_ * radius_) continue;
+        unit->Damage(game, target, false, true,
+                     CAttackType::SPELLS, CDamageType::NORMAL,
+                     "", damagePerSecond_, 0);
+    }
+}
+
+CBuff* CBuffWhirlwind::Clone() const {
+    auto* copy = new CBuffWhirlwind(duration_, damagePerSecond_, radius_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffImmolation =====
+CBuffImmolation::CBuffImmolation(float duration, float damagePerTick,
+                                 float manaDrainPerSecond, float radius)
+    : CBuff(War3ID("BEim"), duration, true),
+      damagePerTick_(damagePerTick),
+      manaDrainPerSecond_(manaDrainPerSecond), radius_(radius) {
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffImmolation::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    if (target->GetMana() < manaDrainPerSecond_) {
+        // Gutter out like ref deactivate() when upkeep cannot be paid.
+        SetRemaining(0.0f);
+        return;
+    }
+    target->SetMana(target->GetMana() - manaDrainPerSecond_);
+    for (auto* unit : game.GetUnits()) {
+        if (!unit || unit->IsDead() || unit == target) continue;
+        if (unit->GetPlayerIndex() == target->GetPlayerIndex()) continue;
+        const float dx = unit->GetX() - target->GetX();
+        const float dy = unit->GetY() - target->GetY();
+        if (dx * dx + dy * dy > radius_ * radius_) continue;
+        unit->Damage(game, target, false, false,
+                     CAttackType::SPELLS, CDamageType::FIRE,
+                     "", damagePerTick_, 0);
+    }
+}
+
+CBuff* CBuffImmolation::Clone() const {
+    auto* copy = new CBuffImmolation(duration_, damagePerTick_,
+                                     manaDrainPerSecond_, radius_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffPhoenixFire =====
+CBuffPhoenixFire::CBuffPhoenixFire(float duration, float damagePerSecond, float radius)
+    : CBuff(War3ID("BPxf"), duration, true),
+      damagePerSecond_(damagePerSecond), radius_(radius) {
+    SetPeriodic(true, 1.0f);
+}
+
+void CBuffPhoenixFire::OnPeriodic(CSimulation& game, CUnit* target) {
+    if (!target || target->IsDead()) return;
+    for (auto* unit : game.GetUnits()) {
+        if (!unit || unit->IsDead() || unit == target) continue;
+        if (unit->GetPlayerIndex() == target->GetPlayerIndex()) continue;
+        const float dx = unit->GetX() - target->GetX();
+        const float dy = unit->GetY() - target->GetY();
+        if (dx * dx + dy * dy > radius_ * radius_) continue;
+        unit->Damage(game, target, false, false,
+                     CAttackType::SPELLS, CDamageType::FIRE,
+                     "", damagePerSecond_, 0);
+    }
+}
+
+CBuff* CBuffPhoenixFire::Clone() const {
+    auto* copy = new CBuffPhoenixFire(duration_, damagePerSecond_, radius_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

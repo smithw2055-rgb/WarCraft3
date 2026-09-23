@@ -506,3 +506,51 @@ public:
     void OnRemove(CSimulation& game, CUnit* target) override;
     CBuff* Clone() const override;
 };
+
+// Whirlwind (Bladestorm, AOww) - the bearer spins, striking nearby
+// enemies every second (ref CBuffWhirlWindCaster, 1s damage interval,
+// NORMAL spell damage). Attack/magic-immune side effects from ref are
+// not modeled (see StateMod/NonStacking gap).
+class CBuffWhirlwind : public CBuff {
+public:
+    CBuffWhirlwind(float duration, float damagePerSecond, float radius);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float damagePerSecond_;
+    float radius_;
+};
+
+// Immolation (Demon Hunter, AEim) - burning aura around the bearer that
+// drains mana every second; guttering out when mana runs dry (ref
+// CAbilityImmolation tick/deactivate).
+class CBuffImmolation : public CBuff {
+public:
+    CBuffImmolation(float duration, float damagePerTick,
+                    float manaDrainPerSecond, float radius);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float damagePerTick_;
+    float manaDrainPerSecond_;
+    float radius_;
+};
+
+// Phoenix Fire (Apxf) - the phoenix scorches nearby enemies every
+// second (ref CAbilityTypeDefinitionPhoenixFire DataA initial damage,
+// DataB damage per second, Area).
+class CBuffPhoenixFire : public CBuff {
+public:
+    CBuffPhoenixFire(float duration, float damagePerSecond, float radius);
+
+    void OnPeriodic(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    float damagePerSecond_;
+    float radius_;
+};
