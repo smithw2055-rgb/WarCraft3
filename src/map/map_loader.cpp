@@ -23,12 +23,12 @@ static bool IsKnownNonRenderableMapUnit(uint32_t id) {
 } // namespace
 
 MapLoader::MapLoader(MpqManager& mpq, CSimulation& sim, CUnitData& unitData,
-                     CDestructableData& destructableData, CItemData& itemData,
+                     CDestructableData& destructableData, CDoodadData& doodadData, CItemData& itemData,
                      CUpgradeData& upgradeData, CAbilityData& abilityData, SceneManager& scene,
                      TexturedTerrain& terrain, TileSet& tileset,
                      W3EMap& mapData, W3iInfo& w3i, WpmData& wpm)
     : mpq_(mpq), sim_(sim), unitData_(unitData),
-      destructableData_(destructableData), itemData_(itemData),
+      destructableData_(destructableData), doodadData_(doodadData), itemData_(itemData),
       upgradeData_(upgradeData), abilityData_(abilityData), scene_(scene),
       terrain_(terrain), tileset_(tileset),
       mapData_(mapData), w3i_(w3i), wpm_(wpm)
@@ -122,11 +122,13 @@ void MapLoader::LoadUnitDataTables() {
     if (mpq_.ArchiveCount() > 0) {
         unitData_ = CUnitData::LoadFromMpq(mpq_, gameplayConstants_);
         destructableData_ = CDestructableData::LoadFromMpq(mpq_);
+        doodadData_ = CDoodadData::LoadFromMpq(mpq_);
         itemData_ = CItemData::LoadFromMpq(mpq_);
         upgradeData_ = CUpgradeData::LoadFromMpq(mpq_);
         abilityData_ = CAbilityData::LoadFromMpq(mpq_);
         sim_.SetUnitData(&unitData_);
         sim_.SetDestructableData(&destructableData_);
+        sim_.SetDoodadData(&doodadData_);
         sim_.SetItemData(&itemData_);
         sim_.SetUpgradeData(&upgradeData_);
         sim_.SetAbilityData(&abilityData_);
@@ -197,11 +199,13 @@ void MapLoader::LoadObjectModifications(const std::string& mapPath) {
     if (mpq_.ArchiveCount() > 0) {
         unitData_ = CUnitData::LoadFromMpq(mpq_, gameplayConstants_, mapPath);
         destructableData_ = CDestructableData::LoadFromMpq(mpq_, mapPath);
+        doodadData_ = CDoodadData::LoadFromMpq(mpq_, mapPath);
         itemData_ = CItemData::LoadFromMpq(mpq_, mapPath);
         upgradeData_ = CUpgradeData::LoadFromMpq(mpq_, mapPath);
         abilityData_ = CAbilityData::LoadFromMpq(mpq_, mapPath);
         sim_.SetUnitData(&unitData_);
         sim_.SetDestructableData(&destructableData_);
+        sim_.SetDoodadData(&doodadData_);
         sim_.SetItemData(&itemData_);
         sim_.SetUpgradeData(&upgradeData_);
         sim_.SetAbilityData(&abilityData_);

@@ -16,6 +16,8 @@ add_executable(warsmash_tests
     test_aura_fixes.cpp
     test_region_events.cpp
     test_destructable_enum.cpp
+    test_doodad_data.cpp
+    test_weather.cpp
     test_combat_aoe.cpp
     test_object_mods.cpp
     test_aura_combat.cpp
@@ -116,6 +118,8 @@ add_executable(warsmash_tests
     ../src/data/abilitydata.cpp
     ../src/data/itemdata.cpp
     ../src/data/destructabledata.cpp
+    ../src/data/doodaddata.cpp
+    ../src/data/slk_merge.cpp
     ../src/data/upgradedata.cpp
     ../src/ecs/widget.cpp
     ../src/ecs/unit.cpp

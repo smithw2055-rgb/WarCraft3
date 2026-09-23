@@ -28,6 +28,7 @@ class CUnitData;
 class CAbilityData;
 class CItemData;
 class CDestructableData;
+class CDoodadData;
 class CUpgradeData;
 
 class CUnitType;

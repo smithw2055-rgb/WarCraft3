@@ -31,6 +31,8 @@ public:
     CUnitData* GetUnitData() const { return unitData_; }
     void SetDestructableData(CDestructableData* data) { destructableData_ = data; }
     CDestructableData* GetDestructableData() const { return destructableData_; }
+    void SetDoodadData(CDoodadData* data) { doodadData_ = data; }
+    CDoodadData* GetDoodadData() const { return doodadData_; }
     void SetItemData(CItemData* data) { itemData_ = data; }
     CItemData* GetItemData() const { return itemData_; }
     void SetUpgradeData(CUpgradeData* data) { upgradeData_ = data; }
@@ -254,6 +256,7 @@ private:
     // Systems
     CUnitData* unitData_ = nullptr;
     CDestructableData* destructableData_ = nullptr;
+    CDoodadData* doodadData_ = nullptr;
     CAbilityData* abilityData_ = nullptr;
     CItemData* itemData_ = nullptr;
     CUpgradeData* upgradeData_ = nullptr;

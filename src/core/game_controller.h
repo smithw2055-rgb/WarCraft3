@@ -23,6 +23,7 @@
 #include "../data/unitdata.h"
 #include "../data/abilitydata.h"
 #include "../data/destructabledata.h"
+#include "../data/doodaddata.h"
 #include "../data/itemdata.h"
 #include "../data/upgradedata.h"
 #include "../data/gameplay_constants.h"
@@ -78,6 +79,7 @@ public:
     MpqManager& GetMpq() { return mpq_; }
     CUnitData& GetUnitData() { return unitData_; }
     CDestructableData& GetDestructableData() { return destructableData_; }
+    CDoodadData& GetDoodadData() { return doodadData_; }
     CItemData& GetItemData() { return itemData_; }
     const W3EMap& GetMapData() const { return map_; }
     const W3iInfo& GetW3i() const { return w3i_; }
@@ -334,6 +336,7 @@ private:
     CSimulation simulation_;
     CUnitData unitData_;
     CDestructableData destructableData_;
+    CDoodadData doodadData_;
     CItemData itemData_;
     CUpgradeData upgradeData_;
     CAbilityData abilityData_;

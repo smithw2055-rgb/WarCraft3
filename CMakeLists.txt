@@ -215,6 +215,8 @@ set(SOURCES
     src/data/abilitydata.cpp
     src/data/itemdata.cpp
     src/data/destructabledata.cpp
+    src/data/doodaddata.cpp
+    src/data/slk_merge.cpp
     src/data/upgradedata.cpp
     src/ecs/widget.cpp
     src/ecs/unit_type.cpp
