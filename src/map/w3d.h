@@ -15,10 +15,17 @@ struct DoodadData {
     int editorId = 0;
 };
 
+struct TerrainDoodadData {
+    uint32_t id = 0;       // War3ID
+    uint32_t u1 = 0;
+    uint32_t location[2] = {};
+};
+
 struct W3dData {
     int version = 0;
     std::vector<DoodadData> doodads;
-    // Terrain doodads (simplified - just count)
+    std::vector<TerrainDoodadData> terrainDoodads;
+    // Legacy count mirror (kept in sync with terrainDoodads.size()).
     uint32_t terrainDoodadCount = 0;
 };
 

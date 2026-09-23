@@ -46,21 +46,40 @@ static bool ParseDoodadRecords(const uint8_t* data, size_t size, size_t recordsO
         d.life = data[off++];
 
         if (version > 7) {
-            CHK(8);
-            off += 4;
+            CHK(4);
+            off += 4; // itemTable
             int itemSetCount = (int)R32LE(data + off); off += 4;
             if (itemSetCount < 0 || itemSetCount > 10000) return false;
-            CHK((size_t)itemSetCount * 8);
-            off += (size_t)itemSetCount * 8;
+            for (int s = 0; s < itemSetCount; s++) {
+                // ref RandomItemSet: uint32 item count, then 8 bytes per item
+                CHK(4);
+                int itemCount = (int)R32LE(data + off); off += 4;
+                if (itemCount < 0 || itemCount > 10000) return false;
+                CHK((size_t)itemCount * 8);
+                off += (size_t)itemCount * 8;
+            }
         }
 
         CHK(4);
         d.editorId = (int)R32LE(data + off); off += 4;
     }
 
-    CHK(8);
-    off += 4;
-    out.terrainDoodadCount = R32LE(data + off); off += 4;
+    CHK(4);
+    off += 4; // u2
+    CHK(4);
+    uint32_t terrainCount = R32LE(data + off); off += 4;
+    if (terrainCount > 100000) return false;
+    // ref TerrainDoodad: War3ID + u1 + 2x uint32 location (16 bytes each)
+    CHK((size_t)terrainCount * 16);
+    out.terrainDoodads.resize(terrainCount);
+    for (uint32_t i = 0; i < terrainCount; i++) {
+        auto& t = out.terrainDoodads[i];
+        t.id = TagBE(data + off); off += 4;
+        t.u1 = R32LE(data + off); off += 4;
+        t.location[0] = R32LE(data + off); off += 4;
+        t.location[1] = R32LE(data + off); off += 4;
+    }
+    out.terrainDoodadCount = terrainCount;
     return off == size;
 }
 
@@ -94,6 +113,8 @@ bool W3dLoad(const uint8_t* data, size_t size, W3dData& out) {
     else return false;
 
     out.doodads = useSkin ? std::move(parsedWithSkin.doodads) : std::move(parsedNoSkin.doodads);
+    out.terrainDoodads = useSkin ? std::move(parsedWithSkin.terrainDoodads)
+                                 : std::move(parsedNoSkin.terrainDoodads);
     out.terrainDoodadCount = useSkin ? parsedWithSkin.terrainDoodadCount : parsedNoSkin.terrainDoodadCount;
 
     if (!out.doodads.empty()) {

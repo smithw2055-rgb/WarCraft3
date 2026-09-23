@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "map/unitsdoo.h"
+#include "map/w3d.h"
 #include "map/w3i.h"
 
 #define TEST_ASSERT(cond) do { if (!(cond)) return false; } while (0)
@@ -233,5 +234,44 @@ bool TestUnitsDooRetainsDropsAndInventory() {
     TEST_ASSERT(u.randomTable.size() == 1);
     TEST_ASSERT(u.randomTable[0].chance == 100);
     TEST_ASSERT(u.creationNumber == 42);
+    return true;
+}
+
+bool TestW3dParsesTerrainDoodads() {
+    // war3map.doo with one plain doodad (v8, nested drop set) followed by
+    // two terrain doodads (ref War3MapDoo: 16 bytes each). Guards the old
+    // bug where any terrain doodad failed the whole parse.
+    std::vector<uint8_t> data;
+    Push8(data, "W3do");
+    Push32(data, 8); // version
+    Push32(data, 0); // u1
+    Push32(data, 1); // 1 doodad
+    Push8(data, "BOcn"); // id
+    Push32(data, 0); // variation
+    PushFloat(data, 10.0f); PushFloat(data, 20.0f); PushFloat(data, 30.0f);
+    PushFloat(data, 1.5f); // angle
+    PushFloat(data, 1.0f); PushFloat(data, 1.0f); PushFloat(data, 1.0f);
+    data.push_back(0); // flags
+    data.push_back(255); // life
+    Push32(data, 0); // itemTable
+    Push32(data, 1); // 1 drop set
+    Push32(data, 2); // 2 items in the set
+    Push8(data, "I001"); Push32(data, 25);
+    Push8(data, "I002"); Push32(data, 75);
+    Push32(data, 7); // editorId
+    Push32(data, 0); // u2
+    Push32(data, 2); // 2 terrain doodads
+    Push8(data, "YOtb"); Push32(data, 1); Push32(data, 11); Push32(data, 22);
+    Push8(data, "YOtc"); Push32(data, 2); Push32(data, 33); Push32(data, 44);
+
+    W3dData w3d;
+    TEST_ASSERT(W3dLoad(data.data(), data.size(), w3d));
+    TEST_ASSERT(w3d.doodads.size() == 1);
+    TEST_ASSERT(w3d.terrainDoodads.size() == 2);
+    TEST_ASSERT(w3d.terrainDoodadCount == 2);
+    TEST_ASSERT(w3d.terrainDoodads[0].location[0] == 11);
+    TEST_ASSERT(w3d.terrainDoodads[0].location[1] == 22);
+    TEST_ASSERT(w3d.terrainDoodads[1].location[0] == 33);
+    TEST_ASSERT(w3d.terrainDoodads[1].location[1] == 44);
     return true;
 }

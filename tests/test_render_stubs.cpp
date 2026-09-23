@@ -1,5 +1,9 @@
 #include "third_party/sokol/sokol_gfx.h"
 
+bool sg_isvalid(void) {
+    return false;
+}
+
 sg_image sg_make_image(const sg_image_desc*) {
     return {0};
 }

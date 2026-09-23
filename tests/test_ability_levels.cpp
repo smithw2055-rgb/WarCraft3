@@ -8,10 +8,14 @@
 #include <vector>
 
 #include "data/abilitydata.h"
+#include "data/gameplay_constants.h"
+#include "data/unitdata.h"
 #include "ecs/abilities/ability_hero.h"
 #include "ecs/abilities/spells.h"
+#include "ecs/abilities/spells14.h"
 #include "ecs/abilities/spells2.h"
 #include "ecs/abilities/spells16.h"
+#include "ecs/abilities/spells18.h"
 #include "ecs/abilities/spells3.h"
 #include "ecs/abilities/spells4.h"
 #include "ecs/abilities/spells5.h"
@@ -30,6 +34,7 @@
 #endif
 
 #define TEST_ASSERT(cond) do { if (!(cond)) { std::cerr << "ASSERT @" << __LINE__ << ": " #cond "\n"; return false; } } while (0)
+#define TEST_NEAR(a, b, eps) do { if (std::fabs((a) - (b)) > (eps)) { std::cerr << "NEAR @" << __LINE__ << ": " #a " vs " #b "\n"; return false; } } while (0)
 
 namespace fs = std::filesystem;
 
@@ -92,6 +97,12 @@ void LoadAbilityData(MpqManager& mpq, CAbilityData& abilityData) {
     abilityData = CAbilityData::LoadFromMpq(mpq);
 }
 
+void LoadUnitData(MpqManager& mpq, CGameplayConstants& gc, CUnitData& unitData) {
+    const std::string res = std::string(PROJECT_SOURCE_DIR) + "/resources/";
+    for (auto a : {"War3Patch.mpq", "war3x.mpq", "war3.mpq"}) mpq.Open(res + a);
+    unitData = CUnitData::LoadFromMpq(mpq, gc);
+}
+
 } // namespace
 
 bool TestAbilityLevelsParse() {
@@ -108,16 +119,14 @@ bool TestAbilityLevelsParse() {
     TEST_ASSERT(bolt->ManaCostAt(1) == 75);
     TEST_ASSERT(bolt->RangeAt(2) == 600.0f);
 
-    // Starfall's mana cost steps down per level (ref 100/75/50).
-    const CAbilityDefFull* starfall = abilityData.GetAbility(War3ID("AEst"));
+    // Starfall is a single-level ultimate (retail AEsf row: Cost 200).
+    const CAbilityDefFull* starfall = abilityData.GetAbility(War3ID("AEsf"));
     TEST_ASSERT(starfall != nullptr);
-    TEST_ASSERT(starfall->levels == 3);
-    TEST_ASSERT(starfall->ManaCostAt(1) == 100);
-    TEST_ASSERT(starfall->ManaCostAt(2) == 75);
-    TEST_ASSERT(starfall->ManaCostAt(3) == 50);
+    TEST_ASSERT(starfall->levels == 1);
+    TEST_ASSERT(starfall->ManaCostAt(1) == 200);
     // Out-of-range levels clamp instead of reading past the end.
-    TEST_ASSERT(starfall->ManaCostAt(9) == 50);
-    TEST_ASSERT(starfall->ManaCostAt(0) == 100);
+    TEST_ASSERT(starfall->ManaCostAt(9) == 200);
+    TEST_ASSERT(starfall->ManaCostAt(0) == 200);
     return true;
 }
 
@@ -161,13 +170,15 @@ bool TestAbilityLevelsFollowSkillLevel() {
     sim.SetAbilityData(&abilityData);
     auto* unit = AdoptAt(sim, 1511, 0, 0, 0);
 
-    unit->AddAbility(sim, std::make_unique<CAbilityStarfall>(15101));
-    auto* starfall = dynamic_cast<CAbilityStarfall*>(unit->GetAbility(War3ID("AEst")));
-    TEST_ASSERT(starfall != nullptr);
-    TEST_ASSERT(starfall->GetManaCost() == 100);
+    unit->AddAbility(sim, std::make_unique<CAbilityOwlScout>(15101));
+    // Owl Scout is a 3-level skill (retail AEst row: Cost 100/75/50),
+    // which exercises the level-up re-application (ref).
+    auto* scout = dynamic_cast<CAbilityOwlScout*>(unit->GetAbility(War3ID("AEst")));
+    TEST_ASSERT(scout != nullptr);
+    TEST_ASSERT(scout->GetManaCost() == 100);
     // Hero skill level-up re-applies the new level's row (ref).
-    starfall->SetLevel(3);
-    TEST_ASSERT(starfall->GetManaCost() == 50);
+    scout->SetLevel(3);
+    TEST_ASSERT(scout->GetManaCost() == 50);
     return true;
 }
 
@@ -513,5 +524,132 @@ bool TestAbilityEffectDataRoundFive() {
     CAbilityFingerOfDeath finger(15706);
     finger.DoEffect(sim, caster, doomed);
     TEST_ASSERT(doomed->IsDead());
+    return true;
+}
+
+bool TestAbilityEffectDataRoundSix() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    CAbilityData abilityData;
+    LoadAbilityData(mpq, abilityData);
+
+    // Parse spot-checks: volcano/doom/decay/forked/factory/split/beast.
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANvc"))->DataFloatAt(1, 4, 0.0f) == 100.0f);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANdo"))->DataFloatAt(1, 0, 0.0f) == 40.0f);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANdo"))->DataFloatAt(1, 2, 0.0f) == 120.0f);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("AUdd"))->DataFloatAt(1, 0, 0.0f) == 0.04f);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANfl"))->DataFloatAt(2, 0, 0.0f) == 160.0f);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANfl"))->DataIntAt(2, 1, 0) == 3);
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANsy"))->UnitIdAt(2, War3ID()) == War3ID("nfa1"));
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANsy"))->DataAt(2, 1) == "ncg1");
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANlm"))->UnitIdAt(2, War3ID()) == War3ID("nlv2"));
+    TEST_ASSERT(abilityData.GetAbility(War3ID("ANsq"))->UnitIdAt(3, War3ID()) == War3ID("nqb3"));
+
+    CSimulation sim;
+    AddPlayers(sim);
+    sim.SetAbilityData(&abilityData);
+    auto* caster = AdoptAt(sim, 1581, 0, 0, 0);
+    auto* foe = AdoptAt(sim, 1582, 1, 100, 100);
+    Settle(sim);
+
+    // Death and Decay scales with bulk: 4 waves of 4% of 10000.
+    caster->AddAbility(sim, std::make_unique<CAbilityDeathAndDecay>(15801));
+    auto* decay = dynamic_cast<CAbilityDeathAndDecay*>(caster->GetAbility(War3ID("AUdd")));
+    TEST_ASSERT(decay != nullptr);
+    const float decayBefore = foe->GetLife();
+    decay->DoEffect(sim, caster, 100, 100);
+    TEST_NEAR(decayBefore - foe->GetLife(), 1600.0f, 1.0f);
+
+    // Forked Lightning level 2 opens for DataA 160.
+    caster->AddAbility(sim, std::make_unique<CAbilityForkedLightning>(15802));
+    auto* forked = dynamic_cast<CAbilityForkedLightning*>(caster->GetAbility(War3ID("ANfl")));
+    TEST_ASSERT(forked != nullptr);
+    forked->SetLevel(2);
+    auto* first = AdoptAt(sim, 1583, 1, 100, 0);
+    Settle(sim);
+    const float forkedBefore = first->GetLife();
+    forked->DoEffect(sim, caster, first);
+    TEST_ASSERT(forkedBefore - first->GetLife() == 160.0f);
+    return true;
+}
+
+bool TestPerLevelSummonsScale() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    CGameplayConstants gc;
+    CUnitData unitData;
+    LoadUnitData(mpq, gc, unitData);
+    for (auto id : {War3ID("hfoo"), War3ID("nlv2"), War3ID("nlv3"),
+                    War3ID("nqb3"), War3ID("nfac"), War3ID("ncgb")}) {
+        if (!unitData.HasUnitType(id)) return true;
+    }
+    CAbilityData abilityData;
+    LoadAbilityData(mpq, abilityData);
+
+    CSimulation sim;
+    AddPlayers(sim);
+    sim.SetAbilityData(&abilityData);
+    sim.SetUnitData(&unitData);
+    auto* caster = sim.CreateUnit(War3ID("hfoo"), 0, 0, 0, 0);
+    TEST_ASSERT(caster != nullptr);
+    Settle(sim);
+
+    // Lava Spawn level 2 raises nlv2, which splits into nlv3s.
+    caster->AddAbility(sim, std::make_unique<CAbilityLavaSpawn>(15811));
+    auto* lava = dynamic_cast<CAbilityLavaSpawn*>(caster->GetAbility(War3ID("ANlm")));
+    TEST_ASSERT(lava != nullptr);
+    lava->SetLevel(2);
+    lava->DoEffect(sim, caster);
+    for (int i = 0; i < 3; i++) sim.Update(); // join new units
+    int mediums = 0;
+    for (CUnit* unit : sim.GetUnits()) {
+        if (unit && !unit->IsDead() && unit->GetTypeId() == War3ID("nlv2")) mediums++;
+    }
+    TEST_ASSERT(mediums == 1);
+    for (CUnit* unit : sim.GetUnits()) {
+        if (unit && !unit->IsDead() && unit->GetTypeId() == War3ID("nlv2")) {
+            unit->Damage(sim, caster, false, false, CAttackType::CHAOS,
+                         CDamageType::NORMAL, "", 99999.0f, 0);
+        }
+    }
+    for (int i = 0; i < 5; i++) sim.Update();
+    int smalls = 0;
+    for (CUnit* unit : sim.GetUnits()) {
+        if (unit && !unit->IsDead() && unit->GetTypeId() == War3ID("nlv3")) smalls++;
+    }
+    TEST_ASSERT(smalls == 2);
+
+    // Quilbeast level 3 raises nqb3.
+    caster->AddAbility(sim, std::make_unique<CAbilityQuilbeast>(15812));
+    auto* beast = dynamic_cast<CAbilityQuilbeast*>(caster->GetAbility(War3ID("ANsq")));
+    TEST_ASSERT(beast != nullptr);
+    beast->SetLevel(3);
+    beast->DoEffect(sim, caster);
+    for (int i = 0; i < 3; i++) sim.Update(); // join new units
+    bool beastFound = false;
+    for (CUnit* unit : sim.GetUnits()) {
+        if (unit && !unit->IsDead() && unit->GetTypeId() == War3ID("nqb3")) beastFound = true;
+    }
+    TEST_ASSERT(beastFound);
+
+    // Pocket Factory level 2 builds nfa1 spawning ncg1.
+    if (!unitData.HasUnitType(War3ID("nfa1")) || !unitData.HasUnitType(War3ID("ncg1"))) return true;
+    caster->AddAbility(sim, std::make_unique<CAbilityPocketFactory>(15813));
+    auto* factory = dynamic_cast<CAbilityPocketFactory*>(caster->GetAbility(War3ID("ANsy")));
+    TEST_ASSERT(factory != nullptr);
+    factory->SetLevel(2);
+    factory->DoEffect(sim, caster, 200, 0);
+    for (int i = 0; i < 3; i++) sim.Update(); // join new units
+    bool factoryFound = false;
+    for (CUnit* unit : sim.GetUnits()) {
+        if (unit && !unit->IsDead() && unit->GetTypeId() == War3ID("nfa1")) factoryFound = true;
+    }
+    TEST_ASSERT(factoryFound);
+    for (int i = 0; i < 260; i++) sim.Update(); // 12s spawn interval
+    bool goblinFound = false;
+    for (CUnit* unit : sim.GetUnits()) {
+        if (unit && !unit->IsDead() && unit->GetTypeId() == War3ID("ncg1")) goblinFound = true;
+    }
+    TEST_ASSERT(goblinFound);
     return true;
 }

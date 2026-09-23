@@ -32,6 +32,7 @@
 #include "ecs/abilities/spells15.h"
 #include "ecs/abilities/spells16.h"
 #include "ecs/abilities/spells17.h"
+#include "ecs/abilities/spells18.h"
 #include "ecs/abilities/auras.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
@@ -124,7 +125,8 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("AEbl")) return std::make_unique<CAbilityBlink>(handleId);
     if (code == War3ID("AOmi")) return std::make_unique<CAbilityMirrorImage>(handleId);
     if (code == War3ID("AOsh")) return std::make_unique<CAbilityShockwave>(handleId);
-    if (code == War3ID("AEst")) return std::make_unique<CAbilityStarfall>(handleId);
+    if (code == War3ID("AEst")) return std::make_unique<CAbilityOwlScout>(handleId);
+    if (code == War3ID("AEsf")) return std::make_unique<CAbilityStarfall>(handleId);
     if (code == War3ID("AEtr")) return std::make_unique<CAbilityTranquility>(handleId);
     if (code == War3ID("AOre")) return std::make_unique<CAbilityReincarnation>(handleId);
     if (code == War3ID("ANch")) return std::make_unique<CAbilityCharm>(handleId);
@@ -274,6 +276,15 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("AUls")) return std::make_unique<CAbilityLocustSwarm>(handleId);
     if (code == War3ID("Acyc")) return std::make_unique<CAbilityCyclone>(handleId);
     if (code == War3ID("Avng")) return std::make_unique<CAbilityVengeance>(handleId);
+
+    // ===== Batch 18 (abilities): ref-skills gap closure =====
+    if (code == War3ID("AOww")) return std::make_unique<CAbilityWhirlwind>(handleId);
+    if (code == War3ID("AEim")) return std::make_unique<CAbilityImmolation>(handleId);
+    if (code == War3ID("AEfn")) return std::make_unique<CAbilityForceOfNature>(handleId);
+    if (code == War3ID("ANsw")) return std::make_unique<CAbilitySummonHawk>(handleId);
+    if (code == War3ID("ANfy")) return std::make_unique<CAbilityFactory>(handleId);
+    if (code == War3ID("Asds")) return std::make_unique<CAbilityKaboom>(handleId);
+    if (code == War3ID("Apxf")) return std::make_unique<CAbilityPhoenixFire>(handleId);
 
     // ===== Auras =====
     if (code == War3ID("AHad")) return std::make_unique<CAbilityDevotionAura>(handleId);

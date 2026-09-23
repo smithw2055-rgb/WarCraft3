@@ -282,8 +282,9 @@ bool TestMirrorImageCopiesCaster() {
 }
 
 bool TestSpells3FactoryCoverage() {
+    // AEsf is Starfall (AEst is the Owl Scout, covered in spells18).
     const char* codes[] = {"AHmt", "AHwe", "AHre", "AEbl", "AOmi",
-                           "AOsh", "AEst", "AEtr", "AOre", "ANch"};
+                           "AOsh", "AEsf", "AEtr", "AOre", "ANch"};
     for (auto code : codes) {
         auto ability = AbilityFactory::CreateAbility(4000, War3ID(code));
         TEST_ASSERT(ability != nullptr);
