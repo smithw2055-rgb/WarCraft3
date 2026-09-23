@@ -147,6 +147,13 @@ void CSimulation::Update() {
     ProcessNewDestructables();
     ProcessItemRemovals();
 
+    // Fog sight pass on its cadence, after pending units join so freshly
+    // created/adopted units contribute the same tick (deterministic: units
+    // iterate in units_ order, no RNG).
+    if (gameTurnTick_ % CFogSystem::kSightTickPeriod == 0) {
+        UpdateFogSight();
+    }
+
     // Advance game time
     AdvanceGameTime(SIM_STEP_TIME);
 
@@ -157,6 +164,32 @@ void CSimulation::Update() {
     postUpdateCallbacks_.clear();
 
     gameTurnTick_++;
+}
+
+void CSimulation::UpdateFogSight() {
+    if (terrainMap_ && terrainMap_->tileWidth > 0 && terrainMap_->tileHeight > 0) {
+        constexpr float kTile = 128.0f; // W3E tiles (cf. w3e.h kTileSize)
+        fogSystem_.EnsureGrid(terrainMap_->tileWidth, terrainMap_->tileHeight,
+                              terrainMap_->offsetX, terrainMap_->offsetY,
+                              terrainMap_->offsetX + terrainMap_->tileWidth * kTile,
+                              terrainMap_->offsetY + terrainMap_->tileHeight * kTile);
+    }
+    const bool night = IsNighttime();
+    sightScratch_.clear();
+    for (const auto* unit : units_) {
+        if (!unit || unit->IsDead()) continue;
+        const CUnitType* type = unit->GetUnitType();
+        if (!type) continue;
+        const int radius = night ? type->GetSightRadiusNight() : type->GetSightRadiusDay();
+        if (radius <= 0) continue;
+        CFogSightSource src;
+        src.player = unit->GetPlayerIndex();
+        src.x = unit->GetX();
+        src.y = unit->GetY();
+        src.radius = (float)radius;
+        sightScratch_.push_back(src);
+    }
+    fogSystem_.UpdateSight(sightScratch_.data(), (int)sightScratch_.size());
 }
 
 void CSimulation::UpdateProjectiles() {

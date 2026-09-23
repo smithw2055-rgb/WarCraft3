@@ -83,6 +83,10 @@ public:
     void SetDebugMode(int mode) { debugMode_ = mode; }
     int DebugMode() const { return debugMode_; }
     void SetMapBounds(float minX, float minZ, float maxX, float maxZ);
+    void GetMapBounds(float out[4]) const {
+        out[0] = mapBounds_[0]; out[1] = mapBounds_[1];
+        out[2] = mapBounds_[2]; out[3] = mapBounds_[3];
+    }
     void SetW3i(const float cameraBounds[8]);
 
     void SetFogOfWarData(const unsigned char* data, int width, int height);

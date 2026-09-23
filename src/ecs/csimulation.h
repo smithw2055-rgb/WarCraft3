@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <functional>
 #include "ecs/fwd.h"
+#include "ecs/fog_state.h"
 #include "ecs/unit.h"
 #include "ecs/pathing/pathfinding.h"
 #include "ecs/player.h"
@@ -146,6 +147,12 @@ public:
     CCombatSystem* GetCombatSystem() { return &combatSystem_; }
     const CCombatSystem* GetCombatSystem() const { return &combatSystem_; }
 
+    // Scripted fog (modifiers + forced paints; see fog_state.h).
+    CFogSystem* GetFogSystem() { return &fogSystem_; }
+    const CFogSystem* GetFogSystem() const { return &fogSystem_; }
+    // Rebuild the sight grid from live units (day/night radii).
+    void UpdateFogSight();
+
     // Delayed actions for timed script effects (ref UnitDamagePoint delay).
     // Fired from Update() once their countdown elapses; deterministic.
     void AddDelayedAction(float delaySeconds, std::function<void()> fn) {
@@ -252,6 +259,8 @@ private:
     CUpgradeData* upgradeData_ = nullptr;
 
     CCombatSystem combatSystem_;
+    CFogSystem fogSystem_;
+    std::vector<CFogSightSource> sightScratch_;
     uint32_t simRandState_ = 0x12345678u; // deterministic sim RNG (LCG)
     W3EMap* terrainMap_ = nullptr;  // terrain queries (owned by loader)
     bool waterDeforms_ = true;
