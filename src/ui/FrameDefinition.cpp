@@ -5,6 +5,12 @@ void FrameDefinition::InheritFrom(const FrameDefinition& other, bool withChildre
     for (auto& kv : other.stringFields) {
         if (!stringFields.count(kv.first)) stringFields[kv.first] = kv.second;
     }
+    for (auto& kv : other.stringPairFields) {
+        if (!stringPairFields.count(kv.first)) {
+            stringPairFields[kv.first] = kv.second;
+            if (!stringFields.count(kv.first)) stringFields[kv.first] = kv.second.first;
+        }
+    }
     for (auto& kv : other.floatFields) {
         if (!floatFields.count(kv.first)) floatFields[kv.first] = kv.second;
     }

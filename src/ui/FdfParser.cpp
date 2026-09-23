@@ -181,6 +181,124 @@ void FdfParser::ParseInclude() {
     (void)path;
 }
 
+bool FdfParser::ParseFrameBodyItem(FrameDefinition& def) {
+    Token t = Peek();
+
+    if (t.type == Token::STRING || t.type == Token::TEXTURE || t.type == Token::LAYER ||
+        t.type == Token::FRAME) {
+        def.innerFrames.push_back(ParseFrame());
+        return true;
+    }
+    if (t.type == Token::SETPOINT) {
+        Advance();
+        FramePoint myPoint = ParseFramePoint();
+        Expect(Token::COMMA);
+        std::string other = ParseString();
+        Expect(Token::COMMA);
+        FramePoint otherPoint = ParseFramePoint();
+        Expect(Token::COMMA);
+        float x = ParseFloat();
+        Expect(Token::COMMA);
+        float y = ParseFloat();
+        Expect(Token::COMMA);
+        def.setPoints.push_back({ myPoint, other, otherPoint, x, y });
+        return true;
+    }
+    if (t.type == Token::ANCHOR) {
+        Advance();
+        FramePoint pt = ParseFramePoint();
+        Expect(Token::COMMA);
+        float x = ParseFloat();
+        Expect(Token::COMMA);
+        float y = ParseFloat();
+        Expect(Token::COMMA);
+        def.anchors.push_back({ pt, x, y });
+        return true;
+    }
+    if (t.type == Token::MENUITEM) {
+        // MenuItem "text", index,  (ref MenuItemFrameDefinitionField)
+        Advance();
+        std::string text = ParseString();
+        Expect(Token::COMMA);
+        int index = (int)ParseFloat();
+        Expect(Token::COMMA);
+        def.menuItems.emplace_back(text, index);
+        return true;
+    }
+    if (t.type != Token::ID) {
+        return false;
+    }
+    std::string id = Advance().text;
+    Token next = Peek();
+
+    if (next.type == Token::FLOAT) {
+        // Numeric run: float / vector2 / vector3 / vector4. Retail
+        // separates values with whitespace, commas, or a mix; the run
+        // ends with a trailing comma (e.g. "1.0 1.0 1.0 1.0,").
+        std::vector<float> vals;
+        vals.push_back(ParseFloat());
+        while (true) {
+            const bool hadComma = Match(Token::COMMA);
+            if (Peek().type == Token::FLOAT) {
+                vals.push_back(ParseFloat());
+                continue;
+            }
+            if (!hadComma) {
+                throw std::runtime_error("FDF: expected comma after value of '" + id + "'");
+            }
+            break;
+        }
+        switch (vals.size()) {
+        case 1: def.floatFields[id] = vals[0]; break;
+        case 2: def.vector2Fields[id] = { vals[0], vals[1] }; break;
+        case 3: def.vector3Fields[id] = { vals[0], vals[1], vals[2] }; break;
+        case 4: def.vector4Fields[id] = { vals[0], vals[1], vals[2], vals[3] }; break;
+        default:
+            throw std::runtime_error("FDF: too many floats for '" + id + "'");
+        }
+        return true;
+    }
+    if (next.type == Token::STRING_LITERAL) {
+        std::string s1 = ParseString();
+        Match(Token::COMMA);
+        if (Peek().type == Token::STRING_LITERAL) {
+            // String pair, comma-separated or not
+            // (e.g. DisabledText variants).
+            std::string s2 = ParseString();
+            Expect(Token::COMMA);
+            def.stringPairFields[id] = { s1, s2 };
+            def.stringFields[id] = s1;
+        } else if (Peek().type == Token::FLOAT) {
+            // Font: Name, Height [, Flags] (ref FontFrameDefinitionField).
+            float height = ParseFloat();
+            Expect(Token::COMMA);
+            std::string flags;
+            if (Peek().type == Token::STRING_LITERAL) {
+                flags = ParseString();
+                Expect(Token::COMMA);
+            }
+            def.fontFields[id] = FontDef{ s1, height, "", flags };
+            def.stringFields[id] = s1;
+        } else {
+            def.stringFields[id] = s1;
+        }
+        return true;
+    }
+    if (next.type >= Token::JUSTIFYTOP && next.type <= Token::JUSTIFYRIGHT) {
+        // Justification keyword value (e.g. FontJustificationH JUSTIFYLEFT,).
+        def.stringFields[id] = Advance().text;
+        Expect(Token::COMMA);
+        return true;
+    }
+    if (next.type == Token::COMMA) {
+        // Bare flag (e.g. SetAllPoints,).
+        Advance();
+        def.flags.insert(id);
+        return true;
+    }
+    throw std::runtime_error("FDF: unexpected token after ID '" + id + "': " + next.text);
+}
+
 FrameDefinition FdfParser::ParseFrame() {
     // Determine frame class from type qualifier
     Token qualTok = Peek();
@@ -231,95 +349,7 @@ FrameDefinition FdfParser::ParseFrame() {
 
         Expect(Token::OPEN_CURLY);
         while (Peek().type != Token::CLOSE_CURLY && Peek().type != Token::EOF_TOKEN) {
-            Token t = Peek();
-
-            if (t.type == Token::STRING || t.type == Token::TEXTURE || t.type == Token::LAYER ||
-                t.type == Token::FRAME) {
-                def.innerFrames.push_back(ParseFrame());
-            }
-            else if (t.type == Token::SETPOINT) {
-                Advance();
-                FramePoint myPoint = ParseFramePoint();
-                Expect(Token::COMMA);
-                std::string other = ParseString();
-                Expect(Token::COMMA);
-                FramePoint otherPoint = ParseFramePoint();
-                Expect(Token::COMMA);
-                float x = ParseFloat();
-                Expect(Token::COMMA);
-                float y = ParseFloat();
-                Expect(Token::COMMA);
-                def.setPoints.push_back({ myPoint, other, otherPoint, x, y });
-            }
-            else if (t.type == Token::ANCHOR) {
-                Advance();
-                FramePoint pt = ParseFramePoint();
-                Expect(Token::COMMA);
-                float x = ParseFloat();
-                Expect(Token::COMMA);
-                float y = ParseFloat();
-                Expect(Token::COMMA);
-                def.anchors.push_back({ pt, x, y });
-            }
-            else if (t.type == Token::ID) {
-                std::string id = Advance().text;
-                Token next = Peek();
-
-                if (next.type == Token::FLOAT) {
-                    // float or vector or font
-                    float v1 = ParseFloat();
-                    if (Match(Token::COMMA)) {
-                        // Single float value
-                        def.floatFields[id] = v1;
-                    } else {
-                        // Need more tokens but next is comma already consumed
-                        // Vector2: ID FLOAT FLOAT COMMA
-                        if (Peek().type == Token::FLOAT) {
-                            float v2 = ParseFloat();
-                            if (Match(Token::COMMA)) {
-                                def.vector2Fields[id] = { v1, v2 };
-                            }
-                            // Could be font: ID STRING_LITERAL COMMA FLOAT COMMA
-                        }
-                        else if (Peek().type == Token::STRING_LITERAL) {
-                            // Font: ID STRING_LITERAL COMMA FLOAT COMMA
-                            std::string fontName = ParseString();
-                            Expect(Token::COMMA);
-                            // Actually: ID FLOAT COMMA STRING_LITERAL COMMA - need reparse
-                            // This was parsed as: ID FLOAT, then we're here
-                        }
-                    }
-                }
-                else if (next.type == Token::STRING_LITERAL) {
-                    // String or string-pair
-                    std::string s1 = ParseString();
-                    if (Match(Token::COMMA)) {
-                        if (Peek().type == Token::STRING_LITERAL) {
-                            std::string s2 = ParseString();
-                            Expect(Token::COMMA);
-                            def.stringFields[id] = s1; // store first, the pair would need special handling
-                        } else {
-                            // Actually, the string already consumed the comma? No, ParseString reads the string literal.
-                            // After ParseString returns, we need to check if there's a second string.
-                            // Wait, the issue: ID STRING_LITERAL COMMA -> single string
-                            // ID STRING_LITERAL STRING_LITERAL COMMA -> string pair
-                            // After ParseString() (which consumed a STRING_LITERAL)
-                            def.stringFields[id] = s1;
-                        }
-                    }
-                }
-                else if (next.type == Token::COMMA) {
-                    // Flag
-                    Advance(); // consume comma
-                    def.flags.insert(id);
-                }
-                else {
-                    throw std::runtime_error("FDF: unexpected token after ID '" + id + "': " + next.text);
-                }
-            }
-            else {
-                break;
-            }
+            if (!ParseFrameBodyItem(def)) break;
         }
         Expect(Token::CLOSE_CURLY);
         templates_[name] = def;
@@ -346,60 +376,8 @@ FrameDefinition FdfParser::ParseFrame() {
 
         Expect(Token::OPEN_CURLY);
         while (Peek().type != Token::CLOSE_CURLY && Peek().type != Token::EOF_TOKEN) {
-            // Similar element parsing as above
-            Token t = Peek();
-            if (t.type == Token::STRING || t.type == Token::TEXTURE || t.type == Token::LAYER ||
-                t.type == Token::FRAME) {
-                def.innerFrames.push_back(ParseFrame());
-            }
-            else if (t.type == Token::SETPOINT) {
-                Advance();
-                FramePoint myPoint = ParseFramePoint();
-                Expect(Token::COMMA);
-                std::string other = ParseString();
-                Expect(Token::COMMA);
-                FramePoint otherPoint = ParseFramePoint();
-                Expect(Token::COMMA);
-                float x = ParseFloat();
-                Expect(Token::COMMA);
-                float y = ParseFloat();
-                Expect(Token::COMMA);
-                def.setPoints.push_back({ myPoint, other, otherPoint, x, y });
-            }
-            else if (t.type == Token::ANCHOR) {
-                Advance();
-                FramePoint pt = ParseFramePoint();
-                Expect(Token::COMMA);
-                float x = ParseFloat();
-                Expect(Token::COMMA);
-                float y = ParseFloat();
-                Expect(Token::COMMA);
-                def.anchors.push_back({ pt, x, y });
-            }
-            else if (t.type == Token::ID) {
-                std::string id = Advance().text;
-                Token next = Peek();
-                if (next.type == Token::FLOAT) {
-                    float val = ParseFloat();
-                    Match(Token::COMMA);
-                    def.floatFields[id] = val;
-                }
-                else if (next.type == Token::STRING_LITERAL) {
-                    std::string val = ParseString();
-                    Match(Token::COMMA);
-                    def.stringFields[id] = val;
-                }
-                else if (next.type == Token::COMMA) {
-                    Advance();
-                    def.flags.insert(id);
-                }
-                else {
-                    throw std::runtime_error("FDF: unexpected after ID: " + next.text);
-                }
-            }
-            else {
-                break;
-            }
+            // Same body grammar as Frame blocks.
+            if (!ParseFrameBodyItem(def)) break;
         }
         Expect(Token::CLOSE_CURLY);
         if (!name.empty()) {

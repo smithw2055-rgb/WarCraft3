@@ -255,6 +255,37 @@ bool TestLocustSwarmDevours();
 bool TestCycloneSuspends();
 bool TestVengeanceRises();
 bool TestSpells17FactoryCoverage();
+bool TestWhirlwindSpins();
+bool TestImmolationBurnsAndDrains();
+bool TestSummonsWithoutDataAreGraceful();
+bool TestKaboomDetonates();
+bool TestPhoenixFireScorches();
+bool TestStarfallCodeIsAesf();
+bool TestSpells18FactoryCoverage();
+bool TestOrderStringTable();
+bool TestSpellBaseOrderIds();
+bool TestSpellOrderDispatch();
+bool TestWrongOrderDoesNotCast();
+bool TestSmartDoesNotCastSpells();
+bool TestPassiveNeverMatchesOrders();
+bool TestFogUnexploredIsMasked();
+bool TestFogUnitSightReveals();
+bool TestFogExploredMemory();
+bool TestFogUpdateSightDirect();
+bool TestFogMaskedOverrideWinsOverSight();
+bool TestFogModifierLifecycle();
+bool TestFogOverridePrecedence();
+bool TestFogRasterize();
+bool TestFogVersionBumps();
+bool TestFogJassRoundTrip();
+bool TestFogEnableGate();
+bool TestFogSharedVision();
+bool TestLightningSegmentCount();
+bool TestLightningDefaultParams();
+bool TestLightningEndpointsAndBounds();
+bool TestLightningDeterminism();
+bool TestLightningBoltBookkeeping();
+bool TestLightningSlkOverride();
 bool TestAbilityLevelsParse();
 bool TestAbilityLevelsApplyOnAdd();
 bool TestAbilityLevelsFollowSkillLevel();
@@ -265,6 +296,8 @@ bool TestAbilityEffectDataRoundTwo();
 bool TestAbilityEffectDataRoundThree();
 bool TestAbilityEffectDataRoundFour();
 bool TestAbilityEffectDataRoundFive();
+bool TestAbilityEffectDataRoundSix();
+bool TestPerLevelSummonsScale();
 bool TestHexUsesMarkerNotStun();
 bool TestSleepWakesOnDamage();
 bool TestSilenceBlocksCastOnly();
@@ -306,6 +339,7 @@ bool TestVfsLastOpenedArchiveWins();
 bool TestW3iParsesPlayersAndForces();
 bool TestW3iParsesTechAndRandomTables();
 bool TestUnitsDooRetainsDropsAndInventory();
+bool TestW3dParsesTerrainDoodads();
 bool TestIssueOrderByIdNatives();
 bool TestTerrainQueryNatives();
 bool TestRectRegionCellNatives();
@@ -622,6 +656,37 @@ int main() {
         {"Cyclone suspends", TestCycloneSuspends},
         {"Vengeance rises", TestVengeanceRises},
         {"Spells17 factory coverage", TestSpells17FactoryCoverage},
+        {"Whirlwind spins", TestWhirlwindSpins},
+        {"Immolation burns and drains", TestImmolationBurnsAndDrains},
+        {"Summons without data are graceful", TestSummonsWithoutDataAreGraceful},
+        {"Kaboom detonates", TestKaboomDetonates},
+        {"Phoenix fire scorches", TestPhoenixFireScorches},
+        {"Starfall code is AEsf", TestStarfallCodeIsAesf},
+        {"Spells18 factory coverage", TestSpells18FactoryCoverage},
+        {"Order string table", TestOrderStringTable},
+        {"Spell base order ids", TestSpellBaseOrderIds},
+        {"Spell order dispatch", TestSpellOrderDispatch},
+        {"Wrong order does not cast", TestWrongOrderDoesNotCast},
+        {"SMART does not cast spells", TestSmartDoesNotCastSpells},
+        {"Passive never matches orders", TestPassiveNeverMatchesOrders},
+        {"Fog unexplored is masked", TestFogUnexploredIsMasked},
+        {"Fog unit sight reveals", TestFogUnitSightReveals},
+        {"Fog explored memory", TestFogExploredMemory},
+        {"Fog update sight direct", TestFogUpdateSightDirect},
+        {"Fog masked override wins over sight", TestFogMaskedOverrideWinsOverSight},
+        {"Fog modifier lifecycle", TestFogModifierLifecycle},
+        {"Fog override precedence", TestFogOverridePrecedence},
+        {"Fog rasterize", TestFogRasterize},
+        {"Fog version bumps", TestFogVersionBumps},
+        {"Fog JASS round trip", TestFogJassRoundTrip},
+        {"Fog enable gate", TestFogEnableGate},
+        {"Fog shared vision", TestFogSharedVision},
+        {"Lightning segment count", TestLightningSegmentCount},
+        {"Lightning default params", TestLightningDefaultParams},
+        {"Lightning endpoints and bounds", TestLightningEndpointsAndBounds},
+        {"Lightning determinism", TestLightningDeterminism},
+        {"Lightning bolt bookkeeping", TestLightningBoltBookkeeping},
+        {"Lightning SLK override", TestLightningSlkOverride},
         {"Ability levels parse", TestAbilityLevelsParse},
         {"Ability levels apply on add", TestAbilityLevelsApplyOnAdd},
         {"Ability levels follow skill level", TestAbilityLevelsFollowSkillLevel},
@@ -632,6 +697,8 @@ int main() {
         {"Ability effect data round three", TestAbilityEffectDataRoundThree},
         {"Ability effect data round four", TestAbilityEffectDataRoundFour},
         {"Ability effect data round five", TestAbilityEffectDataRoundFive},
+        {"Ability effect data round six", TestAbilityEffectDataRoundSix},
+        {"Per-level summons scale", TestPerLevelSummonsScale},
         {"Hex uses marker not stun", TestHexUsesMarkerNotStun},
         {"Sleep wakes on damage", TestSleepWakesOnDamage},
         {"Silence blocks cast only", TestSilenceBlocksCastOnly},
@@ -673,6 +740,7 @@ int main() {
         {"W3I parses players and forces", TestW3iParsesPlayersAndForces},
         {"W3I parses tech and random tables", TestW3iParsesTechAndRandomTables},
         {"Units.doo retains drops and inventory", TestUnitsDooRetainsDropsAndInventory},
+        {"W3D parses terrain doodads", TestW3dParsesTerrainDoodads},
         {"Issue order-by-id natives", TestIssueOrderByIdNatives},
         {"Terrain query natives", TestTerrainQueryNatives},
         {"Rect/region cell natives", TestRectRegionCellNatives},

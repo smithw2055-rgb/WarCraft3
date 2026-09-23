@@ -42,6 +42,11 @@ add_executable(warsmash_tests
     test_spells15.cpp
     test_spells16.cpp
     test_spells17.cpp
+    test_spells18.cpp
+    test_orders.cpp
+    test_fog.cpp
+    test_lightning.cpp
+    test_fdf.cpp
     test_ability_levels.cpp
     test_vfs_overlay.cpp
     test_map_data.cpp
@@ -62,11 +67,13 @@ add_executable(warsmash_tests
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
     ../src/map/w3i.cpp
+    ../src/map/w3d.cpp
     ../src/map/object_mods.cpp
     ../src/map/unitsdoo.cpp
     ../src/map/wts.cpp
     ../src/asset/BLP.cpp
     ../src/asset/DDS.cpp
+    ../src/asset/Texture.cpp
     ../src/asset/stb_image.cpp
     ../src/core/map_path_resolver.cpp
     ../src/model/mdx.cpp
@@ -79,6 +86,18 @@ add_executable(warsmash_tests
     ../src/render/mdx_skinning.cpp
     ../src/render/mdx_prem_particles.cpp
     ../src/render/mdx_ribbons.cpp
+    ../src/render/lightning.cpp
+    ../src/ui/FdfParser.cpp
+    ../src/ui/FrameDefinition.cpp
+    ../src/ui/FrameBuilder.cpp
+    ../src/ui/UIFrame.cpp
+    ../src/ui/SimpleFrame.cpp
+    ../src/ui/BackdropFrame.cpp
+    ../src/ui/ButtonFrame.cpp
+    ../src/ui/TextFrame.cpp
+    ../src/ui/TextureFrame.cpp
+    ../src/ui/UiRenderer.cpp
+    ../src/ui/TextRenderer.cpp
     ../src/render/replaceable_ids.cpp
     ../src/scripting/jass_animation_tags.cpp
     ../src/scripting/JassNatives.cpp
@@ -100,6 +119,7 @@ add_executable(warsmash_tests
     ../src/data/upgradedata.cpp
     ../src/ecs/widget.cpp
     ../src/ecs/unit.cpp
+    ../src/ecs/fog_state.cpp
     ../src/ecs/unit_type.cpp
     ../src/ecs/player.cpp
     ../src/ecs/csimulation.cpp
@@ -108,6 +128,7 @@ add_executable(warsmash_tests
     ../src/ecs/ability_factory.cpp
     ../src/ecs/buff.cpp
     ../src/ecs/buffs.cpp
+    ../src/ecs/orders/order.cpp
     ../src/ecs/item.cpp
     ../src/ecs/item_bonuses.cpp
     ../src/ecs/destructable.cpp
@@ -166,6 +187,7 @@ add_executable(warsmash_tests
     ../src/ecs/abilities/spells15.cpp
     ../src/ecs/abilities/spells16.cpp
     ../src/ecs/abilities/spells17.cpp
+    ../src/ecs/abilities/spells18.cpp
     ../src/ecs/abilities/spells3.cpp
     ../src/ecs/abilities/auras.cpp
     ../src/ecs/abilities/ability_builder.cpp

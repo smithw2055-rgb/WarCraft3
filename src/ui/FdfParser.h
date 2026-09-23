@@ -42,6 +42,8 @@ private:
     void ParseStringList();
     void ParseInclude();
     FrameDefinition ParseFrame();
+    // One body item inside { ... }; false when the loop should stop.
+    bool ParseFrameBodyItem(FrameDefinition& def);
 
     std::string input_;
     size_t pos_ = 0;

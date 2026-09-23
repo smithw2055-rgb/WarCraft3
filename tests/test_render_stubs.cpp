@@ -92,3 +92,7 @@ bool IsActive() {
 }
 
 }
+
+int sg_append_buffer(sg_buffer, const sg_range*) {
+    return 0;
+}

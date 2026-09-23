@@ -1396,6 +1396,30 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
             addAbilityButton(rallyAbility, OrderIds::SET_RALLY, CommandClickMode::TARGET);
             continue;
         }
+        if (auto* spellAbility = dynamic_cast<CAbilitySpellBase*>(ability)) {
+            // Spell buttons carry the retail base order (ref getBaseOrderId)
+            // so clicks dispatch through the same order routing as JASS.
+            // Passives and item powers have no engine order: no button.
+            const int baseOrder = spellAbility->GetBaseOrderId();
+            if (baseOrder <= 0) {
+                continue;
+            }
+            CommandClickMode mode = CommandClickMode::IMMEDIATE;
+            switch (spellAbility->GetTargetType()) {
+            case CSpellTargetType::TARGET_POINT:
+                mode = CommandClickMode::POINT_ONLY;
+                break;
+            case CSpellTargetType::TARGET_UNIT:
+            case CSpellTargetType::TARGET_BOTH:
+                mode = CommandClickMode::TARGET;
+                break;
+            case CSpellTargetType::NO_TARGET:
+                mode = CommandClickMode::IMMEDIATE;
+                break;
+            }
+            addAbilityButton(spellAbility, baseOrder, mode);
+            continue;
+        }
         if (auto* queueAbility = dynamic_cast<CAbilityQueue*>(ability)) {
             std::vector<War3ID> trained(queueAbility->GetTrainedUnits().begin(), queueAbility->GetTrainedUnits().end());
             std::sort(trained.begin(), trained.end(),

@@ -40,6 +40,7 @@ struct FontDef {
     std::string name;
     float size = 12;
     std::string path;
+    std::string flags;
 };
 
 struct Vector4Def {
@@ -62,11 +63,13 @@ public:
 
     std::set<std::string> flags;
     std::map<std::string, std::string> stringFields;
+    std::map<std::string, std::pair<std::string, std::string>> stringPairFields;
     std::map<std::string, float> floatFields;
     std::map<std::string, Vector4Def> vector4Fields;
     std::map<std::string, Vector2Def> vector2Fields;
     std::map<std::string, Vector3Def> vector3Fields;
     std::map<std::string, FontDef> fontFields;
+    std::vector<std::pair<std::string, int>> menuItems;
     std::vector<SetPointDef> setPoints;
     std::vector<AnchorDef> anchors;
     std::vector<FrameDefinition> innerFrames;
@@ -93,7 +96,8 @@ public:
     }
 
     bool HasField(const std::string& key) const {
-        return stringFields.count(key) || floatFields.count(key) ||
+        return stringFields.count(key) || stringPairFields.count(key) ||
+               floatFields.count(key) ||
                vector4Fields.count(key) || vector2Fields.count(key) ||
                fontFields.count(key);
     }
