@@ -2350,8 +2350,67 @@ void GameController::StepSimulation(float dt) {
         if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
             SyncAndReconcileVisuals();
         }
+        SyncFogOfWar();
+        SyncLightnings();
         RefreshSelectionUi(false);
     }
+}
+
+void GameController::SyncFogOfWar() {
+    if (!simulationInitialized_ || !terrainLoaded_) return;
+    const uint64_t version = simulation_.GetFogSystem()->Version();
+    if (version == fogVersionSynced_) return;
+    fogVersionSynced_ = version;
+    const int localPlayer = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+    float bounds[4] = {-4096, -4096, 4096, 4096};
+    texturedTerrain_.GetMapBounds(bounds);
+    constexpr int kFogGrid = 128;
+    fogGrid_.assign(kFogGrid * kFogGrid, 0);
+    simulation_.GetFogSystem()->Rasterize(localPlayer, kFogGrid, kFogGrid,
+                                          bounds[0], bounds[1], bounds[2], bounds[3],
+                                          fogGrid_.data());
+    texturedTerrain_.SetFogOfWarData(fogGrid_.data(), kFogGrid, kFogGrid);
+}
+
+void GameController::SyncLightnings() {
+    if (!simulationInitialized_ || !jassNatives_) return;
+    auto* lightning = scene_.GetLightning();
+    if (!lightning) return;
+    // One-shot retail-table override (custom maps may ship their own
+    // Splats\LightningData.slk; the map MPQ mounts on top).
+    if (!lightningParamsLoaded_ && mpq_.ArchiveCount() > 0) {
+        lightningParamsLoaded_ = true;
+        std::vector<uint8_t> bytes;
+        if (mpq_.ReadFile("Splats\\LightningData.slk", bytes) && !bytes.empty()) {
+            lightning->LoadParamsFromSlk(bytes.data(), bytes.size());
+        }
+    }
+    const auto& bolts = jassNatives_->GetData()->lightnings;
+    const int localPlayer = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+    std::unordered_set<int> live;
+    for (const auto& [id, bolt] : bolts) {
+        if (!bolt) continue;
+        live.insert(id);
+        // JASS (x, y, z-height) -> scene Y-up (x, z, y).
+        lightning->SetBolt(id, bolt->x1, bolt->z1, bolt->y1,
+                           bolt->x2, bolt->z2, bolt->y2,
+                           bolt->r, bolt->g, bolt->b, bolt->a, bolt->code);
+        bool show = true;
+        if (bolt->checkVisibility) {
+            show = simulation_.GetFogSystem()->IsVisibleTo(
+                localPlayer, (bolt->x1 + bolt->x2) * 0.5f, (bolt->y1 + bolt->y2) * 0.5f);
+        }
+        lightning->SetBoltVisible(id, show);
+    }
+    for (auto it = lightningSynced_.begin(); it != lightningSynced_.end();) {
+        if (!live.count(*it)) {
+            lightning->RemoveBolt(*it);
+            it = lightningSynced_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    lightningSynced_ = std::move(live);
 }
 
 void GameController::SyncAndReconcileVisuals() {

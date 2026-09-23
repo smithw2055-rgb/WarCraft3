@@ -665,6 +665,7 @@ void SceneManager::Clear() {
     for (auto* inst : instances_) delete inst;
     instances_.clear();
     cache_.clear();
+    lightning_.Clear();
     ResetLoadStats();
 }
 
@@ -1255,4 +1256,7 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
             }
         }
     }
+    // Procedural lightning bolts (JASS AddLightning*) on top.
+    lightning_.Update(dt);
+    lightning_.Render(view, proj);
 }

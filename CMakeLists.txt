@@ -196,6 +196,7 @@ set(SOURCES
     src/render/mdx_particles.cpp
     src/render/mdx_prem_particles.cpp
     src/render/mdx_ribbons.cpp
+    src/render/lightning.cpp
     src/render/light_manager.cpp
     src/render/scene.cpp
     src/render/replaceable_ids.cpp
@@ -218,6 +219,7 @@ set(SOURCES
     src/ecs/widget.cpp
     src/ecs/unit_type.cpp
     src/ecs/unit.cpp
+    src/ecs/fog_state.cpp
     src/ecs/player.cpp
     src/ecs/destructable.cpp
     src/ecs/item.cpp
@@ -255,6 +257,7 @@ set(SOURCES
     src/ecs/abilities/spells15.cpp
     src/ecs/abilities/spells16.cpp
     src/ecs/abilities/spells17.cpp
+    src/ecs/abilities/spells18.cpp
     src/ecs/abilities/ability_repair.cpp
     src/ecs/abilities/ability_transport.cpp
     src/ecs/abilities/ability_root.cpp
@@ -266,6 +269,7 @@ set(SOURCES
     src/ecs/item_bonuses.cpp
     src/ecs/buff.cpp
     src/ecs/buffs.cpp
+    src/ecs/orders/order.cpp
     src/ecs/behaviors/behavior_move.cpp
     src/ecs/behaviors/behavior_attack.cpp
     src/ecs/behaviors/behavior_stop.cpp

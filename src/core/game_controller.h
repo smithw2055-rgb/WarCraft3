@@ -153,6 +153,8 @@ private:
     void RenderUiOnlyGlueSpriteLayers(int screenW, int screenH);
     void StepSimulation(float dt);
     void SyncAndReconcileVisuals();
+    void SyncFogOfWar();
+    void SyncLightnings();
     void CollectUnitOverlays(int screenW, int screenH);
     void CaptureScreenshotIfNeeded(int screenW, int screenH);
     bool WriteFramebufferPng(const std::string& path, int screenW, int screenH);
@@ -244,6 +246,13 @@ private:
     float lastTime_ = 0.0f;
 
     WarsmashConfig config_;
+
+    // Scripted-fog raster cache (re-uploaded only when CFogSystem changes).
+    uint64_t fogVersionSynced_ = 0;
+    std::vector<unsigned char> fogGrid_;
+    // JASS lightning bolts mirrored into the scene (ids live here).
+    bool lightningParamsLoaded_ = false;
+    std::unordered_set<int> lightningSynced_;
 
     // Rendering
     SceneManager scene_;

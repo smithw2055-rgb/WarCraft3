@@ -5,6 +5,7 @@
 #include <memory>
 #include "resource/mpq_storm.h"
 #include "model/mdx.h"
+#include "render/lightning.h"
 #include "render/mdx_viewer.h"
 #include "render/picking.h"
 
@@ -74,6 +75,7 @@ public:
 
     // Render all placed models
     void RenderAll(const Mat4& view, const Mat4& proj, float dt);
+    LightningSystem* GetLightning() { return &lightning_; }
     const std::vector<SceneEventEffect>& GetFrameEventEffects() const { return frameEventEffects_; }
     void SetDebugRenderRange(int start, int count);
     void SetDebugRenderKind(const std::string& kind);
@@ -129,6 +131,7 @@ private:
     std::unordered_map<uint32_t, std::string> doodadFiles_;
     LoadStats loadStats_;
     std::vector<SceneEventEffect> frameEventEffects_;
+    LightningSystem lightning_;
     int debugRenderStart_ = 0;
     int debugRenderCount_ = -1;
     std::string debugRenderKind_;
