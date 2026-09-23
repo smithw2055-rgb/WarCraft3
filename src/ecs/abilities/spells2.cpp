@@ -17,32 +17,18 @@ CAbilityHealingWave::CAbilityHealingWave(int handleId)
 }
 
 void CAbilityHealingWave::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder bounce: each hop rebuilds its heal
+    // chain with the 0.75x falloff baked in.
     if (!target || target->IsDead()) return;
-    CWidget* current = target;
-    float heal = healAmount_;
-    for (int i = 0; i < bounces_ && current; i++) {
-        auto* unit = dynamic_cast<CUnit*>(current);
-        if (unit && !unit->IsDead()) {
-            float newLife = unit->GetLife() + heal;
-            if (newLife > unit->GetMaxLife()) newLife = unit->GetMaxLife();
-            unit->SetLife(game, newLife);
-            heal *= 0.75f; // reduce per bounce
-        }
-        // Find next bounce target
-        CUnit* next = nullptr;
-        float bestDist = bounceRange_;
-        for (auto* other : game.GetUnits()) {
-            if (other->IsDead() || other == current) continue;
-            float dx = other->GetX() - current->GetX();
-            float dy = other->GetY() - current->GetY();
-            float dist = std::sqrt(dx*dx + dy*dy);
-            if (dist < bestDist) {
-                bestDist = dist;
-                next = other;
-            }
-        }
-        current = next;
-    }
+    ABActionBounce wave(
+        bounces_, bounceRange_,
+        [heal = healAmount_](int bounce) {
+            ABEffectChain mend;
+            mend.Add(std::make_unique<ABActionHealTarget>(
+                static_cast<float>(heal * std::pow(0.75f, bounce))));
+            return mend;
+        });
+    wave.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityHealingWave::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -60,13 +46,11 @@ CAbilityHex::CAbilityHex(int handleId)
 }
 
 void CAbilityHex::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (targetUnit) {
-        // Hex: cannot attack or cast, but can move (canonical buff BOhx).
-        targetUnit->AddBuff(std::make_unique<CBuffHex>(duration_), game);
-    }
+    // Migrated onto a single AbilityBuilder buff attach (canonical BOhx:
+    // cannot attack or cast, but can move).
+    ABActionAddBuffTarget hex(
+        [duration = duration_]() { return std::make_unique<CBuffHex>(duration); });
+    hex.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityHex::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -83,25 +67,20 @@ CAbilityChainLightning::CAbilityChainLightning(int handleId)
 }
 
 void CAbilityChainLightning::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder bounce: each hop rebuilds its damage
+    // chain with the falloff baked in. Same nearest-neighbor walk as the
+    // loop replaced.
     if (!target || target->IsDead()) return;
-    CWidget* current = target;
-    float dmg = damage_;
-    for (int i = 0; i < bounces_ && current; i++) {
-        current->Damage(game, caster, false, false,
-                        CAttackType::SPELLS, CDamageType::LIGHTNING,
-                        "", dmg, 0);
-        dmg *= (1.0f - damageReduction_);
-        CUnit* next = nullptr;
-        float bestDist = bounceRange_;
-        for (auto* other : game.GetUnits()) {
-            if (other->IsDead() || other == current) continue;
-            float dx = other->GetX() - current->GetX();
-            float dy = other->GetY() - current->GetY();
-            float dist = std::sqrt(dx*dx + dy*dy);
-            if (dist < bestDist) { bestDist = dist; next = other; }
-        }
-        current = next;
-    }
+    ABActionBounce bolt(
+        bounces_, bounceRange_,
+        [damage = damage_, reduction = damageReduction_](int bounce) {
+            ABEffectChain hit;
+            hit.Add(std::make_unique<ABActionDamageTarget>(
+                static_cast<float>(damage * std::pow(1.0f - reduction, bounce)),
+                CAttackType::SPELLS, CDamageType::LIGHTNING));
+            return hit;
+        });
+    bolt.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityChainLightning::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -119,15 +98,12 @@ CAbilityFeralSpirit::CAbilityFeralSpirit(int handleId)
 }
 
 void CAbilityFeralSpirit::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto an AbilityBuilder summon: spread-64 fan one row above
+    // the caster (run point y+32 compensates the action's half-spread lift,
+    // matching the legacy layout exactly).
     if (!caster) return;
-    for (int i = 0; i < count_; i++) {
-        float x = caster->GetX() + (i - count_/2) * 64.0f;
-        float y = caster->GetY() + 64.0f;
-        // Timed-life summon (ref CBuffTimedLife): wolves dissipate instead
-        // of living forever; summoned callback fires for JASS GetSummonedUnit.
-        SummonTimedUnit(game, caster, wolfType_, War3ID("AOsf"),
-                        x, y, caster->GetFacing(), summonDuration_);
-    }
+    ABActionSummon wolves(wolfType_, War3ID("AOsf"), count_, summonDuration_, 64.0f);
+    wolves.Run(game, caster, nullptr, true, caster->GetX(), caster->GetY() + 32.0f);
 }
 
 void CAbilityFeralSpirit::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -144,17 +120,21 @@ CAbilityEarthquake::CAbilityEarthquake(int handleId)
 }
 
 void CAbilityEarthquake::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // AOE damage to buildings
-    for (auto* unit : game.GetUnits()) {
-        if (unit->IsDead() || !unit->IsBuilding()) continue;
-        float dx = unit->GetX() - x;
-        float dy = unit->GetY() - y;
-        if (dx*dx + dy*dy <= radius_*radius_) {
-            unit->Damage(game, caster, false, false,
-                         CAttackType::SIEGE, CDamageType::NORMAL,
-                         "", damagePerSecond_ * duration_, 0);
-        }
-    }
+    // Migrated onto an AbilityBuilder iteration: buildings in radius take
+    // siege damage (the caster qualifies when it is one, as before).
+    ABEffectChain smash;
+    smash.Add(std::make_unique<ABActionDamageTarget>(
+        damagePerSecond_ * duration_, CAttackType::SIEGE, CDamageType::NORMAL));
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionIf>(
+        std::make_shared<ABCondFunc>(
+            [](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                return unit != nullptr && !unit->IsDead() && unit->IsBuilding();
+            }),
+        std::move(smash)));
+    ABActionForEachInRange quake(radius_, std::move(perUnit), true);
+    quake.Run(game, caster, nullptr, true, x, y);
 }
 
 void CAbilityEarthquake::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -173,25 +153,14 @@ CAbilityCarrionSwarm::CAbilityCarrionSwarm(int handleId)
 }
 
 void CAbilityCarrionSwarm::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder line iteration (poison corridor from
+    // the caster toward the target).
     if (!target || !caster) return;
-    float dx = target->GetX() - caster->GetX();
-    float dy = target->GetY() - caster->GetY();
-    float dist = std::sqrt(dx*dx + dy*dy);
-    if (dist < 1.0f) return;
-    float nx = dx/dist, ny = dy/dist;
-    for (auto* unit : game.GetUnits()) {
-        if (unit->IsDead() || unit == caster) continue;
-        float ux = unit->GetX() - caster->GetX();
-        float uy = unit->GetY() - caster->GetY();
-        float proj = ux*nx + uy*ny;
-        if (proj < 0 || proj > range_) continue;
-        float perp = std::abs(ux*ny - uy*nx);
-        if (perp <= width_/2) {
-            unit->Damage(game, caster, false, false,
-                         CAttackType::SPELLS, CDamageType::POISON,
-                         "", damage_, 0);
-        }
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
+                                                       CDamageType::POISON));
+    ABActionForEachInLine swarm(range_, width_, std::move(perUnit));
+    swarm.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityCarrionSwarm::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -208,13 +177,19 @@ CAbilitySleep::CAbilitySleep(int handleId)
 }
 
 void CAbilitySleep::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    if (!target || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (targetUnit && targetUnit->CanSleep()) {
-        // Sleep: idles the target; any damage wakes it (see CUnit::Damage).
-        targetUnit->AddBuff(std::make_unique<CBuffSleep>(duration_), game);
-    }
+    // Migrated onto an AbilityBuilder branch: only sleep-capable targets
+    // doze (any damage wakes them, see CUnit::Damage).
+    ABEffectChain doze;
+    doze.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_]() { return std::make_unique<CBuffSleep>(duration); }));
+    ABActionIf sleep(
+        std::make_shared<ABCondFunc>(
+            [](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                return unit != nullptr && !unit->IsDead() && unit->CanSleep();
+            }),
+        std::move(doze));
+    sleep.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilitySleep::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -231,19 +206,16 @@ CAbilityInferno::CAbilityInferno(int handleId)
 }
 
 void CAbilityInferno::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto AbilityBuilder pieces: nearby enemies are stunned,
+    // then the infernal is summoned with timed life at the point.
     if (!caster) return;
-    // Stun nearby enemies
-    for (auto* unit : game.GetUnits()) {
-        if (unit->IsDead()) continue;
-        float dx = unit->GetX() - x;
-        float dy = unit->GetY() - y;
-        if (dx*dx + dy*dy <= stunRadius_*stunRadius_) {
-            unit->AddBuff(std::make_unique<CBuffStun>(stunDuration_), game);
-        }
-    }
-    // Summon infernal with timed life (ref CBuffTimedLife).
-    SummonTimedUnit(game, caster, infernalType_, War3ID("AUin"),
-                    x, y, caster->GetFacing(), summonDuration_);
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionStunTarget>(stunDuration_));
+    // includeCaster: the hand loop spared nobody (not even the caster).
+    ABActionForEachInRange terror(stunRadius_, std::move(perUnit), true);
+    terror.Run(game, caster, nullptr, true, x, y);
+    ABActionSummon infernal(infernalType_, War3ID("AUin"), 1, summonDuration_, 0.0f);
+    infernal.Run(game, caster, nullptr, true, x, y);
 }
 
 void CAbilityInferno::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -260,16 +232,13 @@ CAbilitySilence::CAbilitySilence(int handleId)
 }
 
 void CAbilitySilence::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    (void)caster;
-    for (auto* unit : game.GetUnits()) {
-        if (unit->IsDead() || unit == caster) continue;
-        float dx = unit->GetX() - x;
-        float dy = unit->GetY() - y;
-        if (dx*dx + dy*dy <= radius_*radius_) {
-            // Silence blocks casting only; the target keeps moving/attacking.
-            unit->AddBuff(std::make_unique<CBuffSilence>(duration_), game);
-        }
-    }
+    // Migrated onto an AbilityBuilder iteration: everything in radius
+    // (caster excluded) loses its voice but keeps moving/attacking.
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_]() { return std::make_unique<CBuffSilence>(duration); }));
+    ABActionForEachInRange hush(radius_, std::move(perUnit));
+    hush.Run(game, caster, nullptr, true, x, y);
 }
 
 void CAbilitySilence::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -287,10 +256,12 @@ CAbilityBlackArrow::CAbilityBlackArrow(int handleId)
 }
 
 void CAbilityBlackArrow::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto a single AbilityBuilder weapon attack (piercing shot:
+    // attack-flagged, ranged, so it can miss/evade/crit like any shot).
     if (!target || !caster) return;
-    target->Damage(game, caster, true, true,
-                   CAttackType::PIERCE, CDamageType::NORMAL,
-                   "", bonusDamage_, 0);
+    ABActionDamageTarget shot(bonusDamage_, CAttackType::PIERCE, CDamageType::NORMAL,
+                              true, true);
+    shot.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityBlackArrow::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -307,12 +278,15 @@ CAbilityLifeDrain::CAbilityLifeDrain(int handleId)
 }
 
 void CAbilityLifeDrain::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto a single AbilityBuilder buff attach (channelled drain
+    // ticks on the bearer, healing the caster).
     if (!target || !caster || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    // Channelled drain over time (ref): periodic damage + heal to caster.
-    targetUnit->AddBuff(std::make_unique<CBuffLifeDrain>(
-        duration_, drainPerSecond_ * 1.0f, caster->GetHandleId()), game);
+    const int casterHandle = caster->GetHandleId();
+    ABActionAddBuffTarget drain(
+        [duration = duration_, tick = drainPerSecond_, casterHandle]() {
+            return std::make_unique<CBuffLifeDrain>(duration, tick, casterHandle);
+        });
+    drain.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityLifeDrain::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -330,15 +304,23 @@ CAbilityFingerOfDeath::CAbilityFingerOfDeath(int handleId)
 }
 
 void CAbilityFingerOfDeath::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder branch: heroes withstand the finger
+    // for DataC instead of dying (ref).
     if (!target) return;
-    float damage = damage_;
-    if (auto* targetUnit = dynamic_cast<CUnit*>(target)) {
-        // Heroes withstand the finger for DataC instead of dying (ref).
-        if (targetUnit->IsHero()) damage = heroDamage_;
-    }
-    target->Damage(game, caster, false, false,
-                   CAttackType::SPELLS, CDamageType::DEATH,
-                   "", damage, 0);
+    ABEffectChain lethal;
+    lethal.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
+                                                      CDamageType::DEATH));
+    ABEffectChain heroic;
+    heroic.Add(std::make_unique<ABActionDamageTarget>(heroDamage_, CAttackType::SPELLS,
+                                                      CDamageType::DEATH));
+    ABActionIf finger(
+        std::make_shared<ABCondFunc>(
+            [](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                return unit != nullptr && unit->IsHero();
+            }),
+        std::move(heroic), std::move(lethal));
+    finger.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityFingerOfDeath::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -356,9 +338,9 @@ CAbilityDarkPortal::CAbilityDarkPortal(int handleId)
 
 void CAbilityDarkPortal::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     if (!caster) return;
-    // First spell on the AbilityBuilder path: (re)register the summon
-    // chain with the current level's numbers, then run it like the ref
-    // .j doEffect (summon + fired summoned events).
+    // Migrated: first spell on the AbilityBuilder path. (Re)register the
+    // summon chain with the current level's numbers, then run it like the
+    // ref .j doEffect (summon + fired summoned events).
     ABEffectChain chain;
     chain.Add(std::make_unique<ABActionSummon>(
         portalUnitType_, War3ID("ANdp"), summonCount_, summonDuration_));
@@ -382,20 +364,17 @@ CAbilityRainOfChaos::CAbilityRainOfChaos(int handleId)
 }
 
 void CAbilityRainOfChaos::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto AbilityBuilder waves (same scattered pattern as
+    // Starfall, fixed +-100 scatter; the caster is not spared, as before).
     for (int w = 0; w < waves_; w++) {
         // Deterministic synced scatter (std::rand is banned in sim code).
         float wx = x + game.SimRandRange(-100.0f, 100.0f);
         float wy = y + game.SimRandRange(-100.0f, 100.0f);
-        for (auto* unit : game.GetUnits()) {
-            if (unit->IsDead()) continue;
-            float dx = unit->GetX() - wx;
-            float dy = unit->GetY() - wy;
-            if (dx*dx + dy*dy <= radius_*radius_) {
-                unit->Damage(game, caster, false, false,
-                             CAttackType::SPELLS, CDamageType::FIRE,
-                             "", damage_, 0);
-            }
-        }
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTarget>(
+            damage_, CAttackType::SPELLS, CDamageType::FIRE));
+        ABActionForEachInRange chaos(radius_, std::move(perUnit), true);
+        chaos.Run(game, caster, nullptr, true, wx, wy);
     }
 }
 

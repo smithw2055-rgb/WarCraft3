@@ -1,8 +1,11 @@
 #include "spells5.h"
+#include "ecs/abilities/ability_builder.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/player.h"
+#include "data/abilitydata.h"
+#include <algorithm>
 #include <cmath>
 
 // ===== Flame Strike =====
@@ -15,18 +18,15 @@ CAbilityFlameStrike::CAbilityFlameStrike(int handleId)
 }
 
 void CAbilityFlameStrike::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto AbilityBuilder waves (same instant multi-wave pattern
+    // as Blizzard / Rain of Fire).
     if (!caster) return;
     for (int w = 0; w < waves_; w++) {
-        for (auto* unit : game.GetUnits()) {
-            if (!unit || unit->IsDead() || unit == caster) continue;
-            const float dx = unit->GetX() - x;
-            const float dy = unit->GetY() - y;
-            if (dx * dx + dy * dy <= radius_ * radius_) {
-                unit->Damage(game, caster, false, false,
-                             CAttackType::SPELLS, CDamageType::FIRE,
-                             "", damagePerWave_, 0);
-            }
-        }
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTarget>(
+            damagePerWave_, CAttackType::SPELLS, CDamageType::FIRE));
+        ABActionForEachInRange wave(radius_, std::move(perUnit));
+        wave.Run(game, caster, nullptr, true, x, y);
     }
 }
 
@@ -40,19 +40,21 @@ CAbilityDeathAndDecay::CAbilityDeathAndDecay(int handleId)
 }
 
 void CAbilityDeathAndDecay::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto AbilityBuilder waves; each wave corrupts every unit in
+    // the area (friend and foe, caster exempt) for a max-life fraction.
     if (!caster) return;
     for (int w = 0; w < waves_; w++) {
-        for (auto* unit : game.GetUnits()) {
-            if (!unit || unit->IsDead() || unit == caster) continue;
-            const float dx = unit->GetX() - x;
-            const float dy = unit->GetY() - y;
-            if (dx * dx + dy * dy <= radius_ * radius_) {
-                unit->Damage(game, caster, false, false,
-                             CAttackType::SPELLS, CDamageType::DEATH,
-                             "", damagePerWave_, 0);
-            }
-        }
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTargetMaxLifePct>(
+            damageFraction_, CAttackType::SPELLS, CDamageType::DEATH));
+        ABActionForEachInRange wave(radius_, std::move(perUnit));
+        wave.Run(game, caster, nullptr, true, x, y);
     }
+}
+
+void CAbilityDeathAndDecay::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    damageFraction_ = def.DataFloatAt(level, 0, damageFraction_);
+    radius_ = def.AreaAt(level);
 }
 
 // ===== Impale =====
@@ -65,26 +67,15 @@ CAbilityImpale::CAbilityImpale(int handleId)
 }
 
 void CAbilityImpale::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder line iteration (damage + stun
+    // corridor). The dead-target early-out matches the loop replaced.
     if (!target || !caster || target->IsDead()) return;
-    const float dx = target->GetX() - caster->GetX();
-    const float dy = target->GetY() - caster->GetY();
-    const float dist = std::sqrt(dx * dx + dy * dy);
-    if (dist < 1.0f) return;
-    const float nx = dx / dist, ny = dy / dist;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        const float ux = unit->GetX() - caster->GetX();
-        const float uy = unit->GetY() - caster->GetY();
-        const float proj = ux * nx + uy * ny;
-        if (proj < 0 || proj > range_) continue;
-        const float perp = std::abs(ux * ny - uy * nx);
-        if (perp <= width_ / 2) {
-            unit->Damage(game, caster, false, false,
-                         CAttackType::SPELLS, CDamageType::NORMAL,
-                         "", damage_, 0);
-            unit->AddBuff(std::make_unique<CBuffStun>(stunDuration_), game);
-        }
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
+                                                       CDamageType::NORMAL));
+    perUnit.Add(std::make_unique<ABActionStunTarget>(stunDuration_));
+    ABActionForEachInLine impale(range_, width_, std::move(perUnit));
+    impale.Run(game, caster, target, false, 0, 0);
 }
 
 // ===== Fan of Knives =====
@@ -96,18 +87,15 @@ CAbilityFanOfKnives::CAbilityFanOfKnives(int handleId)
 }
 
 void CAbilityFanOfKnives::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto an AbilityBuilder iteration: only units owned by other
+    // players take damage (same player-index rule as the loop replaced).
     if (!caster) return;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
-        const float dx = unit->GetX() - caster->GetX();
-        const float dy = unit->GetY() - caster->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->Damage(game, caster, false, false,
-                         CAttackType::SPELLS, CDamageType::NORMAL,
-                         "", damage_, 0);
-        }
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
+                                                       CDamageType::NORMAL));
+    ABActionForEachInRange fan(radius_, std::move(perUnit));
+    fan.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    fan.Run(game, caster, nullptr, false, 0, 0);
 }
 
 // ===== Rain of Fire =====
@@ -120,18 +108,15 @@ CAbilityRainOfFire::CAbilityRainOfFire(int handleId)
 }
 
 void CAbilityRainOfFire::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto AbilityBuilder waves (same instant multi-wave pattern
+    // as Blizzard; the .j drop timing is a visual pass).
     if (!caster) return;
     for (int w = 0; w < waves_; w++) {
-        for (auto* unit : game.GetUnits()) {
-            if (!unit || unit->IsDead() || unit == caster) continue;
-            const float dx = unit->GetX() - x;
-            const float dy = unit->GetY() - y;
-            if (dx * dx + dy * dy <= radius_ * radius_) {
-                unit->Damage(game, caster, false, false,
-                             CAttackType::SPELLS, CDamageType::FIRE,
-                             "", damagePerWave_, 0);
-            }
-        }
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTarget>(
+            damagePerWave_, CAttackType::SPELLS, CDamageType::FIRE));
+        ABActionForEachInRange wave(radius_, std::move(perUnit));
+        wave.Run(game, caster, nullptr, true, x, y);
     }
 }
 
@@ -161,19 +146,19 @@ CAbilityDarkRitual::CAbilityDarkRitual(int handleId)
 }
 
 void CAbilityDarkRitual::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto AbilityBuilder pieces: a same-player non-hero victim
+    // (never the caster) dies, and its life force becomes caster mana
+    // (capped by the pool), computed up front like AbsorbMana.
     if (!target || !caster || target->IsDead() || target == caster) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit || targetUnit->IsHero()) return;
-    if (targetUnit->GetPlayerIndex() != caster->GetPlayerIndex()) return;
-    // The victim's life force becomes mana, capped by the caster's pool.
-    float mana = caster->GetMana() + targetUnit->GetLife();
-    if (mana > static_cast<float>(caster->GetMaxMana())) {
-        mana = static_cast<float>(caster->GetMaxMana());
-    }
-    targetUnit->Damage(game, caster, false, false,
-                       CAttackType::SPELLS, CDamageType::DEATH,
-                       "", 1e9f, 0);
-    caster->SetMana(mana);
+    auto* victim = dynamic_cast<CUnit*>(target);
+    if (!victim || victim->IsHero()) return;
+    if (victim->GetPlayerIndex() != caster->GetPlayerIndex()) return;
+    const float mana = std::min(caster->GetMana() + victim->GetLife(),
+                                static_cast<float>(caster->GetMaxMana()));
+    ABActionDamageTarget slay(1e9f, CAttackType::SPELLS, CDamageType::DEATH);
+    slay.Run(game, caster, target, false, 0, 0);
+    ABActionSetManaTarget gift(mana);
+    gift.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Shadow Strike =====
@@ -186,14 +171,19 @@ CAbilityShadowStrike::CAbilityShadowStrike(int handleId)
 }
 
 void CAbilityShadowStrike::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    if (!target || target->IsDead()) return;
-    target->Damage(game, caster, false, false,
-                   CAttackType::SPELLS, CDamageType::POISON,
-                   "", damage_, 0);
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    targetUnit->AddBuff(std::make_unique<CBuffSlow>(
-        slowDuration_, slowPercent_, caster ? caster->GetHandleId() : -1), game);
-    targetUnit->AddBuff(std::make_unique<CBuffPoison>(
-        poisonDuration_, poisonPerTick_, caster ? caster->GetHandleId() : -1), game);
+    // Migrated onto an AbilityBuilder chain: poison hit plus slow and
+    // poison over time.
+    const int casterHandle = caster ? caster->GetHandleId() : -1;
+    ABEffectChain chain;
+    chain.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
+                                                     CDamageType::POISON));
+    chain.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = slowDuration_, percent = slowPercent_, casterHandle]() {
+            return std::make_unique<CBuffSlow>(duration, percent, casterHandle);
+        }));
+    chain.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = poisonDuration_, tick = poisonPerTick_, casterHandle]() {
+            return std::make_unique<CBuffPoison>(duration, tick, casterHandle);
+        }));
+    chain.Run(game, caster, target, false, 0, 0);
 }

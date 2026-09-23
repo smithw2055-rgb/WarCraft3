@@ -7,11 +7,6 @@
 #include "data/abilitydata.h"
 #include <cmath>
 
-static float Dist2(float ax, float ay, float bx, float by) {
-    const float dx = ax - bx, dy = ay - by;
-    return dx * dx + dy * dy;
-}
-
 // ===== Mass Teleport =====
 CAbilityMassTeleport::CAbilityMassTeleport(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AHmt"), CAbilityCategory::SPELL) {
@@ -22,14 +17,15 @@ CAbilityMassTeleport::CAbilityMassTeleport(int handleId)
 }
 
 void CAbilityMassTeleport::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto an AbilityBuilder iteration: same-player units around
+    // the caster relocate to the spell destination (carried by the teleport
+    // action itself, since iteration repoints the effect point).
     if (!caster) return;
-    const float cx = caster->GetX(), cy = caster->GetY();
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        if (Dist2(unit->GetX(), unit->GetY(), cx, cy) > radius_ * radius_) continue;
-        unit->SetPosition(x, y);
-    }
+    ABEffectChain group;
+    group.Add(std::make_unique<ABActionTeleportTarget>(x, y));
+    ABActionForEachInRange mass(radius_, std::move(group));
+    mass.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    mass.Run(game, caster, nullptr, false, 0, 0);
     caster->SetPosition(x, y);
 }
 
@@ -42,13 +38,13 @@ CAbilitySummonWaterElemental::CAbilitySummonWaterElemental(int handleId)
 }
 
 void CAbilitySummonWaterElemental::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto an AbilityBuilder summon (spread-64 fan one row above
+    // the caster; run point y+32 compensates the action's half-spread
+    // lift, matching the legacy layout exactly).
     if (!caster) return;
-    for (int i = 0; i < count_; i++) {
-        const float x = caster->GetX() + (i - count_ / 2) * 64.0f;
-        const float y = caster->GetY() + 64.0f;
-        SummonTimedUnit(game, caster, elementalType_, War3ID("AHwe"),
-                        x, y, caster->GetFacing(), summonDuration_);
-    }
+    ABActionSummon elemental(elementalType_, War3ID("AHwe"), count_,
+                             summonDuration_, 64.0f);
+    elemental.Run(game, caster, nullptr, true, caster->GetX(), caster->GetY() + 32.0f);
 }
 
 // ===== Resurrect (Paladin Resurrection, AHre) =====
@@ -61,18 +57,15 @@ CAbilityResurrect::CAbilityResurrect(int handleId)
 }
 
 void CAbilityResurrect::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    // Migrated onto an AbilityBuilder iteration: up to maxTargets dead
+    // same-player units in radius are revived in place.
     if (!caster) return;
-    int revived = 0;
-    for (auto* unit : game.GetUnits()) {
-        if (revived >= maxTargets_) break;
-        if (!unit || !unit->IsDead() || unit == caster) continue;
-        if (unit->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        if (Dist2(unit->GetX(), unit->GetY(), x, y) > radius_ * radius_) continue;
-        auto* revivedUnit = dynamic_cast<CUnit*>(unit);
-        if (!revivedUnit) continue;
-        revivedUnit->Revive(game, unit->GetX(), unit->GetY());
-        revived++;
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionReviveTarget>());
+    ABActionForEachInRange resurrection(radius_, std::move(perUnit), false, maxTargets_);
+    resurrection.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    resurrection.SetLifeFilter(ABLifeFilter::DEAD);
+    resurrection.Run(game, caster, nullptr, true, x, y);
 }
 
 // ===== Blink =====
@@ -85,7 +78,8 @@ CAbilityBlink::CAbilityBlink(int handleId)
 }
 
 void CAbilityBlink::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    (void)game;
+    // Migrated relocation onto an AbilityBuilder teleport (range clamp
+    // stays hand-written; no-op without terrain data, as before).
     if (!caster) return;
     const float dx = x - caster->GetX(), dy = y - caster->GetY();
     const float dist = std::sqrt(dx * dx + dy * dy);
@@ -93,7 +87,8 @@ void CAbilityBlink::DoEffect(CSimulation& game, CUnit* caster, float x, float y)
         x = caster->GetX() + dx / dist * maxRange_;
         y = caster->GetY() + dy / dist * maxRange_;
     }
-    caster->SetPosition(x, y);
+    ABActionTeleportTarget blink;
+    blink.Run(game, caster, caster, true, x, y);
 }
 
 void CAbilityBlink::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -109,13 +104,16 @@ CAbilityMirrorImage::CAbilityMirrorImage(int handleId)
 }
 
 void CAbilityMirrorImage::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto AbilityBuilder copy summons: one action per image,
+    // fanned one row above the caster exactly like the legacy layout.
     if (!caster) return;
+    ABEffectChain images;
     for (int i = 0; i < count_; i++) {
-        const float x = caster->GetX() + (i - count_ / 2) * 64.0f;
-        const float y = caster->GetY() + 64.0f;
-        SummonTimedUnit(game, caster, caster->GetTypeId(), War3ID("AOmi"),
-                        x, y, caster->GetFacing(), duration_);
+        const float ox = (i - count_ / 2) * 64.0f;
+        images.Add(std::make_unique<ABActionSummonCopyOfTarget>(
+            War3ID("AOmi"), duration_, ox, 64.0f));
     }
+    images.Run(game, caster, caster, false, 0, 0);
 }
 
 void CAbilityMirrorImage::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -132,25 +130,14 @@ CAbilityShockwave::CAbilityShockwave(int handleId)
 }
 
 void CAbilityShockwave::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder line iteration (damage corridor from
+    // the caster toward the target). Same geometry as the loop replaced.
     if (!target || !caster) return;
-    const float dx = target->GetX() - caster->GetX();
-    const float dy = target->GetY() - caster->GetY();
-    const float dist = std::sqrt(dx * dx + dy * dy);
-    if (dist < 1.0f) return;
-    const float nx = dx / dist, ny = dy / dist;
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == caster) continue;
-        const float ux = unit->GetX() - caster->GetX();
-        const float uy = unit->GetY() - caster->GetY();
-        const float proj = ux * nx + uy * ny;
-        if (proj < 0 || proj > range_) continue;
-        const float perp = std::abs(ux * ny - uy * nx);
-        if (perp <= width_ / 2) {
-            unit->Damage(game, caster, false, false,
-                         CAttackType::SPELLS, CDamageType::NORMAL,
-                         "", damage_, 0);
-        }
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
+                                                       CDamageType::NORMAL));
+    ABActionForEachInLine shock(range_, width_, std::move(perUnit));
+    shock.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityShockwave::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -159,27 +146,28 @@ void CAbilityShockwave::ApplyEffectData(const CAbilityDefFull& def, int level) {
 
 // ===== Starfall =====
 CAbilityStarfall::CAbilityStarfall(int handleId)
-    : CAbilitySpellBase(handleId, War3ID("AEst"), CAbilityCategory::SPELL) {
+    // Retail AEsf (AEst is the Owl Scout); corrected against the
+    // ref mapping and the retail order list (starfall=852183/AEsf).
+    // Defaults are the SLK level-1 row (Cost 200, Cool 180).
+    : CAbilitySpellBase(handleId, War3ID("AEsf"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::NO_TARGET);
-    SetCooldown(60.0f);
-    SetManaCost(100);
+    SetCooldown(180.0f);
+    SetManaCost(200);
 }
 
 void CAbilityStarfall::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto AbilityBuilder waves: each wave scatters (deterministic
+    // synced RNG, std::rand stays banned) and damages its neighborhood.
     if (!caster) return;
     const float cx = caster->GetX(), cy = caster->GetY();
     for (int w = 0; w < waves_; w++) {
-        // Deterministic synced scatter (std::rand is banned in sim code).
         const float wx = cx + game.SimRandRange(-radius_, radius_);
         const float wy = cy + game.SimRandRange(-radius_, radius_);
-        for (auto* unit : game.GetUnits()) {
-            if (!unit || unit->IsDead() || unit == caster) continue;
-            if (Dist2(unit->GetX(), unit->GetY(), wx, wy) <= radius_ * radius_ / 4) {
-                unit->Damage(game, caster, false, false,
-                             CAttackType::SPELLS, CDamageType::MAGIC,
-                             "", damage_, 0);
-            }
-        }
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTarget>(
+            damage_, CAttackType::SPELLS, CDamageType::MAGIC));
+        ABActionForEachInRange star(radius_ / 2, std::move(perUnit));
+        star.Run(game, caster, nullptr, true, wx, wy);
     }
 }
 
@@ -192,19 +180,18 @@ CAbilityTranquility::CAbilityTranquility(int handleId)
 }
 
 void CAbilityTranquility::DoEffect(CSimulation& game, CUnit* caster) {
+    // Migrated onto an AbilityBuilder iteration: same-player units around
+    // the caster (caster included) are healed and gain Rejuvenation.
     if (!caster) return;
-    const float cx = caster->GetX(), cy = caster->GetY();
-    for (auto* unit : game.GetUnits()) {
-        auto* target = dynamic_cast<CUnit*>(unit);
-        if (!target || target->IsDead()) continue;
-        if (target->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
-        if (Dist2(target->GetX(), target->GetY(), cx, cy) > radius_ * radius_) continue;
-        const float totalHeal = healPerTick_ * duration_;
-        float newLife = target->GetLife() + totalHeal;
-        if (newLife > target->GetMaxLife()) newLife = target->GetMaxLife();
-        target->SetLife(game, newLife);
-        target->AddBuff(std::make_unique<CBuffRejuvenation>(duration_, healPerTick_), game);
-    }
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionHealTarget>(healPerTick_ * duration_));
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+        [duration = duration_, tick = healPerTick_]() {
+            return std::make_unique<CBuffRejuvenation>(duration, tick);
+        }));
+    ABActionForEachInRange calm(radius_, std::move(perUnit), true);
+    calm.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+    calm.Run(game, caster, nullptr, false, 0, 0);
 }
 
 void CAbilityTranquility::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -247,16 +234,24 @@ CAbilityCharm::CAbilityCharm(int handleId)
 }
 
 void CAbilityCharm::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    // Migrated onto an AbilityBuilder branch: low-level non-heroes change
+    // ownership to the caster's player.
     if (!target || !caster || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit || targetUnit->IsHero()) return;
-    const CUnitType* type = targetUnit->GetUnitType();
-    if (type && type->GetLevel() > maxLevel_) return;
-    CPlayer* oldOwner = game.GetPlayer(targetUnit->GetPlayerIndex());
-    CPlayer* newOwner = game.GetPlayer(caster->GetPlayerIndex());
-    if (oldOwner) oldOwner->RemoveUnit(targetUnit);
-    targetUnit->SetPlayerIndex(caster->GetPlayerIndex());
-    if (newOwner) newOwner->AddUnit(targetUnit);
+    auto* victim = dynamic_cast<CUnit*>(target);
+    if (!victim) return;
+    ABEffectChain convert;
+    convert.Add(std::make_unique<ABActionTransferToCaster>());
+    ABActionIf charm(
+        std::make_shared<ABCondFunc>(
+            [maxLevel = maxLevel_](CSimulation&, CUnit*, CWidget* unitTarget,
+                                   bool, float, float) {
+                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                if (!unit || unit->IsDead() || unit->IsHero()) return false;
+                const CUnitType* type = unit->GetUnitType();
+                return type == nullptr || type->GetLevel() <= maxLevel;
+            }),
+        std::move(convert));
+    charm.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityCharm::ApplyEffectData(const CAbilityDefFull& def, int level) {
