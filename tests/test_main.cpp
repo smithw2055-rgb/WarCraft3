@@ -72,6 +72,9 @@ bool TestDivineShieldStackingKeepsInvulnerable();
 bool TestRegionEnterLeaveFiresOnMigration();
 bool TestLifecycleEventsAndPlayerUnitDualMatch();
 bool TestEnumDestructablesInRect();
+bool TestDoodadTableLoads();
+bool TestDoodadSimWiring();
+bool TestWeatherEffectLifecycle();
 bool TestSplashDamagesEnemiesNotAllies();
 bool TestProjectileBounceChainsWithFalloff();
 bool TestEvasionNegatesAttacks();
@@ -473,6 +476,9 @@ int main() {
         {"Region enter/leave fires on migration", TestRegionEnterLeaveFiresOnMigration},
         {"Lifecycle events and player-unit dual match", TestLifecycleEventsAndPlayerUnitDualMatch},
         {"Enum destructables in rect", TestEnumDestructablesInRect},
+        {"Doodad table loads", TestDoodadTableLoads},
+        {"Doodad sim wiring", TestDoodadSimWiring},
+        {"Weather effect lifecycle", TestWeatherEffectLifecycle},
         {"Splash damages enemies not allies", TestSplashDamagesEnemiesNotAllies},
         {"Projectile bounce chains with falloff", TestProjectileBounceChainsWithFalloff},
         {"Evasion negates attacks", TestEvasionNegatesAttacks},

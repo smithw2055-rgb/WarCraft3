@@ -508,6 +508,16 @@ public:
     };
     std::unordered_map<int, std::shared_ptr<JassLightning>> lightnings;
 
+    // Weather effects (ref weathereffect handles): rect + effect code
+    // retained with an enable flag. No particle visuals (ref renders
+    // none either); the renderer reads this table when it grows some.
+    struct JassWeather {
+        War3ID code;
+        float minX = 0, minY = 0, maxX = 0, maxY = 0;
+        bool enabled = false;
+    };
+    std::unordered_map<int, std::shared_ptr<JassWeather>> weathers;
+
     // Weighted random pools (ref itempool/unitpool): entries keep insertion
     // order; rolls use the deterministic sim RNG so setup stays in sync.
     struct JassWeightedPool {

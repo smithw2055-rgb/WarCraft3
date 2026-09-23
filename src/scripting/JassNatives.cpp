@@ -5047,16 +5047,41 @@ void JassNatives::RegisterFogNatives() {
 // 23. Weather & Lightning natives
 // ============================================================
 void JassNatives::RegisterWeatherNatives() {
-    vm_.RegisterNative("AddWeatherEffect", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::WEATHER, data->nextHandleId++));
+    vm_.RegisterNative("AddWeatherEffect", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        auto fx = std::make_shared<JassNativesData::JassWeather>();
+        if (args.size() >= 2) {
+            const int rid = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
+            const auto rit = data->rects.find(rid);
+            if (rit != data->rects.end() && rit->second) {
+                fx->minX = rit->second->minX;
+                fx->minY = rit->second->minY;
+                fx->maxX = rit->second->maxX;
+                fx->maxY = rit->second->maxY;
+            }
+            fx->code = War3ID((uint32_t)args[1].intVal);
+        }
+        const int id = data->nextHandleId++;
+        data->weathers[id] = fx;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::WEATHER, id));
     });
     vm_.RegisterNative("RemoveWeatherEffect", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::WEATHER);
-        if (id >= 0) data->FreeHandle(args[0].intVal);
+        if (id >= 0) {
+            data->weathers.erase(id);
+            data->FreeHandle(args[0].intVal);
+        }
         return JassValue::Null();
     });
-    vm_.RegisterNative("EnableWeatherEffect", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("EnableWeatherEffect", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::WEATHER);
+        const auto it = data->weathers.find(id);
+        if (it != data->weathers.end() && it->second) {
+            it->second->enabled = args[1].boolVal;
+        }
+        return JassValue::Null();
+    });
 }
 
 void JassNatives::RegisterLightningNatives() {
