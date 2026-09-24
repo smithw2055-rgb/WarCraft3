@@ -576,6 +576,22 @@ void ABActionRemoveTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTa
     game.RemoveUnit(unit);
 }
 
+ABActionDevourTarget::ABActionDevourTarget(float digestDuration, float digestPerTick)
+    : digestDuration_(digestDuration), digestPerTick_(digestPerTick) {}
+
+void ABActionDevourTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
+                               bool, float, float) {
+    if (!unitTarget || !caster || unitTarget->IsDead() || unitTarget == caster) return;
+    auto* victim = dynamic_cast<CUnit*>(unitTarget);
+    if (!victim || victim->IsHero()) return;
+    if (victim->GetPlayerIndex() == caster->GetPlayerIndex()) return;
+    if (!victim->GetUnitType()) return;
+    // Ground meat only (ref targs); flyers cannot be swallowed.
+    if (victim->GetUnitType()->GetMovementType() == PathingGridMovementType::FLY) return;
+    if (!caster->LoadUnit(victim)) return;
+    victim->AddBuff(std::make_unique<CBuffDigest>(digestDuration_, digestPerTick_), game);
+}
+
 ABActionCreateUnitWithBuff::ABActionCreateUnitWithBuff(War3ID typeId, float x, float y,
                                                        std::vector<BuffFactory> factories)
     : typeId_(typeId), x_(x), y_(y), factories_(std::move(factories)) {}

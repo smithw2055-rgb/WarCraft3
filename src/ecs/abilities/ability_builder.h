@@ -700,6 +700,20 @@ private:
     float duration_;
 };
 
+// Devour a unit target whole (ref Kodo Devour): enemy non-hero ground
+// units are loaded into the caster's cargo and take digest damage over
+// time inside. Anything else is left alone.
+class ABActionDevourTarget : public ABAction {
+public:
+    ABActionDevourTarget(float digestDuration, float digestPerTick);
+    void Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
+             bool hasPoint, float x, float y) override;
+
+private:
+    float digestDuration_;
+    float digestPerTick_;
+};
+
 // Homing damage missile at the unit target (ref StormBoltMissile +
 // ABActionCreateUnitTargetedProjectile): the missile carries the damage
 // and applies the stun in its on-hit hook, so both land on impact and a

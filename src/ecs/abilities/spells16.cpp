@@ -16,20 +16,10 @@ CAbilityDevour::CAbilityDevour(int handleId)
 }
 
 void CAbilityDevour::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // NOT migrated: swallowing uses the transport/cargo system (LoadUnit)
-    // plus a Digest DoT, neither of which a target-triple action chain can
-    // address. The only chain-shaped step (digest buff) cannot run without
-    // the cargo hold existing first.
-    if (!target || !caster || target->IsDead() || target == caster) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit || targetUnit->IsHero()) return;
-    if (targetUnit->GetPlayerIndex() == caster->GetPlayerIndex()) return;
-    if (!targetUnit->GetUnitType()) return;
-    // Ground meat only (ref targs); flyers cannot be swallowed.
-    if (targetUnit->GetUnitType()->GetMovementType() == PathingGridMovementType::FLY) return;
-    if (!caster->LoadUnit(targetUnit)) return;
-    targetUnit->AddBuff(std::make_unique<CBuffDigest>(
-        digestDuration_, digestPerTick_), game);
+    // Migrated onto a single AbilityBuilder devour (cargo swallow plus
+    // digest over time).
+    ABActionDevourTarget devour(digestDuration_, digestPerTick_);
+    devour.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityDevour::ApplyEffectData(const CAbilityDefFull& def, int level) {
