@@ -50,18 +50,20 @@ bool CProjectile::Update(CSimulation& sim) {
             splashAttack.damageFactorHalf = splashFactorHalf;
             splashAttack.damageFactorQuarter = splashFactorQuarter;
             if (auto* combat = sim.GetCombatSystem()) {
-                combat->ApplySplashDamage(sim, source, target, true, true,
-                                          attackType, CDamageType::NORMAL,
+                combat->ApplySplashDamage(sim, source, target, isAttack, isRanged,
+                                          attackType, damageType,
                                           weaponSound, damage, splashBonus,
                                           0, 0, splashAttack);
             } else {
-                target->Damage(sim, source, true, true, attackType,
-                               CDamageType::NORMAL, weaponSound, damage, splashBonus);
+                target->Damage(sim, source, isAttack, isRanged, attackType,
+                               damageType, weaponSound, damage, splashBonus);
             }
+            if (onHit) onHit(sim, source, target);
             return true;
         }
-        target->Damage(sim, source, true, true, attackType,
-                       CDamageType::NORMAL, weaponSound, damage, 0);
+        target->Damage(sim, source, isAttack, isRanged, attackType,
+                       damageType, weaponSound, damage, 0);
+        if (onHit) onHit(sim, source, target);
         // Bounce: chain to the nearest other enemy in range with falloff.
         if (bouncesLeft > 0 && source) {
             CUnit* next = nullptr;

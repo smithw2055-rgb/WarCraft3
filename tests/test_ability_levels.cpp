@@ -235,14 +235,16 @@ bool TestAbilityEffectDataFollowsLevel() {
     auto* splash = AdoptAt(sim, 1533, 1, 200, 0);
     (void)splash;
 
-    // Storm Bolt level 3 hits for the DataA 350.
+    // Storm Bolt level 3 hits for the DataA 350 (after missile flight).
     caster->AddAbility(sim, std::make_unique<CAbilityStormBolt>(15301));
     auto* bolt = dynamic_cast<CAbilityStormBolt*>(caster->GetAbility(War3ID("AHtb")));
     TEST_ASSERT(bolt != nullptr);
     bolt->SetLevel(3);
     const float before = target->GetLife();
     bolt->DoEffect(sim, caster, target);
-    TEST_ASSERT(before - target->GetLife() == 350.0f);
+    TEST_ASSERT(target->GetLife() == before);
+    for (int i = 0; i < 30; i++) sim.Update();
+    TEST_NEAR(before - target->GetLife(), 350.0f, 2.0f);
 
     // Healing Wave level 2 opens for DataA 215.
     caster->AddAbility(sim, std::make_unique<CAbilityHealingWave>(15302));

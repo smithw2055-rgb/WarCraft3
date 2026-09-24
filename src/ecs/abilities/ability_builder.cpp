@@ -738,9 +738,9 @@ void ABActionMissileStun::Run(CSimulation& game, CUnit* caster, CWidget* unitTar
                               bool, float, float) {
     auto* target = dynamic_cast<CUnit*>(unitTarget);
     if (!caster || !target || target->IsDead()) return;
-    // Stun lands with the cast (deterministic); the visible missile carries
-    // the damage so travel time still applies to the life total.
-    target->AddBuff(std::make_unique<CBuffStun>(stunDuration_), game);
+    // StormBolt.j fidelity: the missile carries the damage AND the stun
+    // lands on impact (no instant effect at cast; fizzle when the target
+    // dies mid-flight).
     CProjectile missile;
     missile.attackerHandleId = caster->GetHandleId();
     missile.targetHandleId = target->GetHandleId();
@@ -749,7 +749,16 @@ void ABActionMissileStun::Run(CSimulation& game, CUnit* caster, CWidget* unitTar
     missile.speed = speed_;
     missile.damage = damage_;
     missile.attackType = attackType_;
+    missile.damageType = damageType_;
+    missile.isAttack = false;
+    missile.isRanged = false;
     missile.maxTravel = 4096.0f;
+    const float stun = stunDuration_;
+    missile.onHit = [stun](CSimulation& sim, CUnit*, CWidget* hit) {
+        auto* victim = dynamic_cast<CUnit*>(hit);
+        if (!victim || victim->IsDead()) return;
+        victim->AddBuff(std::make_unique<CBuffStun>(stun), sim);
+    };
     game.SpawnProjectile(std::move(missile));
 }
 

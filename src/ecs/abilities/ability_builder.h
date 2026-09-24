@@ -687,9 +687,9 @@ private:
 };
 
 // Homing damage missile at the unit target (ref StormBoltMissile +
-// ABActionCreateUnitTargetedProjectile, simplified): spawns a real
-// CProjectile for the damage flight and applies the stun instantly so the
-// effect is deterministic even if the target moves or dies mid-flight.
+// ABActionCreateUnitTargetedProjectile): the missile carries the damage
+// and applies the stun in its on-hit hook, so both land on impact and a
+// mid-flight death fizzles the whole effect.
 class ABActionMissileStun : public ABAction {
 public:
     ABActionMissileStun(float damage, float stunDuration, float speed = 800.0f,

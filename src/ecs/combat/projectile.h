@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <string>
 #include "data/combat_types.h"
 
@@ -19,6 +20,9 @@ struct CProjectile {
     float speed = 0.0f; // world units per second
     float damage = 0.0f; // rolled at fire time (dice + bonuses)
     CAttackType attackType = CAttackType::NORMAL;
+    CDamageType damageType = CDamageType::NORMAL;
+    bool isAttack = true;
+    bool isRanged = true;
     std::string weaponSound;
     float maxTravel = 0.0f; // lifetime guard in world units
     float traveled = 0.0f;
@@ -33,6 +37,11 @@ struct CProjectile {
     int bouncesLeft = 0;
     float bounceRange = 0.0f;
     float bounceLossFactor = 1.0f;
+
+    // On-hit hook (ref spell-missile onHit, e.g. StormBolt stun): fired on
+    // every damaging impact after base damage, never on fizzle. Source may
+    // be null (killed mid-flight).
+    std::function<void(CSimulation& sim, CUnit* source, CWidget* target)> onHit;
 
     // Advances one sim tick. Returns true when finished (impact or fizzle).
     bool Update(CSimulation& sim);

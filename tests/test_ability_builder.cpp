@@ -345,19 +345,29 @@ bool TestABIfBranch() {
     return true;
 }
 
-// StormBolt missile: stun lands with the cast, damage arrives by projectile.
+// StormBolt missile: nothing lands at cast; damage + stun arrive together
+// on impact; a mid-flight death fizzles everything.
 bool TestABMissileStun() {
     CSimulation sim;
     auto* caster = AdoptAt(sim, 221, 0, 0);
     auto* target = AdoptAt(sim, 222, 300, 0);
+    auto* doomed = AdoptAt(sim, 223, 300, 0);
     Settle(sim);
     const float before = target->GetLife();
     ABActionMissileStun bolt(100.0f, 2.0f, 800.0f);
     bolt.Run(sim, caster, target, false, 0, 0);
-    TEST_ASSERT(target->GetBuff(War3ID("Bstn")) != nullptr);
-    TEST_ASSERT(target->GetLife() == before); // damage still in flight
+    TEST_ASSERT(target->GetBuff(War3ID("Bstn")) == nullptr);
+    TEST_ASSERT(target->GetLife() == before);
     for (int i = 0; i < 30; i++) sim.Update();
     TEST_ASSERT(target->GetLife() < before);
+    TEST_ASSERT(target->GetBuff(War3ID("Bstn")) != nullptr);
+    // A target that dies mid-flight takes neither damage nor stun, even
+    // after the missile would have arrived (300 units at 50/s = 6s).
+    ABActionMissileStun bolt2(100.0f, 2.0f, 50.0f);
+    bolt2.Run(sim, caster, doomed, false, 0, 0);
+    doomed->SetLife(sim, 0.0f);
+    for (int i = 0; i < 150; i++) sim.Update();
+    TEST_ASSERT(doomed->GetBuff(War3ID("Bstn")) == nullptr);
     return true;
 }
 
@@ -436,7 +446,10 @@ bool TestStormBoltChainParity() {
     CAbilityStormBolt bolt(2601);
     const float before = target->GetLife();
     bolt.DoEffect(sim, caster, target);
-    // Chain preserves the legacy instant-damage + stun behavior.
+    // Homing missile: nothing at cast time, damage + stun on impact.
+    TEST_ASSERT(target->GetLife() == before);
+    TEST_ASSERT(target->GetBuff(War3ID("Bstn")) == nullptr);
+    for (int i = 0; i < 30; i++) sim.Update();
     TEST_ASSERT(target->GetLife() < before);
     TEST_ASSERT(target->GetBuff(War3ID("Bstn")) != nullptr);
     return true;

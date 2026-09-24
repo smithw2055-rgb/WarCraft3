@@ -123,15 +123,11 @@ CAbilityStormBolt::CAbilityStormBolt(int handleId)
 }
 
 void CAbilityStormBolt::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder chain (ref StormBolt.j doEffect:
-    // damage + stun on the target). Instant damage preserved: the .j
-    // homing-missile flight is ABActionMissileStun, kept as a primitive
-    // for a later visual pass; behavior stays instant per existing tests.
-    ABEffectChain chain;
-    chain.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
-                                                     CDamageType::LIGHTNING));
-    chain.Add(std::make_unique<ABActionStunTarget>(stunDuration_));
-    chain.Run(game, caster, target, false, 0, 0);
+    // StormBolt.j doEffect: a homing missile whose on-hit deals damage and
+    // stuns. Nothing lands at cast time; flight time applies.
+    ABActionMissileStun bolt(damage_, stunDuration_, 800.0f,
+                             CAttackType::SPELLS, CDamageType::LIGHTNING);
+    bolt.Run(game, caster, target, false, 0, 0);
 }
 
 void CAbilityStormBolt::ApplyEffectData(const CAbilityDefFull& def, int level) {
