@@ -8,6 +8,8 @@
 #include <vector>
 #include <unordered_map>
 
+#include "resource/casc.h"
+
 struct MpqArchive {
     std::string path;
     HANDLE handle = nullptr;
@@ -20,6 +22,11 @@ public:
 
     bool Open(const std::string& path);
     void CloseAll();
+
+    // CASC storage (1.30+ installs): behaves like a game archive in the
+    // lookup order below, shadowing MPQs but never folders or map mounts.
+    bool OpenCasc(const std::string& storagePath);
+    int CascCount() const { return (int)cascStorages_.size(); }
 
     // Map mount (ref CompoundDataSource game+map): the map MPQ shadows every
     // game archive regardless of open order. Game archives keep
@@ -45,10 +52,13 @@ public:
 
 private:
     // Lookup order: folders, last added first; then map mounts, last
-    // mounted first; then game archives in open order (patches first).
+    // mounted first; then CASC storages in open order; then game archives
+    // in open order (patches first).
     const MpqArchive* FindFileInArchives(const std::string& filename) const;
+    const CascStorage* FindFileInCasc(const std::string& filename) const;
     bool FindFileInFolders(const std::string& filename, std::string& outPath) const;
     std::vector<MpqArchive> archives_;
     std::vector<MpqArchive> topArchives_; // map mounts shadow everything
+    std::vector<CascStorage> cascStorages_;
     std::vector<std::string> folders_;
 };

@@ -20,6 +20,7 @@ add_executable(warsmash_tests
     test_doodad_data.cpp
     test_weather.cpp
     test_texttag.cpp
+    test_casc.cpp
     test_combat_aoe.cpp
     test_object_mods.cpp
     test_aura_combat.cpp
@@ -110,6 +111,7 @@ add_executable(warsmash_tests
     ../src/scripting/JassParser.cpp
     ../src/scripting/JassVM.cpp
     ../src/resource/mpq_storm.cpp
+    ../src/resource/casc.cpp
     ../src/resource/slk.cpp
     ../src/map/wpm.cpp
     ../src/map/wts.cpp
@@ -227,6 +229,14 @@ if(StormLib_FOUND)
 else()
     message(STATUS "StormLib not found for tests")
     target_compile_definitions(warsmash_tests PRIVATE WITHOUT_STORMLIB=1)
+endif()
+
+# CascLib (optional)
+if(CascLib_FOUND)
+    target_link_libraries(warsmash_tests PRIVATE CascLib::casc)
+else()
+    message(STATUS "CascLib not found for tests")
+    target_compile_definitions(warsmash_tests PRIVATE WITHOUT_CASCLIB=1)
 endif()
 
 add_test(NAME warsmash_tests COMMAND warsmash_tests)

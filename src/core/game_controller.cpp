@@ -1392,6 +1392,11 @@ void GameController::OpenDataSources() {
                     projectRoot, resourcesDir, ds.second);
                 if (fs::exists(p)) mpq_.Open(p.string());
                 else std::cerr << "MpqStorm: configured MPQ not found " << p.string() << std::endl;
+            } else if (ds.first == "CASC" || ds.first == "casc") {
+                auto p = path_utils::ResolveConfiguredPath(
+                    projectRoot, resourcesDir, ds.second);
+                if (fs::exists(p)) mpq_.OpenCasc(p.string());
+                else std::cerr << "MpqStorm: configured CASC storage not found " << p.string() << std::endl;
             }
         }
     }

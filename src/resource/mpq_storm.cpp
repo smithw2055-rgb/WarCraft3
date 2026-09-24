@@ -49,11 +49,34 @@ bool MpqManager::Open(const std::string& path) {
     return true;
 }
 
+bool MpqManager::OpenCasc(const std::string& storagePath) {
+    for (auto& c : cascStorages_) {
+        if (c.Path() == storagePath) return true;
+    }
+    CascStorage storage;
+    if (!storage.Open(storagePath)) {
+        std::cerr << "MpqStorm: failed to open CASC storage " << storagePath << std::endl;
+        return false;
+    }
+    cascStorages_.push_back(std::move(storage));
+    return true;
+}
+
+const CascStorage* MpqManager::FindFileInCasc(const std::string& filename) const {
+    const std::string key = ToArchivePath(filename);
+    for (const auto& c : cascStorages_) {
+        if (c.FileExists(key)) return &c;
+    }
+    return nullptr;
+}
+
 void MpqManager::CloseAll() {
     for (auto& a : archives_) {
         if (a.handle) SFileCloseArchive(a.handle);
     }
     archives_.clear();
+    for (auto& c : cascStorages_) c.Close();
+    cascStorages_.clear();
     CloseTop();
 }
 
@@ -121,7 +144,8 @@ bool MpqManager::FindFileInFolders(const std::string& filename, std::string& out
 bool MpqManager::FileExists(const std::string& filename) const {
     std::string folderPath;
     if (FindFileInFolders(filename, folderPath)) return true;
-    return FindFileInArchives(filename) != nullptr;
+    if (FindFileInArchives(filename) != nullptr) return true;
+    return FindFileInCasc(filename) != nullptr;
 }
 
 bool MpqManager::ReadFile(const std::string& filename, std::vector<uint8_t>& out) const {
@@ -132,20 +156,24 @@ bool MpqManager::ReadFile(const std::string& filename, std::vector<uint8_t>& out
         out.clear();
     }
     const auto* archive = FindFileInArchives(filename);
-    if (!archive) return false;
-
-    const std::string key = ToArchivePath(filename);
-    HANDLE hFile = nullptr;
-    if (!SFileOpenFileEx(archive->handle, key.c_str(), SFILE_OPEN_BASE_FILE, &hFile)) return false;
-
-    DWORD fileSize = SFileGetFileSize(hFile, nullptr);
-    out.resize(fileSize);
-    DWORD bytesRead = 0;
-    bool ok = SFileReadFile(hFile, out.data(), fileSize, &bytesRead, nullptr);
-    SFileCloseFile(hFile);
-
-    if (!ok) out.clear();
-    return ok;
+    if (archive) {
+        const std::string key = ToArchivePath(filename);
+        HANDLE hFile = nullptr;
+        if (SFileOpenFileEx(archive->handle, key.c_str(), SFILE_OPEN_BASE_FILE, &hFile)) {
+            DWORD fileSize = SFileGetFileSize(hFile, nullptr);
+            out.resize(fileSize);
+            DWORD bytesRead = 0;
+            const bool ok =
+                SFileReadFile(hFile, out.data(), fileSize, &bytesRead, nullptr);
+            SFileCloseFile(hFile);
+            if (ok) return true;
+            out.clear();
+        }
+    }
+    // CASC storages shadow MPQ game archives but never folders or maps.
+    const auto* casc = FindFileInCasc(ToArchivePath(filename));
+    if (casc) return casc->ReadFile(ToArchivePath(filename), out);
+    return false;
 }
 
 std::vector<std::string> MpqManager::ListFiles(const std::string& archivePath) const {
@@ -173,6 +201,9 @@ std::vector<std::string> MpqManager::ListAllFiles(const std::string& pattern) co
         do { result.push_back(fd.cFileName); }
         while (SFileFindNextFile(hFind, &fd));
         SFileFindClose(hFind);
+    }
+    for (const auto& c : cascStorages_) {
+        for (auto& name : c.ListFiles(pattern)) result.push_back(std::move(name));
     }
     return result;
 }

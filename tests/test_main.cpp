@@ -349,6 +349,9 @@ bool TestCreateVisionExpires();
 bool TestTextTagAgeAndExpiry();
 bool TestTextTagPermanentSurvives();
 bool TestTextTagPosUnitSnap();
+bool TestCascGracefulFailure();
+bool TestCascManagerPlumbing();
+bool TestCascLiveIfPresent();
 bool TestResurrectChainParity();
 bool TestThunderClapChainParity();
 bool TestManaBurnChainParity();
@@ -770,6 +773,9 @@ int main() {
         {"TextTag age and expiry", TestTextTagAgeAndExpiry},
         {"TextTag permanent survives", TestTextTagPermanentSurvives},
         {"TextTag PosUnit snap", TestTextTagPosUnitSnap},
+        {"CASC graceful failure", TestCascGracefulFailure},
+        {"CASC manager plumbing", TestCascManagerPlumbing},
+        {"CASC live if present", TestCascLiveIfPresent},
         {"Resurrect chain parity", TestResurrectChainParity},
         {"ThunderClap chain parity", TestThunderClapChainParity},
         {"ManaBurn chain parity", TestManaBurnChainParity},

@@ -92,6 +92,24 @@ else()
     message(STATUS "StormLib NOT found! Install via vcpkg (stormlib) or apt (libstorm-dev)")
 endif()
 
+# -------------------------------------------------------------------
+# CascLib - for CASC storage reading (1.30+ installs)
+find_path(CASCLIB_INCLUDE_DIR CascLib.h
+    PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET}/include" /usr/local/include /usr/include)
+find_library(CASCLIB_LIBRARY NAMES casc CascLib casclib
+    PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET}/lib" /usr/local/lib /usr/lib)
+if(CASCLIB_INCLUDE_DIR AND CASCLIB_LIBRARY)
+    add_library(CascLib::casc UNKNOWN IMPORTED)
+    set_target_properties(CascLib::casc PROPERTIES
+        IMPORTED_LOCATION "${CASCLIB_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${CASCLIB_INCLUDE_DIR}"
+    )
+    set(CascLib_FOUND TRUE)
+    message(STATUS "CascLib found: ${CASCLIB_LIBRARY}")
+else()
+    message(STATUS "CascLib NOT found! Install via vcpkg (casclib) or apt (libcasc-dev)")
+endif()
+
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -169,6 +187,7 @@ set(SOURCES
     src/render/minimap.cpp
     src/render/daynight.cpp
     src/resource/mpq_storm.cpp
+        src/resource/casc.cpp
     src/resource/slk.cpp
     src/asset/stb_image.cpp
     src/asset/stb_image_write.cpp
@@ -375,6 +394,14 @@ if(BUILD_APP)
             target_compile_definitions(${target} PRIVATE WITHOUT_STORMLIB=1)
         endif()
     endmacro()
+    macro(link_casclib target)
+        if(CascLib_FOUND)
+            target_link_libraries(${target} PRIVATE CascLib::casc)
+        else()
+            message(WARNING "Building without CascLib - CASC storage disabled")
+            target_compile_definitions(${target} PRIVATE WITHOUT_CASCLIB=1)
+        endif()
+    endmacro()
 
     # -- Linking --
     # sokol headers are header-only; sokol_app.h on MSVC uses #pragma comment for system libs
@@ -386,6 +413,8 @@ if(BUILD_APP)
             ${AERO_APP_LIBRARY}
         )
         link_stormlib(warsmash)
+    link_casclib(warsmash)
+    link_casclib(warsmash)
         foreach(AERO_DLL Aero.dll AeroApp.dll)
             if(EXISTS "${AERO_BIN_DIR}/${AERO_DLL}")
                 add_custom_command(TARGET warsmash POST_BUILD
@@ -415,6 +444,7 @@ if(BUILD_APP)
     add_executable(resource_auditor
         tools/resource_auditor.cpp
         src/resource/mpq_storm.cpp
+        src/resource/casc.cpp
         src/resource/slk.cpp
         src/map/w3e.cpp
         src/map/w3x_storm.cpp
@@ -425,19 +455,24 @@ if(BUILD_APP)
     add_executable(dump_cliff
         tools/dump_cliff.cpp
         src/resource/mpq_storm.cpp
+        src/resource/casc.cpp
         src/resource/slk.cpp
     )
     link_stormlib(dump_cliff)
+    link_casclib(dump_cliff)
 
     add_executable(search_mdx
         tools/search_mdx.cpp
         src/resource/mpq_storm.cpp
+        src/resource/casc.cpp
     )
     link_stormlib(search_mdx)
+    link_casclib(search_mdx)
 
     add_executable(mpq_file_probe
         tools/mpq_file_probe.cpp
         src/resource/mpq_storm.cpp
+        src/resource/casc.cpp
     )
     target_include_directories(mpq_file_probe PRIVATE src)
     target_compile_definitions(mpq_file_probe PRIVATE
@@ -445,10 +480,12 @@ if(BUILD_APP)
         __STORMLIB_NO_STATIC_LINK__
     )
     link_stormlib(mpq_file_probe)
+    link_casclib(mpq_file_probe)
 
     add_executable(extract_ui_assets
         tools/extract_ui_assets.cpp
         src/resource/mpq_storm.cpp
+        src/resource/casc.cpp
         src/resource/slk.cpp
         src/asset/BLP.cpp
     src/model/mdx.cpp
@@ -462,6 +499,7 @@ if(BUILD_APP)
         __STORMLIB_NO_STATIC_LINK__
     )
     link_stormlib(extract_ui_assets)
+    link_casclib(extract_ui_assets)
 
     target_include_directories(resource_auditor PRIVATE src)
     target_compile_definitions(resource_auditor PRIVATE
@@ -469,10 +507,12 @@ if(BUILD_APP)
         __STORMLIB_NO_STATIC_LINK__
     )
     link_stormlib(resource_auditor)
+    link_casclib(resource_auditor)
 
     add_executable(terrain_analyzer
         tools/terrain_analyzer.cpp
         src/resource/mpq_storm.cpp
+        src/resource/casc.cpp
         src/resource/slk.cpp
         src/map/w3e.cpp
         src/map/w3x_storm.cpp
@@ -485,4 +525,5 @@ if(BUILD_APP)
         __STORMLIB_NO_STATIC_LINK__
     )
     link_stormlib(terrain_analyzer)
+    link_casclib(terrain_analyzer)
 endif()
