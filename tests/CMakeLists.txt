@@ -19,6 +19,7 @@ add_executable(warsmash_tests
     test_destructable_enum.cpp
     test_doodad_data.cpp
     test_weather.cpp
+    test_texttag.cpp
     test_combat_aoe.cpp
     test_object_mods.cpp
     test_aura_combat.cpp

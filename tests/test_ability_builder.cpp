@@ -952,3 +952,30 @@ bool TestHealIgnoresShield() {
     TEST_ASSERT(ally->GetBuff(War3ID("BNss")) != nullptr);
     return true;
 }
+
+bool TestCreateVisionModifier() {
+    CSimulation sim;
+    auto* caster = AdoptAt(sim, 581, 0, 0);
+    auto* beacon = AdoptAt(sim, 582, 5000, 0);
+    Settle(sim);
+    // Far beyond any unit sight radius: masked until revealed.
+    TEST_ASSERT(!sim.GetFogSystem()->IsVisibleTo(0, 5000.0f, 0.0f));
+    ABActionCreateVision reveal(200.0f);
+    reveal.Run(sim, caster, beacon, false, 0.0f, 0.0f);
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(0, 5000.0f, 0.0f));
+    TEST_ASSERT(!sim.GetFogSystem()->IsVisibleTo(0, 5400.0f, 0.0f));
+    return true;
+}
+
+bool TestCreateVisionExpires() {
+    CSimulation sim;
+    auto* caster = AdoptAt(sim, 591, 0, 0);
+    auto* beacon = AdoptAt(sim, 592, 5000, 0);
+    Settle(sim);
+    ABActionCreateVision reveal(200.0f, 0.2f);
+    reveal.Run(sim, caster, beacon, false, 0.0f, 0.0f);
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(0, 5000.0f, 0.0f));
+    for (int i = 0; i < 30; i++) sim.Update();
+    TEST_ASSERT(!sim.GetFogSystem()->IsVisibleTo(0, 5000.0f, 0.0f));
+    return true;
+}

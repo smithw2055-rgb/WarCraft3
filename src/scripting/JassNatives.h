@@ -206,6 +206,7 @@ struct JassTextTag {
     float x = 0, y = 0;
     float vx = 0, vy = 0; // drift from SetTextTagVelocity
     float height = 0;
+    float age = 0;
     float lifespan = 0;
     float fadepoint = 0;
     int color = 0xFFFFFFFF;
@@ -902,6 +903,7 @@ public:
     void FireResearchEvent(int unitSimHandle, int upgradeId);
     void FireReviveEvent(int reviverSimHandle, int revivedSimHandle);
     void UpdateRegions();
+    void UpdateTextTags(float dt);
     void ForgetItem(int itemSimHandle);
     // Advances live melee AI controllers one sim tick.
     void UpdateAI();

@@ -344,6 +344,11 @@ bool TestSpellShieldBlocksDamage();
 bool TestSpellShieldAllyBypass();
 bool TestMissileDeflected();
 bool TestHealIgnoresShield();
+bool TestCreateVisionModifier();
+bool TestCreateVisionExpires();
+bool TestTextTagAgeAndExpiry();
+bool TestTextTagPermanentSurvives();
+bool TestTextTagPosUnitSnap();
 bool TestResurrectChainParity();
 bool TestThunderClapChainParity();
 bool TestManaBurnChainParity();
@@ -760,6 +765,11 @@ int main() {
         {"Spell shield ally bypass", TestSpellShieldAllyBypass},
         {"Missile deflected", TestMissileDeflected},
         {"Heal ignores shield", TestHealIgnoresShield},
+        {"Create vision modifier", TestCreateVisionModifier},
+        {"Create vision expires", TestCreateVisionExpires},
+        {"TextTag age and expiry", TestTextTagAgeAndExpiry},
+        {"TextTag permanent survives", TestTextTagPermanentSurvives},
+        {"TextTag PosUnit snap", TestTextTagPosUnitSnap},
         {"Resurrect chain parity", TestResurrectChainParity},
         {"ThunderClap chain parity", TestThunderClapChainParity},
         {"ManaBurn chain parity", TestManaBurnChainParity},

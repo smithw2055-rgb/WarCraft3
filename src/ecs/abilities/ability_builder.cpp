@@ -3,6 +3,7 @@
 #include "ecs/behaviors/behavior_channel.h"
 #include "ecs/combat/projectile.h"
 #include "ecs/csimulation.h"
+#include "ecs/fog_state.h"
 #include "ecs/player.h"
 #include "ecs/unit.h"
 #include "ecs/unit_type.h"
@@ -797,4 +798,24 @@ void ABActionDispelTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTa
     auto* unit = dynamic_cast<CUnit*>(unitTarget);
     if (!unit || unit->IsDead()) return;
     unit->RemoveBuffsIf(game, removePositive_, removeNegative_, false, true);
+}
+
+ABActionCreateVision::ABActionCreateVision(float radius, float duration)
+    : radius_(radius), duration_(duration) {}
+
+void ABActionCreateVision::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
+                               bool hasPoint, float x, float y) {
+    if (!caster || radius_ <= 0.0f) return;
+    float cx, cy;
+    ResolveCenter(caster, unitTarget, hasPoint, x, y, cx, cy);
+    CFogSystem* fog = game.GetFogSystem();
+    if (!fog) return;
+    const int id = fog->AddModifier(caster->GetPlayerIndex(),
+                                    CFogArea::Circle(cx, cy, radius_),
+                                    CFogState::VISIBLE);
+    if (id < 0) return;
+    fog->SetModifierEnabled(id, true);
+    if (duration_ > 0.0f) {
+        game.AddDelayedAction(duration_, [fog, id]() { fog->RemoveModifier(id); });
+    }
 }

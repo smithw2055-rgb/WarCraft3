@@ -686,6 +686,20 @@ private:
     bool spent_ = false;
 };
 
+// Reveal a circular area for the caster's player (ref vision modifier
+// actions, e.g. Far Sight): creates and starts a fog modifier at the
+// effect center. A positive duration auto-removes it afterwards.
+class ABActionCreateVision : public ABAction {
+public:
+    ABActionCreateVision(float radius, float duration = 0.0f);
+    void Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
+             bool hasPoint, float x, float y) override;
+
+private:
+    float radius_;
+    float duration_;
+};
+
 // Homing damage missile at the unit target (ref StormBoltMissile +
 // ABActionCreateUnitTargetedProjectile): the missile carries the damage
 // and applies the stun in its on-hit hook, so both land on impact and a

@@ -1736,6 +1736,7 @@ void GameController::InitInGame() {
             if (jassNatives_) {
                 jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
                 jassNatives_->UpdateRegions();
+                jassNatives_->UpdateTextTags(CSimulation::SIM_STEP_TIME);
                 jassNatives_->PumpQueuedThreads(1024);
             }
             EnsureHumanMeleeStartsFromMapConfig();

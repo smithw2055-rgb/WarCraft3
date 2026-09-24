@@ -695,6 +695,31 @@ void JassNatives::UpdateAI() {
     }
 }
 
+// Ages floating text: drift by velocity unless suspended, and retire
+// non-permanent tags past lifespan (handles freed like DestroyTextTag).
+void JassNatives::UpdateTextTags(float dt) {
+    if (!data_ || dt <= 0.0f) return;
+    std::vector<int> expired;
+    for (auto& [id, tag] : data_->textTags) {
+        if (!tag || tag->suspended) continue;
+        tag->age += dt;
+        tag->x += tag->vx * dt;
+        tag->y += tag->vy * dt;
+        if (!tag->permanent && tag->lifespan > 0.0f && tag->age >= tag->lifespan) {
+            expired.push_back(id);
+        }
+    }
+    for (int id : expired) {
+        data_->textTags.erase(id);
+        for (auto it = data_->handles.begin(); it != data_->handles.end(); ++it) {
+            if (it->second.type == JassHandleInfo::TEXT_TAG && it->second.id == id) {
+                data_->FreeHandle(it->first);
+                break;
+            }
+        }
+    }
+}
+
 void JassNatives::UpdateRegions() {
     if (!sim_ || !data_) {
         return;
@@ -4789,8 +4814,20 @@ void JassNatives::RegisterTextTagNatives() {
         if (id >= 0) { auto it = data->textTags.find(id); if (it != data->textTags.end()) { it->second->x = args[1].realVal; it->second->y = args[2].realVal; } }
         return JassValue::Null();
     });
-    vm_.RegisterNative("SetTextTagPosUnit", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("SetTextTagPosUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::TEXT_TAG);
+        if (id < 0 || !sim) return JassValue::Null();
+        auto it = data->textTags.find(id);
+        if (it == data->textTags.end() || !it->second) return JassValue::Null();
+        const int unitId = data->GetSimHandle(args[1].intVal, JassHandleInfo::UNIT);
+        CUnit* unit = sim->GetUnit(unitId);
+        if (!unit) return JassValue::Null();
+        // Snap to the unit's current position (continuous follow rides
+        // with the renderer's world-anchored text pass).
+        it->second->x = unit->GetX();
+        it->second->y = unit->GetY();
+        it->second->height = args[2].realVal;
         return JassValue::Null();
     });
     vm_.RegisterNative("SetTextTagColor", [data = data_](const std::vector<JassValue>& args) -> JassValue {
@@ -4825,6 +4862,10 @@ void JassNatives::RegisterTextTagNatives() {
     });
     vm_.RegisterNative("SetTextTagAge", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
+        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::TEXT_TAG);
+        if (id < 0) return JassValue::Null();
+        auto it = data->textTags.find(id);
+        if (it != data->textTags.end() && it->second) it->second->age = args[1].realVal;
         return JassValue::Null();
     });
     vm_.RegisterNative("SetTextTagLifespan", [data = data_](const std::vector<JassValue>& args) -> JassValue {
