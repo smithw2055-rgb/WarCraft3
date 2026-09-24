@@ -9,6 +9,7 @@ add_executable(warsmash_tests
     test_w3e.cpp
     test_blp.cpp
     test_mdx.cpp
+    test_mdl.cpp
     test_jass_animation_tags.cpp
     test_jass_vm.cpp
     test_render_stubs.cpp
@@ -79,6 +80,7 @@ add_executable(warsmash_tests
     ../src/asset/stb_image.cpp
     ../src/core/map_path_resolver.cpp
     ../src/model/mdx.cpp
+    ../src/model/mdl.cpp
     ../src/render/mdx_animator.cpp
     ../src/render/mdx_collision.cpp
     ../src/render/picking.cpp

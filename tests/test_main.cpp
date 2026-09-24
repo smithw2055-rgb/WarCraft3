@@ -19,6 +19,8 @@ bool TestW3ELoadValidMinimal();
 bool TestW3ELoadRejectsBadMagic();
 bool TestDecodeBLPRejectsBadMagic();
 bool TestDecodeBLPDecodesMinimalPaletted();
+bool TestMdlFixtureParses();
+bool TestMdlRejectsGarbage();
 bool TestMdxTimelineSamplesLinearValues();
 bool TestMdxTimelineRejectsShortValues();
 bool TestMdxTimelineFallsBackWhenTangentsAreMissing();
@@ -423,6 +425,8 @@ int main() {
         {"W3E rejects invalid magic", TestW3ELoadRejectsBadMagic},
         {"BLP rejects invalid magic", TestDecodeBLPRejectsBadMagic},
         {"BLP decodes minimal paletted texture", TestDecodeBLPDecodesMinimalPaletted},
+        {"MDL fixture parses", TestMdlFixtureParses},
+        {"MDL rejects garbage", TestMdlRejectsGarbage},
         {"MDX timeline samples linear values", TestMdxTimelineSamplesLinearValues},
         {"MDX timeline rejects short value arrays", TestMdxTimelineRejectsShortValues},
         {"MDX timeline falls back without tangents", TestMdxTimelineFallsBackWhenTangentsAreMissing},

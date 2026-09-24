@@ -1,5 +1,6 @@
 #include "scene.h"
 #include "map/object_mods.h"
+#include "model/mdl.h"
 #include "resource/slk.h"
 #include <iostream>
 #include <algorithm>
@@ -61,14 +62,12 @@ static std::string NormalizeModelPathWithExtension(const std::string& path) {
     std::transform(tail.begin(), tail.end(), tail.begin(), [](unsigned char c) {
         return (char)std::tolower(c);
     });
-    if (tail == ".mdl") {
-        normalized.resize(normalized.size() - 4);
-        normalized += ".mdx";
+    // Keep an explicit .mdl request: EnsureModelCached parses MDL text
+    // directly and falls back across extensions either way.
+    if (tail == ".mdl" || tail == ".mdx") {
+        return normalized;
     }
-    else if (tail != ".mdx") {
-        normalized += ".mdx";
-    }
-    return normalized;
+    return normalized + ".mdx";
 }
 
 static Vec3 TransformInstanceLocalPoint(const PlacedModel& inst, const Vec3& localPosition) {
@@ -723,14 +722,52 @@ bool SceneManager::EnsureModelCached(const std::string& path, MdxEntry& entry) {
         return true;
     }
 
+    // Parses raw model bytes according to the requested extension. .mdl
+    // text goes through the MDL parser into the same MdxModel the binary
+    // loader fills.
+    auto tryParse = [](const std::string& filePath, const std::vector<uint8_t>& bytes,
+                       MdxModel& model) {
+        std::string tail;
+        if (filePath.size() >= 4) {
+            tail = filePath.substr(filePath.size() - 4);
+            std::transform(tail.begin(), tail.end(), tail.begin(), [](unsigned char c) {
+                return (char)std::tolower(c);
+            });
+        }
+        if (tail == ".mdl") {
+            std::string text(bytes.begin(), bytes.end());
+            return MdlLoad(text.c_str(), text.size(), model);
+        }
+        return MdxLoad(bytes.data(), bytes.size(), model);
+    };
+    auto siblingPath = [](const std::string& filePath) {
+        if (filePath.size() < 4) return std::string();
+        std::string tail = filePath.substr(filePath.size() - 4);
+        std::string lower = tail;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+            return (char)std::tolower(c);
+        });
+        if (lower == ".mdx") return filePath.substr(0, filePath.size() - 4) + ".mdl";
+        if (lower == ".mdl") return filePath.substr(0, filePath.size() - 4) + ".mdx";
+        return std::string();
+    };
+
     std::vector<uint8_t> data;
     if (!mpq_ || !mpq_->ReadFile(path, data)) {
         return false;
     }
 
     MdxModel model;
-    if (!MdxLoad(data.data(), data.size(), model)) {
-        return false;
+    if (!tryParse(path, data, model)) {
+        // Fallback to the sibling extension (.mdx <-> .mdl), covering
+        // custom-map models shipped as uncompiled MDL text.
+        const std::string sibling = siblingPath(path);
+        if (sibling.empty() || !mpq_->ReadFile(sibling, data)) {
+            return false;
+        }
+        if (!tryParse(sibling, data, model)) {
+            return false;
+        }
     }
     entry.path = path;
     entry.model = std::move(model);

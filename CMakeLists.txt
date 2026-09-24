@@ -186,6 +186,7 @@ set(SOURCES
     src/map/w3d.cpp
     src/map/unitsdoo.cpp
     src/model/mdx.cpp
+    src/model/mdl.cpp
     src/render/mdx_viewer.cpp
     src/render/mdx_sequence_select.cpp
     src/render/mdx_animator.cpp
@@ -449,7 +450,8 @@ if(BUILD_APP)
         src/resource/mpq_storm.cpp
         src/resource/slk.cpp
         src/asset/BLP.cpp
-        src/model/mdx.cpp
+    src/model/mdx.cpp
+    src/model/mdl.cpp
         src/asset/stb_image.cpp
         src/asset/stb_image_write.cpp
     )
