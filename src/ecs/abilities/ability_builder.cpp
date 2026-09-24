@@ -234,7 +234,12 @@ ABActionDamageTarget::ABActionDamageTarget(float amount, CAttackType attackType,
 void ABActionDamageTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                bool, float, float) {
     if (!unitTarget || unitTarget->IsDead()) return;
-    unitTarget->Damage(game, caster, isAttack_, ranged_, attackType_, damageType_, "",
+    // Spell effect reaction (ref CheckUnitForAbilityEffectReaction): a
+    // shielded enemy target consumes its shield and takes nothing.
+    if (auto* victim = dynamic_cast<CUnit*>(unitTarget)) {
+        if (!victim->CheckSpellEffectReaction(game, caster)) return;
+    }
+    unitTarget->Damage(game, caster, false, ranged_, attackType_, damageType_, "",
                        amount_, 0);
 }
 
@@ -267,9 +272,9 @@ ABActionAddBuffTarget::ABActionAddBuffTarget(BuffFactory factory)
 
 void ABActionAddBuffTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                 bool, float, float) {
-    (void)caster;
     auto* unit = dynamic_cast<CUnit*>(unitTarget);
     if (!unit || unit->IsDead() || !factory_) return;
+    if (!unit->CheckSpellEffectReaction(game, caster)) return;
     unit->AddBuff(factory_(), game);
 }
 
@@ -277,9 +282,9 @@ ABActionStunTarget::ABActionStunTarget(float duration) : duration_(duration) {}
 
 void ABActionStunTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                              bool, float, float) {
-    (void)caster;
     auto* unit = dynamic_cast<CUnit*>(unitTarget);
     if (!unit || unit->IsDead()) return;
+    if (!unit->CheckSpellEffectReaction(game, caster)) return;
     unit->AddBuff(std::make_unique<CBuffStun>(duration_), game);
 }
 
@@ -699,6 +704,7 @@ void ABActionManaBurn::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget
                            bool, float, float) {
     auto* unit = dynamic_cast<CUnit*>(unitTarget);
     if (!unit || unit->IsDead()) return;
+    if (!unit->CheckSpellEffectReaction(game, caster)) return;
     const int burned = std::min(maxBurn_, static_cast<int>(unit->GetMana()));
     unit->SetMana(unit->GetMana() - burned);
     unit->Damage(game, caster, false, false, attackType_, damageType_, "",
@@ -752,6 +758,7 @@ void ABActionMissileStun::Run(CSimulation& game, CUnit* caster, CWidget* unitTar
     missile.damageType = damageType_;
     missile.isAttack = false;
     missile.isRanged = false;
+    missile.checkEffectReaction = true;
     missile.maxTravel = 4096.0f;
     const float stun = stunDuration_;
     missile.onHit = [stun](CSimulation& sim, CUnit*, CWidget* hit) {

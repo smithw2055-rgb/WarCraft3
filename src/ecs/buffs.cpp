@@ -972,6 +972,15 @@ CBuff* CBuffPhoenixFire::Clone() const {
     return copy;
 }
 
+CBuffSpellShield::CBuffSpellShield(float duration)
+    : CBuff(War3ID("BNss"), duration, true) {}
+
+CBuff* CBuffSpellShield::Clone() const {
+    auto* copy = new CBuffSpellShield(duration_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
 CBuffAuraStat::CBuffAuraStat(War3ID auraCode, std::vector<Bonus> bonuses,
                              int casterHandle)
     : CBuff(auraCode, 1e9f, true), bonuses_(std::move(bonuses)) {

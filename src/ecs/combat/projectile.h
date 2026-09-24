@@ -43,6 +43,11 @@ struct CProjectile {
     // be null (killed mid-flight).
     std::function<void(CSimulation& sim, CUnit* source, CWidget* target)> onHit;
 
+    // Effect-reaction gate (ref CheckUnitForAbilityProjReaction): when set,
+    // a shielded enemy target consumes its shield and the missile fizzles
+    // with no damage and no hook. Attack projectiles leave this off.
+    bool checkEffectReaction = false;
+
     // Advances one sim tick. Returns true when finished (impact or fizzle).
     bool Update(CSimulation& sim);
 };

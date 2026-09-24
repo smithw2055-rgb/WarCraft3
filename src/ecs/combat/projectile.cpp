@@ -42,6 +42,11 @@ bool CProjectile::Update(CSimulation& sim) {
         CUnit* source = sim.GetUnit(attackerHandleId);
         x = target->GetX();
         y = target->GetY();
+        if (checkEffectReaction) {
+            if (auto* victim = dynamic_cast<CUnit*>(target)) {
+                if (!victim->CheckSpellEffectReaction(sim, source)) return true;
+            }
+        }
         if (splashHalf > 0.0f) {
             CUnitAttack splashAttack;
             splashAttack.areaFull = splashFull;

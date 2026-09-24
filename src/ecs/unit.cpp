@@ -384,6 +384,19 @@ bool CUnit::HasBuff(War3ID buffId) const {
     return GetBuff(buffId) != nullptr;
 }
 
+bool CUnit::CheckSpellEffectReaction(CSimulation& game, CUnit* caster) {
+    if (!caster || caster == this) return true;
+    // Allied casters bypass the shield; missing players count as hostile.
+    CPlayer* self = game.GetPlayer(GetPlayerIndex());
+    CPlayer* foe = game.GetPlayer(caster->GetPlayerIndex());
+    if (self && foe && self->HasAlliance(*foe, CAllianceType::PASSIVE)) {
+        return true;
+    }
+    if (!HasBuff(War3ID("BNss"))) return true;
+    RemoveBuff(War3ID("BNss"), game);
+    return false;
+}
+
 bool CUnit::IsHexed() const {
     for (const auto& buff : buffs_) {
         if (buff && dynamic_cast<const CBuffHex*>(buff.get())) return true;

@@ -557,6 +557,16 @@ private:
     float radius_;
 };
 
+// Spell Shield marker (retail Amulet of Spell Shield, buff BNss): pure
+// marker buff consumed by CheckSpellEffectReaction. Duration is the
+// shield window; blocking one spell removes it.
+class CBuffSpellShield : public CBuff {
+public:
+    explicit CBuffSpellShield(float duration);
+
+    CBuff* Clone() const override;
+};
+
 // Aura stat bonus (ref BuffAuraBase + non-stacking stat bonuses): one
 // instance per aura ability per bearer, carrying all of that aura's
 // bonuses. Each bonus registers in the unit's non-stacking table so

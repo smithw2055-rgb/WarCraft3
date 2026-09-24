@@ -882,3 +882,73 @@ bool TestChannelFizzleOnDeath() {
     TEST_ASSERT(target->GetLife() == before);
     return true;
 }
+
+bool TestSpellShieldBlocksDamage() {
+    CSimulation sim;
+    auto* caster = AdoptAt(sim, 541, 0, 0);
+    auto* target = AdoptAt(sim, 542, 300, 0);
+    Settle(sim);
+    target->AddBuff(std::make_unique<CBuffSpellShield>(60.0f), sim);
+    const float before = target->GetLife();
+    ABEffectChain nuke;
+    nuke.Add(std::make_unique<ABActionDamageTarget>(100.0f));
+    nuke.Run(sim, caster, target, false, 0, 0);
+    // Blocked and consumed; the follow-up lands.
+    TEST_ASSERT(target->GetLife() == before);
+    TEST_ASSERT(target->GetBuff(War3ID("BNss")) == nullptr);
+    nuke.Run(sim, caster, target, false, 0, 0);
+    TEST_ASSERT(target->GetLife() < before);
+    return true;
+}
+
+bool TestSpellShieldAllyBypass() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::USER));
+    sim.GetPlayer(0)->SetAlliance(1, CAllianceType::PASSIVE, true);
+    sim.GetPlayer(1)->SetAlliance(0, CAllianceType::PASSIVE, true);
+    auto* caster = AdoptAtFor(sim, 551, 0, 0, 0);
+    auto* ally = AdoptAtFor(sim, 552, 1, 300, 0);
+    Settle(sim);
+    ally->AddBuff(std::make_unique<CBuffSpellShield>(60.0f), sim);
+    const float before = ally->GetLife();
+    ABEffectChain nuke;
+    nuke.Add(std::make_unique<ABActionDamageTarget>(100.0f));
+    nuke.Run(sim, caster, ally, false, 0, 0);
+    TEST_ASSERT(ally->GetLife() < before);
+    TEST_ASSERT(ally->GetBuff(War3ID("BNss")) != nullptr);
+    return true;
+}
+
+bool TestMissileDeflected() {
+    CSimulation sim;
+    auto* caster = AdoptAt(sim, 561, 0, 0);
+    auto* target = AdoptAt(sim, 562, 300, 0);
+    Settle(sim);
+    target->AddBuff(std::make_unique<CBuffSpellShield>(60.0f), sim);
+    const float before = target->GetLife();
+    CAbilityStormBolt bolt(5601);
+    bolt.DoEffect(sim, caster, target);
+    for (int i = 0; i < 30; i++) sim.Update();
+    TEST_ASSERT(target->GetLife() == before);
+    TEST_ASSERT(target->GetBuff(War3ID("Bstn")) == nullptr);
+    TEST_ASSERT(target->GetBuff(War3ID("BNss")) == nullptr);
+    return true;
+}
+
+bool TestHealIgnoresShield() {
+    CSimulation sim;
+    auto* caster = AdoptAt(sim, 571, 0, 0);
+    auto* ally = AdoptAt(sim, 572, 300, 0);
+    Settle(sim);
+    ally->AddBuff(std::make_unique<CBuffSpellShield>(60.0f), sim);
+    ally->Damage(sim, nullptr, false, false, CAttackType::CHAOS,
+                 CDamageType::NORMAL, "", 200.0f, 0);
+    const float wounded = ally->GetLife();
+    ABEffectChain mend;
+    mend.Add(std::make_unique<ABActionHealTarget>(100.0f));
+    mend.Run(sim, caster, ally, false, 0, 0);
+    TEST_ASSERT(ally->GetLife() > wounded);
+    TEST_ASSERT(ally->GetBuff(War3ID("BNss")) != nullptr);
+    return true;
+}

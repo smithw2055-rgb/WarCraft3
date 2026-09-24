@@ -151,6 +151,11 @@ public:
     bool IsSilenced() const;
     bool IsAsleep() const;
     bool IsSummoned() const;
+    // Spell effect reaction (ref CheckUnitForAbilityEffectReaction):
+    // returns true when an enemy-targeted spell effect may land. A present
+    // Spell Shield (BNss) is consumed and the effect fizzles instead.
+    // Allied casters bypass the shield; missing players count as hostile.
+    bool CheckSpellEffectReaction(CSimulation& game, CUnit* caster);
     // Sleep capability (ref UnitAddSleep/UnitCanSleep): Sleep effects only
     // land when both flags hold. Both default true (retail default).
     bool CanSleep() const { return canSleep_ && canSleepPerm_; }
