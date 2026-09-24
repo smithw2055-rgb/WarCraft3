@@ -1,5 +1,6 @@
 #include "ecs/abilities/ability_builder.h"
 #include "ecs/ability.h"
+#include "ecs/behaviors/behavior_channel.h"
 #include "ecs/combat/projectile.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
@@ -9,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <unordered_set>
+#include <utility>
 
 ABActionDamageArea::ABActionDamageArea(float radius, float amount,
                                        CAttackType attackType, CDamageType damageType)
@@ -707,6 +709,24 @@ void ABActionIf::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                      bool hasPoint, float x, float y) {
     const bool take = cond_ && cond_->Test(game, caster, unitTarget, hasPoint, x, y);
     (take ? thenChain_ : elseChain_).Run(game, caster, unitTarget, hasPoint, x, y);
+}
+
+ABActionBeginChannel::ABActionBeginChannel(int durationTicks, ABEffectChain tick,
+                                           ABEffectChain finish)
+    : durationTicks_(durationTicks),
+      tick_(std::move(tick)),
+      finish_(std::move(finish)) {}
+
+void ABActionBeginChannel::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
+                               bool hasPoint, float x, float y) {
+    (void)game;
+    if (spent_ || !caster || caster->IsDead() || durationTicks_ < 0) return;
+    spent_ = true;
+    const int targetHandle = unitTarget ? unitTarget->GetHandleId() : -1;
+    auto behavior = std::make_unique<CBehaviorChannel>(
+        std::move(tick_), std::move(finish_), durationTicks_,
+        targetHandle, hasPoint, x, y);
+    caster->SetCurrentBehavior(std::move(behavior));
 }
 
 ABActionMissileStun::ABActionMissileStun(float damage, float stunDuration, float speed,

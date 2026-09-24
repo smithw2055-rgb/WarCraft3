@@ -17,16 +17,33 @@ CAbilityMassTeleport::CAbilityMassTeleport(int handleId)
 }
 
 void CAbilityMassTeleport::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto an AbilityBuilder iteration: same-player units around
-    // the caster relocate to the spell destination (carried by the teleport
-    // action itself, since iteration repoints the effect point).
+    // Group relocation (caster included: the same-player filter covers it)
+    // as a finish chain: instant with no casting delay (legacy path),
+    // otherwise channeled per the .j doEffect.
     if (!caster) return;
-    ABEffectChain group;
-    group.Add(std::make_unique<ABActionTeleportTarget>(x, y));
-    ABActionForEachInRange mass(radius_, std::move(group));
-    mass.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
-    mass.Run(game, caster, nullptr, false, 0, 0);
-    caster->SetPosition(x, y);
+    auto makeFinish = [&]() {
+        ABEffectChain group;
+        group.Add(std::make_unique<ABActionTeleportTarget>(x, y));
+        auto iter = std::make_unique<ABActionForEachInRange>(
+            radius_, std::move(group), true);
+        iter->SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
+        ABEffectChain finish;
+        finish.Add(std::move(iter));
+        return finish;
+    };
+    if (castingDelay_ <= 0.0f) {
+        ABEffectChain finish = makeFinish();
+        finish.Run(game, caster, nullptr, false, 0, 0);
+        return;
+    }
+    const int ticks =
+        (int)std::ceil(castingDelay_ / (double)game.GetSimStepTime());
+    ABActionBeginChannel channel(ticks, ABEffectChain{}, makeFinish());
+    channel.Run(game, caster, nullptr, true, x, y);
+}
+
+void CAbilityMassTeleport::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    castingDelay_ = def.DataFloatAt(level, 1, castingDelay_);
 }
 
 // ===== Summon Water Elemental =====

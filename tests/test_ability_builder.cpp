@@ -14,6 +14,7 @@
 #include "ecs/abilities/spells2.h"
 #include "ecs/abilities/spells3.h"
 #include "ecs/abilities/spells5.h"
+#include "ecs/behaviors/behavior_channel.h"
 #include "ecs/buffs.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
@@ -789,5 +790,82 @@ bool TestHealingWaveBounceParity() {
     const float g2 = t2->GetLife() - b2;
     TEST_ASSERT(g0 == 100.0f);
     TEST_ASSERT(g0 > g1 && g1 > g2 && g2 > 0.0f);
+    return true;
+}
+
+bool TestChannelFinishRunsAtEnd() {
+    CSimulation sim;
+    auto* caster = AdoptAt(sim, 501, 0, 0);
+    auto* target = AdoptAt(sim, 502, 300, 0);
+    Settle(sim);
+    const float before = target->GetLife();
+    ABEffectChain finish;
+    finish.Add(std::make_unique<ABActionDamageTarget>(100.0f));
+    ABActionBeginChannel channel(3, ABEffectChain{}, std::move(finish));
+    channel.Run(sim, caster, target, false, 0, 0);
+    TEST_ASSERT(dynamic_cast<CBehaviorChannel*>(caster->GetCurrentBehavior()) != nullptr);
+    sim.Update();
+    sim.Update();
+    TEST_ASSERT(target->GetLife() == before);
+    sim.Update();
+    TEST_ASSERT(target->GetLife() < before);
+    return true;
+}
+
+bool TestChannelTickRunsEachTick() {
+    CSimulation sim;
+    auto* caster = AdoptAt(sim, 511, 0, 0);
+    auto* target = AdoptAt(sim, 512, 300, 0);
+    Settle(sim);
+    const float before = target->GetLife();
+    ABEffectChain tick;
+    tick.Add(std::make_unique<ABActionDamageTarget>(10.0f));
+    ABEffectChain finish;
+    finish.Add(std::make_unique<ABActionDamageTarget>(100.0f));
+    ABActionBeginChannel channel(3, std::move(tick), std::move(finish));
+    channel.Run(sim, caster, target, false, 0, 0);
+    sim.Update();
+    const float afterOne = target->GetLife();
+    TEST_ASSERT(afterOne < before);
+    sim.Update();
+    sim.Update();
+    // Two ticks (10 each) plus the 100 finish, modulo armor rounding.
+    TEST_ASSERT(target->GetLife() < afterOne);
+    TEST_ASSERT(before - target->GetLife() >= 100.0f);
+    return true;
+}
+
+bool TestChannelInterruptCancels() {
+    CSimulation sim;
+    auto* caster = AdoptAt(sim, 521, 0, 0);
+    auto* target = AdoptAt(sim, 522, 300, 0);
+    Settle(sim);
+    const float before = target->GetLife();
+    ABEffectChain finish;
+    finish.Add(std::make_unique<ABActionDamageTarget>(100.0f));
+    ABActionBeginChannel channel(5, ABEffectChain{}, std::move(finish));
+    channel.Run(sim, caster, target, false, 0, 0);
+    sim.Update();
+    // New orders replace the behavior: the finish never fires.
+    std::unique_ptr<CBehavior> empty;
+    caster->SetCurrentBehavior(std::move(empty));
+    for (int i = 0; i < 10; i++) sim.Update();
+    TEST_ASSERT(target->GetLife() == before);
+    return true;
+}
+
+bool TestChannelFizzleOnDeath() {
+    CSimulation sim;
+    auto* caster = AdoptAt(sim, 531, 0, 0);
+    auto* target = AdoptAt(sim, 532, 300, 0);
+    Settle(sim);
+    const float before = target->GetLife();
+    ABEffectChain finish;
+    finish.Add(std::make_unique<ABActionDamageTarget>(100.0f));
+    ABActionBeginChannel channel(2, ABEffectChain{}, std::move(finish));
+    channel.Run(sim, caster, target, false, 0, 0);
+    caster->SetLife(sim, 0.0f);
+    for (int i = 0; i < 5; i++) sim.Update();
+    TEST_ASSERT(target->GetLife() == before);
     return true;
 }

@@ -287,6 +287,7 @@ set(SOURCES
     src/ecs/behaviors/behavior_harvest.cpp
     src/ecs/behaviors/behavior_return_resources.cpp
     src/ecs/behaviors/behavior_spell.cpp
+    src/ecs/behaviors/behavior_channel.cpp
     src/ecs/pathing/world_collision.cpp
     src/ecs/pathing/pathfinding.cpp
     src/ecs/combat/combat_system.cpp

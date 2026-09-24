@@ -668,6 +668,24 @@ private:
     ABEffectChain elseChain_;
 };
 
+// Begin a channeled cast on the caster (ref ABActionBeginChanneling):
+// installs a CBehaviorChannel holding for `durationTicks` (per-tick
+// `tick` chain each tick, `finish` chain once at the end). Single-shot:
+// the chains move into the behavior on Run, later Runs are no-ops.
+class ABActionBeginChannel : public ABAction {
+public:
+    ABActionBeginChannel(int durationTicks, ABEffectChain tick,
+                         ABEffectChain finish);
+    void Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
+             bool hasPoint, float x, float y) override;
+
+private:
+    int durationTicks_;
+    ABEffectChain tick_;
+    ABEffectChain finish_;
+    bool spent_ = false;
+};
+
 // Homing damage missile at the unit target (ref StormBoltMissile +
 // ABActionCreateUnitTargetedProjectile, simplified): spawns a real
 // CProjectile for the damage flight and applies the stun instantly so the

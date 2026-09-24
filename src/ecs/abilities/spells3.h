@@ -10,8 +10,11 @@ class CAbilityMassTeleport : public CAbilitySpellBase {
 public:
     CAbilityMassTeleport(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float radius_ = 400.0f;
+    float castingDelay_ = 0.0f; // ref DataB; 0 keeps the instant legacy path
 };
 
 // ===== Summon Water Elemental (Archmage) - timed summon =====

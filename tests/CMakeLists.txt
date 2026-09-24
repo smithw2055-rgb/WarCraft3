@@ -158,6 +158,7 @@ add_executable(warsmash_tests
     ../src/ecs/behaviors/behavior_return_resources.cpp
     ../src/ecs/behaviors/behavior_repair.cpp
     ../src/ecs/behaviors/behavior_spell.cpp
+    ../src/ecs/behaviors/behavior_channel.cpp
     ../src/ecs/abilities/ability_attack.cpp
     ../src/ecs/abilities/ability_move.cpp
     ../src/ecs/abilities/ability_hero.cpp

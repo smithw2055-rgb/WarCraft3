@@ -334,6 +334,10 @@ bool TestShockwaveChainParity();
 bool TestImpaleChainParity();
 bool TestChainLightningBounceParity();
 bool TestHealingWaveBounceParity();
+bool TestChannelFinishRunsAtEnd();
+bool TestChannelTickRunsEachTick();
+bool TestChannelInterruptCancels();
+bool TestChannelFizzleOnDeath();
 bool TestResurrectChainParity();
 bool TestThunderClapChainParity();
 bool TestManaBurnChainParity();
@@ -740,6 +744,10 @@ int main() {
         {"Impale chain parity", TestImpaleChainParity},
         {"ChainLightning bounce parity", TestChainLightningBounceParity},
         {"HealingWave bounce parity", TestHealingWaveBounceParity},
+        {"Channel finish runs at end", TestChannelFinishRunsAtEnd},
+        {"Channel tick runs each tick", TestChannelTickRunsEachTick},
+        {"Channel interrupt cancels", TestChannelInterruptCancels},
+        {"Channel fizzle on death", TestChannelFizzleOnDeath},
         {"Resurrect chain parity", TestResurrectChainParity},
         {"ThunderClap chain parity", TestThunderClapChainParity},
         {"ManaBurn chain parity", TestManaBurnChainParity},
