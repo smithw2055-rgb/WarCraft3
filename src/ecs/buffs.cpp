@@ -971,3 +971,31 @@ CBuff* CBuffPhoenixFire::Clone() const {
     copy->remaining_ = remaining_;
     return copy;
 }
+
+CBuffAuraStat::CBuffAuraStat(War3ID auraCode, std::vector<Bonus> bonuses,
+                             int casterHandle)
+    : CBuff(auraCode, 1e9f, true), bonuses_(std::move(bonuses)) {
+    casterHandleId_ = casterHandle;
+}
+
+void CBuffAuraStat::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    for (const auto& bonus : bonuses_) {
+        target->AddAuraStatBonus(bonus.type, bonus.percent, GetId(), bonus.value);
+    }
+}
+
+void CBuffAuraStat::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    for (const auto& bonus : bonuses_) {
+        target->RemoveAuraStatBonus(bonus.type, bonus.percent, GetId());
+    }
+}
+
+CBuff* CBuffAuraStat::Clone() const {
+    auto* copy = new CBuffAuraStat(GetId(), bonuses_, casterHandleId_);
+    copy->remaining_ = remaining_;
+    return copy;
+}

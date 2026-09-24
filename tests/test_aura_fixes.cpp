@@ -116,3 +116,72 @@ bool TestDivineShieldStackingKeepsInvulnerable() {
     TEST_ASSERT(!u.IsInvulnerable());
     return true;
 }
+
+bool TestOverlappingAurasTakeStrongest() {
+    CSimulation sim;
+    CUnitType* type = MakeAuraTestType();
+    CUnit source(111, type, 0, War3ID("hfoo"), 0, 0, 0);
+    CUnit other(112, type, 0, War3ID("hfoo"), 50, 0, 0);
+    CUnit target(113, type, 0, War3ID("hfoo"), 100, 0, 0);
+    sim.GetUnits().push_back(&source);
+    sim.GetUnits().push_back(&other);
+    sim.GetUnits().push_back(&target);
+
+    CAbilityAura weak(210, War3ID("AHad"));
+    weak.SetRadius(1000.0f);
+    weak.SetEnemyOnly(true);
+    weak.SetAffectsAllies(false);
+    weak.SetAffectsSelf(false);
+    weak.AddBonus({CAuraEffectType::ARMOR, 2.0f, false});
+    CAbilityAura strong(211, War3ID("AEmb"));
+    strong.SetRadius(1000.0f);
+    strong.SetEnemyOnly(true);
+    strong.SetAffectsAllies(false);
+    strong.SetAffectsSelf(false);
+    strong.AddBonus({CAuraEffectType::ARMOR, 5.0f, false});
+
+    const int armorBefore = target.GetBonusArmor();
+    weak.OnTick(sim, &source);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore + 2);
+    TEST_ASSERT(target.HasBuff(War3ID("AHad")));
+    // Second aura does not stack: strongest wins, buff visible too.
+    strong.OnTick(sim, &other);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore + 5);
+    TEST_ASSERT(target.HasBuff(War3ID("AEmb")));
+    // Stronger leaves: falls back to the weaker, then to nothing.
+    strong.OnRemove(sim, &other);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore + 2);
+    weak.OnRemove(sim, &source);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore);
+    TEST_ASSERT(target.GetBuff(War3ID("AHad")) == nullptr);
+
+    sim.GetUnits().clear();
+    return true;
+}
+
+bool TestAuraDispelStripsBonus() {
+    CSimulation sim;
+    CUnitType* type = MakeAuraTestType();
+    CUnit source(121, type, 0, War3ID("hfoo"), 0, 0, 0);
+    CUnit target(122, type, 0, War3ID("hfoo"), 100, 0, 0);
+    sim.GetUnits().push_back(&source);
+    sim.GetUnits().push_back(&target);
+
+    CAbilityAura aura(220, War3ID("AHad"));
+    aura.SetRadius(1000.0f);
+    aura.SetEnemyOnly(true);
+    aura.SetAffectsAllies(false);
+    aura.SetAffectsSelf(false);
+    aura.AddBonus({CAuraEffectType::ARMOR, 2.0f, false});
+
+    const int armorBefore = target.GetBonusArmor();
+    aura.OnTick(sim, &source);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore + 2);
+    // Dispel strips the aura buff and its bonus follows.
+    target.RemoveBuffsIf(sim, true, true, false, true);
+    TEST_ASSERT(target.GetBuff(War3ID("AHad")) == nullptr);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore);
+
+    sim.GetUnits().clear();
+    return true;
+}

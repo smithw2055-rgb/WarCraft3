@@ -71,6 +71,8 @@ bool TestSlowAndBloodlustRestoreSpeed();
 bool TestVampiricAndUnholyAuraIdsDiffer();
 bool TestAuraArmorDamageRegenAttackSpeedSymmetric();
 bool TestDivineShieldStackingKeepsInvulnerable();
+bool TestOverlappingAurasTakeStrongest();
+bool TestAuraDispelStripsBonus();
 bool TestRegionEnterLeaveFiresOnMigration();
 bool TestLifecycleEventsAndPlayerUnitDualMatch();
 bool TestEnumDestructablesInRect();
@@ -481,6 +483,8 @@ int main() {
         {"Vampiric and unholy aura ids differ", TestVampiricAndUnholyAuraIdsDiffer},
         {"Aura armor/regen/attack-speed symmetric", TestAuraArmorDamageRegenAttackSpeedSymmetric},
         {"Divine shield stacking keeps invulnerable", TestDivineShieldStackingKeepsInvulnerable},
+        {"Overlapping auras take strongest", TestOverlappingAurasTakeStrongest},
+        {"Aura dispel strips bonus", TestAuraDispelStripsBonus},
         {"Region enter/leave fires on migration", TestRegionEnterLeaveFiresOnMigration},
         {"Lifecycle events and player-unit dual match", TestLifecycleEventsAndPlayerUnitDualMatch},
         {"Enum destructables in rect", TestEnumDestructablesInRect},

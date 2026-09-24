@@ -437,6 +437,152 @@ bool CUnit::IsSummoned() const {
     return false;
 }
 
+void CUnit::AddAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId,
+                             float value) {
+    auto key = std::make_pair((int)type, percent);
+    auto& sources = auraStats_[key];
+    for (auto& s : sources) {
+        if (s.buffId == buffId) {
+            s.value = value;
+            RecomputeAuraStat(type, percent);
+            return;
+        }
+    }
+    sources.push_back({buffId, value});
+    RecomputeAuraStat(type, percent);
+}
+
+void CUnit::RemoveAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId) {
+    auto key = std::make_pair((int)type, percent);
+    auto it = auraStats_.find(key);
+    if (it == auraStats_.end()) return;
+    auto& sources = it->second;
+    sources.erase(std::remove_if(sources.begin(), sources.end(),
+                                 [&](const AuraStatSource& s) { return s.buffId == buffId; }),
+                  sources.end());
+    if (sources.empty()) {
+        auraStats_.erase(it);
+    }
+    RecomputeAuraStat(type, percent);
+}
+
+void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {
+    auto key = std::make_pair((int)type, percent);
+    float best = 0.0f;
+    bool have = false;
+    auto sit = auraStats_.find(key);
+    if (sit != auraStats_.end()) {
+        for (const auto& s : sit->second) {
+            if (!have || s.value > best) {
+                best = s.value;
+                have = true;
+            }
+        }
+    }
+    float applied = 0.0f;
+    auto ait = auraApplied_.find(key);
+    if (ait != auraApplied_.end()) applied = ait->second;
+
+    // Undo the previous effective contribution, then apply the new
+    // strongest one. Math mirrors the legacy direct-mutation aura path
+    // (including its truncation behavior) so single-aura results are
+    // bit-identical.
+    switch (type) {
+        case CAuraEffectType::ARMOR: {
+            const int oldFlat = (int)std::lround(applied);
+            const int newFlat = have ? (int)std::lround(best) : 0;
+            if (oldFlat != 0) AddBonusArmor(-oldFlat);
+            if (newFlat != 0) AddBonusArmor(newFlat);
+            if (newFlat != 0) auraApplied_[key] = (float)newFlat;
+            else auraApplied_.erase(key);
+            break;
+        }
+        case CAuraEffectType::MOVE_SPEED: {
+            if (percent) {
+                const float oldFactor = 1.0f + applied;
+                const float newFactor = have ? (1.0f + best) : 1.0f;
+                if (oldFactor != 0.0f && oldFactor != 1.0f) {
+                    SetSpeed((int)(GetSpeed() / oldFactor));
+                }
+                if (newFactor != 1.0f) {
+                    SetSpeed((int)(GetSpeed() * newFactor));
+                    auraApplied_[key] = best;
+                } else {
+                    auraApplied_.erase(key);
+                }
+            } else {
+                const int oldFlat = (int)applied;
+                const int newFlat = have ? (int)best : 0;
+                if (oldFlat != 0) SetSpeed(GetSpeed() - oldFlat);
+                if (newFlat != 0) SetSpeed(GetSpeed() + newFlat);
+                if (newFlat != 0) auraApplied_[key] = (float)newFlat;
+                else auraApplied_.erase(key);
+            }
+            break;
+        }
+        case CAuraEffectType::ATTACK_SPEED: {
+            const float oldFactor = 1.0f + applied;
+            const float newFactor = have ? (1.0f + best) : 1.0f;
+            if (oldFactor != 0.0f && oldFactor != 1.0f) DivideAttackSpeed(oldFactor);
+            if (newFactor != 1.0f) {
+                MultiplyAttackSpeed(newFactor);
+                auraApplied_[key] = best;
+            } else {
+                auraApplied_.erase(key);
+            }
+            break;
+        }
+        case CAuraEffectType::DAMAGE: {
+            int oldFlat = 0, newFlat = 0;
+            if (percent) {
+                float base = 0.0f;
+                if (auto* unitType = GetUnitType()) {
+                    const auto& attacks = unitType->GetAttacks();
+                    if (!attacks.empty()) {
+                        base = (float)attacks[0].damageBase;
+                        if (attacks[0].damageDice > 0 && attacks[0].damageSidesPerDie > 0) {
+                            base += (float)attacks[0].damageDice *
+                                    (float)(attacks[0].damageSidesPerDie + 1) * 0.5f;
+                        }
+                    }
+                }
+                oldFlat = (int)std::lround(base * applied);
+                newFlat = have ? (int)std::lround(base * best) : 0;
+            } else {
+                oldFlat = (int)std::lround(applied);
+                newFlat = have ? (int)std::lround(best) : 0;
+            }
+            if (oldFlat != 0) AddBonusDamage(-oldFlat);
+            if (newFlat != 0) AddBonusDamage(newFlat);
+            if (have) auraApplied_[key] = best;
+            else auraApplied_.erase(key);
+            break;
+        }
+        case CAuraEffectType::LIFE_REGEN: {
+            if (applied != 0.0f) AddBonusLifeRegen(-applied);
+            if (have && best != 0.0f) {
+                AddBonusLifeRegen(best);
+                auraApplied_[key] = best;
+            } else {
+                auraApplied_.erase(key);
+            }
+            break;
+        }
+        case CAuraEffectType::MANA_REGEN: {
+            if (applied != 0.0f) AddBonusManaRegen(-applied);
+            if (have && best != 0.0f) {
+                AddBonusManaRegen(best);
+                auraApplied_[key] = best;
+            } else {
+                auraApplied_.erase(key);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 void CUnit::UpdateBuffs(CSimulation& game) {
     for (auto it = buffs_.begin(); it != buffs_.end();) {
         auto& buff = *it;

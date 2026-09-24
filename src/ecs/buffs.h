@@ -1,5 +1,7 @@
 #pragma once
+#include <vector>
 #include "ecs/buff.h"
+#include "ecs/abilities/ability_aura.h"
 
 // Slow debuff - reduces movement speed and attack speed
 class CBuffSlow : public CBuff {
@@ -553,4 +555,30 @@ public:
 private:
     float damagePerSecond_;
     float radius_;
+};
+
+// Aura stat bonus (ref BuffAuraBase + non-stacking stat bonuses): one
+// instance per aura ability per bearer, carrying all of that aura's
+// bonuses. Each bonus registers in the unit's non-stacking table so
+// overlapping auras take the strongest bonus per (stat, percent) slot
+// instead of adding up. Removing the buff unregisters and recomputes.
+// Effectively permanent (1e9s); the aura system removes it when the
+// bearer leaves range.
+class CBuffAuraStat : public CBuff {
+public:
+    struct Bonus {
+        CAuraEffectType type = CAuraEffectType::MOVE_SPEED;
+        float value = 0.0f;
+        bool percent = false;
+    };
+
+    CBuffAuraStat(War3ID auraCode, std::vector<Bonus> bonuses,
+                  int casterHandle = -1);
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+
+private:
+    std::vector<Bonus> bonuses_;
 };

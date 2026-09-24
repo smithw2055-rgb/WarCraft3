@@ -14,10 +14,13 @@
 #include "ecs/behaviors/behavior_attack_move.h"
 #include "ecs/orders/order.h"
 #include "data/combat_types.h"
+#include "ecs/abilities/ability_aura.h"
 #include <vector>
 #include <queue>
+#include <map>
 #include <memory>
 #include <unordered_set>
+#include <utility>
 
 class CAbilityAttack;
 class CAbilityMove;
@@ -88,6 +91,12 @@ public:
     void AddBonusLifeRegen(float v) { bonusLifeRegen_ += v; }
     float GetBonusManaRegen() const { return bonusManaRegen_; }
     void AddBonusManaRegen(float v) { bonusManaRegen_ += v; }
+    // Non-stacking aura stat bonuses (ref NonStackingStatBonus): one entry
+    // per source buff per (stat, percent) slot; only the strongest applies.
+    // Implemented in unit.cpp; driven by CBuffAuraStat add/remove.
+    void AddAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId, float value);
+    void RemoveAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId);
+    void RecomputeAuraStat(CAuraEffectType type, bool percent);
     // Evasion / critical strike (0..1 chances; e.g. from abilities/items).
     // Wired into CCombatSystem::CalculateDamage like ref attack listeners.
     float GetEvasionChance() const { return evasionChance_; }
@@ -347,6 +356,15 @@ private:
     float bonusLifeRegen_ = 0.0f;
     float bonusManaRegen_ = 0.0f;
     float attackSpeedMul_ = 1.0f;
+    // Non-stacking aura sources per (stat, percent) slot, plus the
+    // currently applied effective delta (additive stats) or factor
+    // (multiplicative stats) so recompute can undo precisely.
+    struct AuraStatSource {
+        War3ID buffId;
+        float value = 0.0f;
+    };
+    std::map<std::pair<int, bool>, std::vector<AuraStatSource>> auraStats_;
+    std::map<std::pair<int, bool>, float> auraApplied_;
     float evasionChance_ = 0.0f;
     float critChance_ = 0.0f;
     float critMultiplier_ = 1.0f;

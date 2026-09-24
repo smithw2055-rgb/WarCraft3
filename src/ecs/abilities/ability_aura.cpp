@@ -1,4 +1,5 @@
 #include "ability_aura.h"
+#include "ecs/buffs.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
@@ -110,104 +111,22 @@ void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
 }
 
 void CAbilityAura::ApplyAura(CSimulation& game, CUnit* target) {
-    (void)game;
     if (!target) return;
+    // Buff-based application (ref BuffAuraBase): one aura buff carrying
+    // all bonuses, keyed by this aura's code, so overlapping auras take
+    // the strongest bonus per slot and dispels can strip them. The unit's
+    // non-stacking table does the math; single-aura results match the old
+    // direct-mutation path exactly.
+    std::vector<CBuffAuraStat::Bonus> bonuses;
     for (const auto& bonus : bonuses_) {
-        switch (bonus.type) {
-            case CAuraEffectType::MOVE_SPEED:
-                if (bonus.isPercent) {
-                    target->SetSpeed((int)(target->GetSpeed() * (1.0f + bonus.value)));
-                } else {
-                    target->SetSpeed(target->GetSpeed() + (int)bonus.value);
-                }
-                break;
-            case CAuraEffectType::ATTACK_SPEED:
-                // Percent (e.g. +10%) multiplies attack period; flat adds
-                // fractionally as well so remove stays symmetric.
-                target->MultiplyAttackSpeed(1.0f + bonus.value);
-                break;
-            case CAuraEffectType::ARMOR:
-                target->AddBonusArmor((int)std::lround(bonus.value));
-                break;
-            case CAuraEffectType::DAMAGE: {
-                int flat = 0;
-                if (bonus.isPercent) {
-                    float base = 0.0f;
-                    if (auto* type = target->GetUnitType()) {
-                        const auto& attacks = type->GetAttacks();
-                        if (!attacks.empty()) {
-                            base = (float)attacks[0].damageBase;
-                            if (attacks[0].damageDice > 0 && attacks[0].damageSidesPerDie > 0)
-                                base += (float)attacks[0].damageDice *
-                                        (float)(attacks[0].damageSidesPerDie + 1) * 0.5f;
-                        }
-                    }
-                    flat = (int)std::lround(base * bonus.value);
-                } else {
-                    flat = (int)std::lround(bonus.value);
-                }
-                target->AddBonusDamage(flat);
-                break;
-            }
-            case CAuraEffectType::LIFE_REGEN:
-                target->AddBonusLifeRegen(bonus.value);
-                break;
-            case CAuraEffectType::MANA_REGEN:
-                target->AddBonusManaRegen(bonus.value);
-                break;
-            default:
-                break;
-        }
+        bonuses.push_back({bonus.type, bonus.value, bonus.isPercent});
     }
+    target->AddBuff(std::make_unique<CBuffAuraStat>(GetCode(), std::move(bonuses)), game);
 }
 
 void CAbilityAura::RemoveAura(CSimulation& game, CUnit* target) {
-    (void)game;
     if (!target) return;
-    // Remove the bonuses (reverse of ApplyAura)
-    for (const auto& bonus : bonuses_) {
-        switch (bonus.type) {
-            case CAuraEffectType::MOVE_SPEED:
-                if (bonus.isPercent) {
-                    target->SetSpeed((int)(target->GetSpeed() / (1.0f + bonus.value)));
-                } else {
-                    target->SetSpeed(target->GetSpeed() - (int)bonus.value);
-                }
-                break;
-            case CAuraEffectType::ATTACK_SPEED:
-                target->DivideAttackSpeed(1.0f + bonus.value);
-                break;
-            case CAuraEffectType::ARMOR:
-                target->AddBonusArmor(-(int)std::lround(bonus.value));
-                break;
-            case CAuraEffectType::DAMAGE: {
-                int flat = 0;
-                if (bonus.isPercent) {
-                    float base = 0.0f;
-                    if (auto* type = target->GetUnitType()) {
-                        const auto& attacks = type->GetAttacks();
-                        if (!attacks.empty()) {
-                            base = (float)attacks[0].damageBase;
-                            if (attacks[0].damageDice > 0 && attacks[0].damageSidesPerDie > 0)
-                                base += (float)attacks[0].damageDice *
-                                        (float)(attacks[0].damageSidesPerDie + 1) * 0.5f;
-                        }
-                    }
-                    flat = (int)std::lround(base * bonus.value);
-                } else {
-                    flat = (int)std::lround(bonus.value);
-                }
-                target->AddBonusDamage(-flat);
-                break;
-            }
-            case CAuraEffectType::LIFE_REGEN:
-                target->AddBonusLifeRegen(-bonus.value);
-                break;
-            case CAuraEffectType::MANA_REGEN:
-                target->AddBonusManaRegen(-bonus.value);
-                break;
-            default:
-                break;
-        }
-    }
+    // Removing the aura buff unregisters its bonuses and recomputes what
+    // overlapping auras still grant.
+    target->RemoveBuff(GetCode(), game);
 }
