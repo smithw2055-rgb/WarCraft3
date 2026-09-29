@@ -236,6 +236,7 @@ add_executable(warsmash_tests
     ../src/ecs/abilities/spells19.cpp
     ../src/ecs/abilities/spells20.cpp
     ../src/ecs/abilities/spells21.cpp
+    ../src/ecs/abilities/spells22.cpp
     ../src/ecs/abilities/spells23.cpp
     ../src/ecs/abilities/spells24.cpp
     ../src/ecs/abilities/spells25.cpp

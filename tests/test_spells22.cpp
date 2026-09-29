@@ -9,6 +9,7 @@
 #include "data/combat_types.h"
 #include "ecs/abilities/spells17.h"
 #include "ecs/abilities/spells2.h"
+#include "ecs/abilities/spells22.h"
 #include "ecs/ability_factory.h"
 #include "ecs/buffs.h"
 #include "ecs/csimulation.h"

@@ -112,3 +112,12 @@ public:
 private:
     std::string model_;
 };
+
+// MenuFrame (ref parsers/fdf/frames/MenuFrame): a popup list whose entries
+// come from FDF MenuItem fields. Reuses the ListBox item store so selection
+// and JASS dialog natives observe the same state.
+class MenuFrame : public ListBoxFrame {
+public:
+    MenuFrame(const std::string& name, UIFrame* parent = nullptr)
+        : ListBoxFrame(name, parent) {}
+};

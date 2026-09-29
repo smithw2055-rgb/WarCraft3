@@ -102,7 +102,8 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
     if (type == "BACKDROP" || def.frameClass == FrameClass::Texture) {
         frame = new BackdropFrame(def.name, parent);
     }
-    else if (type == "BUTTON" || type == "GLUEBUTTON" || type == "TEXTBUTTON") {
+    else if (type == "BUTTON" || type == "GLUEBUTTON" || type == "GLUETEXTBUTTON" ||
+             type == "TEXTBUTTON") {
         frame = new ButtonFrame(def.name, parent);
         auto* btn = dynamic_cast<ButtonFrame*>(frame);
         if (btn && textRenderer_) btn->SetTextRenderer(textRenderer_);
@@ -161,6 +162,9 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
     else if (type == "POPUPMENU") {
         frame = new PopupMenuFrame(def.name, parent);
     }
+    else if (type == "MENU") {
+        frame = new MenuFrame(def.name, parent);
+    }
     else if (type == "SCROLLBAR" || type == "SLIDER") {
         frame = new ScrollBarFrame(def.name, parent);
     }
@@ -174,13 +178,13 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
              def.frameClass == FrameClass::Frame) {
         frame = new SimpleFrame(def.name, parent);
     }
-    else if (type == "GLUETEXTBUTTON" || type == "GLUEBUTTON") {
-        frame = new ButtonFrame(def.name, parent);
-        auto* btn = dynamic_cast<ButtonFrame*>(frame);
-        if (btn && textRenderer_) btn->SetTextRenderer(textRenderer_);
-    }
     else {
         frame = new SimpleFrame(def.name, parent);
+    }
+
+    // FDF MenuItem entries feed list-like frames (ref MenuItemFrameDefinitionField).
+    if (auto* list = dynamic_cast<ListBoxFrame*>(frame)) {
+        for (const auto& item : def.menuItems) list->AddItem(item.first);
     }
 
     return frame;
@@ -295,6 +299,27 @@ void FrameBuilder::ApplyProperties(UIFrame* frame, const FrameDefinition& def) {
                 }
             }
         }
+    }
+
+    // Extended-frame state (ref parsers/fdf/frames/*). Field keys are the
+    // FDF attribute names; numeric defaults preserve previous behavior.
+    if (auto* check = dynamic_cast<CheckBoxFrame*>(frame)) {
+        if (def.HasFlag("Checked")) check->SetChecked(true);
+    }
+    if (auto* edit = dynamic_cast<EditBoxFrame*>(frame)) {
+        if (def.HasField("MaxLength")) edit->SetMaxLength((int)def.GetFloat("MaxLength", 256));
+    }
+    if (auto* scroll = dynamic_cast<ScrollBarFrame*>(frame)) {
+        if (def.HasField("MinValue") || def.HasField("MaxValue"))
+            scroll->SetRange(def.GetFloat("MinValue", 0), def.GetFloat("MaxValue", 1));
+        if (def.HasField("Value")) scroll->SetValue(def.GetFloat("Value", 0));
+    }
+    if (auto* status = dynamic_cast<StatusBarFrame*>(frame)) {
+        if (def.HasField("MaxValue")) status->SetMax(def.GetFloat("MaxValue", 1));
+        if (def.HasField("Value")) status->SetValue(def.GetFloat("Value", 1));
+    }
+    if (auto* sprite = dynamic_cast<SpriteFrame*>(frame)) {
+        if (def.HasField("Model")) sprite->SetModel(def.GetString("Model", ""));
     }
 }
 

@@ -36,6 +36,7 @@
 #include "ecs/abilities/spells19.h"
 #include "ecs/abilities/spells20.h"
 #include "ecs/abilities/spells21.h"
+#include "ecs/abilities/spells22.h"
 #include "ecs/abilities/spells23.h"
 #include "ecs/abilities/spells24.h"
 #include "ecs/abilities/spells25.h"
@@ -115,12 +116,6 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("AUcs")) return std::make_unique<CAbilityCarrionSwarm>(handleId);
     if (code == War3ID("AUsl")) return std::make_unique<CAbilitySleep>(handleId);
     if (code == War3ID("AUin")) return std::make_unique<CAbilityInferno>(handleId);
-    if (code == War3ID("ANin")) {
-        // Generic Inferno code variant: same effect, own retail order.
-        auto ability = std::make_unique<CAbilityInferno>(handleId);
-        ability->SetAlias(code);
-        return ability;
-    }
 
     // ===== Night Elf Spells =====
     if (code == War3ID("AEmb")) return std::make_unique<CAbilityManaBurn>(handleId);
@@ -305,12 +300,6 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     // ===== Batch 19: banish line =====
     if (code == War3ID("AHbn")) return std::make_unique<CAbilityBanish>(handleId);
     if (code == War3ID("Aam2")) return std::make_unique<CAbilityAntiMagicShell>(handleId);
-    if (code == War3ID("Aams")) {
-        // Base Anti-Magic Shell code variant (Aam2 is the Matrix copy).
-        auto ability = std::make_unique<CAbilityAntiMagicShell>(handleId);
-        ability->SetAlias(code);
-        return ability;
-    }
 
     // ===== Batch 20: possession + stampede =====
     if (code == War3ID("Apos")) return std::make_unique<CAbilityPossession>(handleId);
@@ -320,19 +309,8 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("Asta")) return std::make_unique<CAbilityStasisTrap>(handleId);
     if (code == War3ID("ANto")) return std::make_unique<CAbilityTornado>(handleId);
 
-    // ===== Batch 22: code variants reusing existing classes =====
-    // Afod/Acht share the ANfd/ANht effects with their own retail orders;
-    // the widened alias match in CheckCanUse routes them.
-    if (code == War3ID("Afod")) {
-        auto ability = std::make_unique<CAbilityFingerOfDeath>(handleId);
-        ability->SetAlias(code);
-        return ability;
-    }
-    if (code == War3ID("Acht")) {
-        auto ability = std::make_unique<CAbilityHowlOfTerror>(handleId);
-        ability->SetAlias(code);
-        return ability;
-    }
+    // ===== Batch 22: alias-only retail codes (owned by spells22) =====
+    if (auto alias22 = CreateSpells22Alias(handleId, code)) return alias22;
 
     // ===== Batch 23: chain dispel + taunt =====
     if (code == War3ID("Ache")) return std::make_unique<CAbilityChainDispel>(handleId);
