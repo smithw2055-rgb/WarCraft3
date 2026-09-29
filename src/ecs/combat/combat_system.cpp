@@ -6,10 +6,7 @@
 #include "ecs/player.h"
 #include "audio/AudioSystem.h"
 #include <cmath>
-#include <random>
 #include <algorithm>
-
-static std::mt19937 s_combatRng(std::random_device{}());
 
 // Attack-type vs defense-type multipliers, indexed by DefenseTypeIndex()
 // below: NONE, LIGHT, MEDIUM, HEAVY, FORTIFIED, HERO, DIVINE, UNARMORED.
@@ -54,6 +51,23 @@ CCombatSystem::CCombatSystem() : table_(kTable) {}
 void CCombatSystem::Configure(float defenseArmor, const AttackDefenseTable& table) {
     defenseArmor_ = defenseArmor;
     table_ = table;
+}
+
+void CCombatSystem::ConfigureMagicRules(float etherealBonusMagic, float etherealBonusSpells,
+                                        bool magicImmuneResistsDamage,
+                                        bool magicImmuneResistsUltimates,
+                                        bool etherealBonusAlly) {
+    etherealBonusMagic_ = etherealBonusMagic;
+    etherealBonusSpells_ = etherealBonusSpells;
+    magicImmuneResistsDamage_ = magicImmuneResistsDamage;
+    magicImmuneResistsUltimates_ = magicImmuneResistsUltimates;
+    etherealBonusAlly_ = etherealBonusAlly;
+}
+
+float CCombatSystem::CombatRand01() {
+    // Same Numerical Recipes LCG as CSimulation::SimRand01.
+    rngState_ = rngState_ * 1664525u + 1013904223u;
+    return (float)(rngState_ >> 16) * (1.0f / 65536.0f);
 }
 
 static float LookupRow(const float row[8], int di) {
@@ -110,11 +124,50 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
         }
     }
 
+    // Magic immunity (ref CUnitDefaultMagicImmuneDamageModListener): MAGIC
+    // attacks fizzle when MagicImmunesResistDamage; SPELLS fizzle unless
+    // UNIVERSAL damage with MagicImmunesResistUltimates off.
+    {
+        CUnit* targetUnit = dynamic_cast<CUnit*>(target);
+        if (targetUnit && targetUnit->IsMagicImmune()) {
+            if (attackType == CAttackType::MAGIC && magicImmuneResistsDamage_) {
+                return result;
+            }
+            if (attackType == CAttackType::SPELLS && damageType != CDamageType::NORMAL) {
+                if (damageType != CDamageType::UNIVERSAL || magicImmuneResistsUltimates_) {
+                    return result;
+                }
+            }
+        }
+    }
+
+    // Ethereal bonus multiplier. Physical (NORMAL damage from a
+    // non-MAGIC attack) is negated. Allied casters skip the bonus unless
+    // EtherealDamageBonusAlly is set.
+    float etherealMultiplier = 1.0f;
+    bool etherealNegate = false;
+    {
+        CUnit* targetUnit = dynamic_cast<CUnit*>(target);
+        if (targetUnit && targetUnit->IsEthereal()) {
+            const bool allied = attacker && attacker->GetPlayerIndex() == targetUnit->GetPlayerIndex();
+            const bool grantBonus = !allied || etherealBonusAlly_;
+            if (grantBonus && attackType == CAttackType::MAGIC) {
+                etherealMultiplier = etherealBonusMagic_;
+            } else if (grantBonus && attackType == CAttackType::SPELLS) {
+                etherealMultiplier = etherealBonusSpells_;
+            }
+            if (damageType == CDamageType::NORMAL && attackType != CAttackType::MAGIC) {
+                etherealNegate = true;
+            }
+        }
+    }
+    if (etherealNegate) return result;
+
     // Roll damage (bonus damage is part of the base, like ref computeFinalDamage)
     float rolledDamage = damageBase + bonusDamage;
     if (dice > 0 && sidesPerDie > 0) {
         for (int d = 0; d < dice; d++)
-            rolledDamage += (float)((std::rand() % sidesPerDie) + 1);
+            rolledDamage += (float)(1 + (int)(CombatRand01() * (float)sidesPerDie));
     }
 
     // Attack-type vs defense-type multiplier, always applied (ref CUnit.damage).
@@ -128,14 +181,14 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
     }
     result.multiplier = GetConfiguredMultiplier(attackType, targetDef);
     rolledDamage *= result.multiplier;
+    rolledDamage *= etherealMultiplier;
 
     // Critical strike (ref permanent-crit abilities): multiplies the damage
     // after the attack/defense matchup, before armor reduction.
     if (isAttack && attacker && attacker != targetUnit) {
         const float chance = attacker->GetCritChance();
         if (chance > 0.0f) {
-            std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-            if (dist(s_combatRng) < chance) {
+            if (CombatRand01() < chance) {
                 rolledDamage *= std::max(1.0f, attacker->GetCritMultiplier());
                 result.isCritical = true;
             }
@@ -263,14 +316,12 @@ bool CCombatSystem::CheckEvasion(CUnit* target, CUnit* attacker) {
     const float chance = target->GetEvasionChance();
     if (chance <= 0.0f) return false;
     if (chance >= 1.0f) return true;
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    return dist(s_combatRng) < chance;
+    return CombatRand01() < chance;
 }
 
 float CCombatSystem::ApplyCritical(float damage, float chance, float multiplier) {
     if (chance <= 0) return damage;
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    if (dist(s_combatRng) < chance) {
+    if (CombatRand01() < chance) {
         return damage * multiplier;
     }
     return damage;

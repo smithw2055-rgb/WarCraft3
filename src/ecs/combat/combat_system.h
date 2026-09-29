@@ -26,6 +26,13 @@ public:
     // called the compiled-in defaults are used.
     void Configure(float defenseArmor, const AttackDefenseTable& table);
 
+    // Ethereal / magic-immune rules (ref default damage-taken listeners).
+    // Forwarded from CGameplayConstants by CSimulation::SetGameplayConstants.
+    void ConfigureMagicRules(float etherealBonusMagic, float etherealBonusSpells,
+                             bool magicImmuneResistsDamage,
+                             bool magicImmuneResistsUltimates,
+                             bool etherealBonusAlly = false);
+
     // Attack-type vs defense-type multiplier table (WC3 standard)
     static float GetAttackDefenseMultiplier(CAttackType atk, CDefenseType def);
 
@@ -59,14 +66,26 @@ public:
     static float CalcArmorDamageReduction(int defense, int attackerLevel, float defenseArmor = 0.06f);
 
     // Evasion
-    static bool CheckEvasion(CUnit* target, CUnit* attacker);
+    bool CheckEvasion(CUnit* target, CUnit* attacker);
 
     // Critical strike
-    static float ApplyCritical(float damage, float chance, float multiplier);
+    float ApplyCritical(float damage, float chance, float multiplier);
+
+    // Deterministic combat RNG (same LCG as CSimulation::SimRand01; seeded
+    // per game so replays reproduce. std::rand/mt19937 stay banned here).
+    float CombatRand01();
+    void SetSeed(uint32_t seed) { rngState_ = seed; }
+    uint32_t GetRandState() const { return rngState_; }
 
 private:
     float GetConfiguredMultiplier(CAttackType atk, CDefenseType def) const;
 
     float defenseArmor_ = 0.06f;
     AttackDefenseTable table_;
+    float etherealBonusMagic_ = 1.6667f;
+    float etherealBonusSpells_ = 1.6667f;
+    bool magicImmuneResistsDamage_ = true;
+    bool magicImmuneResistsUltimates_ = true;
+    bool etherealBonusAlly_ = false;
+    uint32_t rngState_ = 0x12345678u;
 };

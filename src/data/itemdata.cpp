@@ -5,7 +5,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <iostream>
-#include <random>
+#include <functional>
 #include <set>
 #include <sstream>
 #include <unordered_map>
@@ -362,17 +362,32 @@ CItemData CItemData::LoadFromMpq(const MpqManager& mpq, const std::string& mapPa
 
     TxtTable skinTbl;
     {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Units\\ItemFunc.txt", buf)) {
-            skinTbl.Load(buf.data(), buf.size());
-        }
-        std::vector<uint8_t> buf2;
-        if (mpq.ReadFile("Units\\ItemStrings.txt", buf2)) {
-            skinTbl.Load(buf2.data(), buf2.size());
-        }
-        std::vector<uint8_t> buf3;
-        if (mpq.ReadFile("Units\\ItemSkin.txt", buf3)) {
-            skinTbl.Load(buf3.data(), buf3.size());
+        // Generic + per-race/campaign overlays (ref StandardObjectData item
+        // func/strings); missing files are skipped by ReadFile.
+        const char* itemFiles[] = {
+            "Units\\ItemFunc.txt",
+            "Units\\ItemStrings.txt",
+            "Units\\ItemSkin.txt",
+            "Units\\CommonItemFunc.txt",
+            "Units\\CommonItemStrings.txt",
+            "Units\\HumanItemFunc.txt",
+            "Units\\HumanItemStrings.txt",
+            "Units\\OrcItemFunc.txt",
+            "Units\\OrcItemStrings.txt",
+            "Units\\NightElfItemFunc.txt",
+            "Units\\NightElfItemStrings.txt",
+            "Units\\UndeadItemFunc.txt",
+            "Units\\UndeadItemStrings.txt",
+            "Units\\NeutralItemFunc.txt",
+            "Units\\NeutralItemStrings.txt",
+            "Units\\CampaignItemFunc.txt",
+            "Units\\CampaignItemStrings.txt",
+        };
+        for (const char* f : itemFiles) {
+            std::vector<uint8_t> buf;
+            if (mpq.ReadFile(f, buf)) {
+                skinTbl.Load(buf.data(), buf.size());
+            }
         }
     }
 
@@ -464,17 +479,17 @@ const CItemType* CItemData::GetItem(War3ID id) const {
     return (it != items_.end()) ? it->second.get() : nullptr;
 }
 
-War3ID CItemData::ChooseRandomItem(int level, std::mt19937& rng) const {
+War3ID CItemData::ChooseRandomItem(int level, std::function<float()> rand01) const {
     auto it = levelToRandomChoices_.find(level);
     if (it == levelToRandomChoices_.end() || it->second.unclassifiedItems.empty()) {
         return War3ID();
     }
     const auto& items = it->second.unclassifiedItems;
-    const size_t index = std::uniform_int_distribution<size_t>(0, items.size() - 1)(rng);
+    const size_t index = (size_t)(rand01() * (float)items.size()) % items.size();
     return items[index];
 }
 
-War3ID CItemData::ChooseRandomItem(CItemClass itemClass, int level, std::mt19937& rng) const {
+War3ID CItemData::ChooseRandomItem(CItemClass itemClass, int level, std::function<float()> rand01) const {
     auto it = levelToRandomChoices_.find(level);
     if (it == levelToRandomChoices_.end()) {
         std::cerr << "chooseRandomItem: no item set: " << level << std::endl;
@@ -487,6 +502,6 @@ War3ID CItemData::ChooseRandomItem(CItemClass itemClass, int level, std::mt19937
         return War3ID();
     }
     const auto& items = classIt->second;
-    const size_t index = std::uniform_int_distribution<size_t>(0, items.size() - 1)(rng);
+    const size_t index = (size_t)(rand01() * (float)items.size()) % items.size();
     return items[index];
 }

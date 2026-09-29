@@ -83,6 +83,29 @@ public:
     CBuff* Clone() const override;
 };
 
+// Ethereal buff (Banish): physical immunity + magic/spell bonus taken.
+// Drives CUnit::IsEthereal, consumed by CCombatSystem (ref ethereal damage
+// rules). Removal is stacking-aware like Divine Shield.
+class CBuffEthereal : public CBuff {
+public:
+    explicit CBuffEthereal(float duration, War3ID id = War3ID("Bban"));
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+};
+
+// Magic immunity buff (Anti-magic Shell): resists MAGIC and non-universal
+// SPELLS. Drives CUnit::IsMagicImmune, consumed by CCombatSystem.
+class CBuffMagicImmune : public CBuff {
+public:
+    explicit CBuffMagicImmune(float duration, War3ID id = War3ID("Bam2"));
+
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
+    CBuff* Clone() const override;
+};
+
 // Stun debuff - cannot act
 class CBuffStun : public CBuff {
 public:
@@ -477,6 +500,18 @@ private:
     float damageFactor_;
 };
 
+// Curse (Banshee, Acrs) - the bearer's attacks may miss (ref DataA).
+class CBuffCurse : public CBuff {
+public:
+    CBuffCurse(float duration, float missChance);
+
+    float GetMissChance() const { return missChance_; }
+    CBuff* Clone() const override;
+
+private:
+    float missChance_;
+};
+
 // Drunken Haze - the bearer's attacks may miss outright (retail
 // DataB 0.45 miss chance).
 class CBuffHaze : public CBuff {
@@ -510,13 +545,14 @@ public:
 };
 
 // Whirlwind (Bladestorm, AOww) - the bearer spins, striking nearby
-// enemies every second (ref CBuffWhirlWindCaster, 1s damage interval,
-// NORMAL spell damage). Attack/magic-immune side effects from ref are
-// not modeled (see StateMod/NonStacking gap).
+// enemies every second. While spinning the bearer is magic immune and
+// cannot attack.
 class CBuffWhirlwind : public CBuff {
 public:
     CBuffWhirlwind(float duration, float damagePerSecond, float radius);
 
+    void OnApply(CSimulation& game, CUnit* target) override;
+    void OnRemove(CSimulation& game, CUnit* target) override;
     void OnPeriodic(CSimulation& game, CUnit* target) override;
     CBuff* Clone() const override;
 
@@ -547,14 +583,17 @@ private:
 // DataB damage per second, Area).
 class CBuffPhoenixFire : public CBuff {
 public:
-    CBuffPhoenixFire(float duration, float damagePerSecond, float radius);
+    CBuffPhoenixFire(float duration, float damagePerSecond, float radius,
+                     float initialDamage = 0.0f);
 
+    void OnApply(CSimulation& game, CUnit* target) override;
     void OnPeriodic(CSimulation& game, CUnit* target) override;
     CBuff* Clone() const override;
 
 private:
     float damagePerSecond_;
     float radius_;
+    float initialDamage_ = 0.0f;
 };
 
 // Spell Shield marker (retail Amulet of Spell Shield, buff BNss): pure
@@ -591,4 +630,32 @@ public:
 
 private:
     std::vector<Bonus> bonuses_;
+};
+
+// Resistant Skin marker (Arsk). Negative buffs applied while this is
+// present have their duration quartered in CUnit::AddBuff.
+class CBuffResistant : public CBuff {
+public:
+    explicit CBuffResistant();
+    CBuff* Clone() const override;
+};
+
+// Incoming attack-type multipliers and an additive outgoing attack
+// multiplier (Runed Bracers AIsr, item reaction AIdd). 1 and 0 are no-ops.
+class CBuffDamageMod : public CBuff {
+public:
+    CBuffDamageMod(War3ID id, float spellsTaken, float magicTaken,
+                   float pierceTaken, float attackDealtAdd);
+
+    float GetSpellsTaken() const { return spellsTaken_; }
+    float GetMagicTaken() const { return magicTaken_; }
+    float GetPierceTaken() const { return pierceTaken_; }
+    float GetAttackDealtAdd() const { return attackDealtAdd_; }
+    CBuff* Clone() const override;
+
+private:
+    float spellsTaken_;
+    float magicTaken_;
+    float pierceTaken_;
+    float attackDealtAdd_;
 };

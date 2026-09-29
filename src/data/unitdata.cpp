@@ -479,6 +479,10 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
         }
         const std::string iconPath = GetMergedString(unitUITxt, unitUI, sid, "Art",
             GetMergedString(unitDataTxt, unitData, sid, "Art"));
+        // Response sound set (UnitUI `unitSound`, e.g. "Footman"); resolved
+        // against Units\UnitAckSounds.slk by audio/UnitSoundset.
+        const std::string unitSound = GetMergedString(unitUITxt, unitUI, sid, "unitSound",
+            GetMergedString(unitDataTxt, unitData, sid, "unitSound"));
 
         const int maxLife = GetMergedInt(unitBalanceTxt, unitBalance, sid, "HP", 100);
         const float lifeRegen = GetMergedFloat(unitBalanceTxt, unitBalance, sid, "regenHP", 0.0f);
@@ -697,6 +701,7 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
             lumberBountyBase, lumberBountyDice, lumberBountySides,
             false);
 
+        type->SetUnitSound(unitSound);
         types_[id] = std::move(type);
 
     }
@@ -781,6 +786,11 @@ CUnitData CUnitData::LoadFromMpq(const MpqManager& mpq,
                      unitBalanceSlk, unitBalanceTxt,
                      unitWeaponsSlk, unitWeaponsTxt,
                      unitUISlk, unitUITxt);
+}
+
+void CUnitData::RegisterUnitType(War3ID typeId, std::unique_ptr<CUnitType> type) {
+    if (!type) return;
+    types_[typeId] = std::move(type);
 }
 
 CUnitType* CUnitData::GetUnitType(War3ID typeId) const {

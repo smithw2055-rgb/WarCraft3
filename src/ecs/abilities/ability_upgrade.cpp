@@ -42,15 +42,28 @@ CBehavior* CAbilityUpgrade::BeginNoTarget(CSimulation& game, CUnit* caster, int 
         return nullptr;
     }
 
-    // Deduct resources
+    // Deduct resources and build the new form over its build time.
     player->AddGold(-upgradeType->GetGoldCost());
     player->AddLumber(-upgradeType->GetLumberCost());
-
-    // Start upgrade (change unit type in-place).
-    // Simplification: applied instantly. A timed morph needs CUnit type-swap
-    // support (stats/ability rebuild mid-game), which does not exist yet;
-    // route through CAbilityQueue once it does (ref upgrade progress).
-    std::cout << "Upgrading to: " << upgradeId.ToString() << std::endl;
-
+    pendingId_ = upgradeId;
+    progress_ = 0.0f;
+    buildTime_ = static_cast<float>(upgradeType->GetBuildTime());
+    if (buildTime_ <= 0.0f) buildTime_ = 1.0f;
+    upgrading_ = true;
+    caster->SetConstructing(true);
+    caster->SetConstructionProgress(0.0f);
     return nullptr;
+}
+
+void CAbilityUpgrade::OnTick(CSimulation& game, CUnit* unit) {
+    if (!upgrading_ || !unit || unit->IsDead()) return;
+    progress_ += game.GetSimStepTime();
+    if (progress_ > buildTime_) progress_ = buildTime_;
+    unit->SetConstructionProgress(progress_);
+    if (progress_ < buildTime_) return;
+    upgrading_ = false;
+    unit->SetConstructing(false);
+    CUnitData* data = game.GetUnitData();
+    CUnitType* form = data ? data->GetUnitType(pendingId_) : nullptr;
+    if (form) unit->MorphTo(form, pendingId_);
 }

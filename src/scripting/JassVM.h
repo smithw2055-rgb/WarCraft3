@@ -116,6 +116,9 @@ private:
     struct JassStructDef {
         std::string name;
         std::string parent;
+        bool isInterface = false;
+        // type name, member that holds the delegated instance
+        std::vector<std::pair<std::string, std::string>> delegates;
         std::vector<JassStructMember> members;
         std::vector<JassStructMethod> methods;
     };
@@ -127,7 +130,9 @@ private:
     const JassStructDef* FindStructDef(const std::string& name) const;
     bool IsStructBaseOf(const std::string& base, const std::string& derived) const;
     // Enclosing-instance id for thistype@S (0 = static context).
-    int ThistypeInstance(const std::string& structName) const;    const JassStructMember* FindStructMember(const JassStructDef* def, const std::string& member) const;
+    int ThistypeInstance(const std::string& structName) const;
+    int FindDelegateInstance(const std::string& type, int instanceId, const std::string& name) const;
+    const JassStructMember* FindStructMember(const JassStructDef* def, const std::string& member) const;
     const JassStructMethod* FindStructMethod(const std::string& type, const std::string& method) const;
     int AllocateStruct(const std::string& type);
     JassValue DefaultStructValue(const std::string& type) const;

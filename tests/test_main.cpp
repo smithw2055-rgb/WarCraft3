@@ -28,6 +28,15 @@ bool TestMdxTimelineUsesBezierTangents();
 bool TestMdxModelTimelineSamplingIgnoresOtherSequences();
 bool TestMdxAnimatedGeosetColorConvertsBgrToRgb();
 bool TestMdxParsesLayerTextureIdTimelineAsInteger();
+bool TestAttachFindIsCaseInsensitive();
+bool TestAttachFindFallbacks();
+bool TestAttachWorldPosition();
+bool TestAttachMatrixMatchesPosition();
+bool TestAttachMatrixFollowsBoneRotation();
+bool TestInstanceMatrixIdentity();
+bool TestCameraRotateAroundPoint();
+bool TestInstanceMatrixRotation();
+bool TestInstanceMatrixPerAxisScale();
 bool TestMdxParsesLightTypeAndTimelines();
 bool TestMdxSamplesCameraTimelinesOnlyInsideCurrentSequence();
 bool TestMdxParsesRibbonColorAndTextureSlotTimelines();
@@ -46,6 +55,7 @@ bool TestMdxCollisionBoxRayUsesCollisionExtents();
 bool TestMdxAnimatorSamplesGlobalSequenceBones();
 bool TestMdxAnimatorLoopRestartMatchesReferenceEndFrame();
 bool TestMdxAnimatorIgnoresSequenceLocalBoneKeysOutsideCurrentSequence();
+bool TestMdxAnimatorBlendsSequenceChange();
 bool TestMdxAnimatorSamplesAttachmentVisibilityAsStep();
 bool TestMdxAnimatorSamplesLightVisibilityAsStep();
 bool TestMdxAnimatorUsesBoneGeosetAnimationVisibility();
@@ -64,6 +74,41 @@ bool TestMdxSkipsFaceFxAndBindPose();
 bool TestJassAnimationTagOrdinalsMatchReference();
 bool TestJassPopulateAnimationTagsFromSelector();
 bool TestJassVmThreadSleepResumesAfterWait();
+bool TestJassArrayGlobals();
+bool TestJassThreadArrayGlobals();
+bool TestPointEffectReportsStoredCoords();
+bool TestLocEffectResolvesLocation();
+bool TestTargetEffectFollowsUnit();
+bool TestTargetEffectFallsBackWhenTargetGone();
+bool TestTcpLoopbackCommandExchange();
+bool TestTcpAcceptTimesOut();
+bool TestLobbyReadyGate();
+bool TestLobbySlotValidation();
+bool TestTurnBatchWireRoundTrip();
+bool TestOrderFromCommandShapes();
+bool TestTurnManagerCollectsAndSorts();
+bool TestLoopbackLockstepGameStaysInSync();
+bool TestDesyncIsDetected();
+bool TestHostRunsThreeTurns();
+bool TestSilentPeerIdles();
+bool TestAcceptRejectsWhenFullOrEmpty();
+bool TestLanBindWorks();
+bool TestTurnManagerDropUnblocks();
+bool TestDisconnectEvictsSeat();
+bool TestClaimValidation();
+bool TestRejoinCatchesUp();
+bool TestRejoinPlayerLogic();
+bool TestSeedFromHistoryLogic();
+bool TestHostMigrationContinues();
+bool TestSpectatorReceivesTurns();
+bool TestSpectatorDropOnSendFailure();
+bool TestLateSpectatorResync();
+bool TestPromoteWatcherPlays();
+bool TestPromoteValidation();
+bool TestPromoteReclaimsDroppedSeat();
+bool TestResyncPackageRoundTrip();
+bool TestReplayLandsOnLiveHash();
+bool TestHostHistoryGrows();
 bool TestItemDamageArmorApplyRemoveSymmetric();
 bool TestItemStrengthFlowsThroughHeroAbility();
 bool TestUpgradeEffectsApplyAndUnapply();
@@ -92,6 +137,29 @@ bool TestRootUprootSwapAndHold();
 bool TestNightElfBuildConsumesWisp();
 bool TestHumanBuildPausesWhenWorkerLeaves();
 bool TestForGroupSleepDoesNotPoisonVm();
+bool TestSeedRngReproducesStreams();
+bool TestCombatSequencesDeterministic();
+bool TestJassRandomFollowsSeed();
+bool TestIssueUnitOrderLogsAndForwards();
+bool TestHashStateDeterministic();
+bool TestReplayLogRoundTrip();
+bool TestGetItemBehaviorPicksUp();
+bool TestDropItemBehaviorDrops();
+bool TestGiveItemBehaviorTransfers();
+bool TestTimedFogModifierExpires();
+bool TestExtendedFramesBuild();
+bool TestEtherealNegatesPhysical();
+bool TestEtherealBonusesMagic();
+bool TestEtherealAllySkipsBonus();
+bool TestMagicImmuneResists();
+bool TestGameplayConstantsEtherealParsed();
+bool TestUnitSoundsetResolve();
+bool TestUnitTypeSoundDefault();
+bool TestEtherealBuffLifecycle();
+bool TestMagicImmuneBuffLifecycle();
+bool TestEtherealBuffBlocksPhysical();
+bool TestAckBankResolve();
+bool TestAckBankPlaySafeWithoutAudio();
 bool TestThornsReflectsOnceWithoutPingPong();
 bool TestStunParksAndClearsBehavior();
 bool TestAttackDefenseTableMatchesOfficialChart();
@@ -131,13 +199,23 @@ bool TestJassCameraSetup();
 bool TestJassSoundMusic();
 bool TestJassCinematicVisuals();
 bool TestJassSuspendDecayMisc();
+bool TestJassP0Natives();
+bool TestJassP1Natives();
+bool TestJassTargeting();
+bool TestJassBonus();
+bool TestJassFiles();
+bool TestJassSmallBatch();
+bool TestJassEventFiring();
+bool TestRetailMapSmoke();
 bool TestTimedLifeKillsBearerOnExpiry();
 bool TestMassTeleportMovesGroup();
 bool TestBlinkClampsRange();
+bool TestBlinkSlidesOffBlockedCell();
 bool TestShockwaveLineDamage();
 bool TestStarfallDamagesArea();
 bool TestTranquilityHealsAllies();
 bool TestResurrectRevivesInRadius();
+bool TestResurrectSkipsBoneCorpse();
 bool TestReincarnationRevivesOnDeath();
 bool TestCharmConvertsCreep();
 bool TestSummonWaterElemental();
@@ -246,6 +324,7 @@ bool TestPulverizeSlams();
 bool TestForkedLightningChains();
 bool TestSpells14FactoryCoverage();
 bool TestPhoenixRebirths();
+bool TestPhoenixHatchDelayFromData();
 bool TestSpells15FactoryCoverage();
 bool TestDevourSwallows();
 bool TestDevourMagicDispels();
@@ -269,6 +348,75 @@ bool TestKaboomDetonates();
 bool TestPhoenixFireScorches();
 bool TestStarfallCodeIsAesf();
 bool TestSpells18FactoryCoverage();
+bool TestBanishEtherealizes();
+bool TestAntiMagicShellImmunizes();
+bool TestSpells19FactoryCoverage();
+bool TestSpells19OrderIds();
+bool TestPossessionConvertsAndSacrifices();
+bool TestPossessionNoSacrificeWithoutConversion();
+bool TestStampedeTramplesCorridor();
+bool TestSpells20FactoryCoverage();
+bool TestSpells20OrderIds();
+bool TestStasisTrapTripsAndStuns();
+bool TestStasisTrapIgnoresAllies();
+bool TestTornadoWandersAndTosses();
+bool TestTornadoExpires();
+bool TestSpells21FactoryCoverage();
+bool TestSpells21OrderIds();
+bool TestFingerOfDeathExecutes();
+bool TestFingerOfDeathSparesHeroes();
+bool TestHowlCripplesEnemiesOnly();
+bool TestAliasAnswersOwnOrder();
+bool TestSpells22FactoryCoverage();
+bool TestSpells22OrderIds();
+bool TestChainDispelCleansesBothSides();
+bool TestTauntForcesAttack();
+bool TestSpells23FactoryCoverage();
+bool TestSpells23OrderIds();
+bool TestRegenAuraReachesAllies();
+bool TestItemPassivesApplyAndRemove();
+bool TestSpells24FactoryCoverage();
+bool TestSpells24AliasOrders();
+bool TestCurseMakesAttacksMiss();
+bool TestMoonWellSpendsMana();
+bool TestEatTreeFellsAndHeals();
+bool TestSacrificeKillsTheOffering();
+bool TestHideAndEtherealAndGold();
+bool TestItemStatBonusesApply();
+bool TestSpells25FactoryCoverage();
+bool TestSpells25OrderIds();
+bool TestSpellShieldBlocksHostileCast();
+bool TestSpellShieldAreaCoversAllies();
+bool TestPermanentItemsChangeTheHero();
+bool TestMoonstoneSetsTheClock();
+bool TestFormToggleAndChaos();
+bool TestSpells26FactoryCoverage();
+bool TestSpells26OrderIds();
+bool TestStatePassivesApply();
+bool TestSpellResistAndMixedDefense();
+bool TestMagicDefenseToggles();
+bool TestMagicLeashStuns();
+bool TestReplenishRestoresAllies();
+bool TestSpells27FactoryCoverage();
+bool TestSpells27OrderIds();
+bool TestMilitiaAndMountPairing();
+bool TestMilitiaReturnsCargoAndExpires();
+bool TestUpgradeAndPowerup();
+bool TestItemPickupAppliesBonuses();
+bool TestBuildRejectsUnbuildableCell();
+bool TestBlightAndHauntedMine();
+bool TestWispAndLumberHarvest();
+bool TestCargoBurrowAndDrop();
+bool TestWaygateAndShops();
+bool TestSacrificeSummonsShade();
+bool TestSpells28FactoryCoverage();
+bool TestSpells28OrderIds();
+bool TestEntangleGoldMinePaysFromParent();
+bool TestEntangleConstruction();
+bool TestOverlayedMinePaysParent();
+bool TestChannelAndDrunkenBrawler();
+bool TestSpells29FactoryCoverage();
+bool TestSpells29OrderIds();
 bool TestOrderStringTable();
 bool TestSpellBaseOrderIds();
 bool TestSpellOrderDispatch();
@@ -287,12 +435,15 @@ bool TestFogVersionBumps();
 bool TestFogJassRoundTrip();
 bool TestFogEnableGate();
 bool TestFogSharedVision();
+bool TestUnitShareVisionReveals();
+bool TestTerrainDeformLowersHeight();
 bool TestLightningSegmentCount();
 bool TestLightningDefaultParams();
 bool TestLightningEndpointsAndBounds();
 bool TestLightningDeterminism();
 bool TestLightningBoltBookkeeping();
 bool TestLightningSlkOverride();
+bool TestImageBillboardPoseAndCorners();
 bool TestAbilityLevelsParse();
 bool TestAbilityLevelsApplyOnAdd();
 bool TestAbilityLevelsFollowSkillLevel();
@@ -371,6 +522,7 @@ bool TestAbilityArtLookupFromProfiles();
 bool TestSpellEffectNatives();
 bool TestImageNatives();
 bool TestTrackableAndUbersplatNatives();
+bool TestTrackableEnterAndHit();
 bool TestPoolPlaceRandomItem();
 bool TestPoolPlaceRandomUnit();
 bool TestChooseRandomCreep();
@@ -397,6 +549,9 @@ bool TestMeleeAIDiscoversHumanPlan();
 bool TestMeleeAIEconomyGrows();
 bool TestMeleeAIAttackWave();
 bool TestMeleeAINativesWiring();
+bool TestMeleeAIOrdersEnterCommandLog();
+bool TestMeleeAIDifficultyPacing();
+bool TestMeleeAIThinkRate();
 bool TestMdxParsesRibbonEmitter();
 bool TestRibbonEmissionAndQuads();
 bool TestRibbonAboveBelowGeometry();
@@ -418,6 +573,9 @@ bool TestModuleStaticPerStruct();
 bool TestModuleOverrideAndOptional();
 bool TestModuleForwardReference();
 bool TestModuleMissingError();
+bool TestInterfaceMethodDispatch();
+bool TestDelegateForwards();
+bool TestModuleImplementsModule();
 bool TestSetTerrainType();
 bool TestHashtableValues();
 bool TestHashtableHandles();
@@ -452,6 +610,15 @@ int main() {
         {"MDX model timeline sampling ignores other sequences", TestMdxModelTimelineSamplingIgnoresOtherSequences},
         {"MDX animated geoset color converts BGR to RGB", TestMdxAnimatedGeosetColorConvertsBgrToRgb},
         {"MDX parses layer texture id timeline as integer", TestMdxParsesLayerTextureIdTimelineAsInteger},
+        {"Attach find is case insensitive", TestAttachFindIsCaseInsensitive},
+        {"Attach find fallbacks", TestAttachFindFallbacks},
+        {"Attach world position", TestAttachWorldPosition},
+        {"Attach matrix matches position", TestAttachMatrixMatchesPosition},
+        {"Attach matrix follows bone rotation", TestAttachMatrixFollowsBoneRotation},
+        {"Instance matrix identity", TestInstanceMatrixIdentity},
+        {"Camera rotate around point", TestCameraRotateAroundPoint},
+        {"Instance matrix rotation", TestInstanceMatrixRotation},
+        {"Instance matrix per-axis scale", TestInstanceMatrixPerAxisScale},
         {"MDX parses light type and timelines", TestMdxParsesLightTypeAndTimelines},
         {"MDX samples camera timelines only inside current sequence", TestMdxSamplesCameraTimelinesOnlyInsideCurrentSequence},
         {"MDX parses ribbon color and texture slot timelines", TestMdxParsesRibbonColorAndTextureSlotTimelines},
@@ -470,6 +637,7 @@ int main() {
         {"MDX animator samples global-sequence bones", TestMdxAnimatorSamplesGlobalSequenceBones},
         {"MDX animator loop restart matches reference end frame", TestMdxAnimatorLoopRestartMatchesReferenceEndFrame},
         {"MDX animator ignores sequence-local bone keys outside current sequence", TestMdxAnimatorIgnoresSequenceLocalBoneKeysOutsideCurrentSequence},
+        {"MDX animator blends sequence change", TestMdxAnimatorBlendsSequenceChange},
         {"MDX animator samples attachment visibility as step", TestMdxAnimatorSamplesAttachmentVisibilityAsStep},
         {"MDX animator samples light visibility as step", TestMdxAnimatorSamplesLightVisibilityAsStep},
         {"MDX animator uses bone geoset animation visibility", TestMdxAnimatorUsesBoneGeosetAnimationVisibility},
@@ -488,6 +656,41 @@ int main() {
         {"JASS animation tag ordinals match reference", TestJassAnimationTagOrdinalsMatchReference},
         {"JASS PopulateTags parses selector", TestJassPopulateAnimationTagsFromSelector},
         {"JASS VM thread sleep resumes after wait", TestJassVmThreadSleepResumesAfterWait},
+        {"JASS array globals round-trip", TestJassArrayGlobals},
+        {"JASS thread array round-trip", TestJassThreadArrayGlobals},
+        {"Point effect reports stored coords", TestPointEffectReportsStoredCoords},
+        {"Loc effect resolves location", TestLocEffectResolvesLocation},
+        {"Target effect follows unit", TestTargetEffectFollowsUnit},
+        {"Target effect falls back when target gone", TestTargetEffectFallsBackWhenTargetGone},
+        {"TCP loopback command exchange", TestTcpLoopbackCommandExchange},
+        {"TCP accept times out", TestTcpAcceptTimesOut},
+        {"Lobby ready gate", TestLobbyReadyGate},
+        {"Lobby slot validation", TestLobbySlotValidation},
+        {"Turn batch wire round trip", TestTurnBatchWireRoundTrip},
+        {"Order from command shapes", TestOrderFromCommandShapes},
+        {"Turn manager collects and sorts", TestTurnManagerCollectsAndSorts},
+        {"Loopback lockstep game stays in sync", TestLoopbackLockstepGameStaysInSync},
+        {"Desync is detected", TestDesyncIsDetected},
+        {"Host runs three turns", TestHostRunsThreeTurns},
+        {"Silent peer idles", TestSilentPeerIdles},
+        {"Accept rejects when full or empty", TestAcceptRejectsWhenFullOrEmpty},
+        {"LAN bind works", TestLanBindWorks},
+        {"Turn manager drop unblocks", TestTurnManagerDropUnblocks},
+        {"Disconnect evicts seat", TestDisconnectEvictsSeat},
+        {"Claim validation", TestClaimValidation},
+        {"Rejoin catches up", TestRejoinCatchesUp},
+        {"Rejoin player logic", TestRejoinPlayerLogic},
+        {"Seed from history logic", TestSeedFromHistoryLogic},
+        {"Host migration continues", TestHostMigrationContinues},
+        {"Spectator receives turns", TestSpectatorReceivesTurns},
+        {"Spectator drop on send failure", TestSpectatorDropOnSendFailure},
+        {"Late spectator resync", TestLateSpectatorResync},
+        {"Promote watcher plays", TestPromoteWatcherPlays},
+        {"Promote validation", TestPromoteValidation},
+        {"Promote reclaims dropped seat", TestPromoteReclaimsDroppedSeat},
+        {"Resync package round trip", TestResyncPackageRoundTrip},
+        {"Replay lands on live hash", TestReplayLandsOnLiveHash},
+        {"Host history grows", TestHostHistoryGrows},
         {"Item damage/armor apply/remove symmetric", TestItemDamageArmorApplyRemoveSymmetric},
         {"Item strength flows through hero ability", TestItemStrengthFlowsThroughHeroAbility},
         {"Upgrade effects apply and unapply", TestUpgradeEffectsApplyAndUnapply},
@@ -516,6 +719,29 @@ int main() {
         {"Night elf build consumes wisp", TestNightElfBuildConsumesWisp},
         {"Human build pauses when worker leaves", TestHumanBuildPausesWhenWorkerLeaves},
         {"ForGroup sleep does not poison VM", TestForGroupSleepDoesNotPoisonVm},
+        {"Seed RNG reproduces streams", TestSeedRngReproducesStreams},
+        {"Combat sequences deterministic", TestCombatSequencesDeterministic},
+        {"JASS random follows seed", TestJassRandomFollowsSeed},
+        {"IssueUnitOrder logs and forwards", TestIssueUnitOrderLogsAndForwards},
+        {"HashState deterministic", TestHashStateDeterministic},
+        {"ReplayLog round trip", TestReplayLogRoundTrip},
+        {"GetItem behavior picks up", TestGetItemBehaviorPicksUp},
+        {"DropItem behavior drops", TestDropItemBehaviorDrops},
+        {"GiveItem behavior transfers", TestGiveItemBehaviorTransfers},
+        {"Timed fog modifier expires", TestTimedFogModifierExpires},
+        {"Extended FDF frames build", TestExtendedFramesBuild},
+        {"Ethereal negates physical", TestEtherealNegatesPhysical},
+        {"Ethereal bonuses magic", TestEtherealBonusesMagic},
+        {"Ethereal ally skips bonus", TestEtherealAllySkipsBonus},
+        {"Magic immune resists", TestMagicImmuneResists},
+        {"Gameplay constants ethereal parsed", TestGameplayConstantsEtherealParsed},
+        {"Unit soundset resolve", TestUnitSoundsetResolve},
+        {"Unit type sound default", TestUnitTypeSoundDefault},
+        {"Ethereal buff lifecycle", TestEtherealBuffLifecycle},
+        {"Magic immune buff lifecycle", TestMagicImmuneBuffLifecycle},
+        {"Ethereal buff blocks physical", TestEtherealBuffBlocksPhysical},
+        {"Ack bank resolve", TestAckBankResolve},
+        {"Ack bank play safe without audio", TestAckBankPlaySafeWithoutAudio},
         {"Thorns reflects once without ping-pong", TestThornsReflectsOnceWithoutPingPong},
         {"Stun parks and clears behavior", TestStunParksAndClearsBehavior},
         {"Attack/defense table matches official chart", TestAttackDefenseTableMatchesOfficialChart},
@@ -555,13 +781,23 @@ int main() {
         {"JASS sound music", TestJassSoundMusic},
         {"JASS cinematic visuals", TestJassCinematicVisuals},
         {"JASS suspend decay misc", TestJassSuspendDecayMisc},
+        {"JASS P0 natives", TestJassP0Natives},
+        {"JASS P1 natives", TestJassP1Natives},
+        {"JASS targeting", TestJassTargeting},
+        {"JASS bonus", TestJassBonus},
+        {"JASS files", TestJassFiles},
+        {"JASS small batch", TestJassSmallBatch},
+        {"JASS event firing", TestJassEventFiring},
+        {"Retail map smoke", TestRetailMapSmoke},
         {"Timed life kills bearer on expiry", TestTimedLifeKillsBearerOnExpiry},
         {"Mass teleport moves group", TestMassTeleportMovesGroup},
         {"Blink clamps range", TestBlinkClampsRange},
+        {"Blink slides off blocked cell", TestBlinkSlidesOffBlockedCell},
         {"Shockwave line damage", TestShockwaveLineDamage},
         {"Starfall damages area", TestStarfallDamagesArea},
         {"Tranquility heals allies", TestTranquilityHealsAllies},
         {"Resurrect revives in radius", TestResurrectRevivesInRadius},
+        {"Resurrect skips bone corpse", TestResurrectSkipsBoneCorpse},
         {"Reincarnation revives on death", TestReincarnationRevivesOnDeath},
         {"Charm converts creep", TestCharmConvertsCreep},
         {"Summon water elemental", TestSummonWaterElemental},
@@ -670,6 +906,7 @@ int main() {
         {"Forked lightning chains", TestForkedLightningChains},
         {"Spells14 factory coverage", TestSpells14FactoryCoverage},
         {"Phoenix rebirths", TestPhoenixRebirths},
+        {"Phoenix hatch delay from data", TestPhoenixHatchDelayFromData},
         {"Spells15 factory coverage", TestSpells15FactoryCoverage},
         {"Devour swallows", TestDevourSwallows},
         {"Devour magic dispels", TestDevourMagicDispels},
@@ -693,6 +930,75 @@ int main() {
         {"Phoenix fire scorches", TestPhoenixFireScorches},
         {"Starfall code is AEsf", TestStarfallCodeIsAesf},
         {"Spells18 factory coverage", TestSpells18FactoryCoverage},
+        {"Banish etherealizes", TestBanishEtherealizes},
+        {"Anti-magic shell immunizes", TestAntiMagicShellImmunizes},
+        {"Spells19 factory coverage", TestSpells19FactoryCoverage},
+        {"Spells19 order ids", TestSpells19OrderIds},
+        {"Possession converts and sacrifices", TestPossessionConvertsAndSacrifices},
+        {"Possession no sacrifice without conversion", TestPossessionNoSacrificeWithoutConversion},
+        {"Stampede tramples corridor", TestStampedeTramplesCorridor},
+        {"Spells20 factory coverage", TestSpells20FactoryCoverage},
+        {"Spells20 order ids", TestSpells20OrderIds},
+        {"Stasis trap trips and stuns", TestStasisTrapTripsAndStuns},
+        {"Stasis trap ignores allies", TestStasisTrapIgnoresAllies},
+        {"Tornado wanders and tosses", TestTornadoWandersAndTosses},
+        {"Tornado expires", TestTornadoExpires},
+        {"Spells21 factory coverage", TestSpells21FactoryCoverage},
+        {"Spells21 order ids", TestSpells21OrderIds},
+        {"Finger of Death executes", TestFingerOfDeathExecutes},
+        {"Finger of Death spares heroes", TestFingerOfDeathSparesHeroes},
+        {"Howl cripples enemies only", TestHowlCripplesEnemiesOnly},
+        {"Alias answers own order", TestAliasAnswersOwnOrder},
+        {"Spells22 factory coverage", TestSpells22FactoryCoverage},
+        {"Spells22 order ids", TestSpells22OrderIds},
+        {"Chain dispel cleanses both sides", TestChainDispelCleansesBothSides},
+        {"Taunt forces attack", TestTauntForcesAttack},
+        {"Spells23 factory coverage", TestSpells23FactoryCoverage},
+        {"Spells23 order ids", TestSpells23OrderIds},
+        {"Regen aura reaches allies", TestRegenAuraReachesAllies},
+        {"Item passives apply and remove", TestItemPassivesApplyAndRemove},
+        {"Spells24 factory coverage", TestSpells24FactoryCoverage},
+        {"Spells24 alias orders", TestSpells24AliasOrders},
+        {"Curse makes attacks miss", TestCurseMakesAttacksMiss},
+        {"Moon well spends mana", TestMoonWellSpendsMana},
+        {"Eat tree fells and heals", TestEatTreeFellsAndHeals},
+        {"Sacrifice kills the offering", TestSacrificeKillsTheOffering},
+        {"Hide and ethereal and gold", TestHideAndEtherealAndGold},
+        {"Item stat bonuses apply", TestItemStatBonusesApply},
+        {"Spells25 factory coverage", TestSpells25FactoryCoverage},
+        {"Spells25 order ids", TestSpells25OrderIds},
+        {"Spell shield blocks hostile cast", TestSpellShieldBlocksHostileCast},
+        {"Spell shield area covers allies", TestSpellShieldAreaCoversAllies},
+        {"Permanent items change the hero", TestPermanentItemsChangeTheHero},
+        {"Moonstone sets the clock", TestMoonstoneSetsTheClock},
+        {"Form toggle and chaos", TestFormToggleAndChaos},
+        {"Spells26 factory coverage", TestSpells26FactoryCoverage},
+        {"Spells26 order ids", TestSpells26OrderIds},
+        {"State passives apply", TestStatePassivesApply},
+        {"Spell resist and mixed defense", TestSpellResistAndMixedDefense},
+        {"Magic defense toggles", TestMagicDefenseToggles},
+        {"Magic leash stuns", TestMagicLeashStuns},
+        {"Replenish restores allies", TestReplenishRestoresAllies},
+        {"Spells27 factory coverage", TestSpells27FactoryCoverage},
+        {"Spells27 order ids", TestSpells27OrderIds},
+        {"Militia and mount pairing", TestMilitiaAndMountPairing},
+        {"Militia returns cargo and expires", TestMilitiaReturnsCargoAndExpires},
+        {"Upgrade and powerup", TestUpgradeAndPowerup},
+        {"Item pickup applies bonuses", TestItemPickupAppliesBonuses},
+        {"Build rejects unbuildable cell", TestBuildRejectsUnbuildableCell},
+        {"Blight and haunted mine", TestBlightAndHauntedMine},
+        {"Wisp and lumber harvest", TestWispAndLumberHarvest},
+        {"Cargo burrow and drop", TestCargoBurrowAndDrop},
+        {"Waygate and shops", TestWaygateAndShops},
+        {"Sacrifice summons shade", TestSacrificeSummonsShade},
+        {"Spells28 factory coverage", TestSpells28FactoryCoverage},
+        {"Spells28 order ids", TestSpells28OrderIds},
+        {"Entangle gold mine pays from parent", TestEntangleGoldMinePaysFromParent},
+        {"Entangle construction", TestEntangleConstruction},
+        {"Overlayed mine pays parent", TestOverlayedMinePaysParent},
+        {"Channel and drunken brawler", TestChannelAndDrunkenBrawler},
+        {"Spells29 factory coverage", TestSpells29FactoryCoverage},
+        {"Spells29 order ids", TestSpells29OrderIds},
         {"Order string table", TestOrderStringTable},
         {"Spell base order ids", TestSpellBaseOrderIds},
         {"Spell order dispatch", TestSpellOrderDispatch},
@@ -711,12 +1017,15 @@ int main() {
         {"Fog JASS round trip", TestFogJassRoundTrip},
         {"Fog enable gate", TestFogEnableGate},
         {"Fog shared vision", TestFogSharedVision},
+        {"Unit share vision reveals", TestUnitShareVisionReveals},
+        {"Terrain deform lowers height", TestTerrainDeformLowersHeight},
         {"Lightning segment count", TestLightningSegmentCount},
         {"Lightning default params", TestLightningDefaultParams},
         {"Lightning endpoints and bounds", TestLightningEndpointsAndBounds},
         {"Lightning determinism", TestLightningDeterminism},
         {"Lightning bolt bookkeeping", TestLightningBoltBookkeeping},
         {"Lightning SLK override", TestLightningSlkOverride},
+        {"Image billboard pose and corners", TestImageBillboardPoseAndCorners},
         {"Ability levels parse", TestAbilityLevelsParse},
         {"Ability levels apply on add", TestAbilityLevelsApplyOnAdd},
         {"Ability levels follow skill level", TestAbilityLevelsFollowSkillLevel},
@@ -795,6 +1104,7 @@ int main() {
         {"Spell effect natives", TestSpellEffectNatives},
         {"Image natives", TestImageNatives},
         {"Trackable and ubersplat natives", TestTrackableAndUbersplatNatives},
+        {"Trackable enter and hit", TestTrackableEnterAndHit},
         {"Pool place random item", TestPoolPlaceRandomItem},
         {"Pool place random unit", TestPoolPlaceRandomUnit},
         {"Choose random creep", TestChooseRandomCreep},
@@ -821,6 +1131,9 @@ int main() {
         {"Melee AI economy grows", TestMeleeAIEconomyGrows},
         {"Melee AI attack wave", TestMeleeAIAttackWave},
         {"Melee AI natives wiring", TestMeleeAINativesWiring},
+        {"Melee AI orders enter command log", TestMeleeAIOrdersEnterCommandLog},
+        {"Melee AI difficulty pacing", TestMeleeAIDifficultyPacing},
+        {"Melee AI think rate", TestMeleeAIThinkRate},
         {"MDX parses ribbon emitter", TestMdxParsesRibbonEmitter},
         {"Ribbon emission and quads", TestRibbonEmissionAndQuads},
         {"Ribbon above/below geometry", TestRibbonAboveBelowGeometry},
@@ -842,6 +1155,9 @@ int main() {
         {"Module override and optional", TestModuleOverrideAndOptional},
         {"Module forward reference", TestModuleForwardReference},
         {"Module missing error", TestModuleMissingError},
+        {"Interface method dispatch", TestInterfaceMethodDispatch},
+        {"Delegate forwards", TestDelegateForwards},
+        {"Module implements module", TestModuleImplementsModule},
         {"Set terrain type", TestSetTerrainType},
         {"Hashtable values", TestHashtableValues},
         {"Hashtable handles", TestHashtableHandles},

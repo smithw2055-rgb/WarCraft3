@@ -217,7 +217,7 @@ static std::string BuildWaterVertex() {
        << "uniform sampler2D water_height_texture;\nuniform sampler2D ground_height_texture;\nuniform sampler2D water_exists_texture;\n"
        << "uniform float centerOffsetX;\nuniform float centerOffsetY;\nuniform mat4 MVP;\n"
        << "uniform vec4 shallow_color_min;\nuniform vec4 shallow_color_max;\nuniform vec4 deep_color_min;\nuniform vec4 deep_color_max;\n"
-       << "uniform float water_offset;\nuniform sampler2D lightTexture;\nuniform float lightCount;\nuniform float lightTextureHeight;\n"
+       << "uniform float water_offset;\nuniform float water_wave;\nuniform sampler2D lightTexture;\nuniform float lightCount;\nuniform float lightTextureHeight;\n"
        << "out vec2 UV;\nout vec4 vertexColor;\nout vec2 position;\nout vec3 shadeColor;\nout vec2 v_suv;\nflat out float waterCoverage;\n"
        << "const float min_depth = 10.f / 128;\nconst float deeplevel = 64.f / 128;\nconst float maxdepth = 72.f / 128;\n"
        << "void main() {\n"
@@ -233,6 +233,7 @@ static std::string BuildWaterVertex() {
        << "    waterCoverage = (we0 + we1 + we2 + we3) / 4.0;\n"
        << "    position = vec2((vPosition.x + pos.x) * 128.0 + centerOffsetX, (vPosition.y + pos.y) * 128.0 + centerOffsetY);\n"
        << "    vec4 myposition = vec4(position.x, water_height * 128.0, position.y, 1);\n"
+       << "    myposition.y += water_wave * sin(position.x * 0.02 + position.y * 0.017);\n"
        << "    vec3 Normal = vec3(0, 1, 0);\n"
        << "    gl_Position = is_water ? MVP * myposition : vec4(2.0, 0.0, 0.0, 1.0);\n"
        << "    UV = vec2((vPosition.x + pos.x % 2) / 2.0, (vPosition.y + pos.y % 2) / 2.0);\n"
@@ -499,14 +500,14 @@ sg_shader TerrainShaders::CreateWaterShader(int) {
     desc.fragment_func.source = fs.c_str();
 
     desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
-    desc.uniform_blocks[0].size = 148;
+    desc.uniform_blocks[0].size = 152;
     desc.uniform_blocks[0].layout = SG_UNIFORMLAYOUT_NATIVE;
-    const char* vsU[] = {"MVP","centerOffsetX","centerOffsetY","water_offset","lightCount","lightTextureHeight",
+    const char* vsU[] = {"MVP","centerOffsetX","centerOffsetY","water_offset","water_wave","lightCount","lightTextureHeight",
                          "shallow_color_min","shallow_color_max","deep_color_min","deep_color_max"};
     sg_uniform_type vsT[] = {SG_UNIFORMTYPE_MAT4,SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT,
-                             SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT4,SG_UNIFORMTYPE_FLOAT4,
+                             SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT,SG_UNIFORMTYPE_FLOAT4,SG_UNIFORMTYPE_FLOAT4,
                              SG_UNIFORMTYPE_FLOAT4,SG_UNIFORMTYPE_FLOAT4};
-    for (int i = 0; i < 10; ++i) { desc.uniform_blocks[0].glsl_uniforms[i].glsl_name = vsU[i]; desc.uniform_blocks[0].glsl_uniforms[i].type = vsT[i]; desc.uniform_blocks[0].glsl_uniforms[i].array_count = 1; }
+    for (int i = 0; i < 11; ++i) { desc.uniform_blocks[0].glsl_uniforms[i].glsl_name = vsU[i]; desc.uniform_blocks[0].glsl_uniforms[i].type = vsT[i]; desc.uniform_blocks[0].glsl_uniforms[i].array_count = 1; }
 
     desc.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
     desc.uniform_blocks[1].size = 52;

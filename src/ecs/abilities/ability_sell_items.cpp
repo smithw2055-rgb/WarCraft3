@@ -18,6 +18,14 @@ CAbilitySellItems::CAbilitySellItems(int handleId, const std::vector<War3ID>& it
     itemsSold_ = itemsSold;
 }
 
+void CAbilitySellItems::OnAdd(CSimulation& game, CUnit* unit) {
+    (void)unit;
+    for (const auto& entry : game.GetGlobalShopStock()) {
+        if (entry.isUnit) AddStockUnit(entry.id, entry.current, entry.max);
+        else AddStockItem(entry.id, entry.current, entry.max);
+    }
+}
+
 bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, int orderId) {
     // OrderId encodes item index: (orderId & 0xFF00) >> 8 - 1
     int itemIndex = ((orderId & 0xFF00) >> 8) - 1;

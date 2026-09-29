@@ -558,8 +558,8 @@ public:
              bool hasPoint, float x, float y) override;
 };
 
-// Resurrect a dead unit target at full life (ref ABActionResurrect;
-// Paladin Resurrect.j pattern, simplified: no corpse handling).
+// Resurrect a dead unit target via CUnit::Revive. Bone corpses that
+// can no longer be raised are left alone.
 class ABActionResurrectTarget : public ABAction {
 public:
     void Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
@@ -760,4 +760,17 @@ public:
 private:
     bool removePositive_;
     bool removeNegative_;
+};
+
+// Force the unit target to attack `foe` (ref Taunt): issues a
+// widget-targeted ATTACK order through the sim, so it is logged and
+// replayable like any player order. Immediate use only (no storage).
+class ABActionTauntTarget : public ABAction {
+public:
+    explicit ABActionTauntTarget(CUnit* foe) : foe_(foe) {}
+    void Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
+             bool hasPoint, float x, float y) override;
+
+private:
+    CUnit* foe_ = nullptr;
 };

@@ -1099,6 +1099,43 @@ bool TestMdxAnimatorIgnoresSequenceLocalBoneKeysOutsideCurrentSequence() {
     return true;
 }
 
+bool TestMdxAnimatorBlendsSequenceChange() {
+    MdxModel model;
+    model.pivotPoints.push_back({0.0f, 0.0f, 0.0f});
+    MdxSequence stand;
+    stand.name = "Stand";
+    stand.startFrame = 0;
+    stand.endFrame = 100;
+    model.sequences.push_back(stand);
+    MdxSequence attack;
+    attack.name = "Attack";
+    attack.startFrame = 1000;
+    attack.endFrame = 1100;
+    model.sequences.push_back(attack);
+    MdxNode bone;
+    bone.name = "Weapon";
+    bone.objectId = 0;
+    bone.parentId = -1;
+    MdxTimeline translation;
+    translation.tag = TestMdxTag('K', 'G', 'T', 'R');
+    translation.interpolationType = MdxInterpolation::Linear;
+    translation.frames = {1000, 1100};
+    translation.values = {50.0f, 0.0f, 0.0f, 50.0f, 0.0f, 0.0f};
+    bone.timelines.push_back(translation);
+    model.bones.push_back(bone);
+
+    MdxAnimator animator;
+    animator.Init(model);
+    animator.SetBlendTime(1.0f);
+    TEST_ASSERT(animator.SetSequence(0, true, 1.0f));
+    TEST_ASSERT(animator.SetSequence(1, true, 1.0f));
+    TEST_ASSERT(Near(animator.GetBoneMatrices()[0].m[12], 0.0f, 0.5f));
+    animator.Update(0.5f);
+    TEST_ASSERT(Near(animator.GetBoneMatrices()[0].m[12], 25.0f, 1.0f));
+    TEST_ASSERT(Near(animator.GetBlendLeft(), 0.5f, 0.01f));
+    return true;
+}
+
 bool TestMdxAnimatorSamplesAttachmentVisibilityAsStep() {
     MdxModel model;
     model.pivotPoints.push_back({0.0f, 0.0f, 0.0f});

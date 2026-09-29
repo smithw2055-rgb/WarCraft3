@@ -4,6 +4,7 @@
 #include "ecs/combat/projectile.h"
 #include "ecs/csimulation.h"
 #include "ecs/fog_state.h"
+#include "ecs/orders/order.h"
 #include "ecs/player.h"
 #include "ecs/unit.h"
 #include "ecs/unit_type.h"
@@ -297,19 +298,25 @@ void ABActionKillTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarg
     unit->SetLife(game, 0.0f);
 }
 
+static bool CanResurrectCorpse(const CUnit* unit) {
+    if (!unit || !unit->IsDead()) return false;
+    if (unit->IsBoneCorpse()) return false;
+    return true;
+}
+
 void ABActionResurrectTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                   bool, float, float) {
     (void)caster;
     auto* unit = dynamic_cast<CUnit*>(unitTarget);
-    if (!unit || !unit->IsDead()) return;
-    unit->SetLife(game, unit->GetMaxLife());
+    if (!CanResurrectCorpse(unit)) return;
+    unit->Revive(game, unit->GetX(), unit->GetY());
 }
 
 void ABActionReviveTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                bool, float, float) {
     (void)caster;
     auto* unit = dynamic_cast<CUnit*>(unitTarget);
-    if (!unit || !unit->IsDead()) return;
+    if (!CanResurrectCorpse(unit)) return;
     unit->Revive(game, unit->GetX(), unit->GetY());
 }
 
@@ -814,6 +821,15 @@ void ABActionDispelTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTa
     auto* unit = dynamic_cast<CUnit*>(unitTarget);
     if (!unit || unit->IsDead()) return;
     unit->RemoveBuffsIf(game, removePositive_, removeNegative_, false, true);
+}
+
+void ABActionTauntTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
+                              bool, float, float) {
+    (void)caster;
+    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    if (!unit || unit->IsDead() || !foe_ || foe_->IsDead()) return;
+    game.IssueUnitOrder(unit->GetHandleId(),
+                        std::make_unique<COrderTargetWidget>(OrderIds::ATTACK, foe_));
 }
 
 ABActionCreateVision::ABActionCreateVision(float radius, float duration)

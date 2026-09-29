@@ -69,6 +69,37 @@ bool CFogSystem::SetModifierEnabled(int id, bool enabled) {
     return false;
 }
 
+int CFogSystem::AddTimedModifier(int player, const CFogArea& area, CFogState state,
+                                 float durationSeconds) {
+    const int id = AddModifier(player, area, state);
+    for (auto& modifier : modifiers_) {
+        if (modifier.id == id) {
+            modifier.enabled = true;
+            modifier.remaining = durationSeconds;
+            break;
+        }
+    }
+    version_++;
+    return id;
+}
+
+void CFogSystem::Tick(float dt) {
+    if (dt <= 0.0f) return;
+    bool changed = false;
+    for (auto it = modifiers_.begin(); it != modifiers_.end();) {
+        if (it->remaining >= 0.0f) {
+            it->remaining -= dt;
+            if (it->remaining <= 0.0f) {
+                it = modifiers_.erase(it);
+                changed = true;
+                continue;
+            }
+        }
+        ++it;
+    }
+    if (changed) version_++;
+}
+
 void CFogSystem::AddOverride(int player, const CFogArea& area, CFogState state) {
     CFogOverride paint;
     paint.player = player;

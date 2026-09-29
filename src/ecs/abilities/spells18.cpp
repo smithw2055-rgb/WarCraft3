@@ -225,7 +225,7 @@ CAbilityPhoenixFire::CAbilityPhoenixFire(int handleId)
 void CAbilityPhoenixFire::OnAdd(CSimulation& game, CUnit* unit) {
     if (!unit) return;
     unit->AddBuff(std::make_unique<CBuffPhoenixFire>(
-        99999.0f, damagePerSecond_, radius_), game);
+        99999.0f, damagePerSecond_, radius_, initialDamage_), game);
 }
 
 void CAbilityPhoenixFire::OnRemove(CSimulation& game, CUnit* unit) {
@@ -234,8 +234,7 @@ void CAbilityPhoenixFire::OnRemove(CSimulation& game, CUnit* unit) {
 }
 
 void CAbilityPhoenixFire::ApplyEffectData(const CAbilityDefFull& def, int level) {
-    // Ref DataA is the one-off initial damage (not modeled separately);
-    // the aura ticks at DataB per second over Area.
+    initialDamage_ = def.DataFloatAt(level, 0, initialDamage_);
     damagePerSecond_ = def.DataFloatAt(level, 1, damagePerSecond_);
     radius_ = def.AreaAt(level);
 }

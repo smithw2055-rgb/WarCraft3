@@ -21,9 +21,20 @@ public:
 
     // Animation tag for the renderer (Set/QueueDestructableAnimation).
     const std::string& GetAnimation() const { return animation_; }
-    void SetAnimation(const std::string& anim) { animation_ = anim; queuedAnimation_.clear(); }
+    void SetAnimation(const std::string& anim) {
+        animation_ = anim;
+        queuedAnimation_.clear();
+        ++animGeneration_;
+    }
     void QueueAnimation(const std::string& anim) { queuedAnimation_ = anim; }
     const std::string& GetQueuedAnimation() const { return queuedAnimation_; }
+    int GetAnimGeneration() const { return animGeneration_; }
+    // Current clip finished: the queued name becomes the playing name.
+    void PromoteQueuedAnimation() {
+        if (queuedAnimation_.empty()) return;
+        animation_ = std::move(queuedAnimation_);
+        queuedAnimation_.clear();
+    }
     // Animation playback speed multiplier (ref SetDestructableAnimationSpeed).
     float GetAnimationSpeed() const { return animationSpeed_; }
     void SetAnimationSpeed(float v) { animationSpeed_ = v; }
@@ -43,4 +54,5 @@ private:
     float occluderHeight_ = 0.0f;
     std::string animation_;
     std::string queuedAnimation_;
+    int animGeneration_ = 0;
 };

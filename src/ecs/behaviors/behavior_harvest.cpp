@@ -41,9 +41,7 @@ void CBehaviorHarvest::Begin(CSimulation& simulation) {
 void CBehaviorHarvest::End(CSimulation& simulation) {
     if (resourceType_ == CResourceType::GOLD && inMine_) {
         if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
-            if (auto* goldMine = dynamic_cast<CAbilityGoldMine*>(targetUnit->GetAbility(War3ID("Agld")))) {
-                goldMine->RemoveMiner(this);
-            }
+            MineAccessOf(targetUnit).Remove(this);
         }
         if (unit_) {
             unit_->SetHidden(false);
@@ -190,21 +188,21 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             if (resourceType_ == CResourceType::GOLD) {
                 auto* targetUnit = dynamic_cast<CUnit*>(target_);
                 if (targetUnit) {
-                    auto* goldMine = dynamic_cast<CAbilityGoldMine*>(targetUnit->GetAbility(War3ID("Agld")));
-                    if (goldMine) {
-                        if (goldMine->GetGold() <= 0) {
+                    CMineAccess goldMine = MineAccessOf(targetUnit);
+                    if (goldMine.ok()) {
+                        if (goldMine.Gold() <= 0) {
                             std::cout << "Gold mine depleted!" << std::endl;
                             return true;
                         }
 
-                        if (goldMine->CanAddMiner()) {
-                            goldMine->AddMiner(this);
+                        if (goldMine.CanAdd()) {
+                            goldMine.Add(this);
                             unit_->SetHidden(true);
                             unit_->SetInvulnerable(true);
                             inMine_ = true;
                             gathering_ = false;
                             popoutFromMineTurnTick_ = simulation.GetGameTurnTick() + std::max(1, static_cast<int>(
-                                std::ceil(goldMine->GetMiningDuration() / simulation.GetSimStepTime())));
+                                std::ceil(goldMine.Duration() / simulation.GetSimStepTime())));
                             std::cout << "Worker entered mine, waiting until tick " << popoutFromMineTurnTick_ << std::endl;
                         } else {
                             std::cout << "Mine full, waiting..." << std::endl;

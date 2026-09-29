@@ -136,4 +136,38 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     } else {
         std::memcpy(damageBonus.spells, damageBonus.magic, sizeof(damageBonus.spells));
     }
+
+    // Ethereal bonus pair lives in one comma list (ref: index 3 = magic,
+    // index 5 = spells); ally bonus and magic-immune gates are ints.
+    auto readMiscStr = [&](const char* key) {
+        return miscData.HasSection("Misc")
+            ? miscData.GetString("Misc", key, "")
+            : miscData.GetString("GameConstants", key, "");
+    };
+    auto readMiscInt = [&](const char* key, int def) {
+        if (miscData.HasSection("Misc")) return miscData.GetInt("Misc", key, def);
+        return miscData.GetInt("GameConstants", key, def);
+    };
+    const std::string etherealText = readMiscStr("EtherealDamageBonus");
+    if (!etherealText.empty()) {
+        std::vector<std::string> parts;
+        size_t pos = 0;
+        while (true) {
+            size_t comma = etherealText.find(',', pos);
+            parts.push_back(comma == std::string::npos
+                ? etherealText.substr(pos)
+                : etherealText.substr(pos, comma - pos));
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+        if (parts.size() > 3 && !parts[3].empty()) {
+            etherealDamageBonusMagic = (float)std::atof(parts[3].c_str());
+        }
+        if (parts.size() > 5 && !parts[5].empty()) {
+            etherealDamageBonusSpells = (float)std::atof(parts[5].c_str());
+        }
+    }
+    etherealDamageBonusAlly = readMiscInt("EtherealDamageBonusAlly", 0) != 0;
+    magicImmuneResistsDamage = readMiscInt("MagicImmunesResistDamage", 1) != 0;
+    magicImmuneResistsUltimates = readMiscInt("MagicImmunesResistUltimates", 1) != 0;
 }

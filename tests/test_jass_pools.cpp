@@ -282,6 +282,12 @@ bool TestShopPurchaseConsumesStock() {
     // Global stock lands on all shops.
     CallNative(vm, "AddItemToAllStock", {JassValue::Int(0x6763656C), JassValue::Int(2), JassValue::Int(2)});
     TEST_ASSERT(sellPtr->FindStock(War3ID("gcel"))->current == 2);
+    auto* lateShop = sim.AdoptUnit(std::make_unique<CUnit>(8406, MakePoolType("Shop2", War3ID("ngol"), false), 0, War3ID("ngol"), 20, 0, 0));
+    auto lateSell = std::make_unique<CAbilitySellItems>(8407, std::vector<War3ID>{War3ID("gcel")});
+    CAbilitySellItems* latePtr = lateSell.get();
+    lateShop->AddAbility(sim, std::move(lateSell));
+    TEST_ASSERT(latePtr->FindStock(War3ID("gcel")) != nullptr);
+    TEST_ASSERT(latePtr->FindStock(War3ID("gcel"))->current == 2);
     CallNative(vm, "RemoveItemFromAllStock", {JassValue::Int(0x6763656C)});
     TEST_ASSERT(sellPtr->FindStock(War3ID("gcel")) == nullptr);
     return true;

@@ -14,6 +14,8 @@
 #include "ecs/abilities/spells3.h"
 #include "ecs/buffs.h"
 #include "ecs/csimulation.h"
+#include "ecs/pathing/pathfinding.h"
+#include "map/wpm.h"
 #include "ecs/player.h"
 #include "ecs/unit.h"
 #include "ecs/unit_type.h"
@@ -111,6 +113,23 @@ bool TestBlinkClampsRange() {
     return true;
 }
 
+bool TestBlinkSlidesOffBlockedCell() {
+    CSimulation sim;
+    AddPlayers(sim);
+    WpmData wpm;
+    wpm.width = 4;
+    wpm.height = 4;
+    wpm.pathing.assign(16, 0);
+    wpm.pathing[0] = WpmData::UNWALKABLE;
+    sim.SetPathingMap(&wpm, 0.0f, 0.0f);
+    auto* caster = AdoptAt(sim, 312, 0, 0, 0);
+    caster->SetCollisionSize(0.0f);
+    caster->SetPositionAndCheckUnstuck(16.0f, 16.0f, sim);
+    TEST_ASSERT(std::fabs(caster->GetX() - 16.0f) > 1.0f
+                || std::fabs(caster->GetY() - 16.0f) > 1.0f);
+    return true;
+}
+
 bool TestShockwaveLineDamage() {
     CSimulation sim;
     AddPlayers(sim);
@@ -177,6 +196,21 @@ bool TestResurrectRevivesInRadius() {
     TEST_ASSERT(!fallen->IsDead());
     TEST_ASSERT(fallen->GetLife() == fallen->GetMaxLife());
     TEST_ASSERT(farFallen->IsDead()); // outside radius
+    return true;
+}
+
+bool TestResurrectSkipsBoneCorpse() {
+    CSimulation sim;
+    AddPlayers(sim);
+    auto* caster = AdoptAt(sim, 354, 0, 0, 0);
+    auto* fallen = AdoptAt(sim, 355, 0, 100, 0);
+    Settle(sim);
+    fallen->Damage(sim, caster, false, false, CAttackType::CHAOS, CDamageType::NORMAL, "", 99999.0f, 0);
+    for (int i = 0; i < 40; i++) sim.Update();
+    TEST_ASSERT(fallen->IsBoneCorpse());
+    CAbilityResurrect spell(3502);
+    spell.DoEffect(sim, caster, 100, 0);
+    TEST_ASSERT(fallen->IsDead());
     return true;
 }
 
@@ -284,7 +318,7 @@ bool TestMirrorImageCopiesCaster() {
 bool TestSpells3FactoryCoverage() {
     // AEsf is Starfall (AEst is the Owl Scout, covered in spells18).
     const char* codes[] = {"AHmt", "AHwe", "AHre", "AEbl", "AOmi",
-                           "AOsh", "AEsf", "AEtr", "AOre", "ANch"};
+                           "AOsh", "AEsf", "AEtq", "AOre", "ANch"};
     for (auto code : codes) {
         auto ability = AbilityFactory::CreateAbility(4000, War3ID(code));
         TEST_ASSERT(ability != nullptr);

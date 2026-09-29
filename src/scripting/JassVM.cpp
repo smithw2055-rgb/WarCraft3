@@ -1,6 +1,7 @@
 #include "JassVM.h"
 #include <cmath>
 #include <chrono>
+#include <cstdlib>
 #include <sstream>
 
 JassVM::JassVM() {}
@@ -53,6 +54,8 @@ bool JassVM::LoadScript(const std::string& source) {
                 JassStructDef def;
                 def.name = child->text;
                 def.parent = child->extendsType;
+                def.isInterface = child->isInterface;
+                def.delegates = child->delegates;
                 for (auto& member : child->children) {
                     if (member->type == AstNodeType::FUNCTION_DECL) {
                         // Method text is already "Type.name" (mangled).
@@ -206,6 +209,43 @@ int JassVM::ThistypeInstance(const std::string& structName) const {
     return 0;
 }
 
+int JassVM::FindDelegateInstance(const std::string& type, int instanceId, const std::string& name) const {
+    int currentId = instanceId;
+    std::string currentType = type;
+    for (int hop = 0; hop < 4; ++hop) {
+        const JassStructDef* start = FindStructDef(currentType);
+        int nextId = 0;
+        std::string nextType;
+        for (const JassStructDef* d = start; d != nullptr;) {
+            for (const auto& del : d->delegates) {
+                auto host = structInstances_.find(currentId);
+                if (host == structInstances_.end()) return 0;
+                auto held = host->second.scalars.find(del.second);
+                if (held == host->second.scalars.end() || held->second.intVal == 0) continue;
+                auto target = structInstances_.find(held->second.intVal);
+                if (target == structInstances_.end()) continue;
+                if (FindStructMethod(target->second.type, name) ||
+                    (FindStructDef(target->second.type) &&
+                     FindStructMember(FindStructDef(target->second.type), name))) {
+                    nextId = held->second.intVal;
+                    nextType = target->second.type;
+                    break;
+                }
+            }
+            if (nextId != 0) break;
+            d = d->parent.empty() ? nullptr : FindStructDef(d->parent);
+        }
+        if (nextId == 0) return 0;
+        if (FindStructMethod(nextType, name) ||
+            (FindStructDef(nextType) && FindStructMember(FindStructDef(nextType), name))) {
+            return nextId;
+        }
+        currentId = nextId;
+        currentType = nextType;
+    }
+    return 0;
+}
+
 const JassVM::JassStructMember* JassVM::FindStructMember(const JassStructDef* def,
                                                         const std::string& member) const {
     for (const JassStructDef* d = def; d != nullptr;) {
@@ -239,6 +279,10 @@ JassValue JassVM::DefaultStructValue(const std::string& type) const {
 int JassVM::AllocateStruct(const std::string& type) {
     const JassStructDef* def = FindStructDef(type);
     if (!def) return 0;
+    if (def->isInterface) {
+        errors_.push_back("Cannot allocate interface '" + type + "'");
+        return 0;
+    }
     const int id = nextStructId_++;
     JassStructInstance instance;
     instance.type = type;
@@ -274,6 +318,10 @@ JassValue JassVM::CallFunction(const std::string& funcName) {
 }
 
 bool JassVM::PushThreadFrame(ThreadState& state, const std::string& functionName, const std::vector<JassValue>& args) {
+    // Temporary frame tracer (WARSMASH_TRACE_NESTED=1).
+    if (std::getenv("WARSMASH_TRACE_NESTED")) {
+        std::cerr << "[NEST] " << functionName << std::endl;
+    }
     auto it = functions_.find(functionName);
     if (it == functions_.end()) {
         return false;
@@ -341,6 +389,10 @@ void JassVM::SyncThreadFromCallStack(ThreadState& state) {
 }
 
 JassVM::ThreadRunResult JassVM::RunThread(ThreadState& state, const std::string& functionName) {
+    // Temporary execution tracer (WARSMASH_TRACE_CALLS=1).
+    if (!state.started && std::getenv("WARSMASH_TRACE_CALLS")) {
+        std::cerr << "[TRACE] " << functionName << std::endl;
+    }
     ThreadRunResult result;
     if (state.completed) {
         result.completed = true;
@@ -774,6 +826,13 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                         }
                         if (hasIndex) {
                             it->second.arrays[target->text][index] = val;
+                        } else if (!mdef) {
+                            const int forwarded = FindDelegateInstance(it->second.type, instanceId, target->text);
+                            if (forwarded != 0) {
+                                structInstances_[forwarded].scalars[target->text] = val;
+                            } else {
+                                it->second.scalars[target->text] = val;
+                            }
                         } else {
                             it->second.scalars[target->text] = val;
                         }
@@ -822,6 +881,11 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 // Store in array storage
                 std::string arrName = arrAccess->text;
                 std::string key = arrName + "[" + std::to_string(index) + "]";
+                if (std::getenv("WARSMASH_TRACE_ARRAY")) {
+                    const bool toLocal = !callStack_.empty() &&
+                        callStack_.back().locals.find(arrName) != callStack_.back().locals.end();
+                    std::cerr << "[ARR-WRITE] " << key << (toLocal ? " LOCAL" : " GLOBAL") << std::endl;
+                }
                 if (!callStack_.empty() && callStack_.back().locals.find(arrName) != callStack_.back().locals.end()) {
                     callStack_.back().locals[key] = val;
                 } else {
@@ -858,9 +922,17 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
             if (!callStack_.empty()) {
                 auto& locals = callStack_.back().locals;
                 auto it = locals.find(key);
-                if (it != locals.end()) return it->second;
+                if (it != locals.end()) {
+                    if (std::getenv("WARSMASH_TRACE_ARRAY")) {
+                        std::cerr << "[ARR-READ] " << key << " LOCAL" << std::endl;
+                    }
+                    return it->second;
+                }
             }
             auto it = globals_.find(key);
+            if (std::getenv("WARSMASH_TRACE_ARRAY")) {
+                std::cerr << "[ARR-READ] " << key << (it != globals_.end() ? " GLOBAL-HIT" : " MISS") << std::endl;
+            }
             if (it != globals_.end()) return it->second;
             return JassValue::Null();
         }
@@ -1029,7 +1101,17 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 return vit->second;
             }
             auto vit = it->second.scalars.find(node->text);
-            if (vit == it->second.scalars.end()) return JassValue::Null();
+            if (vit == it->second.scalars.end()) {
+                const int forwarded = FindDelegateInstance(it->second.type, instanceId, node->text);
+                if (forwarded != 0) {
+                    auto fit = structInstances_.find(forwarded);
+                    if (fit != structInstances_.end()) {
+                        auto fvit = fit->second.scalars.find(node->text);
+                        if (fvit != fit->second.scalars.end()) return fvit->second;
+                    }
+                }
+                return JassValue::Null();
+            }
             return vit->second;
         }
 
@@ -1092,15 +1174,28 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 return JassValue::Null();
             }
             const JassStructMethod* m = FindStructMethod(iit->second.type, method);
+            int callId = instanceId;
+            std::string callType = iit->second.type;
+            if (!(m && m->func)) {
+                const int forwarded = FindDelegateInstance(iit->second.type, instanceId, method);
+                if (forwarded != 0) {
+                    auto fit = structInstances_.find(forwarded);
+                    if (fit != structInstances_.end()) {
+                        m = FindStructMethod(fit->second.type, method);
+                        callId = forwarded;
+                        callType = fit->second.type;
+                    }
+                }
+            }
             if (m && m->func) {
-                thistypeStack_.emplace_back(iit->second.type, instanceId);
+                thistypeStack_.emplace_back(callType, callId);
                 JassValue result;
                 if (m->isStatic) {
                     result = ExecuteFunction(m->func, args);
                 } else {
                     std::vector<JassValue> withThis;
                     withThis.reserve(args.size() + 1);
-                    withThis.push_back(JassValue::Int(instanceId));
+                    withThis.push_back(JassValue::Int(callId));
                     withThis.insert(withThis.end(), args.begin(), args.end());
                     result = ExecuteFunction(m->func, withThis);
                 }

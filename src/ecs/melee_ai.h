@@ -9,6 +9,7 @@
 // to gold-mining when the standard HARVEST order is rejected.
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include "resource/slk.h"
@@ -17,6 +18,7 @@ class CSimulation;
 class CUnit;
 class CPlayer;
 class CUnitType;
+class COrder;
 
 enum class AIDifficulty : int {
     EASY = 0,
@@ -53,6 +55,10 @@ public:
     // Introspection for tests/debugging.
     int GetThinkCount() const { return thinkCount_; }
     int GetWaveNumber() const { return waveNumber_; }
+    // Difficulty pacing (retail: higher difficulties react faster and
+    // attack more often; NORMAL values preserve existing behavior).
+    int GetThinkIntervalTicks() const;
+    int GetWaveCooldownTicks() const;
     bool HasPlan() const { return plan_.valid; }
     const AIRacePlan& GetPlan() const { return plan_; }
 
@@ -78,6 +84,10 @@ private:
     bool IsEnemyPlayer(int index) const;
     static bool IsWorkerType(const CUnitType* type);
     static bool IsCombatType(const CUnitType* type);
+    // Route one AI decision through the sim lockstep log (replayable,
+    // UI-visible, and identical on every peer since the AI is
+    // deterministic). Falls back to a direct issue when sim_ is null.
+    void IssueAiOrder(CUnit* unit, std::unique_ptr<COrder> order);
 
     CSimulation* sim_ = nullptr;
     int playerIndex_ = -1;

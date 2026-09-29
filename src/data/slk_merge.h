@@ -153,5 +153,12 @@ void ApplyMapDestructableObjectMods(const MpqManager& mpq, const std::string& ma
                                     const SlkTable& destructableSlk,
                                     TxtTable& overlay);
 
+// Doodad custom data (war3map.w3d + DoodadMetaData.slk): same merge
+// semantics as destructables but sourced from the Doodad object changeset
+// (ref Warcraft3MapObjectData doodadChangeset).
+void ApplyMapDoodadObjectMods(const MpqManager& mpq, const std::string& mapPath,
+                              const SlkTable& doodadSlk,
+                              TxtTable& overlay);
+
 void CollectDestructableIds(const SlkAccessor& slk, const TxtTable& txt,
                             std::set<std::string>& outIds);

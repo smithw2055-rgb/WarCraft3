@@ -33,6 +33,16 @@
 #include "ecs/abilities/spells16.h"
 #include "ecs/abilities/spells17.h"
 #include "ecs/abilities/spells18.h"
+#include "ecs/abilities/spells19.h"
+#include "ecs/abilities/spells20.h"
+#include "ecs/abilities/spells21.h"
+#include "ecs/abilities/spells23.h"
+#include "ecs/abilities/spells24.h"
+#include "ecs/abilities/spells25.h"
+#include "ecs/abilities/spells26.h"
+#include "ecs/abilities/spells27.h"
+#include "ecs/abilities/spells28.h"
+#include "ecs/abilities/spells29.h"
 #include "ecs/abilities/auras.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
@@ -105,6 +115,12 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("AUcs")) return std::make_unique<CAbilityCarrionSwarm>(handleId);
     if (code == War3ID("AUsl")) return std::make_unique<CAbilitySleep>(handleId);
     if (code == War3ID("AUin")) return std::make_unique<CAbilityInferno>(handleId);
+    if (code == War3ID("ANin")) {
+        // Generic Inferno code variant: same effect, own retail order.
+        auto ability = std::make_unique<CAbilityInferno>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
 
     // ===== Night Elf Spells =====
     if (code == War3ID("AEmb")) return std::make_unique<CAbilityManaBurn>(handleId);
@@ -127,7 +143,7 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("AOsh")) return std::make_unique<CAbilityShockwave>(handleId);
     if (code == War3ID("AEst")) return std::make_unique<CAbilityOwlScout>(handleId);
     if (code == War3ID("AEsf")) return std::make_unique<CAbilityStarfall>(handleId);
-    if (code == War3ID("AEtr")) return std::make_unique<CAbilityTranquility>(handleId);
+    if (code == War3ID("AEtq")) return std::make_unique<CAbilityTranquility>(handleId);
     if (code == War3ID("AOre")) return std::make_unique<CAbilityReincarnation>(handleId);
     if (code == War3ID("ANch")) return std::make_unique<CAbilityCharm>(handleId);
 
@@ -285,6 +301,202 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("ANfy")) return std::make_unique<CAbilityFactory>(handleId);
     if (code == War3ID("Asds")) return std::make_unique<CAbilityKaboom>(handleId);
     if (code == War3ID("Apxf")) return std::make_unique<CAbilityPhoenixFire>(handleId);
+
+    // ===== Batch 19: banish line =====
+    if (code == War3ID("AHbn")) return std::make_unique<CAbilityBanish>(handleId);
+    if (code == War3ID("Aam2")) return std::make_unique<CAbilityAntiMagicShell>(handleId);
+    if (code == War3ID("Aams")) {
+        // Base Anti-Magic Shell code variant (Aam2 is the Matrix copy).
+        auto ability = std::make_unique<CAbilityAntiMagicShell>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+
+    // ===== Batch 20: possession + stampede =====
+    if (code == War3ID("Apos")) return std::make_unique<CAbilityPossession>(handleId);
+    if (code == War3ID("ANst")) return std::make_unique<CAbilityStampede>(handleId);
+
+    // ===== Batch 21: stasis trap + tornado =====
+    if (code == War3ID("Asta")) return std::make_unique<CAbilityStasisTrap>(handleId);
+    if (code == War3ID("ANto")) return std::make_unique<CAbilityTornado>(handleId);
+
+    // ===== Batch 22: code variants reusing existing classes =====
+    // Afod/Acht share the ANfd/ANht effects with their own retail orders;
+    // the widened alias match in CheckCanUse routes them.
+    if (code == War3ID("Afod")) {
+        auto ability = std::make_unique<CAbilityFingerOfDeath>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+    if (code == War3ID("Acht")) {
+        auto ability = std::make_unique<CAbilityHowlOfTerror>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+
+    // ===== Batch 23: chain dispel + taunt =====
+    if (code == War3ID("Ache")) return std::make_unique<CAbilityChainDispel>(handleId);
+    if (code == War3ID("ANta")) return std::make_unique<CAbilityTaunt>(handleId);
+
+    // ===== Batch 24: ref templates that were only aliases or item passives =====
+    if (code == War3ID("Aoar")) return std::make_unique<CAbilityRegenerationAura>(handleId);
+    if (code == War3ID("Aabr")) {
+        auto ability = std::make_unique<CAbilityRegenerationAura>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+    if (code == War3ID("Aarm")) return std::make_unique<CAbilityManaRegenerationAura>(handleId);
+    if (code == War3ID("AIas")) return std::make_unique<CAbilityItemAttackSpeed>(handleId);
+    if (code == War3ID("AIrm")) return std::make_unique<CAbilityItemManaRegen>(handleId);
+    if (code == War3ID("AIms")) return std::make_unique<CAbilityItemMoveSpeed>(handleId);
+    if (code == War3ID("AIva")) return std::make_unique<CAbilityItemVampirism>(handleId);
+
+    // Same ability-builder template as an ability already implemented.
+    if (code == War3ID("Aasl")) {
+        auto ability = std::make_unique<CAbilityEnduranceAura>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+    if (code == War3ID("Aakb")) {
+        auto ability = std::make_unique<CAbilityCommandAura>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+    if (code == War3ID("ACrn")) {
+        return std::make_unique<CAbilityReincarnation>(handleId, code);
+    }
+    if (code == War3ID("ANdb")) {
+        // Drunken Brawler: the crit half plus the dodge half.
+        return std::make_unique<CAbilityDrunkenBrawler>(handleId);
+    }
+    if (code == War3ID("AIrg")) {
+        auto ability = std::make_unique<CAbilityRejuvenation>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+    if (code == War3ID("AIrd")) {
+        auto ability = std::make_unique<CAbilityRaiseDead>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+    if (code == War3ID("ANfb")) {
+        auto ability = std::make_unique<CAbilityStormBolt>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+    if (code == War3ID("Artn")) {
+        auto ability = std::make_unique<CAbilityReturnResources>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+    if (code == War3ID("Agyv") || code == War3ID("Adts") || code == War3ID("Abdt")) {
+        auto ability = std::make_unique<CAbilityTrueSight>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+
+    // ===== Batch 25: curse, moon well, eat tree, sacrifice, items =====
+    if (code == War3ID("Acrs")) return std::make_unique<CAbilityCurse>(handleId);
+    if (code == War3ID("Ambt")) return std::make_unique<CAbilityMoonWell>(handleId);
+    if (code == War3ID("Aeat")) return std::make_unique<CAbilityEatTree>(handleId);
+    if (code == War3ID("Asac")) return std::make_unique<CAbilitySacrifice>(handleId);
+    if (code == War3ID("Alam")) return std::make_unique<CAbilityRequestSacrifice>(handleId);
+    if (code == War3ID("Ahid")) return std::make_unique<CAbilityHide>(handleId);
+    if (code == War3ID("Aeth")) return std::make_unique<CAbilityEthereal>(handleId);
+    if (code == War3ID("AIgo")) return std::make_unique<CAbilityChestOfGold>(handleId);
+    if (code == War3ID("AIat")) return std::make_unique<CAbilityItemDamageBonus>(handleId);
+    if (code == War3ID("AIde")) return std::make_unique<CAbilityItemArmorBonus>(handleId);
+    if (code == War3ID("AIml")) return std::make_unique<CAbilityItemLifeBonus>(handleId);
+    if (code == War3ID("AImm")) return std::make_unique<CAbilityItemManaPoolBonus>(handleId);
+    if (code == War3ID("AIab")) return std::make_unique<CAbilityItemAttributeBonus>(handleId);
+
+    // ===== Batch 26: shield, tomes, forms, clock, invulnerability =====
+    if (code == War3ID("ANss")) return std::make_unique<CAbilitySpellShieldPassive>(handleId);
+    if (code == War3ID("ANse")) return std::make_unique<CAbilitySpellShieldArea>(handleId);
+    if (code == War3ID("AIim")) return std::make_unique<CAbilityItemPermanentStats>(handleId, code, 0, 0, 1);
+    if (code == War3ID("AIam")) return std::make_unique<CAbilityItemPermanentStats>(handleId, code, 1, 0, 0);
+    if (code == War3ID("AIxm")) return std::make_unique<CAbilityItemPermanentStats>(handleId, code, 0, 1, 0);
+    if (code == War3ID("AIsm")) return std::make_unique<CAbilityItemPermanentStats>(handleId, code, 1, 1, 1);
+    if (code == War3ID("AImi")) return std::make_unique<CAbilityItemPermanentLife>(handleId);
+    if (code == War3ID("AIem")) return std::make_unique<CAbilityItemExperience>(handleId);
+    if (code == War3ID("AIlm")) return std::make_unique<CAbilityItemLevelGain>(handleId);
+    if (code == War3ID("AIfs")) return std::make_unique<CAbilityItemFigurine>(handleId);
+    if (code == War3ID("Avul")) return std::make_unique<CAbilityPermanentInvulnerable>(handleId);
+    if (code == War3ID("AIct")) return std::make_unique<CAbilityChangeTimeOfDay>(handleId);
+    if (code == War3ID("Acpf") || code == War3ID("Aetf") || code == War3ID("Aave")) {
+        return std::make_unique<CAbilityToggleForm>(handleId, code);
+    }
+    if (code == War3ID("Acha")) return std::make_unique<CAbilityChaos>(handleId);
+
+    // ===== Batch 27: state passives, leash, replenish, item reactions =====
+    if (code == War3ID("Aetl")) {
+        return std::make_unique<CAbilityStatePassive>(handleId, code, CPassiveState::Ethereal);
+    }
+    if (code == War3ID("Amim")) {
+        return std::make_unique<CAbilityStatePassive>(handleId, code, CPassiveState::MagicImmune);
+    }
+    if (code == War3ID("Arsk")) {
+        return std::make_unique<CAbilityStatePassive>(handleId, code, CPassiveState::Resistant);
+    }
+    if (code == War3ID("Agho")) {
+        return std::make_unique<CAbilityStatePassive>(handleId, code, CPassiveState::Ghost);
+    }
+    if (code == War3ID("AIsr")) return std::make_unique<CAbilityItemSpellResist>(handleId);
+    if (code == War3ID("AIdd")) return std::make_unique<CAbilityItemMixedDefense>(handleId);
+    if (code == War3ID("Amdf")) return std::make_unique<CAbilityMagicDefense>(handleId);
+    if (code == War3ID("Amls")) return std::make_unique<CAbilityMagicLeash>(handleId);
+    if (code == War3ID("Arpl")) return std::make_unique<CAbilityReplenish>(handleId, code, true);
+    if (code == War3ID("Arpm")) return std::make_unique<CAbilityReplenish>(handleId, code, false);
+    if (code == War3ID("Asph")) return std::make_unique<CAbilitySphere>(handleId);
+    if (code == War3ID("AIco")) {
+        auto ability = std::make_unique<CAbilityCharm>(handleId);
+        ability->SetAlias(code);
+        return ability;
+    }
+
+    // ===== Batch 28: pairing, blight, harvest, cargo, waygate, shops =====
+    if (code == War3ID("Amic")) {
+        return std::make_unique<CAbilityPairing>(handleId, code, CPairMode::MilitiaCall);
+    }
+    if (code == War3ID("Amil")) {
+        return std::make_unique<CAbilityPairing>(handleId, code, CPairMode::Militia);
+    }
+    if (code == War3ID("Acoa")) {
+        return std::make_unique<CAbilityPairing>(handleId, code, CPairMode::Mount);
+    }
+    if (code == War3ID("Acoh")) {
+        return std::make_unique<CAbilityPairing>(handleId, code, CPairMode::LoadPartner);
+    }
+    if (code == War3ID("Acoi")) {
+        return std::make_unique<CAbilityPairing>(handleId, code, CPairMode::Couple);
+    }
+    if (code == War3ID("Abli")) return std::make_unique<CAbilityBlight>(handleId);
+    if (code == War3ID("Abgm")) return std::make_unique<CAbilityBlightedGoldMine>(handleId);
+    if (code == War3ID("Agl2")) return std::make_unique<CAbilityOverlayedGoldMine>(handleId);
+    if (code == War3ID("Aaha")) return std::make_unique<CAbilityAcolyteHarvest>(handleId);
+    if (code == War3ID("Awha")) return std::make_unique<CAbilityWispHarvest>(handleId);
+    if (code == War3ID("Ahrl")) return std::make_unique<CAbilityHarvestLumber>(handleId);
+    if (code == War3ID("Acar")) return std::make_unique<CAbilityCargoHold>(handleId, code, false);
+    if (code == War3ID("Abun")) return std::make_unique<CAbilityCargoHold>(handleId, code, true);
+    if (code == War3ID("Adri") || code == War3ID("Astd")) {
+        return std::make_unique<CAbilityDropInstant>(handleId, code);
+    }
+    if (code == War3ID("Awrp")) return std::make_unique<CAbilityWayGate>(handleId);
+    if (code == War3ID("Apit")) return std::make_unique<CAbilityShopPurchase>(handleId);
+    if (code == War3ID("Aneu")) {
+        return std::make_unique<CAbilityNeutralBuilding>(handleId, code, false);
+    }
+    if (code == War3ID("Aall")) {
+        return std::make_unique<CAbilityNeutralBuilding>(handleId, code, true);
+    }
+
+    // ===== Batch 29: entangle mine, channel test =====
+    if (code == War3ID("Aent")) return std::make_unique<CAbilityEntangleGoldMine>(handleId);
+    if (code == War3ID("Aegm")) return std::make_unique<CAbilityEntangledMine>(handleId);
+    if (code == War3ID("Aenc")) {
+        return std::make_unique<CAbilityCargoHold>(handleId, code, false, 5);
+    }
+    if (code == War3ID("ANcl")) return std::make_unique<CAbilityChannelTest>(handleId);
 
     // ===== Auras =====
     if (code == War3ID("AHad")) return std::make_unique<CAbilityDevotionAura>(handleId);

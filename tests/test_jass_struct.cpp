@@ -434,3 +434,80 @@ endfunction
     TEST_ASSERT(found);
     return true;
 }
+
+bool TestInterfaceMethodDispatch() {
+    JassVM vm;
+    const std::string src = R"(
+interface Weapon
+    method damage takes nothing returns integer
+endinterface
+
+struct Sword extends Weapon
+    method damage takes nothing returns integer
+        return 5
+    endmethod
+endstruct
+
+function TestMain takes nothing returns integer
+    local Sword s = Sword.allocate()
+    return s.damage()
+endfunction
+)";
+    TEST_ASSERT(Run(vm, src, "TestMain").intVal == 5);
+    return true;
+}
+
+bool TestDelegateForwards() {
+    JassVM vm;
+    const std::string src = R"(
+struct Bag
+    integer n = 1
+    method take takes nothing returns integer
+        return .n
+    endmethod
+endstruct
+
+struct Holder
+    Bag bag
+    delegate Bag bag
+endstruct
+
+function TestMain takes nothing returns integer
+    local Holder h = Holder.allocate()
+    set h.bag = Bag.allocate()
+    set h.n = 4
+    return h.take()
+endfunction
+)";
+    TEST_ASSERT(Run(vm, src, "TestMain").intVal == 4);
+    return true;
+}
+
+bool TestModuleImplementsModule() {
+    JassVM vm;
+    const std::string src = R"(
+module Base
+    method base takes nothing returns integer
+        return 2
+    endmethod
+endmodule
+
+module Extra
+    implement Base
+    method extra takes nothing returns integer
+        return 3
+    endmethod
+endmodule
+
+struct Troop
+    implement Extra
+endstruct
+
+function TestMain takes nothing returns integer
+    local Troop t = Troop.allocate()
+    return t.base() + t.extra()
+endfunction
+)";
+    TEST_ASSERT(Run(vm, src, "TestMain").intVal == 5);
+    return true;
+}

@@ -39,6 +39,12 @@ public:
     bool IsExpired() const { return remaining_ <= 0; }
     void SetRemaining(float v) { remaining_ = v; }
     void RefreshDuration() { remaining_ = duration_; }
+    // Resistant Skin quarters a negative buff before it is applied.
+    void ScaleDuration(float factor) {
+        if (factor < 0.0f) factor = 0.0f;
+        duration_ *= factor;
+        remaining_ *= factor;
+    }
 
     // Stacking
     CBuffStackType GetStackType() const { return stackType_; }

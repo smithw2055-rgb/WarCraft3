@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <unordered_map>
 
 struct MdxAnimNode {
     int parentIndex = -1;
@@ -66,6 +67,10 @@ public:
     bool SetSequence(int index, bool loop = true, float speed = 1.0f);
     int FindSequence(const std::string& name) const;
     bool PlaySequence(const std::string& name, bool loop = true, float speed = 1.0f);
+    // Seconds to blend from the previous pose when the sequence changes.
+    void SetBlendTime(float seconds) { blendTime_ = std::max(0.0f, seconds); }
+    float GetBlendTime() const { return blendTime_; }
+    float GetBlendLeft() const { return blendLeft_; }
     int GetCurrentSequence() const { return sequenceState_.sequenceIndex; }
     uint32_t GetCurrentFrame() const { return sequenceState_.currentFrame; }
     int GetSequenceCount() const { return sequences_ ? (int)sequences_->size() : 0; }
@@ -82,6 +87,20 @@ public:
     bool GetObjectPivotAndWorldTransformYUp(int objectId, Vec3& outPivot, Mat4& outMatrix) const;    bool GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const;
     const std::vector<MdxEventTrigger>& GetTriggeredEvents() const { return triggeredEvents_; }
 
+    // Attachment points (JASS "hand"/"head"/"chest"/... names): resolved
+    // against attachment node names (case-insensitive, substring either
+    // way). Returns the objectId, or -1 for "origin"/empty/unknown (caller
+    // falls back to the unit position).
+    int FindAttachmentObjectId(const std::string& attachPoint) const;
+    // Model-space world position of the named attachment (pivot-inclusive,
+    // Y-up); false when unresolvable.
+    bool GetAttachmentWorldPositionYUp(const std::string& attachPoint, Vec3& outPosition) const;
+    // Full model-space world matrix plus pivot position (same Y-up space).
+    // The matrix carries node rotation/scale; callers zero m[12..14] and
+    // compose instance * Translate(position) * rotation for effect placement.
+    bool GetAttachmentWorldMatrixYUp(const std::string& attachPoint,
+                                     Mat4& outMatrix, Vec3& outPosition) const;
+
     // Bone matrices for skinning
     const std::vector<Mat4>& GetBoneMatrices() const { return boneMatrices_; }
     sg_image GetBoneTexture() const { return boneTexture_; }
@@ -95,12 +114,15 @@ private:
     void UpdateEventEmitters();
     void SampleAnimations(uint32_t frame);
     void UpdateSkeleton();
+    void ApplyBlend();
     void UploadBoneTexture();
 
     static void ConvertMatrixToYUp(const Mat4& mdxMat, Mat4& out);
 
     std::vector<MdxAnimNode> nodes_;
     std::vector<int> nodeOrder_; // parent-first traversal order
+    // Lowercased attachment node name -> objectId (rebuilt in BuildSkeleton).
+    std::unordered_map<std::string, int> attachNameToObjectId_;
     std::vector<Mat4> boneMatrices_;
     std::vector<std::pair<int, int>> objectIdToBoneIndex_;
     struct EventTrackState {
@@ -121,6 +143,10 @@ private:
     const std::vector<uint32_t>* globalSequences_ = nullptr;
     const std::vector<std::array<float,3>>* pivotPoints_ = nullptr;
     float elapsedMs_ = 0.0f;
+    float blendTime_ = 0.0f;
+    float blendLeft_ = 0.0f;
+    float blendDuration_ = 0.0f;
+    std::vector<Mat4> blendFrom_;
 
     SequenceState sequenceState_;
     sg_image boneTexture_ = {0};

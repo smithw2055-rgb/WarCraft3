@@ -140,8 +140,37 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
             if (txtFrame) txtFrame->SetFontSize(fontSize);
         }
     }
-    else if (type == "TIMERBAR" || type == "SIMPLEFRAME" || type == "LISTBOX" ||
-             type == "SLIDER" || type == "POPUPMENU" || type == "EDITBOX" ||
+    else if (type == "CHECKBOX") {
+        frame = new CheckBoxFrame(def.name, parent);
+    }
+    else if (type == "EDITBOX") {
+        frame = new EditBoxFrame(def.name, parent);
+        if (def.HasField("Text")) {
+            static_cast<EditBoxFrame*>(frame)->SetText(def.GetString("Text", ""));
+        }
+    }
+    else if (type == "TEXTAREA") {
+        frame = new TextAreaFrame(def.name, parent);
+        if (def.HasField("Text")) {
+            static_cast<TextAreaFrame*>(frame)->SetText(def.GetString("Text", ""));
+        }
+    }
+    else if (type == "LISTBOX") {
+        frame = new ListBoxFrame(def.name, parent);
+    }
+    else if (type == "POPUPMENU") {
+        frame = new PopupMenuFrame(def.name, parent);
+    }
+    else if (type == "SCROLLBAR" || type == "SLIDER") {
+        frame = new ScrollBarFrame(def.name, parent);
+    }
+    else if (type == "SIMPLESTATUSBAR" || type == "STATUSBAR") {
+        frame = new StatusBarFrame(def.name, parent);
+    }
+    else if (type == "SPRITE") {
+        frame = new SpriteFrame(def.name, parent);
+    }
+    else if (type == "TIMERBAR" || type == "SIMPLEFRAME" ||
              def.frameClass == FrameClass::Frame) {
         frame = new SimpleFrame(def.name, parent);
     }

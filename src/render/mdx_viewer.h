@@ -88,6 +88,8 @@ public:
     bool GetSequenceName(int index, std::string& outName) const;
     float GetSequenceDurationSeconds(int index) const;
     float GetAnimationSpeedScale() const { return animationSpeedScale_; }
+    void SetAnimationSpeedScale(float scale) { animationSpeedScale_ = std::max(0.001f, scale); }
+    void SetBlendTime(float seconds) { if (hasAnimations_) animator_.SetBlendTime(seconds); }
     int GetTriggeredEventCount() const { return triggeredEventCount_; }
     int GetResolvedEventEffectCount() const { return resolvedEventEffectCount_; }
     const std::vector<MdxEventEffect>& GetResolvedEventEffects() const { return resolvedEventEffects_; }

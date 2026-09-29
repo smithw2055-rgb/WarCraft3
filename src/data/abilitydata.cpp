@@ -182,13 +182,21 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq, const std::string&
             "Units\\AbilityFunc.txt",
             "Units\\AbilityStrings.txt",
             "Units\\CommonAbilityFunc.txt",
+            "Units\\CommonAbilityStrings.txt",
             "Units\\HumanAbilityFunc.txt",
+            "Units\\HumanAbilityStrings.txt",
             "Units\\OrcAbilityFunc.txt",
+            "Units\\OrcAbilityStrings.txt",
             "Units\\NightElfAbilityFunc.txt",
+            "Units\\NightElfAbilityStrings.txt",
             "Units\\UndeadAbilityFunc.txt",
+            "Units\\UndeadAbilityStrings.txt",
             "Units\\NeutralAbilityFunc.txt",
+            "Units\\NeutralAbilityStrings.txt",
             "Units\\CampaignAbilityFunc.txt",
+            "Units\\CampaignAbilityStrings.txt",
             "Units\\ItemAbilityFunc.txt",
+            "Units\\ItemAbilityStrings.txt",
         };
         for (auto& f : skinFiles) {
             std::vector<uint8_t> sbuf;

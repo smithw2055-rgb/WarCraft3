@@ -4,6 +4,7 @@
 #include "ecs/item.h"
 #include "ecs/item_bonuses.h"
 #include "ecs/ability_factory.h"
+#include "ecs/abilities/ability_spell_base.h"
 #include "ecs/orders/order.h"
 #include "ecs/behaviors/behavior.h"
 #include <iostream>
@@ -61,6 +62,14 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item, 
         // abilities on powerups resolve through the grant path below
         // when the item has an ability list.
         std::cout << "Auto-used powerup item" << std::endl;
+        if (unit) {
+            ApplyItemBonuses(game, unit, item->GetBonuses());
+            for (auto& abilityId : item->GetAbilityList()) {
+                auto created = AbilityFactory::CreateAbility(game.AllocateHandleId(), abilityId);
+                auto* spell = dynamic_cast<CAbilitySpellBase*>(created.get());
+                if (spell) spell->DoEffect(game, unit);
+            }
+        }
         item->SetInInventory(false);
         item->SetInventorySlot(-1);
         item->SetOwner(nullptr);
@@ -79,6 +88,7 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item, 
     item->SetInventorySlot(slot);
     item->SetOwner(unit);
     item->SetHidden(true);
+    ApplyItemBonuses(game, unit, item->GetBonuses());
 
     // Grant item abilities to unit (ref inventory ability add).
     for (auto& abilityId : item->GetAbilityList()) {
@@ -107,6 +117,7 @@ bool CAbilityInventory::DropItemAt(CSimulation& game, CUnit* unit, int slot, flo
 
     CItem* item = items_[slot];
     items_[slot] = nullptr;
+    RemoveItemBonuses(game, unit, item->GetBonuses());
 
     // Remove item abilities from unit (only those no other source grants;
     // GetAbilityList holds this item's contribution).

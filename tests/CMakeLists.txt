@@ -9,6 +9,8 @@ add_executable(warsmash_tests
     test_w3e.cpp
     test_blp.cpp
     test_mdx.cpp
+    test_mdx_attach.cpp
+    test_scene_matrix.cpp
     test_mdl.cpp
     test_jass_animation_tags.cpp
     test_jass_vm.cpp
@@ -26,6 +28,14 @@ add_executable(warsmash_tests
     test_aura_combat.cpp
     test_root_build.cpp
     test_sync_sleep.cpp
+    test_lockstep_items.cpp
+    test_jass_effects_attach.cpp
+    test_net_lobby.cpp
+    test_lockstep_turns.cpp
+    test_lockstep_host.cpp
+    test_determinism.cpp
+    test_combat_magic.cpp
+    test_buffs_ack.cpp
     test_combat_pipeline.cpp
     test_maxlife_layers.cpp
     test_gameplay_data.cpp
@@ -48,6 +58,17 @@ add_executable(warsmash_tests
     test_spells16.cpp
     test_spells17.cpp
     test_spells18.cpp
+    test_spells19.cpp
+    test_spells20.cpp
+    test_spells21.cpp
+    test_spells22.cpp
+    test_spells23.cpp
+    test_spells24.cpp
+    test_spells25.cpp
+    test_spells26.cpp
+    test_spells27.cpp
+    test_spells28.cpp
+    test_spells29.cpp
     test_orders.cpp
     test_fog.cpp
     test_lightning.cpp
@@ -69,6 +90,8 @@ add_executable(warsmash_tests
     test_jass_cache.cpp
     test_jass_misc.cpp
     test_jass_unimplemented.cpp
+    test_jass_p0.cpp
+    test_map_smoke.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
     ../src/map/w3i.cpp
@@ -93,6 +116,7 @@ add_executable(warsmash_tests
     ../src/render/mdx_prem_particles.cpp
     ../src/render/mdx_ribbons.cpp
     ../src/render/lightning.cpp
+    ../src/render/camera.cpp
     ../src/ui/FdfParser.cpp
     ../src/ui/FrameDefinition.cpp
     ../src/ui/FrameBuilder.cpp
@@ -107,6 +131,8 @@ add_executable(warsmash_tests
     ../src/render/replaceable_ids.cpp
     ../src/scripting/jass_animation_tags.cpp
     ../src/scripting/JassNatives.cpp
+    ../src/scripting/jass_common_env.cpp
+    ../src/scripting/jass_config_env.cpp
     ../src/scripting/JassLexer.cpp
     ../src/scripting/JassParser.cpp
     ../src/scripting/JassVM.cpp
@@ -117,6 +143,8 @@ add_executable(warsmash_tests
     ../src/map/wts.cpp
     ../src/map/object_mods.cpp
     ../src/audio/AudioSystem.cpp
+    ../src/audio/UnitSoundset.cpp
+    ../src/audio/AckSoundBank.cpp
     ../src/data/combat_types.cpp
     ../src/data/gameplay_constants.cpp
     ../src/data/unitdata.cpp
@@ -132,6 +160,12 @@ add_executable(warsmash_tests
     ../src/ecs/unit_type.cpp
     ../src/ecs/player.cpp
     ../src/ecs/csimulation.cpp
+    ../src/ecs/lockstep.cpp
+    ../src/net/tcp_transport.cpp
+    ../src/net/lobby_state.cpp
+    ../src/net/turn_batch.cpp
+    ../src/net/turn_manager.cpp
+    ../src/net/lockstep_host.cpp
     ../src/ecs/melee_ai.cpp
     ../src/ecs/ability.cpp
     ../src/ecs/ability_factory.cpp
@@ -162,6 +196,7 @@ add_executable(warsmash_tests
     ../src/ecs/behaviors/behavior_repair.cpp
     ../src/ecs/behaviors/behavior_spell.cpp
     ../src/ecs/behaviors/behavior_channel.cpp
+    ../src/ecs/behaviors/behavior_item.cpp
     ../src/ecs/abilities/ability_attack.cpp
     ../src/ecs/abilities/ability_move.cpp
     ../src/ecs/abilities/ability_hero.cpp
@@ -198,6 +233,16 @@ add_executable(warsmash_tests
     ../src/ecs/abilities/spells16.cpp
     ../src/ecs/abilities/spells17.cpp
     ../src/ecs/abilities/spells18.cpp
+    ../src/ecs/abilities/spells19.cpp
+    ../src/ecs/abilities/spells20.cpp
+    ../src/ecs/abilities/spells21.cpp
+    ../src/ecs/abilities/spells23.cpp
+    ../src/ecs/abilities/spells24.cpp
+    ../src/ecs/abilities/spells25.cpp
+    ../src/ecs/abilities/spells26.cpp
+    ../src/ecs/abilities/spells27.cpp
+    ../src/ecs/abilities/spells28.cpp
+    ../src/ecs/abilities/spells29.cpp
     ../src/ecs/abilities/spells3.cpp
     ../src/ecs/abilities/auras.cpp
     ../src/ecs/abilities/ability_builder.cpp

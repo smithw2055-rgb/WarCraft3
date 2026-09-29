@@ -57,6 +57,21 @@ public:
     CAbilityCommandAura(int handleId);
 };
 
+// ===== Regeneration Aura (Aoar, alias Aabr) - life regen =====
+// Ref template AURA_STATS / MAXHPGEN from DataA. Level-1 amount is a
+// documented guess; the percentage flag in DataB is not read yet.
+class CAbilityRegenerationAura : public CAbilityAura {
+public:
+    CAbilityRegenerationAura(int handleId);
+};
+
+// ===== Mana Regeneration Aura (Aarm) - mana regen =====
+// Ref template AURA_STATS / MAXMPGEN from DataA.
+class CAbilityManaRegenerationAura : public CAbilityAura {
+public:
+    CAbilityManaRegenerationAura(int handleId);
+};
+
 // ===== Disease Cloud (Abomination) - damage aura =====
 class CAbilityDiseaseCloud : public CAbilityAura {
 public:

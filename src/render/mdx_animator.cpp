@@ -1,6 +1,7 @@
 #include "mdx_animator.h"
 #include "renderer.h"
 #include <iostream>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -422,6 +423,48 @@ bool MdxAnimator::GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) con
     return IsFiniteVec3(outPosition);
 }
 
+namespace {
+
+std::string LowerAttachName(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (unsigned char c : s) out.push_back((char)std::tolower(c));
+    return out;
+}
+
+} // namespace
+
+int MdxAnimator::FindAttachmentObjectId(const std::string& attachPoint) const {
+    const std::string query = LowerAttachName(attachPoint);
+    if (query.empty() || query == "origin") return -1;
+    auto exact = attachNameToObjectId_.find(query);
+    if (exact != attachNameToObjectId_.end()) return exact->second;
+    for (const auto& [name, objectId] : attachNameToObjectId_) {
+        if (name.find(query) != std::string::npos || query.find(name) != std::string::npos) {
+            return objectId;
+        }
+    }
+    return -1;
+}
+
+bool MdxAnimator::GetAttachmentWorldPositionYUp(const std::string& attachPoint,
+                                                Vec3& outPosition) const {
+    const int objectId = FindAttachmentObjectId(attachPoint);
+    if (objectId < 0) return false;
+    // Pivot-inclusive location: node world matrices carry rotation/scale
+    // with translations canceled against pivots, so the bare translation
+    // is not the attach point (see GetObjectWorldLocationYUp).
+    return GetObjectWorldLocationYUp(objectId, outPosition);
+}
+
+bool MdxAnimator::GetAttachmentWorldMatrixYUp(const std::string& attachPoint,
+                                              Mat4& outMatrix, Vec3& outPosition) const {
+    const int objectId = FindAttachmentObjectId(attachPoint);
+    if (objectId < 0) return false;
+    return GetObjectWorldTransformYUp(objectId, outMatrix) &&
+           GetObjectWorldLocationYUp(objectId, outPosition);
+}
+
 MdxAnimator::~MdxAnimator() {
     if (!Renderer::IsActive()) return;
     if (boneTexture_.id && sg_query_image_state(boneTexture_) == SG_RESOURCESTATE_VALID)
@@ -500,6 +543,7 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton after order clear\n");
     objectIdToBoneIndex_.clear();
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton after bone map clear\n");
+    attachNameToObjectId_.clear();
     boneCount_ = 0;
     MdxAnimatorLog( "MdxAnimator::BuildSkeleton after bone count reset\n");
     struct Entry {
@@ -573,6 +617,9 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
     }
     for (const auto& attachment : model.attachments) {
         addEntry(attachment.objectId, attachment.parentId, attachment.flags, &attachment.timelines, nullptr, TAG_KATV);
+        if (!attachment.name.empty()) {
+            attachNameToObjectId_[LowerAttachName(attachment.name)] = attachment.objectId;
+        }
     }
     for (const auto& light : model.lights) {
         addEntry(light.objectId, light.parentId, light.flags, &light.timelines, nullptr, TAG_KLAV);
@@ -695,6 +742,10 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
 
 bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
     if (!sequences_ || index < 0 || index >= (int)sequences_->size()) return false;
+    std::vector<Mat4> previous;
+    if (blendTime_ > 0.0f && sequenceState_.sequenceIndex >= 0 && !boneMatrices_.empty()) {
+        previous = boneMatrices_;
+    }
     const auto& seq = (*sequences_)[index];
     sequenceState_.sequenceIndex = index;
     sequenceState_.currentFrame = seq.startFrame;
@@ -708,7 +759,29 @@ bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
         needsBoneUpload_ = true;
         UpdateSkeleton();
     }
+    if (!previous.empty() && previous.size() == boneMatrices_.size()) {
+        blendFrom_ = std::move(previous);
+        blendDuration_ = blendTime_;
+        blendLeft_ = blendTime_;
+        ApplyBlend();
+    } else {
+        blendLeft_ = 0.0f;
+        blendFrom_.clear();
+    }
     return true;
+}
+
+void MdxAnimator::ApplyBlend() {
+    if (blendLeft_ <= 0.0f || blendDuration_ <= 0.0f || blendFrom_.size() != boneMatrices_.size()) return;
+    const float t = std::clamp(1.0f - blendLeft_ / blendDuration_, 0.0f, 1.0f);
+    for (size_t i = 0; i < boneMatrices_.size(); ++i) {
+        Mat4 mixed;
+        for (int k = 0; k < 16; ++k) {
+            mixed.m[k] = blendFrom_[i].m[k] * (1.0f - t) + boneMatrices_[i].m[k] * t;
+        }
+        boneMatrices_[i] = mixed;
+    }
+    needsBoneUpload_ = true;
 }
 
 int MdxAnimator::FindSequence(const std::string& name) const {
@@ -805,6 +878,10 @@ void MdxAnimator::Update(float dt) {
         SampleAnimations(sequenceState_.currentFrame);
         needsBoneUpload_ = true;
         UpdateSkeleton();
+        if (blendLeft_ > 0.0f) {
+            blendLeft_ = std::max(0.0f, blendLeft_ - dt);
+            ApplyBlend();
+        }
     }
     UpdateEventEmitters();
 }

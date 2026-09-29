@@ -68,6 +68,8 @@ public:
     void SetPhysical(bool v) { physical_ = v; }
     void SetPermanent(bool v) { permanent_ = v; }
     void SetIconShowing(bool v) { iconShowing_ = v; }
+    bool IsAutocastActive() const { return autocastActive_; }
+    void SetAutocastActive(bool v) { autocastActive_ = v; }
 
     // Base engine order id for this ability (ref getBaseOrderId); 0 when
     // the ability is not triggered by orders (passives, item powers).
@@ -114,4 +116,5 @@ protected:
     bool physical_ = false;
     bool permanent_ = false;
     bool iconShowing_ = true;
+    bool autocastActive_ = false;
 };

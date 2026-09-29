@@ -39,9 +39,10 @@ bool CAbilitySpellBase::CheckCanUse(CSimulation& game, CUnit* unit, int orderId)
     if (IsOnCooldown()) return false;
     if (!unit) return false;
     // Order routing (ref ability order checks): a nonzero order must be
-    // this spell's base order (or toggle pair). Id 0 preserves legacy
-    // callers (item use, direct UI-less casts) via positional matching.
-    if (!SpellMatchesOrder(code_, orderId)) return false;
+    // this spell's base order (or toggle pair), or the alias order for
+    // code-variant abilities (ANin answering for AUin Inferno, Adet for
+    // Atru True Sight). Id 0 preserves legacy callers via positional match.
+    if (!SpellMatchesOrder(code_, orderId) && !SpellMatchesOrder(alias_, orderId)) return false;
     // Silenced units cannot cast; hexed units can neither attack nor cast
     // (ref target checks ABConditionIsUnitPassAllAbilityTargetChecks).
     if (unit->IsSilenced() || unit->IsHexed()) return false;

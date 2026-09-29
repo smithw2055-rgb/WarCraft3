@@ -36,6 +36,8 @@ public:
 
     CUnitType* GetUnitType(War3ID typeId) const;
     bool HasUnitType(War3ID typeId) const;
+    // Test and script registration. Replaces an existing row for the same id.
+    void RegisterUnitType(War3ID typeId, std::unique_ptr<CUnitType> type);
 
     const std::unordered_map<War3ID, std::unique_ptr<CUnitType>>& GetAllTypes() const { return types_; }
 

@@ -31,6 +31,9 @@ struct AstNode {
     bool isConstant = false;
     bool isArray = false;
     bool isStatic = false; // vJASS static members/methods
+    bool isInterface = false;
+    // delegate Type member: unknown calls forward to that member.
+    std::vector<std::pair<std::string, std::string>> delegates;
     std::string extendsType; // for type declarations
     int line = 0;
 
@@ -64,14 +67,12 @@ private:
     // private/public prefix. Returns nullptr for wrappers handled inline.
     std::unique_ptr<AstNode> ParseDecl(bool inScope);
     std::unique_ptr<AstNode> ParseStructDecl();
+    std::unique_ptr<AstNode> ParseInterfaceDecl();
     // Parses `module Name ... endmodule` into a MODULE_DECL node (kept
     // aside for implement-expansion, never emitted to the program).
     std::unique_ptr<AstNode> ParseModuleDecl();
     void ParseStructOrModuleBody(AstNode* node, bool isModule);
-    // Parses a scope/library body, flattens rewritten children into
-    // `program`, and records initializers. Nested scopes are rejected.
     void ParseScopeOrLibrary(AstNode* program, bool isLibrary);
-    void SkipUnsupportedBlock(const std::string& opener, const std::string& ender);
     std::string ResolveMethodRef(const std::string& base, const std::string& member);
     // Parse one declaration (vJASS or vanilla). Consumes an optional
     // private/public prefix; returns the node plus its raw name and
@@ -120,9 +121,11 @@ private:
         std::string moduleName;
         bool optional = false;
         std::string scopePrefix; // enclosing scope, "" at top level
+        bool intoModule = false;
     };
     std::vector<ImplementRecord> pendingImplements_;
     std::vector<std::unique_ptr<AstNode>> moduleDefs_; // kept alive for expansion
+    std::vector<std::unique_ptr<AstNode>> hoisted_; // nested module/interface lifted to the program
     // Expands pending implements into struct decls and drops MODULE_DECL
     // nodes. Runs once at the end of ParseProgram.
     void ExpandImplements(AstNode* program);

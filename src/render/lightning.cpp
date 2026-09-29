@@ -133,6 +133,7 @@ const LightningSystem::Bolt* LightningSystem::GetBolt(int id) const {
 
 void LightningSystem::Clear() {
     bolts_.clear();
+    billboards_.clear();
 }
 
 void LightningSystem::SetBoltVisible(int id, bool visible) {
@@ -198,6 +199,88 @@ void LightningSystem::Update(float dt) {
             Regenerate(bolt);
         }
     }
+}
+
+ImageBillboardPose MakeImageBillboard(
+    float posX, float posY, float posZ,
+    float sizeX, float sizeY,
+    bool visible, bool render,
+    bool constantHeight, bool aboveWater,
+    float ground, float water,
+    int red, int green, int blue, int alpha) {
+    ImageBillboardPose pose;
+    pose.x = posX;
+    pose.z = posY;
+    pose.y = constantHeight ? posZ : ground + posZ;
+    if (aboveWater && pose.y < water) pose.y = water;
+    pose.halfW = sizeX * 0.5f;
+    pose.halfH = sizeY * 0.5f;
+    auto chan = [](int c) {
+        if (c < 0) c = 0;
+        if (c > 255) c = 255;
+        return c / 255.0f;
+    };
+    pose.r = chan(red);
+    pose.g = chan(green);
+    pose.b = chan(blue);
+    pose.a = chan(alpha);
+    pose.visible = visible && render && pose.halfW > 0.0f && pose.halfH > 0.0f && pose.a > 0.0f;
+    return pose;
+}
+
+void BillboardAxes(const float camRight[3], float outRight[3], float outUp[3]) {
+    outRight[0] = camRight ? camRight[0] : 1.0f;
+    outRight[1] = 0.0f;
+    outRight[2] = camRight ? camRight[2] : 0.0f;
+    const float len = std::sqrt(outRight[0] * outRight[0] + outRight[2] * outRight[2]);
+    if (len < 1.0e-4f) {
+        outRight[0] = 1.0f;
+        outRight[1] = 0.0f;
+        outRight[2] = 0.0f;
+    } else {
+        outRight[0] /= len;
+        outRight[2] /= len;
+    }
+    outUp[0] = 0.0f;
+    outUp[1] = 1.0f;
+    outUp[2] = 0.0f;
+}
+
+void BillboardCorners(float cx, float cy, float cz, float halfW, float halfH,
+                      const float right[3], const float up[3], float out[4][3]) {
+    const float signs[4][2] = {{1.0f, 1.0f}, {-1.0f, 1.0f}, {-1.0f, -1.0f}, {1.0f, -1.0f}};
+    for (int i = 0; i < 4; ++i) {
+        out[i][0] = cx + right[0] * halfW * signs[i][0] + up[0] * halfH * signs[i][1];
+        out[i][1] = cy + right[1] * halfW * signs[i][0] + up[1] * halfH * signs[i][1];
+        out[i][2] = cz + right[2] * halfW * signs[i][0] + up[2] * halfH * signs[i][1];
+    }
+}
+
+void LightningSystem::SetBillboard(int id, float x, float y, float z,
+                                   float halfW, float halfH,
+                                   float r, float g, float b, float a) {
+    ImageBillboardPose pose;
+    pose.x = x;
+    pose.y = y;
+    pose.z = z;
+    pose.halfW = halfW;
+    pose.halfH = halfH;
+    pose.r = r;
+    pose.g = g;
+    pose.b = b;
+    pose.a = a;
+    pose.visible = halfW > 0.0f && halfH > 0.0f && a > 0.0f;
+    billboards_[id] = pose;
+}
+
+bool LightningSystem::RemoveBillboard(int id) {
+    return billboards_.erase(id) > 0;
+}
+
+const ImageBillboardPose* LightningSystem::GetBillboard(int id) const {
+    auto it = billboards_.find(id);
+    if (it == billboards_.end()) return nullptr;
+    return &it->second;
 }
 
 struct LightningVertex {
@@ -279,6 +362,21 @@ void LightningSystem::Render(const Mat4& view, const Mat4& proj) {
                 indices.push_back(v0 + 1); indices.push_back(v0 + 4); indices.push_back(v0 + 2);
             }
         }
+    }
+    float right[3], up[3];
+    BillboardAxes(camRight, right, up);
+    for (const auto& [id, board] : billboards_) {
+        (void)id;
+        if (!board.visible) continue;
+        float corners[4][3];
+        BillboardCorners(board.x, board.y, board.z, board.halfW, board.halfH, right, up, corners);
+        const uint32_t base = (uint32_t)verts.size();
+        for (int i = 0; i < 4; ++i) {
+            verts.push_back({corners[i][0], corners[i][1], corners[i][2],
+                             board.r, board.g, board.b, board.a});
+        }
+        indices.push_back(base + 0); indices.push_back(base + 1); indices.push_back(base + 2);
+        indices.push_back(base + 0); indices.push_back(base + 2); indices.push_back(base + 3);
     }
     if (verts.empty()) return;
 

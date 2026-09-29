@@ -27,6 +27,17 @@ struct CGameplayConstants {
     float GetDefenseArmor() const { return defenseArmor; }
     float GetDamageRatioAgainst(CAttackType atk, CDefenseType def) const;
 
+    // Ethereal / magic-immune rules (Units\MiscGame.txt, ref
+    // CUnitDefaultEtherealDamageModListener /
+    // CUnitDefaultMagicImmuneDamageModListener). TFT retail: ethereal takes
+    // ~1.66x from MAGIC and SPELLS; NORMAL-damage (physical) is negated.
+    // Magic immunity resists MAGIC damage and non-universal SPELLS.
+    float etherealDamageBonusMagic = 1.6667f;
+    float etherealDamageBonusSpells = 1.6667f;
+    bool etherealDamageBonusAlly = false;
+    bool magicImmuneResistsDamage = true;
+    bool magicImmuneResistsUltimates = true;
+
     CGameplayConstants();
     explicit CGameplayConstants(const TxtTable& miscData);
 };

@@ -231,3 +231,111 @@ bool TestMeleeAINativesWiring() {
     TEST_ASSERT(it->second->GetThinkCount() > thinksBefore);
     return true;
 }
+
+namespace {
+
+struct AiHarness {
+    MpqManager mpq;
+    CGameplayConstants gc;
+    std::unique_ptr<CUnitData> unitData;
+    std::unique_ptr<CDestructableData> destData;
+    std::unique_ptr<CSimulation> sim;
+    std::unique_ptr<MeleeAIController> ai;
+
+    // Mirror of TestMeleeAIEconomyGrows setup; null when data is missing.
+    bool Init() {
+        if (!ResourcesPresent()) return false;
+        OpenGameData(mpq);
+        unitData = std::make_unique<CUnitData>(CUnitData::LoadFromMpq(mpq, gc));
+        destData = std::make_unique<CDestructableData>(CDestructableData::LoadFromMpq(mpq));
+        if (!HasMeleeIds(*unitData)) return false;
+        sim = std::make_unique<CSimulation>();
+        sim->SetUnitData(unitData.get());
+        sim->SetDestructableData(destData.get());
+        sim->AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+        sim->AddPlayer(std::make_unique<CPlayer>(1, "AI", CMapControl::COMPUTER));
+        sim->GetPlayer(1)->SetRace(1);
+        sim->GetPlayer(1)->SetGold(2000);
+        sim->GetPlayer(1)->SetFoodCap(100);
+        sim->CreateUnit(War3ID("hhou"), 1, 0, 0, 0);
+        for (int i = 0; i < 3; i++) {
+            sim->CreateUnit(War3ID("hpea"), 1, 200 + i * 40, 0, 0);
+        }
+        CUnit* mine = sim->CreateUnit(War3ID("ngold"), 12, 600, 0, 0);
+        if (auto* gold = dynamic_cast<CAbilityGoldMine*>(mine->GetAbility(War3ID("Agld")))) {
+            gold->SetGold(12500);
+        } else {
+            return false;
+        }
+        ai = std::make_unique<MeleeAIController>(sim.get(), 1);
+        return true;
+    }
+
+    void Run(int ticks) {
+        for (int i = 0; i < ticks; i++) {
+            sim->Update();
+            ai->Update();
+        }
+    }
+};
+
+} // namespace
+
+bool TestMeleeAIOrdersEnterCommandLog() {
+    AiHarness h1, h2;
+    if (!h1.Init() || !h2.Init()) return true; // SKIP without retail data
+    h1.Run(1500);
+    h2.Run(1500);
+    // Every AI decision is visible in the lockstep log, on the AI seat...
+    TEST_ASSERT(!h1.sim->LoggedCommands().empty());
+    for (const auto& cmd : h1.sim->LoggedCommands()) {
+        TEST_ASSERT(cmd.player == 1);
+    }
+    // ...and two identical runs agree exactly (deterministic AI).
+    TEST_ASSERT(h1.sim->LoggedCommands() == h2.sim->LoggedCommands());
+    TEST_ASSERT(h1.sim->HashState() == h2.sim->HashState());
+    return true;
+}
+
+bool TestMeleeAIDifficultyPacing() {
+    CSimulation sim;
+    MeleeAIController easy(&sim, 0);
+    easy.SetDifficulty(0);
+    TEST_ASSERT(easy.GetThinkIntervalTicks() == 40);
+    TEST_ASSERT(easy.GetWaveCooldownTicks() == 1200);
+    MeleeAIController normal(&sim, 0);
+    normal.SetDifficulty(1);
+    TEST_ASSERT(normal.GetThinkIntervalTicks() == 20);
+    TEST_ASSERT(normal.GetWaveCooldownTicks() == 600);
+    MeleeAIController insane(&sim, 0);
+    insane.SetDifficulty(2);
+    TEST_ASSERT(insane.GetThinkIntervalTicks() == 10);
+    TEST_ASSERT(insane.GetWaveCooldownTicks() == 300);
+    // Clamping keeps the stored difficulty in range.
+    insane.SetDifficulty(99);
+    TEST_ASSERT(insane.GetDifficulty() == 2);
+    insane.SetDifficulty(-5);
+    TEST_ASSERT(insane.GetDifficulty() == 0);
+    return true;
+}
+
+bool TestMeleeAIThinkRate() {
+    CSimulation sim;
+    MeleeAIController easy(&sim, 0);
+    easy.SetDifficulty(0);
+    MeleeAIController normal(&sim, 0);
+    normal.SetDifficulty(1);
+    MeleeAIController insane(&sim, 0);
+    insane.SetDifficulty(2);
+    for (int i = 0; i < 200; i++) {
+        sim.Update();
+        easy.Update();
+        normal.Update();
+        insane.Update();
+    }
+    // No units/data: controllers idle, but the think cadence still ticks.
+    TEST_ASSERT(easy.GetThinkCount() == 5);
+    TEST_ASSERT(normal.GetThinkCount() == 10);
+    TEST_ASSERT(insane.GetThinkCount() == 20);
+    return true;
+}

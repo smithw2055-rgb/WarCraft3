@@ -9,6 +9,8 @@ public:
     CAbilitySellItems(int handleId);
     CAbilitySellItems(int handleId, const std::vector<War3ID>& itemsSold);
 
+    void OnAdd(CSimulation& game, CUnit* unit) override;
+
     // Order handling
     bool CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, int orderId) override;
     void OnTick(CSimulation& game, CUnit* unit) override;

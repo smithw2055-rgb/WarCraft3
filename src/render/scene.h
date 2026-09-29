@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -35,6 +36,26 @@ struct PlacedModel {
     std::unique_ptr<MdxViewer> ownedViewer;
     MdxViewer* viewer = nullptr; // shared, not owned
 };
+
+// Instance transform convention (Y-rotation + translation, per-axis
+// scale): the single place that defines how pos/angle/scale become a
+// model matrix. Render and effect attachment share it exactly; picking
+// uses an averaged-scale approximation of the same convention.
+inline Mat4 MakeSceneInstanceMatrix(float x, float y, float z, float angle,
+                                    float sx, float sy, float sz) {
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    Mat4 m = Mat4::Identity();
+    m.m[0] = c * sx;
+    m.m[2] = -s * sx;
+    m.m[5] = sy;
+    m.m[8] = s * sz;
+    m.m[10] = c * sz;
+    m.m[12] = x;
+    m.m[13] = y;
+    m.m[14] = z;
+    return m;
+}
 
 struct SceneEventEffect {
     MdxEventEffect effect;
@@ -73,6 +94,14 @@ public:
                                          const Vec3& initialVelocity = Vec3{0, 0, 0},
                                          float gravity = 0.0f);
 
+    // Persistent attached effect instance (JASS AddSpecialEffectTarget):
+    // positioned by an explicit matrix the caller refreshes every frame
+    // (unit instance transform * attach-node matrix). Slots are kept like
+    // expired transients; removal hides and releases the viewer.
+    int AddAttachedModel(const std::string& path, int player = 0);
+    bool UpdateAttachedModel(int index, const Mat4& modelMatrix);
+    bool RemoveAttachedModel(int index);
+
     // Render all placed models
     void RenderAll(const Mat4& view, const Mat4& proj, float dt);
     LightningSystem* GetLightning() { return &lightning_; }
@@ -85,8 +114,17 @@ public:
                                 float movementSpeed = 0.0f, float turnRate = 0.0f,
                                 bool smoothMotion = false);
     bool SetInstanceVisible(int index, bool visible);
+    // Instance scale access (units: seed scale x script SetUnitScale).
+    bool GetInstanceScale(int index, float scale[3]) const;
+    bool SetInstanceScale(int index, const float scale[3]);
 
-    int InstanceCount() const { return (int)instances_.size(); }
+    int PlayDoodadAnimation(float x, float y, float radius, uint32_t doodadId,
+                            const std::string& animName, bool nearestOnly);
+    // Nearest doodad within radius plays animName. requireFinished waits
+    // until the current sequence ends (queued destructable clips).
+    int PlayAnimationNear(float x, float y, float radius, const std::string& animName,
+                          bool loop, bool requireFinished);
+    int SetPlaybackSpeedNear(float x, float y, float radius, float speed);
 
     // Get viewer for a placed instance (for animation control)
     MdxViewer* GetViewer(int index) {

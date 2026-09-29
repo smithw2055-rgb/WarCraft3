@@ -313,10 +313,19 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
                 if (u.mana > 0) simUnit->SetMana((float)u.mana);
                 if (u.heroLevel > 0) simUnit->SetHeroLevel(u.heroLevel);
                 if (u.targetAcquisition >= 0.0f) simUnit->SetAcquireRange(u.targetAcquisition);
-                // Preplaced ability levels (autocast flags retained for future).
+                // Preplaced ability levels and autocast flags from the doodad.
                 for (const auto& mod : u.modifiedAbilities) {
                     if (CAbility* ability = simUnit->GetAbility(War3ID(mod.id))) {
                         if (mod.level > 0) ability->SetLevel(mod.level);
+                        if (mod.autocastActive != 0) ability->SetAutocastActive(true);
+                    }
+                }
+                if (CUnitType* placedType = simUnit->GetUnitType()) {
+                    const War3ID autocast = placedType->GetDefaultAutocastAbility();
+                    if (autocast.value != 0) {
+                        if (CAbility* ability = simUnit->GetAbility(autocast)) {
+                            ability->SetAutocastActive(true);
+                        }
                     }
                 }
                 // Preplaced inventory (heroes, shops): create + pick up.

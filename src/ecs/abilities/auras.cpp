@@ -137,6 +137,30 @@ CAbilityCommandAura::CAbilityCommandAura(int handleId)
     AddBonus(damage);
 }
 
+// ===== Regeneration Aura =====
+CAbilityRegenerationAura::CAbilityRegenerationAura(int handleId)
+    : CAbilityAura(handleId, War3ID("Aoar")) {
+    SetRadius(900.0f);
+    SetAffectsAllies(true);
+    SetAffectsSelf(true);
+    CAuraBonus lifeRegen;
+    lifeRegen.type = CAuraEffectType::LIFE_REGEN;
+    lifeRegen.value = 1.0f; // ref DataA, documented guess
+    AddBonus(lifeRegen);
+}
+
+// ===== Mana Regeneration Aura =====
+CAbilityManaRegenerationAura::CAbilityManaRegenerationAura(int handleId)
+    : CAbilityAura(handleId, War3ID("Aarm")) {
+    SetRadius(900.0f);
+    SetAffectsAllies(true);
+    SetAffectsSelf(true);
+    CAuraBonus manaRegen;
+    manaRegen.type = CAuraEffectType::MANA_REGEN;
+    manaRegen.value = 1.0f; // ref DataA, documented guess
+    AddBonus(manaRegen);
+}
+
 // ===== Disease Cloud =====
 CAbilityDiseaseCloud::CAbilityDiseaseCloud(int handleId)
     : CAbilityAura(handleId, War3ID("Aapl")) {

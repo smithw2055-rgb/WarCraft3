@@ -91,11 +91,16 @@ bool TestWhirlwindSpins() {
     CAbilityWhirlwind spell(18001);
     spell.DoEffect(sim, caster);
     TEST_ASSERT(caster->GetBuff(War3ID("BOww")) != nullptr);
+    TEST_ASSERT(caster->IsMagicImmune());
+    TEST_ASSERT(caster->AreAttacksDisabled());
     const float foeBefore = foe->GetLife();
     const float friendBefore = friend_->GetLife();
     for (int i = 0; i < 60; i++) sim.Update(); // 1s periodic ticks land
     TEST_ASSERT(foe->GetLife() < foeBefore);
     TEST_ASSERT(friend_->GetLife() == friendBefore); // allies spared
+    caster->RemoveBuff(War3ID("BOww"), sim);
+    TEST_ASSERT(!caster->IsMagicImmune());
+    TEST_ASSERT(!caster->AreAttacksDisabled());
     return true;
 }
 
@@ -165,9 +170,10 @@ bool TestPhoenixFireScorches() {
     auto* bearer = AdoptAt(sim, 1841, 0, 0, 0);
     auto* foe = AdoptAt(sim, 1842, 1, 100, 0);
     Settle(sim);
+    const float foeBefore = foe->GetLife();
     bearer->AddAbility(sim, std::make_unique<CAbilityPhoenixFire>(18401));
     TEST_ASSERT(bearer->GetBuff(War3ID("BPxf")) != nullptr);
-    const float foeBefore = foe->GetLife();
+    TEST_ASSERT(foe->GetLife() < foeBefore);
     for (int i = 0; i < 60; i++) sim.Update();
     TEST_ASSERT(foe->GetLife() < foeBefore);
     return true;

@@ -3,6 +3,9 @@
 #include <iostream>
 #include <memory>
 
+#include <cmath>
+
+#include "data/abilitydata.h"
 #include "data/combat_types.h"
 #include "data/gameplay_constants.h"
 #include "data/unitdata.h"
@@ -83,6 +86,24 @@ bool TestPhoenixRebirths() {
     for (int i = 0; i < 220; i++) sim.Update();
     TEST_ASSERT(CountType(sim, War3ID("hphx"), 0) == 1);
     TEST_ASSERT(CountType(sim, War3ID("hpxe"), 0) == 0);
+    return true;
+}
+
+bool TestPhoenixHatchDelayFromData() {
+    CAbilityDefFull def;
+    def.levels = 1;
+    def.durations = {6.5f};
+    CAbilityPhoenix spell(15011);
+    spell.ApplyData(def);
+    TEST_ASSERT(std::fabs(spell.GetHatchDelay() - 6.5f) < 0.01f);
+
+    CAbilityDefFull dataOnly;
+    dataOnly.levels = 1;
+    dataOnly.dataLevels.push_back({});
+    dataOnly.dataLevels[0][0] = "4";
+    CAbilityPhoenix fromData(15012);
+    fromData.ApplyData(dataOnly);
+    TEST_ASSERT(std::fabs(fromData.GetHatchDelay() - 4.0f) < 0.01f);
     return true;
 }
 

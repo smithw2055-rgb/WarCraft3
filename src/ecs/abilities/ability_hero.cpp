@@ -23,10 +23,10 @@ void CAbilityHero::OnAdd(CSimulation& game, CUnit* unit) {
         intelligence_.base = unitType->GetStartingIntelligence();
         intelligence_.perLevelFactor = unitType->GetIntelligencePerLevel();
 
-        // Pick a random proper name
+        // Pick a proper name via the synced sim RNG (std::rand is banned).
         auto& names = unitType->GetHeroProperNames();
         if (!names.empty()) {
-            properName_ = names[std::rand() % names.size()];
+            properName_ = names[(size_t)(game.SimRand01() * (float)names.size()) % names.size()];
         }
     }
 

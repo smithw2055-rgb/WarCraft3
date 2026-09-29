@@ -121,6 +121,10 @@ public:
     int GetAttacksEnabled() const { return attacksEnabled_; }
     const std::string& GetArmorType() const { return armorType_; }
     bool CanRaise() const { return raise_; }
+    const std::unordered_set<CBuildingPathingType>& GetPreventedPathingTypes() const { return preventedPathingTypes_; }
+    const std::unordered_set<CBuildingPathingType>& GetRequiredPathingTypes() const { return requiredPathingTypes_; }
+    void SetPreventedPathingTypes(std::unordered_set<CBuildingPathingType> v) { preventedPathingTypes_ = std::move(v); }
+    void SetRequiredPathingTypes(std::unordered_set<CBuildingPathingType> v) { requiredPathingTypes_ = std::move(v); }
     bool CanDecay() const { return decay_; }
     CDefenseType GetDefenseType() const { return defenseType_; }
     float GetImpactZ() const { return impactZ_; }
@@ -166,6 +170,11 @@ public:
     int GetGoldBountyAwardedBase() const { return goldBountyAwardedBase_; }
     int GetGoldBountyAwardedDice() const { return goldBountyAwardedDice_; }
     int GetGoldBountyAwardedSides() const { return goldBountyAwardedSides_; }
+    // Response sound set name (UnitUI `unitSound`, e.g. "Footman"): resolved
+    // against Units\UnitAckSounds.slk (`<name><What|Pissed|Yes|...>` rows)
+    // by audio/UnitSoundset (ref UnitSoundset).
+    const std::string& GetUnitSound() const { return unitSound_; }
+    void SetUnitSound(const std::string& s) { unitSound_ = s; }
 
 private:
     std::string name_;
@@ -253,4 +262,5 @@ private:
     int lumberBountyAwardedDice_;
     int lumberBountyAwardedSides_;
     bool neutralBuildingShowMinimapIcon_;
+    std::string unitSound_;
 };

@@ -246,6 +246,12 @@ set(SOURCES
     src/ecs/destructable.cpp
     src/ecs/item.cpp
     src/ecs/csimulation.cpp
+    src/ecs/lockstep.cpp
+    src/net/tcp_transport.cpp
+    src/net/lobby_state.cpp
+    src/net/turn_batch.cpp
+    src/net/turn_manager.cpp
+    src/net/lockstep_host.cpp
     src/ecs/melee_ai.cpp
     src/ecs/ability.cpp
     src/ecs/abilities/ability_attack.cpp
@@ -280,6 +286,16 @@ set(SOURCES
     src/ecs/abilities/spells16.cpp
     src/ecs/abilities/spells17.cpp
     src/ecs/abilities/spells18.cpp
+    src/ecs/abilities/spells19.cpp
+    src/ecs/abilities/spells20.cpp
+    src/ecs/abilities/spells21.cpp
+    src/ecs/abilities/spells23.cpp
+    src/ecs/abilities/spells24.cpp
+    src/ecs/abilities/spells25.cpp
+    src/ecs/abilities/spells26.cpp
+    src/ecs/abilities/spells27.cpp
+    src/ecs/abilities/spells28.cpp
+    src/ecs/abilities/spells29.cpp
     src/ecs/abilities/ability_repair.cpp
     src/ecs/abilities/ability_transport.cpp
     src/ecs/abilities/ability_root.cpp
@@ -307,6 +323,7 @@ set(SOURCES
     src/ecs/behaviors/behavior_return_resources.cpp
     src/ecs/behaviors/behavior_spell.cpp
     src/ecs/behaviors/behavior_channel.cpp
+    src/ecs/behaviors/behavior_item.cpp
     src/ecs/pathing/world_collision.cpp
     src/ecs/pathing/pathfinding.cpp
     src/ecs/combat/combat_system.cpp
@@ -318,6 +335,8 @@ set(SOURCES
     src/scripting/JassNatives.cpp
     # ===== Audio =====
     src/audio/AudioSystem.cpp
+    src/audio/UnitSoundset.cpp
+    src/audio/AckSoundBank.cpp
     # ===== UI =====
     src/ui/UiRenderer.cpp
     src/ui/GluePanels.cpp
@@ -413,8 +432,7 @@ if(BUILD_APP)
             ${AERO_APP_LIBRARY}
         )
         link_stormlib(warsmash)
-    link_casclib(warsmash)
-    link_casclib(warsmash)
+        link_casclib(warsmash)
         foreach(AERO_DLL Aero.dll AeroApp.dll)
             if(EXISTS "${AERO_BIN_DIR}/${AERO_DLL}")
                 add_custom_command(TARGET warsmash POST_BUILD

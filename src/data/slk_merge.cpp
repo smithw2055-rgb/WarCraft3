@@ -175,6 +175,62 @@ void ApplyMapDestructableObjectMods(const MpqManager& mpq, const std::string& ma
               << " customSkipped=" << customSkipped << std::endl;
 }
 
+void ApplyMapDoodadObjectMods(const MpqManager& mpq, const std::string& mapPath,
+                              const SlkTable& doodadSlk,
+                              TxtTable& overlay) {
+    if (mapPath.empty()) return;
+
+    ObjectModificationSet mods;
+    if (!LoadWar3MapDoodadMods(mapPath, mods)) {
+        return;
+    }
+
+    SlkTable metaSlk;
+    std::vector<uint8_t> metaBuf;
+    if (!mpq.ReadFile("Doodads\\DoodadMetaData.slk", metaBuf) ||
+        !metaSlk.Load(metaBuf.data(), metaBuf.size())) {
+        if (!mpq.ReadFile("Units\\DestructableMetaData.slk", metaBuf) ||
+            !metaSlk.Load(metaBuf.data(), metaBuf.size())) {
+            std::cerr << "ObjectMods: DoodadMetaData.slk unavailable; doodad modifications skipped" << std::endl;
+            return;
+        }
+    }
+
+    const SlkAccessor meta(metaSlk, {"ID"});
+    const SlkAccessor doodadData(doodadSlk, {"doodID", "DestructableID", "destructableID", "ID"});
+    int applied = 0;
+    int unknown = 0;
+    int customCloned = 0;
+    int customSkipped = 0;
+
+    for (const auto& entry : mods.custom) {
+        const std::string oldSection = entry.oldId.ToString();
+        const std::string newSection = entry.newId.ToString();
+        if (oldSection.size() != 4 || newSection.size() != 4) {
+            customSkipped++;
+            continue;
+        }
+        if (CopyObjectDataSection(overlay, doodadData, oldSection, newSection) == 0) {
+            customSkipped++;
+            continue;
+        }
+        customCloned++;
+        ApplyObjectModificationEntry(entry, newSection, meta, overlay, applied, unknown);
+    }
+
+    for (const auto& entry : mods.original) {
+        const std::string section = entry.oldId.ToString();
+        ApplyObjectModificationEntry(entry, section, meta, overlay, applied, unknown);
+    }
+
+    std::cout << "ObjectMods: war3map.w3d original=" << mods.original.size()
+              << " custom=" << mods.custom.size()
+              << " applied=" << applied
+              << " unknown=" << unknown
+              << " customCloned=" << customCloned
+              << " customSkipped=" << customSkipped << std::endl;
+}
+
 void CollectDestructableIds(const SlkAccessor& slk, const TxtTable& txt, std::set<std::string>& outIds) {
     for (const auto& [id, row] : slk.rowsById) {
         (void)row;

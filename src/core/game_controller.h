@@ -113,6 +113,9 @@ public:
     std::unordered_map<int, std::vector<std::string>> simUnitAnimationPropertyTags;
     std::unordered_set<int> simUnitVisualRegistrationFailed;
     std::unordered_map<int, int> simItemToVisualIdx;
+    // JASS effect id -> scene attached-model index (-1 = point transient
+    // already spawned once). Reconciled every frame in SyncJassEffectVisuals.
+    std::unordered_map<int, int> effectVisuals_;
     std::unordered_set<int> simItemVisualRegistrationFailed;
 
     bool EnsureSimulationUnitVisual(CUnit* unit);
@@ -155,8 +158,11 @@ private:
     void RenderUiOnlyGlueSpriteLayers(int screenW, int screenH);
     void StepSimulation(float dt);
     void SyncAndReconcileVisuals();
+    void SyncJassEffectVisuals();
     void SyncFogOfWar();
     void SyncLightnings();
+    void SyncScriptDecor();
+    void SyncWeather(float dt);
     void CollectUnitOverlays(int screenW, int screenH);
     void CaptureScreenshotIfNeeded(int screenW, int screenH);
     bool WriteFramebufferPng(const std::string& path, int screenW, int screenH);

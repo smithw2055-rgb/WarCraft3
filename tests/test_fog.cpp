@@ -302,3 +302,35 @@ bool TestFogSharedVision() {
         {JassValue::Int(p1), JassValue::Int(loc)}).boolVal);
     return true;
 }
+
+bool TestUnitShareVisionReveals() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+    auto* scout = AdoptFogAt(sim, 2091, 0, 0, 0);
+    sim.Update();
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(0, 0, 0));
+    TEST_ASSERT(sim.GetFogSystem()->IsMaskedTo(1, 0, 0));
+    scout->SetSharesVisionWith(1, true);
+    for (int i = 0; i < 11; i++) sim.Update();
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(1, 0, 0));
+    scout->SetSharesVisionWith(1, false);
+    for (int i = 0; i < 11; i++) sim.Update();
+    TEST_ASSERT(!sim.GetFogSystem()->IsVisibleTo(1, 0, 0));
+    TEST_ASSERT(sim.GetFogSystem()->GetState(1, 0, 0) == CFogState::FOGGED);
+    return true;
+}
+
+bool TestTerrainDeformLowersHeight() {
+    JassVM vm;
+    CSimulation sim;
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    const int loc = CallNative(vm, "Location", {JassValue::Real(0), JassValue::Real(0)}).intVal;
+    CallNative(vm, "TerrainDeformCrater",
+        {JassValue::Real(0), JassValue::Real(0), JassValue::Real(200),
+         JassValue::Real(40), JassValue::Int(1000), JassValue::Bool(true)});
+    const float z = CallNative(vm, "GetLocationZ", {JassValue::Int(loc)}).realVal;
+    TEST_ASSERT(z < -30.0f);
+    return true;
+}

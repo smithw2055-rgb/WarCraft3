@@ -727,6 +727,18 @@ const OrderName kOrderNames[] = {
 struct CodeOrder { const char* code; int id; };
 
 const CodeOrder kCodeOrders[] = {
+    {"AHbn", 852486},
+    {"Aams", 852186},
+    {"ANin", 852232},
+    {"Apos", 852196},
+    {"ANst", 852593},
+    {"Asta", 852114},
+    {"ANto", 852597},
+    {"Afod", 852230},
+    {"Acht", 852588},
+    {"Ache", 852615},
+    {"ANta", 852520},
+    {"Aam2", 852186},
     {"AEbl", 852525},
     {"AEer", 852171},
     {"AEfk", 852526},
@@ -737,7 +749,7 @@ const CodeOrder kCodeOrders[] = {
     {"AEsf", 852183},
     {"AEsh", 852527},
     {"AEst", 852181},
-    {"AEtr", 852184},
+    {"AEtq", 852184},
     {"AHav", 852086},
     {"AHbz", 852089},
     {"AHca", 852244},
@@ -764,6 +776,7 @@ const CodeOrder kCodeOrders[] = {
     {"ANfa", 852244},
     {"ANfd", 852230},
     {"ANfl", 852587},
+    {"ANfb", 852231},
     {"ANfy", 852658},
     {"ANhs", 852664},
     {"ANht", 852588},
@@ -824,9 +837,31 @@ const CodeOrder kCodeOrders[] = {
     {"Alsh", 852110},
     {"Aply", 852074},
     {"Aprg", 852111},
+    {"Aave", 852531},
+    {"Acpf", 852493},
+    {"Acrs", 852190},
+    {"Aetf", 852496},
+    {"AIam", 852214001},
+    {"AIct", 852621},
+    {"AIem", 852260},
+    {"AIfs", 852261},
+    {"AIim", 852214001},
+    {"AIlm", 852263},
+    {"AImi", 852264},
+    {"AIsm", 852214001},
+    {"AIxm", 852214001},
+    {"ANse", 852572},
+    {"Aeat", 852146},
+    {"Ahid", 852131},
+    {"AIgo", 852610},
+    {"Alam", 852201},
+    {"Ambt", 852542},
+    {"Asac", 852205},
     {"Arai", 852197},
+    {"AIrd", 852624},
     {"Arav", 852155},
     {"Arej", 852161},
+    {"AIrg", 852609},
     {"Aroa", 852164},
     {"Asds", 852040},
     {"Aslo", 852075},
@@ -835,6 +870,23 @@ const CodeOrder kCodeOrders[] = {
     {"Auhf", 852209},
     {"Avng", 852521},
     {"Aweb", 852211},
+    {"AIco", 852267},
+    {"Amdf", 852478},
+    {"Amls", 852480},
+    {"Arpl", 852545},
+    {"Arpm", 852548},
+    {"Aaha", 852185},
+    {"Acoa", 852143},
+    {"Acoh", 852142},
+    {"Acoi", 852508},
+    {"Adri", 852049},
+    {"Ahrl", 852022},
+    {"Amic", 852071},
+    {"Amil", 852072},
+    {"Astd", 852113},
+    {"Awha", 852214},
+    {"Aent", 852147},
+    {"ANcl", 852600},
 };
 
 } // namespace
@@ -879,5 +931,18 @@ bool SpellMatchesOrder(War3ID code, int orderId) {
     // Immolation is a toggle with separate on/off orders (ref
     // CAbilityImmolation answers immolation/unimmolation).
     if (code == War3ID("AEim") && orderId == 852178) return true;
+    // Corporeal / ethereal / avenger forms are toggles with a second order.
+    if (code == War3ID("Acpf") && orderId == 852494) return true;
+    if (code == War3ID("Aetf") && orderId == 852497) return true;
+    if (code == War3ID("Aave") && orderId == 852532) return true;
+    // Magic Defense answers both the on order and magicundefense.
+    if (code == War3ID("Amdf") && orderId == 852479) return true;
+    if (code == War3ID("Amil") && orderId == 852073) return true;
+    if (code == War3ID("Aent") && orderId == 852148) return true;
+    if (code == War3ID("Amic") && orderId == 852651) return true;
+    // Inferno answers both the generic order (852232, shared with the ANin
+    // code variant) and the dreadlord order (852224); both strings exist
+    // in the retail order list for this spell family.
+    if (code == War3ID("AUin") && orderId == 852224) return true;
     return false;
 }

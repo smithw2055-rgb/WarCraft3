@@ -354,6 +354,12 @@ void Minimap::AddMarker(float wx, float wy, uint32_t rgba, float sizePixels) {
     markers_.push_back({wx, wy, rgba, std::max(2.0f, sizePixels)});
 }
 
+void Minimap::ClearScriptMarkers() { scriptMarkers_.clear(); }
+
+void Minimap::AddScriptMarker(float wx, float wy, uint32_t rgba, float sizePixels) {
+    scriptMarkers_.push_back({wx, wy, rgba, std::max(2.0f, sizePixels)});
+}
+
 void Minimap::Render(int winW, int winH, float camX, float camZ,
                      float camYaw, float camPitch, float camDist, float fov, float aspect) {
     if (!texture_.id || !textureView_.id) return;
@@ -428,6 +434,12 @@ void Minimap::Render(int winW, int winH, float camX, float camZ,
     drawMarker(camSX, camSY, 6.0f, 0xFFFFFFFFu);
 
     for (const auto& marker : markers_) {
+        float sx = 0.0f;
+        float sy = 0.0f;
+        WorldToScreen(marker.worldX, marker.worldY, winW, winH, &sx, &sy);
+        drawMarker(sx, sy, marker.sizePixels, marker.rgba);
+    }
+    for (const auto& marker : scriptMarkers_) {
         float sx = 0.0f;
         float sy = 0.0f;
         WorldToScreen(marker.worldX, marker.worldY, winW, winH, &sx, &sy);

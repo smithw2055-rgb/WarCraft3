@@ -1054,7 +1054,7 @@ void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController*
         }
     }
 
-    // Sync position/rotation via SceneManager
+    // Sync position/rotation/scale via SceneManager
     float visualHeight = unit_selection_geom::ComputeUnitVisualHeight(
         *unit, g->GetTexturedTerrain().IsValid(),
         [&](float x, float z) { return g->GetTexturedTerrain().GetGroundHeight(x, z); });
@@ -1063,6 +1063,18 @@ void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController*
         auto vit = g->simUnitToVisualIdx.find(handleId);
         if (vit != g->simUnitToVisualIdx.end()) {
             g->GetScene().UpdateInstancePosition(vit->second, pos, unit->GetFacing());
+            // Script scale (SetUnitScale) multiplies the seed scale; refresh
+            // every frame so mid-game changes apply (cheap idempotent write).
+            float seedScale[3] = {1.0f, 1.0f, 1.0f};
+            auto seedIt = g->simUnitVisualSeeds.find(handleId);
+            if (seedIt != g->simUnitVisualSeeds.end()) {
+                seedScale[0] = seedIt->second.scale[0];
+                seedScale[1] = seedIt->second.scale[1];
+                seedScale[2] = seedIt->second.scale[2];
+            }
+            const float s = unit->GetScale();
+            const float scale[3] = {seedScale[0] * s, seedScale[1] * s, seedScale[2] * s};
+            g->GetScene().SetInstanceScale(vit->second, scale);
         }
     }
 }
@@ -1917,9 +1929,25 @@ void GameController::WireJassCallbacks() {
     // Ref GetLocationZ reads the map terrain height; route JASS queries to
     // the live textured terrain (0 when no map is loaded).
     jassData->SetTerrainHeightCallback([this](float x, float y) -> float {
-        return texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, y) : 0.0f;
+        float height = texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, y) : 0.0f;
+        if (jassNatives_ && jassNatives_->GetData()) {
+            height += jassNatives_->GetData()->TerrainDeformOffset(x, y);
+        }
+        return height;
     });
     jassData->SetLocalPlayerIndex(config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0);
+    // Ref ForFiles enumerates the datasource listfile; route JASS queries
+    // to the live archive set (empty when headless / unmounted).
+    jassData->SetFileLister([this](const std::string& pattern) -> std::vector<std::string> {
+        if (mpq_.ArchiveCount() == 0) return {};
+        return mpq_.ListAllFiles(pattern);
+    });
+    // Ref doPreloadScript reads file bytes from the datasource.
+    jassData->SetScriptReader([this](const std::string& path) -> std::vector<uint8_t> {
+        std::vector<uint8_t> out;
+        mpq_.ReadFile(path, out);
+        return out;
+    });
 
     jassData->camSetPosition = [this](float x, float y, float z) {
         camera_.SetTarget(x, y, z); camera_.ResetToHome();
@@ -2295,6 +2323,16 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
         }
     }
 
+    if (jassNatives_ && jassNatives_->GetData()) {
+        const auto& noise = jassNatives_->GetData()->sourceNoise;
+        camera_.SetNoise(noise.magnitude, noise.velocity, noise.vertOnly, noise.horizOnly);
+        auto& rot = jassNatives_->GetData()->rotateMode;
+        if (rot.active) {
+            if (!camera_.StepRotateAround(rot.x, rot.y, rot.radians, rot.duration, dt)) {
+                rot.active = false;
+            }
+        }
+    }
     camera_.Update(dt);
 
     // Audio listener
@@ -2312,6 +2350,16 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
     // Day/night
     dayNight_.Update(dt);
     if (texturedTerrain_.IsValid()) dayNight_.Apply(texturedTerrain_);
+    if (jassNatives_ && jassNatives_->GetData() && texturedTerrain_.IsValid()) {
+        const auto& fog = jassNatives_->GetData()->globalUnitFog;
+        if (fog.e > fog.d && fog.d >= 0.0f) {
+            float color[3] = {fog.a, fog.b, fog.c};
+            if (color[0] > 1.0f || color[1] > 1.0f || color[2] > 1.0f) {
+                color[0] /= 255.0f; color[1] /= 255.0f; color[2] /= 255.0f;
+            }
+            texturedTerrain_.SetFog(color, fog.d, fog.e);
+        }
+    }
     if (ui_.GetResourceBar()) ui_.GetResourceBar()->SetTimeOfDay(dayNight_.GetTimeOfDay());
 
     for (auto it = activeEventSplats_.begin(); it != activeEventSplats_.end(); ) {
@@ -2358,6 +2406,7 @@ void GameController::StepSimulation(float dt) {
         }
         SyncFogOfWar();
         SyncLightnings();
+        SyncScriptDecor();
         RefreshSelectionUi(false);
     }
 }
@@ -2419,6 +2468,257 @@ void GameController::SyncLightnings() {
     lightningSynced_ = std::move(live);
 }
 
+void GameController::SyncScriptDecor() {
+    if (!jassNatives_ || !jassNatives_->GetData()) return;
+    auto data = jassNatives_->GetData();
+
+    static std::unordered_set<int> splatIds;
+    static std::unordered_set<int> trackableIds;
+    static size_t doodadCursor = 0;
+
+    if (texturedTerrain_.IsValid()) {
+        for (const auto& [id, splat] : data->ubersplats) {
+            if (!splat || splatIds.count(id)) continue;
+            if (!splat->render || splat->forcePaused) continue;
+            texturedTerrain_.AddUberSplat(splat->name, splat->x, splat->y, 1.0f, false);
+            splatIds.insert(id);
+        }
+    }
+
+    if (auto* lightning = scene_.GetLightning()) {
+        static std::vector<int> billboardIds;
+        for (int id : billboardIds) lightning->RemoveBillboard(id);
+        billboardIds.clear();
+        for (const auto& [id, image] : data->images) {
+            if (!image) continue;
+            float ground = 0.0f;
+            float water = 0.0f;
+            if (texturedTerrain_.IsValid()) {
+                ground = texturedTerrain_.GetGroundHeight(image->posX, image->posY);
+                water = texturedTerrain_.GetWaterHeight(image->posX, image->posY);
+            }
+            const ImageBillboardPose pose = MakeImageBillboard(
+                image->posX, image->posY, image->posZ,
+                image->sizeX, image->sizeY,
+                image->visible, image->render,
+                image->constantHeight, image->aboveWater,
+                ground, water,
+                image->red, image->green, image->blue, image->alpha);
+            if (!pose.visible) continue;
+            const int bid = 0x72000000 + id;
+            lightning->SetBillboard(bid, pose.x, pose.y, pose.z,
+                                    pose.halfW, pose.halfH,
+                                    pose.r, pose.g, pose.b, pose.a);
+            billboardIds.push_back(bid);
+        }
+    }
+
+    while (doodadCursor < data->doodadAnims.size()) {
+        const auto& req = data->doodadAnims[doodadCursor++];
+        scene_.PlayDoodadAnimation(req.x, req.y, req.radius, req.doodadId,
+                                   req.animName, req.nearestOnly);
+    }
+
+    for (const auto& [id, track] : data->trackables) {
+        if (!track || trackableIds.count(id) || track->modelPath.empty()) continue;
+        float height = texturedTerrain_.IsValid()
+            ? texturedTerrain_.GetGroundHeight(track->x, track->y) : 0.0f;
+        float pos[3] = {track->x, height, track->y};
+        if (scene_.AddTransientModelAtScenePosition(track->modelPath, pos, track->facing, 1.0f) >= 0) {
+            trackableIds.insert(id);
+        }
+    }
+
+    minimap_.ClearScriptMarkers();
+    for (const auto& [simId, indicator] : data->unitIndicators) {
+        CUnit* unit = simulation_.GetUnit(simId);
+        if (!unit || unit->IsDead()) continue;
+        const uint32_t rgba = (uint32_t(indicator.alpha) << 24)
+            | (uint32_t(indicator.red) << 16)
+            | (uint32_t(indicator.green) << 8)
+            | uint32_t(indicator.blue);
+        minimap_.AddScriptMarker(unit->GetX(), unit->GetY(), rgba, 8.0f);
+    }
+
+    struct PlayedDestructableAnim {
+        int generation = -1;
+        std::string name;
+    };
+    static std::unordered_map<int, PlayedDestructableAnim> playedAnims;
+    for (auto* destructable : simulation_.GetDestructables()) {
+        if (!destructable || destructable->IsHidden()) continue;
+        const float x = destructable->GetX();
+        const float y = destructable->GetY();
+        scene_.SetPlaybackSpeedNear(x, y, 96.0f, destructable->GetAnimationSpeed());
+        PlayedDestructableAnim& slot = playedAnims[destructable->GetHandleId()];
+        const std::string& anim = destructable->GetAnimation();
+        if (slot.generation != destructable->GetAnimGeneration() || slot.name != anim) {
+            const bool loop = destructable->GetQueuedAnimation().empty();
+            if (!anim.empty() &&
+                scene_.PlayAnimationNear(x, y, 96.0f, anim, loop, false) > 0) {
+                slot.generation = destructable->GetAnimGeneration();
+                slot.name = anim;
+            }
+        } else if (!destructable->GetQueuedAnimation().empty()) {
+            const std::string next = destructable->GetQueuedAnimation();
+            if (scene_.PlayAnimationNear(x, y, 96.0f, next, true, true) > 0) {
+                destructable->PromoteQueuedAnimation();
+                slot.name = destructable->GetAnimation();
+            }
+        }
+    }
+}
+
+void GameController::SyncWeather(float dt) {
+    auto* lightning = scene_.GetLightning();
+    if (!lightning) return;
+    static std::vector<int> boltIds;
+    for (int id : boltIds) lightning->RemoveBolt(id);
+    boltIds.clear();
+    if (!jassNatives_ || !jassNatives_->GetData()) return;
+    struct Drop { float x = 0, y = 0, z = 0; bool live = false; };
+    static std::vector<Drop> drops;
+    int slot = 0;
+    constexpr int kBase = 0x71000000;
+    for (const auto& entry : jassNatives_->GetData()->weathers) {
+        const auto& weather = entry.second;
+        if (!weather || !weather->enabled) continue;
+        const float width = std::max(32.0f, weather->maxX - weather->minX);
+        const float height = std::max(32.0f, weather->maxY - weather->minY);
+        const int count = std::min(40, std::max(8, (int)((width * height) / 50000.0f)));
+        if ((int)drops.size() < slot + count) drops.resize(slot + count);
+        const std::string code = weather->code.ToString();
+        const bool snow = code.find('S') != std::string::npos || code.find('s') != std::string::npos;
+        const float speed = snow ? 70.0f : 420.0f;
+        const float length = snow ? 6.0f : 36.0f;
+        for (int i = 0; i < count; i++) {
+            Drop& drop = drops[slot + i];
+            if (!drop.live) {
+                const float u = std::fmod(i * 0.6180339f, 1.0f);
+                drop.x = weather->minX + u * width;
+                drop.y = weather->minY + std::fmod(u * 1.7f, 1.0f) * height;
+                drop.z = 40.0f + std::fmod(u * 240.0f, 240.0f);
+                drop.live = true;
+            }
+            drop.z -= speed * dt;
+            if (drop.z < 0.0f) drop.z = 260.0f;
+            if (drop.x < weather->minX || drop.x > weather->maxX ||
+                drop.y < weather->minY || drop.y > weather->maxY) {
+                drop.live = false;
+                continue;
+            }
+            const int id = kBase + slot + i;
+            lightning->SetBolt(id, drop.x, drop.z, drop.y,
+                               drop.x, std::max(0.0f, drop.z - length), drop.y,
+                               snow ? 0.9f : 0.65f, snow ? 0.9f : 0.75f, 0.95f, 0.45f, "CLPB");
+            boltIds.push_back(id);
+        }
+        slot += count;
+    }
+}
+
+void GameController::SyncJassEffectVisuals() {
+    if (!jassNatives_ || !jassNatives_->GetData()) return;
+    auto data = jassNatives_->GetData();
+
+    auto groundHeight = [&](float x, float y) {
+        return texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, y) : 0.0f;
+    };
+
+    for (auto& [effectId, e] : data->effects) {
+        if (!e || e->modelPath.empty()) continue;
+        auto known = effectVisuals_.find(effectId);
+
+        if (e->targetSimHandle < 0) {
+            // Point effect: one-shot transient on first sight.
+            if (known == effectVisuals_.end()) {
+                float pos[3] = {e->x, groundHeight(e->x, e->y), e->y};
+                scene_.AddTransientModelAtScenePosition(e->modelPath, pos, 0.0f, 1.0f);
+                effectVisuals_[effectId] = -1;
+            }
+            continue;
+        }
+
+        // Attached effect: persistent instance, repositioned every frame.
+        int idx = (known == effectVisuals_.end()) ? -1 : known->second;
+        if (idx < 0) {
+            int player = 0;
+            if (CWidget* w = simulation_.GetWidget(e->targetSimHandle)) {
+                if (auto* u = dynamic_cast<CUnit*>(w)) player = u->GetPlayerIndex();
+            }
+            idx = scene_.AddAttachedModel(e->modelPath, player);
+            if (idx < 0) continue; // model missing; retry next frame
+            effectVisuals_[effectId] = idx;
+        }
+
+        // Compose unit-instance transform * attach-node matrix (mirrors the
+        // SceneManager instance convention: Y-rotation + translation).
+        Mat4 finalMat = Mat4::Identity();
+        bool placed = false;
+        if (CWidget* w = simulation_.GetWidget(e->targetSimHandle)) {
+            float wx = w->GetX(), wy = w->GetY();
+            float h = groundHeight(wx, wy);
+            float angle = 0.0f;
+            MdxViewer* viewer = nullptr;
+            int viewerIdx = -1;
+            if (auto* u = dynamic_cast<CUnit*>(w)) {
+                angle = u->GetFacing();
+                h = unit_selection_geom::ComputeUnitVisualHeight(
+                    *u, texturedTerrain_.IsValid(),
+                    [&](float x, float z) { return texturedTerrain_.GetGroundHeight(x, z); });
+                auto vit = simUnitToVisualIdx.find(u->GetHandleId());
+                if (vit != simUnitToVisualIdx.end()) {
+                    viewerIdx = vit->second;
+                    viewer = scene_.GetViewer(viewerIdx);
+                }
+            } else {
+                auto vit = simItemToVisualIdx.find(w->GetHandleId());
+                if (vit != simItemToVisualIdx.end()) {
+                    viewerIdx = vit->second;
+                    viewer = scene_.GetViewer(viewerIdx);
+                }
+            }
+            // Instance transform shares the scene convention, including
+            // the instance scale (seed x script), so attached models grow
+            // with scaled units.
+            float iscale[3] = {1.0f, 1.0f, 1.0f};
+            if (viewerIdx >= 0) scene_.GetInstanceScale(viewerIdx, iscale);
+            Mat4 inst = MakeSceneInstanceMatrix(wx, h, wy, angle,
+                                                iscale[0], iscale[1], iscale[2]);
+            finalMat = inst;
+            if (viewer && viewer->GetAnimator() && !e->attachPoint.empty()) {
+                // Pivot-inclusive attach location in model space plus the
+                // node orientation (translation stripped, so the unit
+                // instance transform is applied exactly once).
+                Vec3 loc{0, 0, 0};
+                Mat4 node = Mat4::Identity();
+                if (viewer->GetAnimator()->GetAttachmentWorldMatrixYUp(e->attachPoint, node, loc)) {
+                    node.m[12] = 0.0f;
+                    node.m[13] = 0.0f;
+                    node.m[14] = 0.0f;
+                    finalMat = inst * Mat4::Translate(loc.x, loc.y, loc.z) * node;
+                }
+            }
+            placed = true;
+        }
+        if (placed) {
+            if (!scene_.UpdateAttachedModel(idx, finalMat)) {
+                effectVisuals_.erase(effectId);
+            }
+        }
+    }
+
+    // Drop visuals whose effects were destroyed (or never resolved).
+    std::vector<int> gone;
+    for (auto& [effectId, idx] : effectVisuals_) {
+        if (data->effects.find(effectId) == data->effects.end()) {
+            if (idx >= 0) scene_.RemoveAttachedModel(idx);
+            gone.push_back(effectId);
+        }
+    }
+    for (int id : gone) effectVisuals_.erase(id);
+}
+
 void GameController::SyncAndReconcileVisuals() {
     // Sync all sim units to visuals
     for (auto* unit : simulation_.GetUnits()) {
@@ -2427,9 +2727,15 @@ void GameController::SyncAndReconcileVisuals() {
 
         auto visualIt = simUnitToVisualIdx.find(handleId);
         if (visualIt != simUnitToVisualIdx.end()) {
-            if (auto* viewer = scene_.GetViewer(visualIt->second)) {
-                SyncSimulationUnitAnimation(unit, viewer, this);
+        if (auto* viewer = scene_.GetViewer(visualIt->second)) {
+            if (jassNatives_ && jassNatives_->GetData()) {
+                auto blend = jassNatives_->GetData()->unitBlendTimes.find(handleId);
+                if (blend != jassNatives_->GetData()->unitBlendTimes.end()) {
+                    viewer->SetBlendTime(blend->second);
+                }
             }
+            SyncSimulationUnitAnimation(unit, viewer, this);
+        }
         }
     }
 
@@ -2480,6 +2786,8 @@ void GameController::SyncAndReconcileVisuals() {
         simItemToVisualIdx.erase(handleId);
         simItemVisualRegistrationFailed.erase(handleId);
     }
+
+    SyncJassEffectVisuals();
 }
 
 void GameController::CollectUnitOverlays(int screenW, int screenH) {
@@ -2588,9 +2896,10 @@ void GameController::Render(int screenW, int screenH) {
     Renderer::BeginFrame();
     Renderer::SetWireframe(wireframe);
 
-    if (texturedTerrain_.IsValid())
+    if (texturedTerrain_.IsValid()) {
+        texturedTerrain_.SetWaterDeforms(simulationInitialized_ && simulation_.GetWaterDeforms());
         texturedTerrain_.Render(view, proj, frameCount_ * 0.016f);
-    else if (simpleTerrain_.IsValid())
+    } else if (simpleTerrain_.IsValid())
         simpleTerrain_.Render(view, proj);
 
     sg_reset_state_cache();
@@ -2599,6 +2908,7 @@ void GameController::Render(int screenW, int screenH) {
     if (!terrainOnly_) {
             scene_.SetDebugRenderRange(debugSceneRenderStart_, debugSceneRenderCount_);
             scene_.SetDebugRenderKind(debugSceneRenderKind_);
+            SyncWeather(dt);
             scene_.RenderAll(view, proj, dt);
             for (const SceneEventEffect& eventEffect : scene_.GetFrameEventEffects()) {
                 if (audio_.IsValid() && !eventEffect.effect.soundPaths.empty()) {
@@ -3075,8 +3385,22 @@ void GameController::OnMouseDown(const sapp_event* ev) {
             camera_.SetTarget(wx, gh + 100.0f, wy);
         } else if (ui_.GetPendingCommand() >= 0 && IssuePendingCommandAtScreenPoint(ev->mouse_x, ev->mouse_y)) {
             return;
-        } else if (simulationInitialized_ && !simulation_.GetUnits().empty()) {
-            selectionPressActive_ = true;
+        } else {
+            if (jassNatives_ && simulationInitialized_) {
+                int winW = sapp_width(), winH = sapp_height();
+                float aspect = (winH > 0) ? (float)winW / winH : 1.0f;
+                Mat4 view = camera_.GetViewMatrix();
+                Mat4 proj = camera_.GetProjectionMatrix(aspect);
+                auto terrainH = [&](float x, float z) {
+                    return texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, z) : 0.0f;
+                };
+                Vec3 wPos = picking::ScreenToWorld(ev->mouse_x, ev->mouse_y, view, proj, winW, winH,
+                                                   texturedTerrain_.IsValid(), texturedTerrain_.GetRadius(), terrainH);
+                jassNatives_->NotifyTrackableClick(wPos.x, wPos.z);
+            }
+            if (simulationInitialized_ && !simulation_.GetUnits().empty()) {
+                selectionPressActive_ = true;
+            }
         }
     } else if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
         bool issuedOrder = false;
@@ -3614,6 +3938,11 @@ bool GameController::EnsureSimulationUnitVisual(CUnit* unit) {
         scale[0] = seedIt->second.scale[0]; scale[1] = seedIt->second.scale[1]; scale[2] = seedIt->second.scale[2];
         skinId = seedIt->second.skinId; hp = seedIt->second.hitpoints; flags = seedIt->second.flags;
     }
+    // Script unit scale multiplies the seed (per-frame sync keeps it live).
+    const float us = unit->GetScale();
+    scale[0] *= us;
+    scale[1] *= us;
+    scale[2] *= us;
 
     float height = texturedTerrain_.IsValid()
         ? texturedTerrain_.GetGroundHeight(unit->GetX(), unit->GetY())

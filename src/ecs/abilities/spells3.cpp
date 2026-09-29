@@ -95,8 +95,8 @@ CAbilityBlink::CAbilityBlink(int handleId)
 }
 
 void CAbilityBlink::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated relocation onto an AbilityBuilder teleport (range clamp
-    // stays hand-written; no-op without terrain data, as before).
+    // Relocates onto the point. A blocked cell slides to the nearest
+    // walkable sample when a pathing map is loaded.
     if (!caster) return;
     const float dx = x - caster->GetX(), dy = y - caster->GetY();
     const float dist = std::sqrt(dx * dx + dy * dy);
@@ -190,7 +190,7 @@ void CAbilityStarfall::DoEffect(CSimulation& game, CUnit* caster) {
 
 // ===== Tranquility =====
 CAbilityTranquility::CAbilityTranquility(int handleId)
-    : CAbilitySpellBase(handleId, War3ID("AEtr"), CAbilityCategory::SPELL) {
+    : CAbilitySpellBase(handleId, War3ID("AEtq"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::NO_TARGET);
     SetCooldown(60.0f);
     SetManaCost(125);

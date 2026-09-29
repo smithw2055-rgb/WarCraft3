@@ -10,9 +10,8 @@
 struct CAbilityDefFull;
 
 // ===== Whirlwind (Bladestorm, AOww) - spinning AoE =====
-// Ref DataA damage per second, Area of effect, 1s damage interval;
-// the ref magic-immune/attack-lock side effects need the missing
-// StateMod stack and are not modeled.
+// Ref DataA damage per second, Area of effect, 1s damage interval.
+// The bearer is magic immune and cannot attack for the duration.
 class CAbilityWhirlwind : public CAbilitySpellBase {
 public:
     CAbilityWhirlwind(int handleId);
@@ -135,6 +134,7 @@ public:
 protected:
     void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
+    float initialDamage_ = 10.0f;
     float damagePerSecond_ = 10.0f; // ref DataB (documented read)
     float radius_ = 250.0f; // ref Area (documented read)
 };

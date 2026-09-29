@@ -1,6 +1,7 @@
 #pragma once
 #include "ecs/widget.h"
 #include "ecs/item_class.h"
+#include "ecs/item_bonuses.h"
 #include "resource/slk.h"
 #include <vector>
 #include <string>
@@ -63,6 +64,9 @@ public:
     void SetAbilityList(const std::vector<War3ID>& ids) { abilityList_ = ids; }
     void AddAbility(War3ID id) { abilityList_.push_back(id); }
 
+    const std::vector<CItemBonus>& GetBonuses() const { return bonuses_; }
+    void SetBonuses(std::vector<CItemBonus> bonuses) { bonuses_ = std::move(bonuses); }
+
     // Owner
     CUnit* GetOwner() const { return owner_; }
     void SetOwner(CUnit* u) { owner_ = u; }
@@ -124,6 +128,7 @@ private:
 
     // Abilities granted
     std::vector<War3ID> abilityList_;
+    std::vector<CItemBonus> bonuses_;
 
     // Display
     std::string name_;

@@ -84,18 +84,8 @@ static Vec3 TransformInstanceLocalPoint(const PlacedModel& inst, const Vec3& loc
 }
 
 static Mat4 BuildInstanceModelMatrix(const PlacedModel& inst) {
-    Mat4 model = Mat4::Identity();
-    const float c = std::cos(inst.renderAngle);
-    const float s = std::sin(inst.renderAngle);
-    model.m[0] = c * inst.scale[0];
-    model.m[2] = -s * inst.scale[0];
-    model.m[5] = inst.scale[1];
-    model.m[8] = s * inst.scale[2];
-    model.m[10] = c * inst.scale[2];
-    model.m[12] = inst.renderPos[0];
-    model.m[13] = inst.renderPos[1];
-    model.m[14] = inst.renderPos[2];
-    return model;
+    return MakeSceneInstanceMatrix(inst.renderPos[0], inst.renderPos[1], inst.renderPos[2],
+                                   inst.renderAngle, inst.scale[0], inst.scale[1], inst.scale[2]);
 }
 
 namespace {
@@ -1077,6 +1067,58 @@ int SceneManager::AddTransientModelWithSceneMatrix(const std::string& path, cons
     return instanceIndex;
 }
 
+int SceneManager::AddAttachedModel(const std::string& path, int player) {
+    const std::string modelPath = NormalizeModelPathWithExtension(path);
+    std::unique_ptr<MdxViewer> uniqueViewer = CreateUnitViewer(modelPath);
+    if (!uniqueViewer) {
+        loadStats_.missReasons["attached-model-miss"]++;
+        return -1;
+    }
+
+    auto* inst = new PlacedModel();
+    inst->player = player;
+    inst->debugKind = "attached-effect";
+    inst->visible = true;
+    inst->smoothMotion = false;
+    inst->transient = false;
+    inst->useCustomModelMatrix = true;
+    inst->customModelMatrix = Mat4::Identity();
+    inst->ownedViewer = std::move(uniqueViewer);
+    inst->viewer = inst->ownedViewer.get();
+    if (inst->viewer) {
+        inst->viewer->PlaySequenceByIndex(0, true);
+    }
+
+    const int instanceIndex = (int)instances_.size();
+    instances_.push_back(inst);
+    return instanceIndex;
+}
+
+bool SceneManager::UpdateAttachedModel(int index, const Mat4& modelMatrix) {
+    if (index < 0 || index >= (int)instances_.size()) return false;
+    auto* inst = instances_[index];
+    if (!inst || !inst->visible || !inst->viewer) return false;
+    inst->customModelMatrix = modelMatrix;
+    inst->useCustomModelMatrix = true;
+    inst->pos[0] = modelMatrix.m[12];
+    inst->pos[1] = modelMatrix.m[13];
+    inst->pos[2] = modelMatrix.m[14];
+    inst->renderPos[0] = inst->pos[0];
+    inst->renderPos[1] = inst->pos[1];
+    inst->renderPos[2] = inst->pos[2];
+    return true;
+}
+
+bool SceneManager::RemoveAttachedModel(int index) {
+    if (index < 0 || index >= (int)instances_.size()) return false;
+    auto* inst = instances_[index];
+    if (!inst) return false;
+    inst->visible = false;
+    inst->ownedViewer.reset();
+    inst->viewer = nullptr;
+    return true;
+}
+
 bool SceneManager::UpdateInstancePosition(int index, const float pos[3], float angle,
                                           float movementSpeed, float turnRate,
                                           bool smoothMotion) {
@@ -1095,6 +1137,26 @@ bool SceneManager::UpdateInstancePosition(int index, const float pos[3], float a
 bool SceneManager::SetInstanceVisible(int index, bool visible) {
     if (index < 0 || index >= (int)instances_.size()) return false;
     instances_[index]->visible = visible;
+    return true;
+}
+
+bool SceneManager::GetInstanceScale(int index, float scale[3]) const {
+    if (index < 0 || index >= (int)instances_.size() || !scale) return false;
+    const auto* inst = instances_[index];
+    if (!inst) return false;
+    scale[0] = inst->scale[0];
+    scale[1] = inst->scale[1];
+    scale[2] = inst->scale[2];
+    return true;
+}
+
+bool SceneManager::SetInstanceScale(int index, const float scale[3]) {
+    if (index < 0 || index >= (int)instances_.size() || !scale) return false;
+    auto* inst = instances_[index];
+    if (!inst) return false;
+    inst->scale[0] = scale[0];
+    inst->scale[1] = scale[1];
+    inst->scale[2] = scale[2];
     return true;
 }
 
@@ -1296,4 +1358,72 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
     // Procedural lightning bolts (JASS AddLightning*) on top.
     lightning_.Update(dt);
     lightning_.Render(view, proj);
+}
+
+int SceneManager::PlayDoodadAnimation(float x, float y, float radius, uint32_t doodadId,
+                                     const std::string& animName, bool nearestOnly) {
+    if (animName.empty()) return 0;
+    const float limit = radius > 0.0f ? radius * radius : 1.0e12f;
+    int played = 0;
+    float best = limit;
+    int bestIndex = -1;
+    for (int i = 0; i < (int)instances_.size(); i++) {
+        PlacedModel* inst = instances_[i];
+        if (!inst || inst->debugKind != "doodad" || !inst->viewer) continue;
+        if (doodadId != 0 && inst->debugWar3ID != doodadId) continue;
+        const float dx = inst->pos[0] - x;
+        const float dy = inst->pos[2] - y;
+        const float dist = dx * dx + dy * dy;
+        if (dist > limit) continue;
+        if (nearestOnly) {
+            if (dist < best) {
+                best = dist;
+                bestIndex = i;
+            }
+            continue;
+        }
+        if (inst->viewer->PlaySequenceByName(animName.c_str(), true)) played++;
+    }
+    if (nearestOnly && bestIndex >= 0) {
+        if (instances_[bestIndex]->viewer->PlaySequenceByName(animName.c_str(), true)) played++;
+    }
+    return played;
+}
+
+int SceneManager::PlayAnimationNear(float x, float y, float radius,
+                                    const std::string& animName, bool loop,
+                                    bool requireFinished) {
+    if (animName.empty()) return 0;
+    const float limit = radius > 0.0f ? radius * radius : 96.0f * 96.0f;
+    float best = limit;
+    int bestIndex = -1;
+    for (int i = 0; i < (int)instances_.size(); i++) {
+        PlacedModel* inst = instances_[i];
+        if (!inst || inst->debugKind != "doodad" || !inst->viewer) continue;
+        const float dx = inst->pos[0] - x;
+        const float dy = inst->pos[2] - y;
+        const float dist = dx * dx + dy * dy;
+        if (dist > best) continue;
+        best = dist;
+        bestIndex = i;
+    }
+    if (bestIndex < 0) return 0;
+    MdxViewer* viewer = instances_[bestIndex]->viewer;
+    if (requireFinished && !viewer->IsCurrentSequenceFinished()) return 0;
+    return viewer->PlaySequenceByName(animName.c_str(), loop) ? 1 : 0;
+}
+
+int SceneManager::SetPlaybackSpeedNear(float x, float y, float radius, float speed) {
+    const float limit = radius > 0.0f ? radius * radius : 96.0f * 96.0f;
+    int changed = 0;
+    for (PlacedModel* inst : instances_) {
+        if (!inst || !inst->viewer) continue;
+        if (inst->debugKind != "doodad") continue;
+        const float dx = inst->pos[0] - x;
+        const float dy = inst->pos[2] - y;
+        if (dx * dx + dy * dy > limit) continue;
+        inst->viewer->SetAnimationSpeedScale(speed);
+        changed++;
+    }
+    return changed;
 }

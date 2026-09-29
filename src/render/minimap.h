@@ -22,6 +22,8 @@ public:
                 float camYaw, float camPitch, float camDist, float fov, float aspect);
     void ClearMarkers();
     void AddMarker(float wx, float wy, uint32_t rgba, float sizePixels = 8.0f);
+    void ClearScriptMarkers();
+    void AddScriptMarker(float wx, float wy, uint32_t rgba, float sizePixels = 8.0f);
 
     bool HitTest(float mouseX, float mouseY, int winW, int winH) const;
     void ScreenToWorld(float mx, float my, int winW, int winH, float* wx, float* wy) const;
@@ -58,4 +60,5 @@ private:
 
     float texW_ = 0, texH_ = 0;
     std::vector<Marker> markers_;
+    std::vector<Marker> scriptMarkers_;
 };

@@ -30,6 +30,15 @@ float Dist2(float x1, float y1, float x2, float y2) {
 MeleeAIController::MeleeAIController(CSimulation* sim, int playerIndex)
     : sim_(sim), playerIndex_(playerIndex) {}
 
+void MeleeAIController::IssueAiOrder(CUnit* unit, std::unique_ptr<COrder> order) {
+    if (!unit || !order) return;
+    if (sim_) {
+        sim_->IssueUnitOrder(unit->GetHandleId(), std::move(order));
+    } else {
+        unit->IssueOrder(std::move(order));
+    }
+}
+
 void MeleeAIController::SetDifficulty(int difficulty) {
     if (difficulty < 0) difficulty = 0;
     if (difficulty > 2) difficulty = 2;
@@ -41,10 +50,22 @@ void MeleeAIController::Command(int command, int data) {
     lastCommandData_ = data;
 }
 
+int MeleeAIController::GetThinkIntervalTicks() const {
+    if (difficulty_ == AIDifficulty::EASY) return 40;
+    if (difficulty_ == AIDifficulty::INSANE) return 10;
+    return 20;
+}
+
+int MeleeAIController::GetWaveCooldownTicks() const {
+    if (difficulty_ == AIDifficulty::EASY) return 1200;
+    if (difficulty_ == AIDifficulty::INSANE) return 300;
+    return 600;
+}
+
 void MeleeAIController::Update() {
     if (!enabled_ || !sim_) return;
     if (sim_->IsPaused()) return;
-    if (++tickCounter_ < 20) return; // think roughly once per second
+    if (++tickCounter_ < GetThinkIntervalTicks()) return; // ~1/sec on NORMAL
     tickCounter_ = 0;
     Think();
 }
@@ -325,7 +346,7 @@ bool MeleeAIController::TryTrainWorkers() {
         player->GetFoodUsed() + workerType->GetFoodUsed() > player->GetFoodCap()) {
         return false;
     }
-    hall->IssueOrder(std::make_unique<COrderNoTarget>(static_cast<int>(plan_.worker.value)));
+    IssueAiOrder(hall, std::make_unique<COrderNoTarget>(static_cast<int>(plan_.worker.value)));
     return true;
 }
 
@@ -346,7 +367,7 @@ bool MeleeAIController::TryBuildSupply() {
     if (!worker) return false;
     float x = 0.0f, y = 0.0f;
     if (!FindBuildSpot(hall->GetX(), hall->GetY(), x, y)) return false;
-    worker->IssueOrder(
+    IssueAiOrder(worker,
         std::make_unique<COrderTargetPoint>(static_cast<int>(plan_.farm.value), x, y));
     return true;
 }
@@ -365,7 +386,7 @@ bool MeleeAIController::TryBuildBarracks() {
     if (!worker) return false;
     float x = 0.0f, y = 0.0f;
     if (!FindBuildSpot(hall->GetX(), hall->GetY(), x, y)) return false;
-    worker->IssueOrder(
+    IssueAiOrder(worker,
         std::make_unique<COrderTargetPoint>(static_cast<int>(plan_.barracks.value), x, y));
     return true;
 }
@@ -386,7 +407,7 @@ bool MeleeAIController::TryTrainArmy() {
         player->GetFoodUsed() + armyType->GetFoodUsed() > player->GetFoodCap()) {
         return false;
     }
-    barracks->IssueOrder(std::make_unique<COrderNoTarget>(static_cast<int>(plan_.armyUnit.value)));
+    IssueAiOrder(barracks, std::make_unique<COrderNoTarget>(static_cast<int>(plan_.armyUnit.value)));
     return true;
 }
 
@@ -396,13 +417,13 @@ bool MeleeAIController::TryAttackWave(bool force) {
         : difficulty_ == AIDifficulty::INSANE ? 9 : 6;
     const int army = CountArmy();
     if (army < (force ? 2 : waveSize)) return false;
-    if (!force && sim_->GetGameTurnTick() - lastWaveTick_ < 600) return false;
+    if (!force && sim_->GetGameTurnTick() - lastWaveTick_ < GetWaveCooldownTicks()) return false;
     float x = 0.0f, y = 0.0f;
     if (!FindAttackTarget(x, y)) return false;
     for (CUnit* unit : sim_->GetUnits()) {
         if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
         if (plan_.armyUnit.value != 0 && unit->GetTypeId() != plan_.armyUnit) continue;
-        unit->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::ATTACK, x, y));
+        IssueAiOrder(unit, std::make_unique<COrderTargetPoint>(OrderIds::ATTACK, x, y));
     }
     lastWaveTick_ = sim_->GetGameTurnTick();
     waveNumber_++;
@@ -422,19 +443,19 @@ void MeleeAIController::AssignIdleWorkers() {
         if (needLumber) {
             CDestructable* tree = FindNearestTree(worker->GetX(), worker->GetY());
             if (tree) {
-                worker->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, tree));
+                IssueAiOrder(worker, std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, tree));
                 lumberCrew++;
                 continue;
             }
         }
         CUnit* mine = FindNearestGoldMine(worker->GetX(), worker->GetY());
         if (mine) {
-            worker->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, mine));
+            IssueAiOrder(worker, std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, mine));
             continue;
         }
         CDestructable* tree = FindNearestTree(worker->GetX(), worker->GetY());
         if (tree) {
-            worker->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, tree));
+            IssueAiOrder(worker, std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, tree));
             continue;
         }
         break; // nothing to harvest; stay idle
@@ -468,7 +489,7 @@ void MeleeAIController::Think() {
             for (CUnit* unit : sim_->GetUnits()) {
                 if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
                 if (unit->GetTypeId() != plan_.armyUnit) continue;
-                unit->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::ATTACK, threat));
+                IssueAiOrder(unit, std::make_unique<COrderTargetWidget>(OrderIds::ATTACK, threat));
             }
         }
     }

@@ -11,6 +11,8 @@ public:
     // Order handling
     bool CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const override;
     CBehavior* BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) override;
+    void OnTick(CSimulation& game, CUnit* unit) override;
+    bool IsUpgrading() const { return upgrading_; }
 
     // Configuration
     void AddUpgradeTo(War3ID id) { upgradesTo_.insert(id); }
@@ -18,4 +20,8 @@ public:
 
 private:
     std::unordered_set<War3ID> upgradesTo_;
+    War3ID pendingId_;
+    float progress_ = 0.0f;
+    float buildTime_ = 0.0f;
+    bool upgrading_ = false;
 };

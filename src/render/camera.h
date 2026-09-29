@@ -27,6 +27,13 @@ public:
     // Input helpers (for use in ProcessInput)
     void OnMouseMove(float dx, float dy, bool leftDown, bool rightDown);
     void OnMouseWheel(float delta);
+    void SetNoise(float magnitude, float velocity, bool vertOnly, bool horizOnly);
+    Vec3 NoiseOffset() const { return noiseOffset_; }
+
+    // Orbit the rig around a ground point (JASS SetCameraRotateMode).
+    // pivotZ is world Z. Consumes radiansLeft over durationLeft seconds.
+    // Returns false once the turn is finished.
+    bool StepRotateAround(float pivotX, float pivotZ, float& radiansLeft, float& durationLeft, float dt);
 
     // Call this each frame with dt in seconds
     void Update(float dt);
@@ -54,6 +61,14 @@ private:
 
     float mouseSensitivity_ = 0.005f;
     float zoomSpeed_ = 50.0f;
+    float noiseMag_ = 0.0f;
+    float noiseVel_ = 0.0f;
+    bool noiseVertOnly_ = false;
+    bool noiseHorizOnly_ = false;
+    float noiseClock_ = 0.0f;
+    Vec3 noiseOffset_ = {0, 0, 0};
+
+    void RotateAround(float pivotX, float pivotZ, float deltaRadians);
 
     bool dragging_ = false;
     float dragYaw_ = 0.0f;

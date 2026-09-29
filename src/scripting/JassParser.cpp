@@ -71,19 +71,6 @@ std::string JassParser::ResolveMethodRef(const std::string& base, const std::str
     return base + "." + member;
 }
 
-void JassParser::SkipUnsupportedBlock(const std::string& opener, const std::string& ender) {
-    errors_.push_back("Unsupported vJASS feature '" + opener + "' (modules/interfaces/delegates are not implemented)");
-    int depth = 1;
-    while (Peek().type != JassTokenType::EOF_TOKEN && depth > 0) {
-        if (Peek().type == JassTokenType::IDENTIFIER) {
-            if (Peek().text == opener) depth++;
-            else if (Peek().text == ender) depth--;
-        }
-        Advance();
-    }
-    SkipNewlines();
-}
-
 std::unique_ptr<AstNode> JassParser::ParseProgram() {
     auto program = std::make_unique<AstNode>(AstNodeType::PROGRAM);
     SkipNewlines();
@@ -142,14 +129,20 @@ std::unique_ptr<AstNode> JassParser::ParseDecl(bool defaultPrivate, std::string&
             SkipNewlines();
             return nullptr;
         }
-        if (word == "module" || word == "interface" || word == "delegate") {
-            if (word == "module") {
-                auto node = ParseModuleDecl();
-                if (node) outRawName = node->text;
-                return node;
-            }
-            Advance();
-            SkipUnsupportedBlock(word, word == "interface" ? "endinterface" : word);
+        if (word == "module") {
+            auto node = ParseModuleDecl();
+            if (node) outRawName = node->text;
+            return node;
+        }
+        if (word == "interface") {
+            auto node = ParseInterfaceDecl();
+            if (node) outRawName = node->text;
+            return node;
+        }
+        if (word == "delegate") {
+            errors_.push_back("delegate is only valid inside a struct at line " +
+                              std::to_string(Peek().line));
+            while (Peek().type != JassTokenType::NEWLINE && Peek().type != JassTokenType::EOF_TOKEN) Advance();
             return nullptr;
         }
     }
@@ -859,6 +852,30 @@ std::unique_ptr<AstNode> JassParser::ParseStructDecl() {
     return node;
 }
 
+std::unique_ptr<AstNode> JassParser::ParseInterfaceDecl() {
+    const int interfaceLine = Peek().line;
+    Advance(); // interface
+    auto node = std::make_unique<AstNode>(AstNodeType::STRUCT_DECL);
+    node->isInterface = true;
+    node->line = interfaceLine;
+    node->text = Expect(JassTokenType::IDENTIFIER).text;
+    if (Peek().type == JassTokenType::KW_EXTENDS) {
+        Advance();
+        node->extendsType = ParseType();
+    }
+    SkipNewlines();
+    const std::string outerStruct = currentStruct_;
+    currentStruct_ = node->text;
+    ParseStructOrModuleBody(node.get(), false);
+    if (Peek().type == JassTokenType::IDENTIFIER && Peek().text == "endinterface") {
+        Advance();
+    } else {
+        errors_.push_back("Expected 'endinterface' at line " + std::to_string(Peek().line));
+    }
+    currentStruct_ = outerStruct;
+    return node;
+}
+
 std::unique_ptr<AstNode> JassParser::ParseModuleDecl() {
     // At entry Peek() is the contextual `module` identifier.
     const int moduleLine = Peek().line;
@@ -880,20 +897,48 @@ std::unique_ptr<AstNode> JassParser::ParseModuleDecl() {
     return node;
 }
 
-static bool AtBodyEnd(const JassToken& tok, bool isModule) {
+static bool AtBodyEnd(const JassToken& tok, bool isModule, bool isInterface) {
     if (tok.type == JassTokenType::EOF_TOKEN) return true;
-    if (!isModule && tok.type == JassTokenType::KW_ENDSTRUCT) return true;
-    return isModule && tok.type == JassTokenType::IDENTIFIER && tok.text == "endmodule";
+    if (isModule) return tok.type == JassTokenType::IDENTIFIER && tok.text == "endmodule";
+    if (isInterface) return tok.type == JassTokenType::IDENTIFIER && tok.text == "endinterface";
+    return tok.type == JassTokenType::KW_ENDSTRUCT;
 }
 
 void JassParser::ParseStructOrModuleBody(AstNode* node, bool isModule) {
-    while (!AtBodyEnd(Peek(), isModule)) {
+    while (!AtBodyEnd(Peek(), isModule, node->isInterface)) {
         while (Peek().type == JassTokenType::IDENTIFIER &&
                (Peek().text == "private" || Peek().text == "public")) {
             // Struct-level privacy is accepted but not enforced
             // (documented); only scope-level privacy mangles names.
             Advance();
             SkipNewlines();
+        }
+        if (Peek().type == JassTokenType::IDENTIFIER && Peek().text == "defaults") {
+            while (Peek().type != JassTokenType::NEWLINE && Peek().type != JassTokenType::EOF_TOKEN) Advance();
+            SkipNewlines();
+            continue;
+        }
+        if (Peek().type == JassTokenType::IDENTIFIER && Peek().text == "delegate") {
+            const int line = Peek().line;
+            Advance();
+            SkipNewlines();
+            const std::string typeName = ParseType();
+            SkipNewlines();
+            if (Peek().type != JassTokenType::IDENTIFIER) {
+                errors_.push_back("Expected delegated member at line " + std::to_string(line));
+            } else {
+                node->delegates.push_back({typeName, Advance().text});
+            }
+            SkipNewlines();
+            continue;
+        }
+        if (Peek().type == JassTokenType::IDENTIFIER && Peek().text == "interface") {
+            hoisted_.push_back(ParseInterfaceDecl());
+            continue;
+        }
+        if (Peek().type == JassTokenType::IDENTIFIER && Peek().text == "module") {
+            hoisted_.push_back(ParseModuleDecl());
+            continue;
         }
         if (Peek().type == JassTokenType::IDENTIFIER && Peek().text == "implement") {
             const int implLine = Peek().line;
@@ -906,9 +951,17 @@ void JassParser::ParseStructOrModuleBody(AstNode* node, bool isModule) {
                 optional = true;
             }
             if (isModule) {
-                errors_.push_back("'implement' inside a module is not supported at line " +
-                                  std::to_string(implLine));
-                while (Peek().type != JassTokenType::NEWLINE && Peek().type != JassTokenType::EOF_TOKEN) Advance();
+                if (Peek().type == JassTokenType::IDENTIFIER) {
+                    ImplementRecord rec;
+                    rec.structName = node->text;
+                    rec.moduleName = Advance().text;
+                    rec.optional = optional;
+                    rec.intoModule = true;
+                    pendingImplements_.push_back(std::move(rec));
+                } else {
+                    errors_.push_back("Expected module name after 'implement' at line " +
+                                      std::to_string(implLine));
+                }
             } else if (Peek().type == JassTokenType::IDENTIFIER) {
                 pendingImplements_.push_back({node->text, Advance().text, optional});
             } else {
@@ -916,13 +969,6 @@ void JassParser::ParseStructOrModuleBody(AstNode* node, bool isModule) {
                                   std::to_string(implLine));
             }
             SkipNewlines();
-            continue;
-        }
-        if (Peek().type == JassTokenType::IDENTIFIER &&
-            (Peek().text == "module" || Peek().text == "interface" || Peek().text == "delegate")) {
-            std::string word = Advance().text;
-            SkipUnsupportedBlock(word, word == "module" ? "endmodule" :
-                                      word == "interface" ? "endinterface" : word);
             continue;
         }
         bool isStatic = false;
@@ -971,8 +1017,21 @@ void JassParser::ParseStructOrModuleBody(AstNode* node, bool isModule) {
                 // Implicit receiver binds positionally like any parameter.
                 method->parameters.insert(method->parameters.begin(), {"this", node->text});
             }
-            method->children.push_back(ParseBlock());
-            Expect(JassTokenType::KW_ENDMETHOD);
+            SkipNewlines();
+            const bool abstractMethod = node->isInterface &&
+                Peek().type == JassTokenType::IDENTIFIER &&
+                (Peek().text == "method" || Peek().text == "endinterface" ||
+                 Peek().text == "static" || Peek().text == "defaults" ||
+                 Peek().text == "operator" || Peek().text == "implement");
+            if (abstractMethod || (node->isInterface && Peek().type == JassTokenType::NEWLINE &&
+                                   PeekAt(1).type == JassTokenType::IDENTIFIER &&
+                                   (PeekAt(1).text == "method" || PeekAt(1).text == "endinterface" ||
+                                    PeekAt(1).text == "static" || PeekAt(1).text == "defaults"))) {
+                method->children.push_back(std::make_unique<AstNode>(AstNodeType::BLOCK));
+            } else {
+                method->children.push_back(ParseBlock());
+                Expect(JassTokenType::KW_ENDMETHOD);
+            }
             node->children.push_back(std::move(method));
             SkipNewlines();
             continue;
@@ -1188,6 +1247,8 @@ std::unique_ptr<AstNode> JassParser::CloneNode(const AstNode* node) {
     copy->isConstant = node->isConstant;
     copy->isArray = node->isArray;
     copy->isStatic = node->isStatic;
+    copy->isInterface = node->isInterface;
+    copy->delegates = node->delegates;
     copy->extendsType = node->extendsType;
     copy->line = node->line;
     for (const auto& child : node->children) {
@@ -1197,6 +1258,12 @@ std::unique_ptr<AstNode> JassParser::CloneNode(const AstNode* node) {
 }
 
 void JassParser::ExpandImplements(AstNode* program) {
+    if (program) {
+        for (auto& extra : hoisted_) {
+            if (extra) program->children.push_back(std::move(extra));
+        }
+        hoisted_.clear();
+    }
     if (!program || pendingImplements_.empty()) {
         // Still drop stray module nodes so the VM never sees them.
         if (program) {
@@ -1261,7 +1328,56 @@ void JassParser::ExpandImplements(AstNode* program) {
             }
             for (auto& c : n->children) rethistype(c.get(), from, to);
         };
+    auto copyMember = [&](const AstNode* child, AstNode* target, const std::string& from, const std::string& to) -> bool {
+        if (child->type == AstNodeType::FUNCTION_DECL) {
+            const size_t dot = child->text.find('.');
+            const std::string methodName =
+                (dot == std::string::npos) ? child->text : child->text.substr(dot + 1);
+            for (const auto& own : target->children) {
+                if (own->type != AstNodeType::FUNCTION_DECL) continue;
+                const size_t odot = own->text.find('.');
+                const std::string ownName =
+                    (odot == std::string::npos) ? own->text : own->text.substr(odot + 1);
+                if (ownName == methodName) return false;
+            }
+            auto copy = CloneNode(child);
+            copy->text = to + "." + methodName;
+            rethistype(copy.get(), from, to);
+            target->children.push_back(std::move(copy));
+            return true;
+        }
+        if (child->type == AstNodeType::GLOBAL_DECL) {
+            for (const auto& own : target->children) {
+                if (own->type == AstNodeType::GLOBAL_DECL && own->text == child->text) return false;
+            }
+            auto copy = CloneNode(child);
+            rethistype(copy.get(), from, to);
+            target->children.push_back(std::move(copy));
+            return true;
+        }
+        return false;
+    };
+    for (int pass = 0; pass < 8; ++pass) {
+        bool grew = false;
+        for (const auto& rec : pendingImplements_) {
+            if (!rec.intoModule) continue;
+            auto mit = modules.find(rec.moduleName);
+            auto target = modules.find(rec.structName);
+            if (mit == modules.end() || target == modules.end()) {
+                if (pass == 0 && mit == modules.end() && !rec.optional) {
+                    errors_.push_back("implement of undefined module '" + rec.moduleName +
+                                      "' for module '" + rec.structName + "'");
+                }
+                continue;
+            }
+            for (const auto& child : mit->second->children) {
+                if (copyMember(child.get(), target->second, mit->first, target->first)) grew = true;
+            }
+        }
+        if (!grew) break;
+    }
     for (const auto& rec : pendingImplements_) {
+        if (rec.intoModule) continue;
         auto mit = modules.find(rec.moduleName);
         if (mit == modules.end()) {
             if (!rec.optional) {

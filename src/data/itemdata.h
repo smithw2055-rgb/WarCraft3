@@ -3,7 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <memory>
-#include <random>
+#include <functional>
 #include <vector>
 #include "ecs/item_class.h"
 #include "resource/slk.h"
@@ -42,8 +42,8 @@ public:
 
     bool HasItem(War3ID id) const;
     const CItemType* GetItem(War3ID id) const;
-    War3ID ChooseRandomItem(int level, std::mt19937& rng) const;
-    War3ID ChooseRandomItem(CItemClass itemClass, int level, std::mt19937& rng) const;
+    War3ID ChooseRandomItem(int level, std::function<float()> rand01) const;
+    War3ID ChooseRandomItem(CItemClass itemClass, int level, std::function<float()> rand01) const;
 
     static CItemData LoadFromMpq(const class MpqManager& mpq);
     static CItemData LoadFromMpq(const class MpqManager& mpq, const std::string& mapPath);

@@ -1,4 +1,4 @@
-#include "unit.h"
+#include "ecs/pathing/pathfinding.h"
 #include "csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/abilities/ability_spell_base.h"
@@ -208,9 +208,36 @@ void CUnit::SetHeroBonusMana(int v) {
 }
 
 void CUnit::SetPositionAndCheckUnstuck(float x, float y, CSimulation& simulation) {
+    CPathfindingProcessor* path = simulation.GetPathfinding();
+    if (path && path->HasPathingMap()) {
+        const float radius = std::max(0.0f, collisionSize_);
+        auto fits = [&](float px, float py) {
+            return path->IsWorldPointPathableForUnit(px, py, radius, movementType_, this);
+        };
+        if (!fits(x, y)) {
+            constexpr float kStep = 32.0f;
+            bool found = false;
+            for (int ring = 1; ring <= 8 && !found; ++ring) {
+                for (int i = -ring; i <= ring && !found; ++i) {
+                    const float samples[4][2] = {
+                        {x + i * kStep, y + ring * kStep},
+                        {x + i * kStep, y - ring * kStep},
+                        {x + ring * kStep, y + i * kStep},
+                        {x - ring * kStep, y + i * kStep},
+                    };
+                    for (const auto& sample : samples) {
+                        if (!fits(sample[0], sample[1])) continue;
+                        x = sample[0];
+                        y = sample[1];
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
     x_ = x;
     y_ = y;
-    (void)simulation;
 }
 
 bool CUnit::TurnTowardPoint(float targetX, float targetY) {
@@ -322,6 +349,12 @@ CAbility* CUnit::GetAbility(War3ID code) const {
 void CUnit::AddBuff(std::unique_ptr<CBuff> buff, CSimulation& game) {
     if (!buff) return;
 
+    // Resistant Skin (Arsk): negative effects wear off in a quarter of
+    // the usual time. The marker itself is positive and is not shortened.
+    if (buff->IsNegative() && HasBuff(War3ID("Brsk"))) {
+        buff->ScaleDuration(0.25f);
+    }
+
     // Check if buff already exists (by ID)
     for (auto& existing : buffs_) {
         if (existing && existing->GetId() == buff->GetId()) {
@@ -404,6 +437,12 @@ bool CUnit::IsHexed() const {
     return false;
 }
 
+void CUnit::SetSharesVisionWith(int player, bool share) {
+    if (player < 0) return;
+    if (share) sharedVision_.insert(player);
+    else sharedVision_.erase(player);
+}
+
 bool CUnit::IsInvisibleTo(const CUnit* viewer) const {
     if (!viewer || viewer->GetPlayerIndex() == playerIndex_) return false;
     // Faerie Fire reveals invisible units (ref reveal-invisible half).
@@ -479,8 +518,20 @@ void CUnit::RemoveAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffI
     RecomputeAuraStat(type, percent);
 }
 
-void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {
-    auto key = std::make_pair((int)type, percent);
+void CUnit::RecomputeAllAuraStats() {
+    // Snapshot keys first: RecomputeAuraStat mutates auraApplied_ in place.
+    std::vector<std::pair<int, bool>> keys;
+    keys.reserve(auraStats_.size());
+    for (const auto& [key, sources] : auraStats_) {
+        (void)sources;
+        keys.push_back(key);
+    }
+    for (const auto& [type, percent] : keys) {
+        RecomputeAuraStat(static_cast<CAuraEffectType>(type), percent);
+    }
+}
+
+void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {    auto key = std::make_pair((int)type, percent);
     float best = 0.0f;
     bool have = false;
     auto sit = auraStats_.find(key);
@@ -582,10 +633,15 @@ void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {
             break;
         }
         case CAuraEffectType::MANA_REGEN: {
-            if (applied != 0.0f) AddBonusManaRegen(-applied);
+            const float oldFlat = applied;
+            float newFlat = 0.0f;
             if (have && best != 0.0f) {
-                AddBonusManaRegen(best);
-                auraApplied_[key] = best;
+                newFlat = percent ? best * static_cast<float>(GetMaxMana()) : best;
+            }
+            if (oldFlat != 0.0f) AddBonusManaRegen(-oldFlat);
+            if (newFlat != 0.0f) {
+                AddBonusManaRegen(newFlat);
+                auraApplied_[key] = newFlat;
             } else {
                 auraApplied_.erase(key);
             }
@@ -877,6 +933,8 @@ bool CUnit::Update(CSimulation& simulation) {
         return false;
     }
 
+    if (paused_) return false;
+
     // Apply health/mana regen
     ApplyRegen(simulation);
 
@@ -938,6 +996,9 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         if (auto* haze = dynamic_cast<CBuffHaze*>(source->GetBuff(War3ID("BNdh")))) {
             if (simulation.SimRand01() < haze->GetMissChance()) return 0;
         }
+        if (auto* curse = dynamic_cast<CBuffCurse*>(source->GetBuff(War3ID("Bcrs")))) {
+            if (simulation.SimRand01() < curse->GetMissChance()) return 0;
+        }
     }
 
     if (invulnerable_) return 0;
@@ -956,6 +1017,16 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         if (auto* howl = dynamic_cast<CBuffHowl*>(source->GetBuff(War3ID("BNht")))) {
             damage *= howl->GetDamageFactor();
         }
+        // Item reaction AIdd: addDamageDealtMultiplier on the attacker's
+        // pre-damage listener, before armor.
+        float dealt = 1.0f;
+        for (const auto& buff : source->GetBuffs()) {
+            if (auto* mod = dynamic_cast<CBuffDamageMod*>(buff.get())) {
+                dealt += mod->GetAttackDealtAdd();
+            }
+        }
+        if (dealt < 0.0f) dealt = 0.0f;
+        damage *= dealt;
     }
 
     // Avatar (Mountain King): spell immunity while the god-rage holds.
@@ -983,6 +1054,19 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                 actualDamage *= berserk->GetDamageTakenMultiplier();
                 break;
             }
+        }
+    }
+
+    // Runed Bracers / item reaction: per-attack-type damage taken.
+    if (actualDamage > 0) {
+        for (const auto& buff : buffs_) {
+            auto* mod = dynamic_cast<CBuffDamageMod*>(buff.get());
+            if (!mod) continue;
+            float mul = 1.0f;
+            if (attackType == CAttackType::SPELLS) mul = mod->GetSpellsTaken();
+            else if (attackType == CAttackType::MAGIC) mul = mod->GetMagicTaken();
+            else if (attackType == CAttackType::PIERCE) mul = mod->GetPierceTaken();
+            actualDamage *= mul;
         }
     }
 

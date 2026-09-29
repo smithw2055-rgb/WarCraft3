@@ -47,6 +47,17 @@ bool CProjectile::Update(CSimulation& sim) {
                 if (!victim->CheckSpellEffectReaction(sim, source)) return true;
             }
         }
+        if (!pierceReflected && attackType == CAttackType::PIERCE) {
+            if (auto* victim = dynamic_cast<CUnit*>(target)) {
+                if (victim->GetBuff(War3ID("BIdd")) && source
+                    && source->GetHandleId() != victim->GetHandleId()) {
+                    pierceReflected = true;
+                    targetHandleId = source->GetHandleId();
+                    attackerHandleId = victim->GetHandleId();
+                    return false;
+                }
+            }
+        }
         if (splashHalf > 0.0f) {
             CUnitAttack splashAttack;
             splashAttack.areaFull = splashFull;

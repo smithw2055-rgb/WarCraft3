@@ -168,3 +168,49 @@ bool TestLightningSlkOverride() {
     TEST_ASSERT(!sys.LoadParamsFromSlk(nullptr, 0));
     return true;
 }
+
+bool TestImageBillboardPoseAndCorners() {
+    const ImageBillboardPose hidden = MakeImageBillboard(
+        10, 20, 30, 64, 32, false, true, false, false, 100, 0, 255, 0, 0, 255);
+    TEST_ASSERT(!hidden.visible);
+
+    const ImageBillboardPose follow = MakeImageBillboard(
+        10, 20, 30, 64, 32, true, true, false, false, 100, 0, 255, 0, 0, 128);
+    TEST_ASSERT(follow.visible);
+    TEST_NEAR(follow.x, 10.0f, 1e-4f);
+    TEST_NEAR(follow.z, 20.0f, 1e-4f);
+    TEST_NEAR(follow.y, 130.0f, 1e-4f);
+    TEST_NEAR(follow.halfW, 32.0f, 1e-4f);
+    TEST_NEAR(follow.halfH, 16.0f, 1e-4f);
+    TEST_NEAR(follow.r, 1.0f, 1e-4f);
+    TEST_NEAR(follow.g, 0.0f, 1e-4f);
+    TEST_NEAR(follow.a, 128.0f / 255.0f, 1e-4f);
+
+    const ImageBillboardPose absolute = MakeImageBillboard(
+        0, 0, 40, 10, 10, true, true, true, true, 100, 80, 0, 255, 0, 255);
+    TEST_NEAR(absolute.y, 80.0f, 1e-4f);
+
+    const float camRight[3] = {0.0f, 0.2f, 1.0f};
+    float right[3], up[3];
+    BillboardAxes(camRight, right, up);
+    TEST_NEAR(right[0], 0.0f, 1e-4f);
+    TEST_NEAR(right[1], 0.0f, 1e-4f);
+    TEST_NEAR(right[2], 1.0f, 1e-4f);
+    TEST_NEAR(up[1], 1.0f, 1e-4f);
+    float corners[4][3];
+    BillboardCorners(0, 10, 0, 2, 4, right, up, corners);
+    TEST_NEAR(corners[0][2], 2.0f, 1e-4f);
+    TEST_NEAR(corners[0][1], 14.0f, 1e-4f);
+    TEST_NEAR(corners[2][2], -2.0f, 1e-4f);
+    TEST_NEAR(corners[2][1], 6.0f, 1e-4f);
+
+    LightningSystem sys;
+    sys.SetBillboard(7, follow.x, follow.y, follow.z, follow.halfW, follow.halfH,
+                     follow.r, follow.g, follow.b, follow.a);
+    const ImageBillboardPose* stored = sys.GetBillboard(7);
+    TEST_ASSERT(stored != nullptr);
+    TEST_NEAR(stored->y, 130.0f, 1e-4f);
+    TEST_ASSERT(sys.RemoveBillboard(7));
+    TEST_ASSERT(sys.GetBillboard(7) == nullptr);
+    return true;
+}

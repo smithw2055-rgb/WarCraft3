@@ -72,9 +72,9 @@ bool CAbilityHarvest::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId
     // Can target units (gold mines, town halls) or destructables (trees)
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {
-        auto* targetGoldMine = dynamic_cast<CAbilityGoldMine*>(targetUnit->GetAbility(War3ID("Agld")));
-        if (targetGoldMine) {
-            return goldCapacity_ > 0 && targetGoldMine->GetGold() > 0;
+        CMineAccess mine = MineAccessOf(targetUnit);
+        if (mine.ok()) {
+            return goldCapacity_ > 0 && mine.Gold() > 0;
         }
 
         if (CanReturnToTarget(this, unit, targetUnit)) {
@@ -110,8 +110,8 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
 
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {
-        auto* goldMine = dynamic_cast<CAbilityGoldMine*>(targetUnit->GetAbility(War3ID("Agld")));
-        if (goldMine && goldCapacity_ > 0 && goldMine->GetGold() > 0) {
+        CMineAccess mine = MineAccessOf(targetUnit);
+        if (mine.ok() && goldCapacity_ > 0 && mine.Gold() > 0) {
             if (carriedAmount_ > 0 && carriedType_ == CResourceType::GOLD) {
                 auto* behavior = new CBehaviorReturnResources();
                 behavior->SetUnit(caster);

@@ -6,6 +6,7 @@
 #include "ButtonFrame.h"
 #include "TextFrame.h"
 #include "TextureFrame.h"
+#include "ExtendedFrames.h"
 #include "FdfParser.h"
 #include <unordered_map>
 #include <string>

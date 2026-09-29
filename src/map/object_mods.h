@@ -45,6 +45,12 @@ bool LoadWar3MapDestructableMods(const std::string& mapPath,
                                   ObjectModificationSet& out,
                                   WtsTable* wts = nullptr);
 
+// Doodad object data (war3map.w3d): same non-extended encoding as w3b
+// (ref Warcraft3MapObjectData doodadChangeset).
+bool LoadWar3MapDoodadMods(const std::string& mapPath,
+                           ObjectModificationSet& out,
+                           WtsTable* wts = nullptr);
+
 bool LoadWar3MapItemMods(const std::string& mapPath,
                           ObjectModificationSet& out,
                           WtsTable* wts = nullptr);

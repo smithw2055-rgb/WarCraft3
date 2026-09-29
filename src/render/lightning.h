@@ -36,6 +36,29 @@ void GenerateBoltPoints(const LightningPoint& p1, const LightningPoint& p2,
 // fall back to the CLPB row.
 LightningBoltParams DefaultBoltParams(const std::string& code);
 
+// Camera-facing image quad (JASS CreateImage). Scene coords are Y-up:
+// JASS (x, y, height) maps to (x, height, y).
+struct ImageBillboardPose {
+    float x = 0, y = 0, z = 0;
+    float halfW = 0, halfH = 0;
+    float r = 1, g = 1, b = 1, a = 1;
+    bool visible = false;
+};
+
+ImageBillboardPose MakeImageBillboard(
+    float posX, float posY, float posZ,
+    float sizeX, float sizeY,
+    bool visible, bool render,
+    bool constantHeight, bool aboveWater,
+    float ground, float water,
+    int red, int green, int blue, int alpha);
+
+// Cylindrical billboard: right is camera-right flattened onto XZ, up is world up.
+void BillboardAxes(const float camRight[3], float outRight[3], float outUp[3]);
+// Four corners, order: +right+up, -right+up, -right-up, +right-up.
+void BillboardCorners(float cx, float cy, float cz, float halfW, float halfH,
+                      const float right[3], const float up[3], float out[4][3]);
+
 class LightningSystem {
 public:
     struct Bolt {
@@ -74,11 +97,20 @@ public:
     // No-op without a GL context (sg_isvalid), so logic stays testable.
     void Render(const Mat4& view, const Mat4& proj);
 
+    // Untextured camera-facing quads (script images). Ids are independent
+    // of lightning bolt ids.
+    void SetBillboard(int id, float x, float y, float z,
+                      float halfW, float halfH,
+                      float r, float g, float b, float a);
+    bool RemoveBillboard(int id);
+    const ImageBillboardPose* GetBillboard(int id) const;
+
 private:
     void EnsureResources();
     void Regenerate(Bolt& bolt);
 
     std::unordered_map<int, Bolt> bolts_;
+    std::unordered_map<int, ImageBillboardPose> billboards_;
     std::unordered_map<std::string, LightningBoltParams> paramOverrides_;
 
     sg_buffer vertexBuffer_ = {0};

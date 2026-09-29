@@ -76,6 +76,8 @@ public:
     void SetMpq(MpqManager* mpq) { mpq_ = mpq; }
 
     void SetFog(const float color[3], float start, float end);
+    void SetWaterDeforms(bool enabled) { waterDeforms_ = enabled; }
+    bool GetWaterDeforms() const { return waterDeforms_; }
     void SetPathing(const WpmData* wpm) { pathing_ = wpm; }
     void SetRegions(const W3rData* w3r) { regions_ = w3r; }
     void SetShowPathing(bool v) { showPathing_ = v; }
@@ -257,6 +259,7 @@ private:
     bool fogEnabled_ = false;
     float fogColor_[3] = {0.7f, 0.7f, 0.7f};
     float fogStart_ = 8000, fogEnd_ = 20000;
+    bool waterDeforms_ = true;
 
     float mapBounds_[4] = {};
     float shaderMapBounds_[4] = {};

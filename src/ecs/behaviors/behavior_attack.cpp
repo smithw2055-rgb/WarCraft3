@@ -52,7 +52,7 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
     if (!unit_ || !target_) return true;
     // Hexed units cannot attack (but may still move). Stay alive and idle
     // so the behavior resumes when the hex expires (ref hex).
-    if (unit_->IsHexed()) {
+    if (unit_->IsHexed() || unit_->AreAttacksDisabled()) {
         ResetAttackSwingState();
         propelling_ = false;
         return false;
@@ -205,7 +205,8 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
         if (dice > 0 && sides > 0) {
             int roll = 0;
             for (int d = 0; d < dice; d++) {
-                roll += (std::rand() % sides) + 1;
+                // Synced sim RNG (std::rand is banned: lockstep replays).
+                roll += 1 + (int)(simulation.SimRand01() * (float)sides);
             }
             damageAmount = (float)(base + roll);
         }

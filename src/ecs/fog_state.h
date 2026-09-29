@@ -26,6 +26,10 @@ struct CFogModifier {
     CFogArea area;
     CFogState state = CFogState::VISIBLE;
     bool enabled = false;
+    // Timed reveal (ref CTimedCircleFogModifier / Far Sight duration):
+    // remaining < 0 means permanent; otherwise counts down in sim seconds
+    // via Tick() and the modifier is removed at zero.
+    float remaining = -1.0f;
 };
 
 struct CFogOverride {
@@ -65,8 +69,15 @@ public:
 
     // Modifiers (FogModifierStart/Stop/Destroy).
     int AddModifier(int player, const CFogArea& area, CFogState state);
+    // Timed variant (ref CTimedCircleFogModifier): starts enabled and
+    // expires after durationSeconds of Tick() time.
+    int AddTimedModifier(int player, const CFogArea& area, CFogState state,
+                         float durationSeconds);
     bool RemoveModifier(int id);
     bool SetModifierEnabled(int id, bool enabled);
+    // Advance timed modifiers by dt seconds; expired ones are removed.
+    // Called once per sim tick from CSimulation::Update.
+    void Tick(float dt);
 
     // Forced paints (SetFogStateRect/Radius); permanent until cleared.
     void AddOverride(int player, const CFogArea& area, CFogState state);

@@ -4,6 +4,7 @@
 #include "ecs/behaviors/behavior_build.h"
 #include "ecs/player.h"
 #include "data/unitdata.h"
+#include "map/wpm.h"
 #include <cmath>
 #include <iostream>
 
@@ -111,12 +112,53 @@ bool CAbilityBuild::IsBuildLocationObstructed(CSimulation& game, float x, float 
     float collisionSize = buildType->GetCollisionSize();
     if (collisionSize <= 0) collisionSize = 64.0f;
 
-    // Check pathing map
+    // Footprint vs the pathing grid. An empty prevented set still blocks
+    // UNBUILDABLE cells (retail ground buildings). Required types must
+    // cover every cell of the footprint (blight for haunted ground).
     auto* pathfinding = game.GetPathfinding();
-    if (pathfinding) {
-        // Check if the area is walkable (not blocked by terrain/cliffs)
-        // This is a simplified check - full implementation would check
-        // preventedPathingTypes against the pathing grid
+    if (pathfinding && pathfinding->HasPathingMap()) {
+        const WpmData* wpm = pathfinding->GetPathingMap();
+        auto prevented = buildType->GetPreventedPathingTypes();
+        if (prevented.empty()) prevented.insert(CBuildingPathingType::UNBUILDABLE);
+        const auto& required = buildType->GetRequiredPathingTypes();
+        const int x0 = pathfinding->WorldToCellX(x - collisionSize);
+        const int x1 = pathfinding->WorldToCellX(x + collisionSize);
+        const int y0 = pathfinding->WorldToCellY(y - collisionSize);
+        const int y1 = pathfinding->WorldToCellY(y + collisionSize);
+        auto flagOf = [](CBuildingPathingType type) -> uint8_t {
+            switch (type) {
+                case CBuildingPathingType::UNWALKABLE: return WpmData::UNWALKABLE;
+                case CBuildingPathingType::UNFLYABLE: return WpmData::UNFLYABLE;
+                case CBuildingPathingType::UNBUILDABLE:
+                case CBuildingPathingType::UNFIXABLE: return WpmData::UNBUILDABLE;
+                case CBuildingPathingType::BLIGHTED: return WpmData::BLIGHTED;
+                default: return 0;
+            }
+        };
+        auto cellFlag = [&](int cx, int cy, uint8_t flag) {
+            if (cx < 0 || cy < 0 || cx >= wpm->width || cy >= wpm->height) return false;
+            return (wpm->pathing[(size_t)cy * (size_t)wpm->width + (size_t)cx] & flag) != 0;
+        };
+        for (int cy = y0; cy <= y1; ++cy) {
+            for (int cx = x0; cx <= x1; ++cx) {
+                if (cx < 0 || cy < 0 || cx >= wpm->width || cy >= wpm->height) return true;
+                for (CBuildingPathingType type : prevented) {
+                    const uint8_t flag = flagOf(type);
+                    if (flag && cellFlag(cx, cy, flag)) return true;
+                }
+                for (CBuildingPathingType type : required) {
+                    const uint8_t flag = flagOf(type);
+                    if (!flag) continue;
+                    if (type == CBuildingPathingType::BLIGHTED) {
+                        const float wx = pathfinding->CellToWorldX(cx);
+                        const float wy = pathfinding->CellToWorldY(cy);
+                        if (!cellFlag(cx, cy, flag) && !game.IsPointBlighted(wx, wy)) return true;
+                        continue;
+                    }
+                    if (!cellFlag(cx, cy, flag)) return true;
+                }
+            }
+        }
     }
 
     // Check for overlapping units

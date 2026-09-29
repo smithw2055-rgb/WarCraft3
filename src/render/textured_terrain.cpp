@@ -1048,13 +1048,14 @@ void TexturedTerrain::Render(const Mat4& view, const Mat4& proj, float time) {
         auto* wi = tileset_ && tileset_->HasWaterInfo() ? &tileset_->GetWaterInfo() : nullptr;
         struct {
             float MVP[16];
-            float cx, cy, wo;
+            float cx, cy, wo, wave;
             float lc, lth;
             float scMin[4], scMax[4], dcMin[4], dcMax[4];
         } vsU;
         for (int i = 0; i < 16; ++i) vsU.MVP[i] = mvp.m[i];
         vsU.cx = centerOffsetX_; vsU.cy = centerOffsetY_;
         vsU.wo = waterHeightOffset_;
+        vsU.wave = waterDeforms_ ? 8.0f * std::sin(time * 1.6f) : 0.0f;
         vsU.lc = (float)lightManager_.GetLightCount(); vsU.lth = lightManager_.GetLightTextureHeight();
         float defMin[4] = {0,0.1f,0.3f,0.6f};
         float defMax[4] = {0,0.3f,0.5f,0.8f};

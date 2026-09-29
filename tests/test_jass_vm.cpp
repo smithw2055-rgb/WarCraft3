@@ -114,3 +114,85 @@ endfunction
 
     return true;
 }
+
+bool TestJassArrayGlobals() {
+    JassVM vm;
+    const char* script = R"JASS(
+globals
+    force array bj_FORCE_PLAYER
+    integer probe = 0
+endglobals
+
+function FillForces takes nothing returns nothing
+    local integer index = 0
+    loop
+        exitwhen index == 3
+        set bj_FORCE_PLAYER[index] = 100 + index
+        set index = index + 1
+    endloop
+endfunction
+
+function ReadForces takes nothing returns nothing
+    set probe = bj_FORCE_PLAYER[0] + bj_FORCE_PLAYER[1] * 1000 + bj_FORCE_PLAYER[2] * 1000000
+endfunction
+)JASS";
+
+    if (!vm.LoadScript(script)) {
+        std::cerr << "JASS array test failed to load script" << std::endl;
+        return false;
+    }
+    vm.CallFunction("FillForces");
+    vm.CallFunction("ReadForces");
+    const int probe = vm.GetGlobal("probe").intVal;
+    if (probe != 100 + 101 * 1000 + 102 * 1000000) {
+        std::cerr << "JASS array globals round-trip failed, probe=" << probe << std::endl;
+        return false;
+    }
+    return true;
+}
+
+bool TestJassThreadArrayGlobals() {
+    JassVM vm;
+    const char* script = R"JASS(
+globals
+    force array bj_FORCE_PLAYER
+    integer probe = 0
+endglobals
+
+function ThreadWriter takes nothing returns nothing
+    local integer index = 0
+    loop
+        exitwhen index == 3
+        set bj_FORCE_PLAYER[index] = 100 + index
+        set index = index + 1
+    endloop
+endfunction
+
+function ThreadReader takes nothing returns nothing
+    set probe = bj_FORCE_PLAYER[0] + bj_FORCE_PLAYER[1] * 1000 + bj_FORCE_PLAYER[2] * 1000000
+endfunction
+)JASS";
+
+    if (!vm.LoadScript(script)) {
+        std::cerr << "JASS thread array test failed to load script" << std::endl;
+        return false;
+    }
+    JassVM::ThreadState writeState;
+    JassVM::ThreadRunResult wres = vm.RunThread(writeState, "ThreadWriter");
+    if (!wres.completed || wres.sleeping) {
+        std::cerr << "JASS thread array writer did not complete" << std::endl;
+        return false;
+    }
+    JassVM::ThreadState readState;
+    JassVM::ThreadRunResult rres = vm.RunThread(readState, "ThreadReader");
+    if (!rres.completed || rres.sleeping) {
+        std::cerr << "JASS thread array reader did not complete" << std::endl;
+        return false;
+    }
+    const int probe = vm.GetGlobal("probe").intVal;
+    if (probe != 100 + 101 * 1000 + 102 * 1000000) {
+        std::cerr << "JASS thread array round-trip failed, probe=" << probe << std::endl;
+        return false;
+    }
+    return true;
+}

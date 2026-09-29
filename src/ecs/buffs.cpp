@@ -150,6 +150,58 @@ CBuff* CBuffDivineShield::Clone() const {
     return copy;
 }
 
+// ===== CBuffEthereal =====
+CBuffEthereal::CBuffEthereal(float duration, War3ID id)
+    : CBuff(id, duration, false) {}
+
+void CBuffEthereal::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->SetEthereal(true);
+}
+
+void CBuffEthereal::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    // Stacking-aware: OnRemove runs before erasure, so self still counts.
+    // Any remaining ethereal buff (whatever its id) keeps the flag.
+    int count = 0;
+    for (const auto& b : target->GetBuffs()) {
+        if (b && dynamic_cast<const CBuffEthereal*>(b.get())) ++count;
+    }
+    if (count <= 1) target->SetEthereal(false);
+}
+
+CBuff* CBuffEthereal::Clone() const {
+    auto* copy = new CBuffEthereal(duration_, GetId());
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffMagicImmune =====
+CBuffMagicImmune::CBuffMagicImmune(float duration, War3ID id)
+    : CBuff(id, duration, true) {}
+
+void CBuffMagicImmune::OnApply(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (target) target->SetMagicImmune(true);
+}
+
+void CBuffMagicImmune::OnRemove(CSimulation& game, CUnit* target) {
+    (void)game;
+    if (!target) return;
+    int count = 0;
+    for (const auto& b : target->GetBuffs()) {
+        if (b && dynamic_cast<const CBuffMagicImmune*>(b.get())) ++count;
+    }
+    if (count <= 1) target->SetMagicImmune(false);
+}
+
+CBuff* CBuffMagicImmune::Clone() const {
+    auto* copy = new CBuffMagicImmune(duration_, GetId());
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
 // ===== CBuffStun =====
 CBuffStun::CBuffStun(float duration)
     : CBuff(War3ID("Bstn"), duration, false) {}
@@ -796,7 +848,7 @@ void CBuffHatchAfter::OnRemove(CSimulation& game, CUnit* target) {
                                      target->GetX(), target->GetY(), 0);
     if (!hatched) return;
     if (chainRebirth_) {
-        hatched->AddBuff(std::make_unique<CBuffPhoenixRebirth>(), game);
+        hatched->AddBuff(std::make_unique<CBuffPhoenixRebirth>(duration_), game);
     }
     game.RemoveUnit(target); // the shell is consumed
     if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
@@ -836,6 +888,16 @@ CBuffHowl::CBuffHowl(float duration, float damageFactor)
 
 CBuff* CBuffHowl::Clone() const {
     auto* copy = new CBuffHowl(duration_, damageFactor_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+// ===== CBuffCurse =====
+CBuffCurse::CBuffCurse(float duration, float missChance)
+    : CBuff(War3ID("Bcrs"), duration, false), missChance_(missChance) {}
+
+CBuff* CBuffCurse::Clone() const {
+    auto* copy = new CBuffCurse(duration_, missChance_);
     copy->remaining_ = remaining_;
     return copy;
 }
@@ -887,6 +949,26 @@ CBuffWhirlwind::CBuffWhirlwind(float duration, float damagePerSecond, float radi
     : CBuff(War3ID("BOww"), duration, true),
       damagePerSecond_(damagePerSecond), radius_(radius) {
     SetPeriodic(true, 1.0f);
+}
+
+void CBuffWhirlwind::OnApply(CSimulation&, CUnit* target) {
+    if (!target) return;
+    target->SetMagicImmune(true);
+    target->SetAttacksDisabled(true);
+}
+
+void CBuffWhirlwind::OnRemove(CSimulation&, CUnit* target) {
+    if (!target) return;
+    target->SetAttacksDisabled(false);
+    int immune = 0;
+    for (const auto& buff : target->GetBuffs()) {
+        if (!buff) continue;
+        if (dynamic_cast<const CBuffMagicImmune*>(buff.get())
+            || dynamic_cast<const CBuffWhirlwind*>(buff.get())) {
+            immune++;
+        }
+    }
+    if (immune <= 1) target->SetMagicImmune(false);
 }
 
 void CBuffWhirlwind::OnPeriodic(CSimulation& game, CUnit* target) {
@@ -946,28 +1028,41 @@ CBuff* CBuffImmolation::Clone() const {
 }
 
 // ===== CBuffPhoenixFire =====
-CBuffPhoenixFire::CBuffPhoenixFire(float duration, float damagePerSecond, float radius)
+CBuffPhoenixFire::CBuffPhoenixFire(float duration, float damagePerSecond, float radius,
+                                   float initialDamage)
     : CBuff(War3ID("BPxf"), duration, true),
-      damagePerSecond_(damagePerSecond), radius_(radius) {
+      damagePerSecond_(damagePerSecond), radius_(radius), initialDamage_(initialDamage) {
     SetPeriodic(true, 1.0f);
 }
 
-void CBuffPhoenixFire::OnPeriodic(CSimulation& game, CUnit* target) {
-    if (!target || target->IsDead()) return;
+namespace {
+
+void ScorchNearby(CSimulation& game, CUnit* target, float radius, float amount) {
+    if (!target || target->IsDead() || amount <= 0.0f) return;
     for (auto* unit : game.GetUnits()) {
         if (!unit || unit->IsDead() || unit == target) continue;
         if (unit->GetPlayerIndex() == target->GetPlayerIndex()) continue;
         const float dx = unit->GetX() - target->GetX();
         const float dy = unit->GetY() - target->GetY();
-        if (dx * dx + dy * dy > radius_ * radius_) continue;
+        if (dx * dx + dy * dy > radius * radius) continue;
         unit->Damage(game, target, false, false,
                      CAttackType::SPELLS, CDamageType::FIRE,
-                     "", damagePerSecond_, 0);
+                     "", amount, 0);
     }
 }
 
+} // namespace
+
+void CBuffPhoenixFire::OnApply(CSimulation& game, CUnit* target) {
+    ScorchNearby(game, target, radius_, initialDamage_);
+}
+
+void CBuffPhoenixFire::OnPeriodic(CSimulation& game, CUnit* target) {
+    ScorchNearby(game, target, radius_, damagePerSecond_);
+}
+
 CBuff* CBuffPhoenixFire::Clone() const {
-    auto* copy = new CBuffPhoenixFire(duration_, damagePerSecond_, radius_);
+    auto* copy = new CBuffPhoenixFire(duration_, damagePerSecond_, radius_, initialDamage_);
     copy->remaining_ = remaining_;
     return copy;
 }
@@ -1005,6 +1100,30 @@ void CBuffAuraStat::OnRemove(CSimulation& game, CUnit* target) {
 
 CBuff* CBuffAuraStat::Clone() const {
     auto* copy = new CBuffAuraStat(GetId(), bonuses_, casterHandleId_);
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+CBuffResistant::CBuffResistant()
+    : CBuff(War3ID("Brsk"), 1.0e9f, true) {}
+
+CBuff* CBuffResistant::Clone() const {
+    auto* copy = new CBuffResistant();
+    copy->remaining_ = remaining_;
+    return copy;
+}
+
+CBuffDamageMod::CBuffDamageMod(War3ID id, float spellsTaken, float magicTaken,
+                               float pierceTaken, float attackDealtAdd)
+    : CBuff(id, 1.0e9f, true)
+    , spellsTaken_(spellsTaken)
+    , magicTaken_(magicTaken)
+    , pierceTaken_(pierceTaken)
+    , attackDealtAdd_(attackDealtAdd) {}
+
+CBuff* CBuffDamageMod::Clone() const {
+    auto* copy = new CBuffDamageMod(GetId(), spellsTaken_, magicTaken_,
+                                    pierceTaken_, attackDealtAdd_);
     copy->remaining_ = remaining_;
     return copy;
 }

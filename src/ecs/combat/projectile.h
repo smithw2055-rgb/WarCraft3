@@ -47,6 +47,8 @@ struct CProjectile {
     // a shielded enemy target consumes its shield and the missile fizzles
     // with no damage and no hook. Attack projectiles leave this off.
     bool checkEffectReaction = false;
+    // Dragon Scale (AIdd): a pierce missile reflects once, back at the shooter.
+    bool pierceReflected = false;
 
     // Advances one sim tick. Returns true when finished (impact or fizzle).
     bool Update(CSimulation& sim);

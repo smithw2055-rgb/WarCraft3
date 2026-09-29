@@ -72,6 +72,7 @@ public:
     // Cooldown state
     bool IsOnCooldown() const { return cooldownRemaining_ > 0; }
     void StartCooldown() { cooldownRemaining_ = cooldown_; }
+    void ResetCooldown() { cooldownRemaining_ = 0.0f; }
     void UpdateCooldown(float dt) { if (cooldownRemaining_ > 0) cooldownRemaining_ -= dt; }
     float GetCooldownRemaining() const { return cooldownRemaining_; }
 

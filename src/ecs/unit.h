@@ -76,8 +76,19 @@ public:
     void SetHeroBonusMana(int v);
     int GetDefense() const { return currentDefense_; }
     void SetDefense(int v) { currentDefense_ = v; }
-    // Total defense including item/upgrade bonus armor
-    int GetTotalDefense() const { return currentDefense_ + bonusArmor_; }
+    // Total defense including item/upgrade bonus armor (ref GetTotalDefense;
+    // temporary script bonus from UnitAddDefenseBonus rides along so combat
+    // honors Avatar/Devotion-style script armor).
+    int GetTotalDefense() const { return currentDefense_ + bonusArmor_ + (int)tempDefenseBonus_; }
+    // Temporary script defense bonus (ref temporaryDefenseBonus): mutated by
+    // UnitAddDefenseBonus/SetTemporaryDefenseBonus, read by GetUnitDefenseBonus.
+    float GetTempDefenseBonus() const { return tempDefenseBonus_; }
+    void SetTempDefenseBonus(float v) { tempDefenseBonus_ = v; }
+    void AddTempDefenseBonus(float v) { tempDefenseBonus_ += v; }
+    // Buff applied as a death explosion visual (ref explodesOnDeathBuffId;
+    // stored for the effect pass, cf. JASS SetUnitExplodeOnDeathBuffId).
+    War3ID GetExplodeOnDeathBuffId() const { return explodeBuffId_; }
+    void SetExplodeOnDeathBuffId(War3ID id) { explodeBuffId_ = id; }
     CDefenseType GetDefenseType() const;
 
     // Instance bonus stats (items, upgrades, buffs). These stack on top of
@@ -97,6 +108,9 @@ public:
     void AddAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId, float value);
     void RemoveAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId);
     void RecomputeAuraStat(CAuraEffectType type, bool percent);
+    // Recompute every aura-stat slot (ref computeDerivedFields sweep;
+    // backs the RecomputeStatBonusesOnUnit native).
+    void RecomputeAllAuraStats();
     // Evasion / critical strike (0..1 chances; e.g. from abilities/items).
     // Wired into CCombatSystem::CalculateDamage like ref attack listeners.
     float GetEvasionChance() const { return evasionChance_; }
@@ -231,6 +245,9 @@ public:
     // State
     void SetHidden(bool v) { hidden_ = v; }
     bool IsHidden() const { return hidden_; }
+    // Paused units stay in the world but skip behavior and ability ticks.
+    void SetPaused(bool v) { paused_ = v; }
+    bool IsPaused() const { return paused_; }
 
     // Construction state
     bool IsConstructing() const { return constructing_; }
@@ -239,14 +256,24 @@ public:
     // still attack; movement behaviors complete immediately while rooted.
     bool IsRooted() const { return rooted_; }
     void SetRooted(bool v) { rooted_ = v; }
-    // Invisibility (Wind Walk buff, Permanent Invisibility/Shadowmeld
-    // flag): hidden from other players unless revealed (Faerie Fire).
-    // Detectors (shades, owls) are not modeled yet.
+    // Invisibility is hidden from other players unless revealed (Faerie Fire)
+    // or a detector is within sight range.
     bool IsInvisible() const { return invisible_; }
     void SetInvisible(bool v) { invisible_ = v; }
     // Detectors (shades, sentry wards) pierce stealth within sight range.
     bool IsDetector() const { return detector_; }
     void SetDetector(bool v) { detector_ = v; }
+    // Players who also see through this unit's sight (UnitShareVision).
+    void SetSharesVisionWith(int player, bool share);
+    const std::unordered_set<int>& SharedVisionPlayers() const { return sharedVision_; }
+    // Ethereal (Banish): immune to physical (NORMAL damage), takes bonus
+    // from MAGIC/SPELLS (ref CUnitDefaultEtherealDamageModListener).
+    bool IsEthereal() const { return ethereal_; }
+    void SetEthereal(bool v) { ethereal_ = v; }
+    // Magic immunity (Anti-Magic Shell, spell immunity): resists MAGIC and
+    // non-universal SPELLS (ref CUnitDefaultMagicImmuneDamageModListener).
+    bool IsMagicImmune() const { return magicImmune_; }
+    void SetMagicImmune(bool v) { magicImmune_ = v; }
     bool IsInvisibleTo(const CUnit* viewer) const;
     bool IsConstructionPaused() const { return constructionPaused_; }
     void SetConstructionPaused(bool v) { constructionPaused_ = v; }
@@ -269,12 +296,16 @@ public:
 
     // Collision
     float GetCollisionSize() const { return collisionSize_; }
+    void SetCollisionSize(float v) { collisionSize_ = v; }
 
     // Cargo (transported units ride along hidden inside this unit)
     const std::vector<CUnit*>& GetCargoUnits() const { return cargoUnits_; }
     bool IsLoadedAboard() const { return loadedAboard_; }
     bool LoadUnit(CUnit* passenger);
     void UnloadUnitAt(CUnit* passenger, float x, float y);
+    // Burrow cargo (Abun) locks attacks until a peon is inside.
+    bool AreAttacksDisabled() const { return attacksDisabled_; }
+    void SetAttacksDisabled(bool v) { attacksDisabled_ = v; }
     bool CanBeTargetedBy(CSimulation& simulation, CUnit* source,
                          const std::vector<CTargetType>& targetsAllowed) const override;
 
@@ -358,6 +389,8 @@ private:
     int bonusDamage_ = 0;
     int heroBonusDamage_ = 0;
     int bonusArmor_ = 0;
+    float tempDefenseBonus_ = 0.0f;
+    War3ID explodeBuffId_ = War3ID(0u);
     float bonusLifeRegen_ = 0.0f;
     float bonusManaRegen_ = 0.0f;
     float attackSpeedMul_ = 1.0f;
@@ -382,11 +415,15 @@ private:
     bool isBuilding_;
     bool isHero_;
     bool hidden_ = false;
+    bool paused_ = false;
     bool invulnerable_ = false;
     bool constructing_ = false;
     bool rooted_ = false;
     bool invisible_ = false;
     bool detector_ = false;
+    std::unordered_set<int> sharedVision_;
+    bool ethereal_ = false;
+    bool magicImmune_ = false;
     // Morph snapshot (ref alternate-form units).
     bool morphed_ = false;
     CUnitType* originalType_ = nullptr;
@@ -466,4 +503,5 @@ private:
     // Transport cargo (passengers hidden aboard this unit)
     std::vector<CUnit*> cargoUnits_;
     bool loadedAboard_ = false;
+    bool attacksDisabled_ = false;
 };

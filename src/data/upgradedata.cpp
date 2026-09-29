@@ -106,13 +106,29 @@ CUpgradeData CUpgradeData::LoadFromMpq(const MpqManager& mpq, const std::string&
 
     TxtTable skinTbl;
     {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Units\\UpgradeFunc.txt", buf)) {
-            skinTbl.Load(buf.data(), buf.size());
-        }
-        std::vector<uint8_t> buf2;
-        if (mpq.ReadFile("Units\\UpgradeStrings.txt", buf2)) {
-            skinTbl.Load(buf2.data(), buf2.size());
+        const char* upgradeFiles[] = {
+            "Units\\UpgradeFunc.txt",
+            "Units\\UpgradeStrings.txt",
+            "Units\\CommonUpgradeFunc.txt",
+            "Units\\CommonUpgradeStrings.txt",
+            "Units\\HumanUpgradeFunc.txt",
+            "Units\\HumanUpgradeStrings.txt",
+            "Units\\OrcUpgradeFunc.txt",
+            "Units\\OrcUpgradeStrings.txt",
+            "Units\\NightElfUpgradeFunc.txt",
+            "Units\\NightElfUpgradeStrings.txt",
+            "Units\\UndeadUpgradeFunc.txt",
+            "Units\\UndeadUpgradeStrings.txt",
+            "Units\\NeutralUpgradeFunc.txt",
+            "Units\\NeutralUpgradeStrings.txt",
+            "Units\\CampaignUpgradeFunc.txt",
+            "Units\\CampaignUpgradeStrings.txt",
+        };
+        for (const char* f : upgradeFiles) {
+            std::vector<uint8_t> buf;
+            if (mpq.ReadFile(f, buf)) {
+                skinTbl.Load(buf.data(), buf.size());
+            }
         }
     }
 

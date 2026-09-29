@@ -8,12 +8,16 @@ class COrder {
 public:
     virtual ~COrder() = default;
     virtual int GetOrderId() const = 0;
+
+    enum class TargetKind : int32_t { NONE = 0, POINT = 1, WIDGET = 2 };
+    virtual TargetKind GetTargetKind() const = 0;
 };
 
 class COrderNoTarget : public COrder {
 public:
     COrderNoTarget(int orderId) : orderId_(orderId) {}
     int GetOrderId() const override { return orderId_; }
+    TargetKind GetTargetKind() const override { return TargetKind::NONE; }
 private:
     int orderId_;
 };
@@ -23,6 +27,7 @@ public:
     COrderTargetPoint(int orderId, float x, float y, float z = 0)
         : orderId_(orderId), x_(x), y_(y), z_(z) {}
     int GetOrderId() const override { return orderId_; }
+    TargetKind GetTargetKind() const override { return TargetKind::POINT; }
     float GetX() const { return x_; }
     float GetY() const { return y_; }
     float GetZ() const { return z_; }
@@ -36,6 +41,7 @@ public:
     COrderTargetWidget(int orderId, CWidget* target)
         : orderId_(orderId), target_(target) {}
     int GetOrderId() const override { return orderId_; }
+    TargetKind GetTargetKind() const override { return TargetKind::WIDGET; }
     CWidget* GetTarget() const { return target_; }
 private:
     int orderId_;
@@ -56,6 +62,7 @@ struct OrderIds {
     // Smart order / right-click context
     static constexpr int SMART = 851971;
     static constexpr int MOVE_SMART = 851971;
+    static constexpr int NEUTRALINTERACT = 852566;
 
     // Building
     static constexpr int CANCEL = 851976;

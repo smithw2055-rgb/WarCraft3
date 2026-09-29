@@ -24,9 +24,11 @@
 #include "data/unitdata.h"
 #include "data/destructabledata.h"
 #include "data/itemdata.h"
+#include "ecs/orders/order.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <optional>
 
 CSimulation::CSimulation() {
@@ -118,6 +120,7 @@ static void ApplyItemTypeData(CItem& item, CSimulation& simulation) {
 
 void CSimulation::Update() {
     if (paused_) return;
+    fogSystem_.Tick(SIM_STEP_TIME);
     // Update units (includes regen, behavior processing, death detection)
     for (auto* unit : units_) {
         bool shouldRemove = unit->Update(*this);
@@ -140,6 +143,7 @@ void CSimulation::Update() {
 
     // Step projectiles after units so just-fired shots move the same tick.
     UpdateProjectiles();
+    UpdateHazards();
 
     ProcessUnitRemovals();
     ProcessNewUnits();
@@ -188,6 +192,12 @@ void CSimulation::UpdateFogSight() {
         src.y = unit->GetY();
         src.radius = (float)radius;
         sightScratch_.push_back(src);
+        for (int other : unit->SharedVisionPlayers()) {
+            if (other == src.player || other < 0 || other >= CFogSystem::kMaxPlayers) continue;
+            CFogSightSource shared = src;
+            shared.player = other;
+            sightScratch_.push_back(shared);
+        }
     }
     fogSystem_.UpdateSight(sightScratch_.data(), (int)sightScratch_.size());
 }
@@ -196,6 +206,36 @@ void CSimulation::UpdateProjectiles() {
     for (auto it = projectiles_.begin(); it != projectiles_.end();) {
         if (it->Update(*this)) {
             it = projectiles_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void CSimulation::UpdateHazards() {
+    for (auto it = hazards_.begin(); it != hazards_.end();) {
+        SimHazard& h = *it;
+        // Wander step (tornadoes).
+        if (h.speed > 0.0f) {
+            const float dx = h.tx - h.x;
+            const float dy = h.ty - h.y;
+            const float dist = std::sqrt(dx * dx + dy * dy);
+            if (dist > 1.0f) {
+                const float step = std::min(h.speed * SIM_STEP_TIME, dist);
+                h.x += (dx / dist) * step;
+                h.y += (dy / dist) * step;
+            }
+        }
+        bool consume = false;
+        if (h.tick) {
+            h.tickCount++;
+            if (h.tickCount % std::max(1, h.tickPeriod) == 0) {
+                consume = h.tick(*this, h);
+            }
+        }
+        h.ticksLeft--;
+        if (consume || h.ticksLeft <= 0) {
+            it = hazards_.erase(it);
         } else {
             ++it;
         }
@@ -285,6 +325,24 @@ CUnit* CSimulation::AdoptUnit(std::unique_ptr<CUnit> unit) {
     unitMap_[ptr->GetHandleId()] = std::move(unit);
     newUnits_.push_back(ptr);
     return ptr;
+}
+
+void CSimulation::AddGlobalShopStock(War3ID id, int current, int max, bool isUnit) {
+    for (auto& entry : globalShopStock_) {
+        if (entry.id == id && entry.isUnit == isUnit) {
+            entry.current = current;
+            entry.max = max;
+            return;
+        }
+    }
+    globalShopStock_.push_back({id, current, max, isUnit});
+}
+
+void CSimulation::RemoveGlobalShopStock(War3ID id, bool isUnit) {
+    globalShopStock_.erase(std::remove_if(globalShopStock_.begin(), globalShopStock_.end(),
+        [&](const GlobalShopStockEntry& entry) {
+            return entry.id == id && entry.isUnit == isUnit;
+        }), globalShopStock_.end());
 }
 
 CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
@@ -606,4 +664,89 @@ void CSimulation::ProcessItemRemovals() {
         itemMap_.erase(handleId);
     }
     removedItems_.clear();
+}
+
+namespace {
+
+uint64_t HashU32(uint64_t h, uint32_t v) {
+    // FNV-1a 64 over 4 LE bytes (same-binary comparison only).
+    for (int i = 0; i < 4; i++) {
+        h ^= (uint64_t)((v >> (i * 8)) & 0xFFu);
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+uint64_t HashFloat(uint64_t h, float v) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &v, sizeof(bits));
+    return HashU32(h, bits);
+}
+
+} // namespace
+
+bool CSimulation::IssueUnitOrder(int unitHandle, std::unique_ptr<COrder> order) {
+    if (!order) return false;
+    CUnit* unit = GetUnit(unitHandle);
+    if (!unit) return false;
+    SimCommand cmd;
+    cmd.turn = gameTurnTick_;
+    cmd.player = unit->GetPlayerIndex();
+    cmd.unit = unitHandle;
+    cmd.orderId = order->GetOrderId();
+    cmd.targetKind = (int32_t)order->GetTargetKind();
+    cmd.targetHandle = -1;
+    cmd.x = 0.0f;
+    cmd.y = 0.0f;
+    cmd.z = 0.0f;
+    if (auto* pt = dynamic_cast<COrderTargetPoint*>(order.get())) {
+        cmd.x = pt->GetX();
+        cmd.y = pt->GetY();
+        cmd.z = pt->GetZ();
+    } else if (auto* wg = dynamic_cast<COrderTargetWidget*>(order.get())) {
+        cmd.targetHandle = wg->GetTarget() ? wg->GetTarget()->GetHandleId() : -1;
+    }
+    commandLog_.push_back(cmd);
+    const int orderId = cmd.orderId;
+    const int targetHandle = cmd.targetHandle;
+    const float x = cmd.x;
+    const float y = cmd.y;
+    unit->IssueOrder(std::move(order));
+    if (unitOrderCallback_) {
+        unitOrderCallback_(unitHandle, orderId, targetHandle, x, y);
+    }
+    return true;
+}
+
+uint64_t CSimulation::HashState() const {
+    uint64_t h = 1469598103934665603ull; // FNV-1a offset
+    h = HashU32(h, (uint32_t)gameTurnTick_);
+    h = HashU32(h, simRandState_);
+    h = HashU32(h, combatSystem_.GetRandState());
+    std::vector<const CUnit*> sorted(units_.begin(), units_.end());
+    std::sort(sorted.begin(), sorted.end(),
+              [](const CUnit* a, const CUnit* b) {
+                  return a->GetHandleId() < b->GetHandleId();
+              });
+    h = HashU32(h, (uint32_t)sorted.size());
+    for (const auto* u : sorted) {
+        if (!u) continue;
+        h = HashU32(h, (uint32_t)u->GetHandleId());
+        h = HashU32(h, u->GetTypeId().value);
+        h = HashU32(h, (uint32_t)u->GetPlayerIndex());
+        h = HashFloat(h, u->GetX());
+        h = HashFloat(h, u->GetY());
+        h = HashFloat(h, u->GetLife());
+    }
+    h = HashU32(h, (uint32_t)projectiles_.size());
+    for (const auto& p : projectiles_) {
+        h = HashFloat(h, p.x);
+        h = HashFloat(h, p.y);
+    }
+    h = HashU32(h, (uint32_t)hazards_.size());
+    for (const auto& hz : hazards_) {
+        h = HashFloat(h, hz.x);
+        h = HashFloat(h, hz.y);
+    }
+    return h;
 }

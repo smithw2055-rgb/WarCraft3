@@ -276,3 +276,71 @@ bool TestTrackableAndUbersplatNatives() {
     TEST_ASSERT(ndata->ubersplats.find(splatSim) == ndata->ubersplats.end());
     return true;
 }
+
+bool TestTrackableEnterAndHit() {
+    const char* script =
+        "globals\n"
+        "integer enterCount = 0\n"
+        "integer hitCount = 0\n"
+        "integer lastTrack = 0\n"
+        "endglobals\n"
+        "function OnTrackEnter takes nothing returns nothing\n"
+        "set enterCount = enterCount + 1\n"
+        "set lastTrack = GetTriggeringTrackable()\n"
+        "endfunction\n"
+        "function OnTrackHit takes nothing returns nothing\n"
+        "set hitCount = hitCount + 1\n"
+        "set lastTrack = GetTriggeringTrackable()\n"
+        "endfunction\n";
+
+    JassVM vm;
+    CSimulation sim;
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    TEST_ASSERT(vm.LoadScript(script));
+
+    const int track = CallNative(vm, "CreateTrackable",
+        {JassValue::Str("Doodads\\Cinematic\\Torch\\Torch.mdx"),
+         JassValue::Real(500), JassValue::Real(600), JassValue::Real(0)}).intVal;
+    TEST_ASSERT(track != 0);
+    const int enterTrig = CallNative(vm, "CreateTrigger", {}).intVal;
+    CallNative(vm, "TriggerRegisterTrackableTrackEvent", {JassValue::Int(enterTrig), JassValue::Int(track)});
+    CallNative(vm, "TriggerAddAction", {JassValue::Int(enterTrig), JassValue::Str("OnTrackEnter")});
+    const int hitTrig = CallNative(vm, "CreateTrigger", {}).intVal;
+    CallNative(vm, "TriggerRegisterTrackableHitEvent", {JassValue::Int(hitTrig), JassValue::Int(track)});
+    CallNative(vm, "TriggerAddAction", {JassValue::Int(hitTrig), JassValue::Str("OnTrackHit")});
+
+    auto* unit = sim.AdoptUnit(std::make_unique<CUnit>(8301, MakeVisualType(), 0, War3ID("hfoo"), 0, 0, 0));
+    TEST_ASSERT(unit != nullptr);
+    sim.Update();
+
+    natives.UpdateTimers(0.0f);
+    natives.PumpQueuedThreads(64);
+    TEST_ASSERT(vm.GetGlobal("enterCount").intVal == 0);
+
+    unit->SetPosition(500.0f, 600.0f);
+    natives.UpdateTimers(0.0f);
+    natives.PumpQueuedThreads(64);
+    TEST_ASSERT(vm.GetGlobal("enterCount").intVal == 1);
+    TEST_ASSERT(vm.GetGlobal("lastTrack").intVal == track);
+
+    natives.UpdateTimers(0.0f);
+    natives.PumpQueuedThreads(64);
+    TEST_ASSERT(vm.GetGlobal("enterCount").intVal == 1);
+
+    unit->SetPosition(0.0f, 0.0f);
+    natives.UpdateTimers(0.0f);
+    unit->SetPosition(510.0f, 600.0f);
+    natives.UpdateTimers(0.0f);
+    natives.PumpQueuedThreads(64);
+    TEST_ASSERT(vm.GetGlobal("enterCount").intVal == 2);
+
+    natives.NotifyTrackableClick(500.0f, 600.0f);
+    natives.PumpQueuedThreads(64);
+    TEST_ASSERT(vm.GetGlobal("hitCount").intVal == 1);
+    TEST_ASSERT(vm.GetGlobal("lastTrack").intVal == track);
+    natives.NotifyTrackableClick(0.0f, 0.0f);
+    natives.PumpQueuedThreads(64);
+    TEST_ASSERT(vm.GetGlobal("hitCount").intVal == 1);
+    return true;
+}

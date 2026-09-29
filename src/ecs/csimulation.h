@@ -6,6 +6,7 @@
 #include <functional>
 #include "ecs/fwd.h"
 #include "ecs/fog_state.h"
+#include "ecs/lockstep.h"
 #include "ecs/unit.h"
 #include "ecs/pathing/pathfinding.h"
 #include "ecs/player.h"
@@ -42,6 +43,11 @@ public:
     void SetGameplayConstants(const CGameplayConstants& c) {
         gameplayConstants_ = c;
         combatSystem_.Configure(c.GetDefenseArmor(), c.damageBonus);
+        combatSystem_.ConfigureMagicRules(c.etherealDamageBonusMagic,
+                                          c.etherealDamageBonusSpells,
+                                          c.magicImmuneResistsDamage,
+                                          c.magicImmuneResistsUltimates,
+                                          c.etherealDamageBonusAlly);
     }
     const CGameplayConstants& GetGameplayConstants() const { return gameplayConstants_; }
 
@@ -79,6 +85,27 @@ public:
     float GetSimStepTime() const { return SIM_STEP_TIME; }
     static constexpr float SIM_STEP_TIME = 1.0f / 20.0f;
 
+    // Lockstep (ref GameTurnManager): player commands funnel here, are
+    // logged with the current turn, then forwarded. Returns false when
+    // the unit handle does not resolve.
+    bool IssueUnitOrder(int unitHandle, std::unique_ptr<COrder> order);
+    const std::vector<SimCommand>& LoggedCommands() const { return commandLog_; }
+    void ClearCommandLog() { commandLog_.clear(); }
+
+    // Deterministic state hash for desync detection: turn, RNG state,
+    // units (sorted by handle) and live projectiles. Floats hash by bit
+    // pattern; valid for same-binary comparison only.
+    uint64_t HashState() const;
+
+    uint32_t GetRandState() const { return simRandState_; }
+    void SetRandState(uint32_t state) { simRandState_ = state; }
+    // Reseed the whole game RNG (sim stream + combat stream) together;
+    // JASS SetRandomSeed funnels here so replays reproduce.
+    void SeedRng(uint32_t seed) {
+        simRandState_ = seed;
+        combatSystem_.SetSeed(seed);
+    }
+
     // Game time
     float GetGameTimeOfDay() const { return gameTimeOfDay_; }
     void SetGameTimeOfDay(float t) { gameTimeOfDay_ = t; }
@@ -107,8 +134,8 @@ public:
     void SetTerrainMap(W3EMap* w3e) { terrainMap_ = w3e; }
     W3EMap* GetTerrainMap() const { return terrainMap_; }
 
-    // Water deformation toggle (ref SetWaterDeforms): retained for the
-    // water render pass; no consumer yet.
+    // Water deformation toggle (ref SetWaterDeforms). The water mesh
+    // adds a traveling wave while this is true.
     void SetWaterDeforms(bool v) { waterDeforms_ = v; }
     bool GetWaterDeforms() const { return waterDeforms_; }
 
@@ -145,6 +172,18 @@ public:
         }
     }
 
+    // AddItemToAllStock / AddUnitToAllStock. Shops created later copy this
+    // list when their sell ability is added.
+    struct GlobalShopStockEntry {
+        War3ID id;
+        int current = 0;
+        int max = 0;
+        bool isUnit = false;
+    };
+    void AddGlobalShopStock(War3ID id, int current, int max, bool isUnit);
+    void RemoveGlobalShopStock(War3ID id, bool isUnit);
+    const std::vector<GlobalShopStockEntry>& GetGlobalShopStock() const { return globalShopStock_; }
+
     // Combat
     CCombatSystem* GetCombatSystem() { return &combatSystem_; }
     const CCombatSystem* GetCombatSystem() const { return &combatSystem_; }
@@ -160,6 +199,24 @@ public:
     void AddDelayedAction(float delaySeconds, std::function<void()> fn) {
         delayedActions_.push_back({delaySeconds, std::move(fn)});
     }
+
+    // Timed hazards (Stasis Trap mines, Tornado wanderers): position +
+    // radius areas that tick periodically until expiry or consumption.
+    // Callbacks must resolve units by handle (raw pointers may dangle) and
+    // must only use SimRand for game-affecting rolls. Returns true from
+    // tick to consume the hazard early (mine triggered).
+    struct SimHazard {
+        float x = 0.0f, y = 0.0f;
+        float radius = 0.0f;
+        int ticksLeft = 0;
+        int tickPeriod = 1;
+        int tickCount = 0;
+        // Wander (tornadoes): stepped toward (tx, ty) every tick.
+        float tx = 0.0f, ty = 0.0f, speed = 0.0f;
+        std::function<bool(CSimulation&, SimHazard&)> tick;
+    };
+    void AddHazard(SimHazard hazard) { hazards_.push_back(std::move(hazard)); }
+    const std::vector<SimHazard>& GetHazards() const { return hazards_; }
 
     // Deterministic synced RNG (ref GameTurnManager lockstep: every client
     // must roll the same sequence; std::rand is banned in sim code).
@@ -265,6 +322,7 @@ private:
     CFogSystem fogSystem_;
     std::vector<CFogSightSource> sightScratch_;
     uint32_t simRandState_ = 0x12345678u; // deterministic sim RNG (LCG)
+    std::vector<SimCommand> commandLog_;
     W3EMap* terrainMap_ = nullptr;  // terrain queries (owned by loader)
     bool waterDeforms_ = true;
     std::vector<BlightRect> blightRects_; // SetBlight* overrides
@@ -274,7 +332,10 @@ private:
         std::function<void()> fn;
     };
     std::vector<DelayedAction> delayedActions_;
+    std::vector<SimHazard> hazards_;
+    void UpdateHazards();
     std::unique_ptr<CWorldCollision> worldCollision_;    std::unique_ptr<CPathfindingProcessor> pathfindingProcessor_;
+    std::vector<GlobalShopStockEntry> globalShopStock_;
     AudioSystem* audio_ = nullptr;
     HandleIdAllocator handleIdAlloc_;
 

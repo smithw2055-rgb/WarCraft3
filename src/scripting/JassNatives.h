@@ -77,15 +77,58 @@ struct JassTrigger {
     std::vector<std::string> conditionFuncNames;
     std::vector<std::string> actionFuncNames;
     std::vector<std::pair<int, int>> registeredEvents;
-    // Unit-state events (ref TriggerRegisterUnitStateEvent): fired by the
-    // trigger poll pass once wired; retained so registration never loses.
+    // Polled trigger events (ref event objects): evaluated edge-triggered
+    // (false -> true) by the state poll pass in UpdateTimers.
     struct JassUnitStateEvent {
         int unitHandle = 0;
         int state = 0;
         int opcode = 0;
         float limit = 0.0f;
+        bool wasTrue = false;
     };
     std::vector<JassUnitStateEvent> unitStateEvents;
+    // Proximity events (ref CUnitEventInRange): range + filter were dropped
+    // by the first port; retained here for the poll pass.
+    struct JassUnitInRangeEvent {
+        int unitHandle = 0;
+        float range = 0.0f;
+        std::string filterFunc;
+        bool inside = false;
+    };
+    std::vector<JassUnitInRangeEvent> unitInRangeEvents;
+    // Player-state threshold events (TriggerRegisterPlayerStateEvent).
+    struct JassPlayerStateEvent {
+        int playerHandle = 0;
+        int state = 0;
+        int opcode = 0;
+        float limit = 0.0f;
+        bool wasTrue = false;
+    };
+    std::vector<JassPlayerStateEvent> playerStateEvents;
+    // Variable-watch events (ref registerVariableEvent).
+    struct JassVarEvent {
+        std::string varName;
+        int opcode = 0;
+        double limit = 0.0;
+        bool wasTrue = false;
+    };
+    std::vector<JassVarEvent> varEvents;
+    // Time-of-day events (ref registerTimeOfDayEvent; TIME_OF_DAY only,
+    // matching the ref guard that throws for other game states).
+    struct JassGameStateEvent {
+        int state = 0;
+        int opcode = 0;
+        float limit = 0.0f;
+        bool wasTrue = false;
+    };
+    std::vector<JassGameStateEvent> gameStateEvents;
+    // Chat events: player + substring filter + exact-match flag.
+    struct JassChatEvent {
+        int playerHandle = 0;
+        std::string find;
+        bool exact = false;
+    };
+    std::vector<JassChatEvent> chatEvents;
     int evalCount = 0;
     int execCount = 0;
 };
@@ -213,6 +256,7 @@ struct JassTextTag {
     bool permanent = false;
     bool visible = true;
     bool suspended = false;
+    bool centered = false; // SetTextTagCentered render hint
 };
 
 struct JassEffect {
@@ -226,8 +270,8 @@ struct JassEffect {
     int effectType = 0;
 };
 
-// Billboard image (ref image API): full state retained for the renderer;
-// render consumption lands with the UI/scene image pass.
+// Billboard image (ref image API). The renderer draws a camera-facing
+// quad at the script height, tinted with the script color.
 struct JassImage {
     std::string file;
     float sizeX = 0, sizeY = 0, sizeZ = 0;
@@ -242,11 +286,14 @@ struct JassImage {
     int red = 255, green = 255, blue = 255, alpha = 255;
 };
 
-// Clickable trackable (ref trackable API): firing hit/track events needs
-// the render picking path; registration below stores trigger interest.
+// Clickable trackable. Hit (4101) fires on a world click inside the
+// radius; track (4102) fires when a unit enters the radius.
 struct JassTrackable {
     std::string modelPath;
     float x = 0, y = 0, facing = 0;
+    int jassHandle = 0;
+    bool occupancyReady = false;
+    bool unitInside = false;
 };
 
 // Ground decal (ref ubersplat API): renderer consumes finished/color.
@@ -291,7 +338,8 @@ struct JassHandleInfo {
         EFFECT, LIGHTNING, WEATHER, FOG_MODIFIER, QUEST, QUEST_ITEM, CAMERA_SETUP, ABILITY,
         PRIMARY_TAG, SECONDARY_TAG, PRIMARY_TAGS, SECONDARY_TAGS,
         DIALOG, BUTTON, MULTIBOARD, MULTIBOARDITEM, LEADERBOARD,
-        IMAGE, TRACKABLE, UBERSPLAT, HASHTABLE, GAMECACHE
+        IMAGE, TRACKABLE, UBERSPLAT, HASHTABLE, GAMECACHE, PROJECTILE, TARGET_TYPES,
+        STAT_BONUS, STATE_MOD, HANDLE_LIST, STRING_LIST, INT_EXPR
     };
     Type type;
     int id;
@@ -509,9 +557,7 @@ public:
     };
     std::unordered_map<int, std::shared_ptr<JassLightning>> lightnings;
 
-    // Weather effects (ref weathereffect handles): rect + effect code
-    // retained with an enable flag. No particle visuals (ref renders
-    // none either); the renderer reads this table when it grows some.
+    // Weather effects. Enabled regions spawn falling streaks each frame.
     struct JassWeather {
         War3ID code;
         float minX = 0, minY = 0, maxX = 0, maxY = 0;
@@ -693,9 +739,10 @@ public:
     };
     std::unordered_map<int, std::shared_ptr<JassTerrainDeform>> terrainDeforms;
     int nextTerrainDeformId = 0x1C000000;
+    // Crater is negative, ripple/wave positive, faded to the rim.
+    float TerrainDeformOffset(float x, float y) const;
 
-    // Doodad animation requests (ref SetDoodadAnimation): retained for the
-    // scene doodad pass; no consumer yet (documented).
+    // Doodad animation requests. The scene plays these as they arrive.
     struct JassDoodadAnim {
         float x = 0, y = 0, radius = 0;
         uint32_t doodadId = 0;
@@ -705,9 +752,8 @@ public:
     };
     std::vector<JassDoodadAnim> doodadAnims;
 
-    // Unit-attached visual/vision state without a sim consumer yet (ref
-    // UnitShareVision/UnitAddIndicator/SetUnitFog): retained per unit sim id
-    // for the renderer/FoW passes to consume.
+    // UnitShareVision feeds the fog sight pass. Indicators are drawn on the
+    // minimap. SetUnitFog overrides terrain fog when an end distance is set.
     std::unordered_map<int, std::unordered_set<int>> unitSharedVision;
     struct JassUnitIndicator {
         int red = 255, green = 255, blue = 255, alpha = 255;
@@ -794,6 +840,115 @@ public:
     int eventResearchingUnitHandle = -1;
     int eventResearchedId = 0;
     int eventExpiredTimerHandle = -1;
+    int eventTrackableHandle = -1;
+    // Dialog click + region event state (ref CommonTriggerExecutionScope).
+    int eventClickedButtonHandle = -1;
+    int eventClickedDialogHandle = -1;
+    int eventTriggeringRegionHandle = -1;
+    // Chat event scope (ref player chat execution scope).
+    std::string eventChatString;
+    std::string eventChatMatched;
+    // Per-unit ability cooldowns: (unitSim << 32 | abilityCode) -> remaining.
+    std::unordered_map<int64_t, float> abilityCooldowns;
+    // Units with collision disabled (SetUnitMovementTypeNoCollision).
+    std::unordered_set<int> noCollisionUnits;
+    // Extended ability flags for JASS ability handles (ref CAbilityJass
+    // physical/universal): bit0=physical, bit1=universal, keyed like
+    // abilityCooldowns. Hardcoded sim abilities report false unless set.
+    std::unordered_map<int64_t, uint8_t> abilityExtFlags;
+    // String-keyed user data blobs (ref ability localStore): keyed like
+    // abilityCooldowns so values survive handle re-allocation.
+    struct JassAbilityUserData {
+        std::unordered_map<std::string, int64_t> ints;
+        std::unordered_map<std::string, double> reals;
+        std::unordered_map<std::string, std::string> strs;
+        std::unordered_map<std::string, bool> bools;
+        bool empty() const { return ints.empty() && reals.empty() && strs.empty() && bools.empty(); }
+    };
+    std::unordered_map<int64_t, JassAbilityUserData> abilityUserData;
+    // Spell-cast scope (ref CommonTriggerExecutionScope spell fields):
+    // order id + target type of the triggering cast, cast-id counter.
+    int eventSpellOrderId = 0;
+    int eventSpellTargetType = 0;
+    int triggerCastId = 0;
+    // Preferred selection replacement (ref unitPreferredSelectionReplacement).
+    std::unordered_map<int, int> preferredSelectionReplacement; // goneSim -> wantedSim
+    // JASS projectiles (ref CJassProjectile): sim-ticked records below.
+    struct JassProjectile {
+        int casterSimId = -1;
+        uint32_t rawcode = 0;
+        float x = 0, y = 0, facing = 0, speed = 800.0f;
+        bool homing = false;
+        float damage = 0.0f;
+        bool reflected = false;
+        bool done = false;
+        bool hasUnitTarget = false;
+        int targetSimId = -1;
+        bool hasPointTarget = false;
+        float tx = 0, ty = 0;
+        float traveled = 0.0f;
+    };
+    std::unordered_map<int, std::shared_ptr<JassProjectile>> projectiles;
+    int nextProjectileId = 0x20000000;
+    // Target-type sets (ref EnumSet<CTargetType> targeting handles):
+    // stored as ref-ordinal ints (see ParseTargetType order).
+    std::unordered_map<int, std::unordered_set<int>> targetTypeSets;
+    int nextTargetTypeSetId = 0x21000000;
+    // Non-stacking stat bonuses (ref NonStackingStatBuff): aura-mappable
+    // types ride CUnit::AddAuraStatBonus slots; MAXHP/MAXMP use JASS-side
+    // strongest-wins below; HPSTEAL/THORNS have no unit mutator (stored).
+    struct JassStatBonus {
+        int type = 0; // NonStackingStatBuffType ordinal
+        std::string key;
+        float value = 0.0f;
+        std::unordered_set<int> holders; // unitSimIds
+    };
+    std::unordered_map<int, std::shared_ptr<JassStatBonus>> statBonuses;
+    int nextStatBonusId = 0x22000000;
+    // Strongest-wins applied MAXHP/MAXMP per unit (type -> absolute amount).
+    std::unordered_map<int64_t, float> maxStatApplied; // (unitSim<<32|type)->applied
+    // State mods (ref StateModBuff): mapped types drive unit flags with
+    // OR-recompute over active records; unmapped types are stored.
+    struct JassStateMod {
+        int type = 0; // StateModBuffType ordinal
+        int value = 0;
+        std::unordered_set<int> holders; // unitSimIds
+    };
+    std::unordered_map<int, std::shared_ptr<JassStateMod>> stateMods;
+    int nextStateModId = 0x23000000;
+    // Generic script containers (ref HandleList/StringList/IntExpr).
+    std::unordered_map<int, std::vector<JassValue>> handleLists;
+    int nextHandleListId = 0x24000000;
+    std::unordered_map<int, std::vector<std::string>> stringLists;
+    int nextStringListId = 0x25000000;
+    std::unordered_map<int, std::string> intExprs; // sim id -> func name
+    int nextIntExprId = 0x26000000;
+    // Looped ability sounds: (unitSim << 32 | aliasCode) -> audio id.
+    std::unordered_map<int64_t, int> loopedSpellSounds;
+    // Cutscene time override (ref false time of day): clock frozen at the
+    // given hour while remaining ticks down, then prior suspend restored.
+    struct JassFalseTime {
+        float remaining = 0.0f;
+        bool wasSuspended = false;
+    };
+    JassFalseTime falseTime;
+    // Current ForFiles enumeration path (ref enumFileScope).
+    std::string enumFilePath;
+    // Archive file listing injected by the host (ref dataSource listfile):
+    // pattern (StormLib wildcards) -> matching paths, original case.
+    std::function<std::vector<std::string>(const std::string& pattern)> fileLister;
+    void SetFileLister(std::function<std::vector<std::string>(const std::string&)> fn) {
+        fileLister = std::move(fn);
+    }
+    // Script file bytes injected by the host (ref dataSource streams).
+    std::function<std::vector<uint8_t>(const std::string& path)> scriptReader;
+    void SetScriptReader(std::function<std::vector<uint8_t>(const std::string&)> fn) {
+        scriptReader = std::move(fn);
+    }
+    // Per-tick trigger interest (ref registerOnTickEvent): trigger jass
+    // handles fired once per UpdateTimers pass, plus unit-bound variants.
+    std::unordered_set<int> onTickTriggers;
+    std::unordered_map<int, int> onUnitTickTriggers; // triggerHandle -> unitSimId
 
     // Callbacks for external system access (set from main.cpp)
     std::function<float(float, float)> terrainGroundHeight;
@@ -872,6 +1027,15 @@ struct JassQueuedContext {
     int eventResearchingUnitHandle = -1;
     int eventResearchedId = 0;
     int eventExpiredTimerHandle = -1;
+    int eventTrackableHandle = -1;
+    int eventClickedButtonHandle = -1;
+    int eventClickedDialogHandle = -1;
+    int eventTriggeringRegionHandle = -1;
+    std::string eventChatString;
+    std::string eventChatMatched;
+    int eventSpellOrderId = 0;
+    int eventSpellTargetType = 0;
+    int triggerCastId = 0;
 };
 
 struct JassQueuedThread {
@@ -902,6 +1066,11 @@ public:
     void FireSummonEvent(int summonerSimHandle, int summonedSimHandle);
     void FireResearchEvent(int unitSimHandle, int upgradeId);
     void FireReviveEvent(int reviverSimHandle, int revivedSimHandle);
+    void FireTrackableEvent(int trackableHandle, int eventCode);
+    void NotifyTrackableClick(float x, float y);
+    void FireDialogButtonEvent(int buttonJassHandle);
+    void FireChatEvent(int fromPlayerHandle, const std::string& message);
+    void FireAllianceChange(int playerIdA, int playerIdB);
     void UpdateRegions();
     void UpdateTextTags(float dt);
     void ForgetItem(int itemSimHandle);
@@ -923,6 +1092,14 @@ private:
     bool EvaluateTriggerConditions(JassTrigger& trigger, const JassQueuedContext& context,
                                    bool requireEnabled = true);
     void QueueTriggerActions(JassTrigger& trigger, const JassQueuedContext& context);
+    void UpdateTrackables();
+    void UpdateProjectiles(float dt);
+    void FireTickTriggers();
+    void FireStateTriggers();
+    // Strongest-wins recompute for JASS-side MAXHP/MAXMP bonus records.
+    void RecomputeMaxStatBonus(int unitSim, int type);
+    // OR-recompute for mapped state-mod flags from active records.
+    void RecomputeStateMod(int unitSim, int type);
     void RegisterHandleNatives();
     void RegisterMathNatives();
     void RegisterConversionNatives();
@@ -963,6 +1140,9 @@ private:
     void RegisterTerrainEditNatives();
     void RegisterHashtableNatives();
     void RegisterGameCacheNatives();
+    void RegisterProjectileNatives();
+    void RegisterTargetingNatives();
+    void RegisterBonusNatives();
     void RegisterMiscNatives();
 
     void RegisterConfigPlayerNatives();
