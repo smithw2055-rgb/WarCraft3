@@ -203,3 +203,34 @@ bool TestGameCacheStoreRestoreUnit() {
     TEST_ASSERT(!CallNative(f.vm, "HaveStoredUnit", {JassValue::Int(cache), JassValue::Str("m1"), JassValue::Str("guard")}).boolVal);
     return true;
 }
+
+bool TestGameCacheSyncStored() {
+    // SyncStored* close the last common.j native-declaration gap: with no
+    // net layer the local value is authoritative, so scalars read through
+    // like their GetStored* counterparts.
+    Fixture f;
+    const int cache = CallNative(f.vm, "InitGameCache", {JassValue::Str("test-sync")}).intVal;
+    TEST_ASSERT(cache != 0);
+    TEST_ASSERT(CallNative(f.vm, "SyncStoredInteger", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("n")}).intVal == 0);
+    CallNative(f.vm, "StoreInteger", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("n"), JassValue::Int(314)});
+    CallNative(f.vm, "StoreReal", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("r"), JassValue::Real(2.75f)});
+    CallNative(f.vm, "StoreBoolean", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("b"), JassValue::Bool(true)});
+    TEST_ASSERT(CallNative(f.vm, "StoreString", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("s"), JassValue::Str("synced")}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "SyncStoredInteger", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("n")}).intVal == 314);
+    TEST_ASSERT(CallNative(f.vm, "SyncStoredReal", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("r")}).realVal == 2.75f);
+    TEST_ASSERT(CallNative(f.vm, "SyncStoredBoolean", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("b")}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "SyncStoredString", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("s")}).strVal == "synced");
+    // Missing keys fail closed like the Get* variants.
+    TEST_ASSERT(!CallNative(f.vm, "SyncStoredBoolean", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("nope")}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "SyncStoredString", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("nope")}).strVal.empty());
+    // Unit sync without a stored unit fails closed (no crash); with unit
+    // data absent the restore path also fails closed like RestoreUnit.
+    auto* u = f.sim.AdoptUnit(std::make_unique<CUnit>(8821, MakeCacheType(), 0, War3ID("hfoo"), 0, 0, 0));
+    f.sim.Update();
+    (void)u;
+    const int uh = f.data->AllocHandle(JassHandleInfo::UNIT, 8821);
+    TEST_ASSERT(CallNative(f.vm, "SyncStoredUnit", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("nope")}).intVal == 0);
+    TEST_ASSERT(CallNative(f.vm, "StoreUnit", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("guard"), JassValue::Int(uh)}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "SyncStoredUnit", {JassValue::Int(cache), JassValue::Str("m"), JassValue::Str("guard")}).intVal == 0);
+    return true;
+}

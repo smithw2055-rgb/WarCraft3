@@ -256,6 +256,14 @@ bool TestPlayerTeamNatives() {
     const int teams = CallNative(vm, "GetTeams", {}).intVal;
     TEST_ASSERT(CallNative(vm, "CountPlayersInForce", {JassValue::Int(teams)}).intVal == 2);
 
+    // ForceEnumPlayers covers full slots (ref bj_MAX_PLAYER_SLOTS), not
+    // just live sim players, so campaign/all-player forces see slots 12-15.
+    const int allForce = CallNative(vm, "CreateForce", {}).intVal;
+    CallNative(vm, "ForceEnumPlayers", {JassValue::Int(allForce), JassValue::Null()});
+    TEST_ASSERT(CallNative(vm, "CountPlayersInForce", {JassValue::Int(allForce)}).intVal == 16);
+    const int p15 = CallNative(vm, "Player", {JassValue::Int(15)}).intVal;
+    TEST_ASSERT(CallNative(vm, "IsPlayerInForce", {JassValue::Int(p15), JassValue::Int(allForce)}).boolVal);
+
     // Tax rates default 0, round-trip when set.
     TEST_ASSERT(CallNative(vm, "GetPlayerTaxRate", {JassValue::Int(p0), JassValue::Int(p1), JassValue::Int(1)}).intVal == 0);
     CallNative(vm, "SetPlayerTaxRate", {JassValue::Int(p0), JassValue::Int(p1), JassValue::Int(1), JassValue::Int(30)});

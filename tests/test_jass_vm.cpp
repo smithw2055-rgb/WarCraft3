@@ -196,3 +196,59 @@ endfunction
     }
     return true;
 }
+
+bool TestJassSetScalarFromArray() {
+    // Regression: `set scalar = arr[i]` with a lone array read on the RHS
+    // must copy the element (ref InitGlobals `set udg_AAAPG_Arthas =
+    // bj_FORCE_PLAYER[1]`). It previously matched the array-element-target
+    // branch (children[0] is ArrayAccess) and stored null instead.
+    JassVM vm;
+    const char* script = R"JASS(
+globals
+    force array bj_FORCE_PLAYER
+    force udg_copy = null
+    integer probe = 0
+endglobals
+
+function FillForces takes nothing returns nothing
+    set bj_FORCE_PLAYER[1] = 4242
+endfunction
+
+function CopyForce takes nothing returns nothing
+    set udg_copy = bj_FORCE_PLAYER[1]
+endfunction
+
+function ReadForce takes nothing returns force
+    return bj_FORCE_PLAYER[1]
+endfunction
+
+function ShiftTarget takes nothing returns nothing
+    set bj_FORCE_PLAYER[2] = 777
+    set probe = bj_FORCE_PLAYER[2]
+endfunction
+)JASS";
+
+    if (!vm.LoadScript(script)) {
+        std::cerr << "JASS scalar-from-array test failed to load script" << std::endl;
+        return false;
+    }
+    vm.CallFunction("FillForces");
+    vm.CallFunction("CopyForce");
+    if (vm.GetGlobal("udg_copy").intVal != 4242) {
+        std::cerr << "JASS set scalar = arr[i] failed, copy="
+                  << vm.GetGlobal("udg_copy").intVal << std::endl;
+        return false;
+    }
+    if (vm.CallFunction("ReadForce").intVal != 4242) {
+        std::cerr << "JASS return arr[i] failed" << std::endl;
+        return false;
+    }
+    // Array-element targets still write (no regression from the fix).
+    vm.CallFunction("ShiftTarget");
+    if (vm.GetGlobal("probe").intVal != 777) {
+        std::cerr << "JASS array-element target write broke, probe="
+                  << vm.GetGlobal("probe").intVal << std::endl;
+        return false;
+    }
+    return true;
+}

@@ -870,7 +870,13 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
             }
 
             // Set statement (assignment)
-            if (!node->children.empty() && node->children[0]->type == AstNodeType::ARRAY_ACCESS) {
+            // Array element assignment carries both target and value
+            // (children = [ArrayAccess, value]). A lone ArrayAccess child
+            // is the VALUE of `set scalar = arr[i]` (ref InitGlobals force
+            // copies like `set udg_AAAPG_Arthas = bj_FORCE_PLAYER[1]`), so
+            // it must fall through to simple assignment below.
+            if (!node->children.empty() && node->children[0]->type == AstNodeType::ARRAY_ACCESS &&
+                node->children.size() > 1) {
                 // Array element assignment: set arr[i] = val
                 auto& arrAccess = node->children[0];
                 int index = (int)ExecuteNode(arrAccess->children[0].get()).intVal;

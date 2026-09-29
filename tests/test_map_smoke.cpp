@@ -94,7 +94,8 @@ bool TestRetailMapSmoke() {
         for (const auto& bj : {"Scripts\\Blizzard.j", "Scripts\\common.j"}) {
             std::vector<uint8_t> bytes;
             if (mpqDbg.ReadFile(bj, bytes) && !bytes.empty()) {
-                const fs::path outJ = fs::temp_directory_path() / "Blizzard.j";
+                const fs::path outJ = fs::temp_directory_path() /
+                    (std::string(bj) == "Scripts\\common.j" ? "common.j" : "Blizzard.j");
                 std::ofstream out(outJ, std::ios::binary);
                 out.write(reinterpret_cast<const char*>(bytes.data()),
                           static_cast<std::streamsize>(bytes.size()));

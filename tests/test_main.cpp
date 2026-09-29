@@ -76,6 +76,7 @@ bool TestJassPopulateAnimationTagsFromSelector();
 bool TestJassVmThreadSleepResumesAfterWait();
 bool TestJassArrayGlobals();
 bool TestJassThreadArrayGlobals();
+bool TestJassSetScalarFromArray();
 bool TestPointEffectReportsStoredCoords();
 bool TestLocEffectResolvesLocation();
 bool TestTargetEffectFollowsUnit();
@@ -582,6 +583,7 @@ bool TestHashtableHandles();
 bool TestGameCacheValuesAndFlush();
 bool TestGameCacheDiskPersistence();
 bool TestGameCacheStoreRestoreUnit();
+bool TestGameCacheSyncStored();
 bool TestReviveHero();
 bool TestAbilityLevelShift();
 bool TestSelectUnitAndFood();
@@ -658,6 +660,7 @@ int main() {
         {"JASS VM thread sleep resumes after wait", TestJassVmThreadSleepResumesAfterWait},
         {"JASS array globals round-trip", TestJassArrayGlobals},
         {"JASS thread array round-trip", TestJassThreadArrayGlobals},
+        {"JASS set scalar from array element", TestJassSetScalarFromArray},
         {"Point effect reports stored coords", TestPointEffectReportsStoredCoords},
         {"Loc effect resolves location", TestLocEffectResolvesLocation},
         {"Target effect follows unit", TestTargetEffectFollowsUnit},
@@ -1164,6 +1167,7 @@ int main() {
         {"GameCache values and flush", TestGameCacheValuesAndFlush},
         {"GameCache disk persistence", TestGameCacheDiskPersistence},
         {"GameCache store/restore unit", TestGameCacheStoreRestoreUnit},
+        {"GameCache sync stored natives", TestGameCacheSyncStored},
         {"Revive hero", TestReviveHero},
         {"Ability level shift", TestAbilityLevelShift},
         {"Select unit and food", TestSelectUnitAndFood},

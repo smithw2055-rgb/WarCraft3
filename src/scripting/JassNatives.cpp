@@ -2368,7 +2368,10 @@ void JassNatives::RegisterForceNatives() {
         auto fit = data->forces.find(forceId);
         if (fit == data->forces.end()) return JassValue::Null();
         const std::string filterFunc = (args.size() > 1 && args[1].type == JassValue::STRING) ? args[1].strVal : "";
-        const int playerCount = sim ? sim->GetPlayerCount() : 24;
+        // Enumerate full player slots (ref bj_MAX_PLAYER_SLOTS), not just
+        // live sim players, so bj_FORCE_ALL_PLAYERS covers slots 12-15.
+        const int simCount = sim ? sim->GetPlayerCount() : 0;
+        const int playerCount = std::max(simCount, 16);
         for (int playerId = 0; playerId < playerCount; ++playerId) {
             if (acceptPlayer(playerId, filterFunc)) {
                 addPlayerToForce(*fit->second, playerId);
@@ -2384,7 +2387,8 @@ void JassNatives::RegisterForceNatives() {
         if (fit == data->forces.end()) return JassValue::Null();
         const std::string filterFunc = (args[1].type == JassValue::STRING) ? args[1].strVal : "";
         const int limit = std::max(0, args[2].intVal);
-        const int playerCount = sim ? sim->GetPlayerCount() : 24;
+        const int simCount = sim ? sim->GetPlayerCount() : 0;
+        const int playerCount = std::max(simCount, 16);
         int acceptedCount = 0;
         for (int playerId = 0; playerId < playerCount && acceptedCount < limit; ++playerId) {
             if (acceptPlayer(playerId, filterFunc)) {
@@ -11647,6 +11651,65 @@ void JassNatives::RegisterGameCacheNatives() {
         if (mit == c->values.end()) return JassValue::Str("");
         auto it = mit->second.find(args[2].strVal);
         return JassValue::Str(it != mit->second.end() ? it->second.strVal : "");
+    });
+    // SyncStored* (ref sync natives): with no net layer the local value is
+    // authoritative, so these read through like their GetStored*
+    // counterparts (documented single-player parity). This closes the last
+    // common.j native-declaration gap (see native coverage matrix).
+    vm_.RegisterNative("SyncStoredInteger", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Int(0);
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Int(0);
+        auto mit = c->values.find(args[1].strVal);
+        if (mit == c->values.end()) return JassValue::Int(0);
+        auto it = mit->second.find(args[2].strVal);
+        return JassValue::Int(it != mit->second.end() ? it->second.intVal : 0);
+    });
+    vm_.RegisterNative("SyncStoredReal", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Real(0.0f);
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Real(0.0f);
+        auto mit = c->values.find(args[1].strVal);
+        if (mit == c->values.end()) return JassValue::Real(0.0f);
+        auto it = mit->second.find(args[2].strVal);
+        return JassValue::Real(it != mit->second.end() ? it->second.realVal : 0.0f);
+    });
+    vm_.RegisterNative("SyncStoredBoolean", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Bool(false);
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Bool(false);
+        auto mit = c->values.find(args[1].strVal);
+        if (mit == c->values.end()) return JassValue::Bool(false);
+        auto it = mit->second.find(args[2].strVal);
+        return JassValue::Bool(it != mit->second.end() ? it->second.boolVal : false);
+    });
+    vm_.RegisterNative("SyncStoredString", [getCache](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Str("");
+        auto c = getCache(args[0].intVal);
+        if (!c) return JassValue::Str("");
+        auto mit = c->values.find(args[1].strVal);
+        if (mit == c->values.end()) return JassValue::Str("");
+        auto it = mit->second.find(args[2].strVal);
+        return JassValue::Str(it != mit->second.end() ? it->second.strVal : "");
+    });
+    vm_.RegisterNative("SyncStoredUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3 || !sim) return JassValue::Int(0);
+        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GAMECACHE);
+        if (simId < 0) return JassValue::Int(0);
+        auto it = data->gameCaches.find(simId);
+        if (it == data->gameCaches.end()) return JassValue::Int(0);
+        auto mit = it->second->units.find(args[1].strVal);
+        if (mit == it->second->units.end()) return JassValue::Int(0);
+        auto uit = mit->second.find(args[2].strVal);
+        if (uit == mit->second.end()) return JassValue::Int(0);
+        // Local parity for the ref unit-getter: rehydrate the snapshot at
+        // the origin (stored snapshots carry no position; documented).
+        const auto& stored = uit->second;
+        CUnit* unit = sim->CreateUnit(War3ID(stored.typeId), stored.owner, 0.0f, 0.0f, 0.0f);
+        if (!unit) return JassValue::Int(0);
+        if (stored.level > 1) unit->SetHeroLevel(stored.level);
+        unit->SetLife(*sim, unit->GetMaxLife() * stored.lifeFraction);
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
     });
     vm_.RegisterNative("RestoreUnit", [data = data_, sim = sim_, getCache](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 7 || !sim) return JassValue::Null();
