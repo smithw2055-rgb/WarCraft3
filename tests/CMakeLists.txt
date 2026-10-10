@@ -74,6 +74,7 @@ add_executable(warsmash_tests
     test_lightning.cpp
     test_fdf.cpp
     test_ability_levels.cpp
+    test_hero_carry.cpp
     test_vfs_overlay.cpp
     test_map_data.cpp
     test_jass_orders_terrain.cpp
@@ -168,6 +169,7 @@ add_executable(warsmash_tests
     ../src/ecs/unit_type.cpp
     ../src/ecs/player.cpp
     ../src/ecs/csimulation.cpp
+    ../src/ecs/hero_carry.cpp
     ../src/ecs/lockstep.cpp
     ../src/net/tcp_transport.cpp
     ../src/net/lobby_state.cpp

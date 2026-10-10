@@ -213,6 +213,7 @@ set(SOURCES
     src/ecs/destructable.cpp
     src/ecs/item.cpp
     src/ecs/csimulation.cpp
+    src/ecs/hero_carry.cpp
     src/ecs/lockstep.cpp
     src/net/tcp_transport.cpp
     src/net/lobby_state.cpp

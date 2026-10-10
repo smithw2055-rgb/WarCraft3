@@ -15,6 +15,8 @@
 #include "../ecs/abilities/ability_build.h"
 #include "../ecs/abilities/ability_gold_mine.h"
 #include "../ecs/abilities/ability_harvest.h"
+#include "../ecs/abilities/ability_hero.h"
+#include "../ecs/abilities/ability_inventory.h"
 #include "../ecs/abilities/ability_move.h"
 #include "../ecs/abilities/ability_queue.h"
 #include "../ecs/abilities/ability_repair.h"
@@ -1481,6 +1483,10 @@ void GameController::HandleGlueMapLaunchRequest(const std::string& mapPath, int 
     }
 
     config_.localPlayerIndex = localPlayerIndex;
+    // Fresh menu launch: never inherit a stale ChangeLevel snapshot (e.g.
+    // the user aborted to the menu mid-campaign).
+    carriedHeroes_.clear();
+    arrivedViaChangeLevel_ = false;
     if (uiOnlyMode_) {
         pendingGlueMapLaunch_ = true;
         pendingGlueMapLaunchRequestedPath_ = mapPath;
@@ -1836,6 +1842,7 @@ void GameController::InitInGame() {
                 jassNatives_->PumpQueuedThreads(1024);
             }
             EnsureHumanMeleeStartsFromMapConfig();
+            SpawnCarriedHeroes();
             FlushStartupSimulationState();
             EnsureComputerAIStarted();
             simulation_.SetMapInitPhase(false);
@@ -2447,6 +2454,9 @@ void GameController::Update(int screenW, int screenH, float dt) {
                 pendingGlueMapLaunchResolvedPath_ = resolved;
                 pendingGlueMapLaunchLocalPlayer_ = config_.localPlayerIndex;
                 MoveDebugLogLine("ChangeLevel: queued campaign map switch to '" + resolved + "'");
+                // Snapshot human heroes BEFORE the reload tears the sim down;
+                // SpawnCarriedHeroes consumes them once the next map is up.
+                CollectCarriedHeroes();
                 StartPendingGlueMapLaunch(screenW, screenH);
                 frameCount_++;
                 return;
@@ -4564,6 +4574,62 @@ void GameController::EnsureHumanMeleeStartsFromMapConfig() {
             createdAny = true;
     }
     if (createdAny) simulation_.Update();
+}
+
+void GameController::CollectCarriedHeroes() {
+    carriedHeroes_.clear();
+    arrivedViaChangeLevel_ = false;
+    if (!simulationInitialized_) return;
+    for (CUnit* unit : simulation_.GetUnits()) {
+        CarriedHero carried = SnapshotHero(unit, simulation_);
+        if (carried.typeId.value != 0) carriedHeroes_.push_back(std::move(carried));
+    }
+    arrivedViaChangeLevel_ = true;
+    std::cout << "ChangeLevel: carrying " << carriedHeroes_.size() << " heroes" << std::endl;
+}
+
+void GameController::SpawnCarriedHeroes() {
+    if (!arrivedViaChangeLevel_) return;
+    arrivedViaChangeLevel_ = false;
+    std::vector<CarriedHero> carried = std::move(carriedHeroes_);
+    carriedHeroes_.clear();
+    if (carried.empty() || !simulationInitialized_) return;
+    auto* data = jassNatives_ ? jassNatives_->GetData().get() : nullptr;
+    Vec3 center = texturedTerrain_.IsValid() ? texturedTerrain_.GetCenter() : Vec3(0, 0, 0);
+    int spawned = 0;
+    for (size_t hi = 0; hi < carried.size(); ++hi) {
+        const CarriedHero& ch = carried[hi];
+        CPlayer* owner = simulation_.GetPlayer(ch.ownerPlayer);
+        if (!owner) continue;
+        if (!simulation_.GetUnitData() ||
+            !simulation_.GetUnitData()->GetUnitType(ch.typeId)) {
+            continue; // hero type absent from the next map's data
+        }
+        // Start location, else an owned building, else map center, each
+        // fanned out so stacked heroes do not overlap.
+        float sx = center.x, sy = center.z;
+        bool placed = data && FindPlayerStartLocationPosition(data, ch.ownerPlayer, sx, sy);
+        if (!placed) {
+            for (CUnit* unit : simulation_.GetUnits()) {
+                if (!unit || unit->IsDead() || unit->GetPlayerIndex() != ch.ownerPlayer) continue;
+                if (unit->GetUnitType() && unit->GetUnitType()->IsBuilding()) {
+                    sx = unit->GetX();
+                    sy = unit->GetY();
+                    placed = true;
+                    break;
+                }
+            }
+        }
+        const float angle = (float)hi * 2.39996f; // golden angle fan-out
+        const float radius = 128.0f + 64.0f * (float)hi;
+        sx += std::cos(angle) * radius;
+        sy += std::sin(angle) * radius;
+        CUnit* hero = RespawnCarriedHero(simulation_, ch, sx, sy);
+        if (hero) spawned++;
+    }
+    if (spawned > 0) simulation_.Update();
+    std::cout << "ChangeLevel: respawned " << spawned << "/" << carried.size()
+              << " carried heroes" << std::endl;
 }
 
 void GameController::MaybeLogAIStatus() {

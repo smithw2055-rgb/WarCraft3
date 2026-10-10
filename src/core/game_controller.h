@@ -45,6 +45,8 @@
 
 struct sapp_event; // fwd
 
+#include "../ecs/hero_carry.h"
+
 class GameController {
 public:
     GameController();
@@ -229,6 +231,11 @@ private:
     void DumpUnsupportedDiagnostics();
     void EnsureHumanMeleeStartsFromMapConfig();
     void EnsureHumanMeleeStartForPlayer(int playerIndex, float startX, float startY);
+    // Campaign carry-over: snapshot human heroes before a ChangeLevel reload
+    // and respawn them after the next map initializes (level/XP/skills/
+    // items). Stale snapshots are dropped, never replayed twice.
+    void CollectCarriedHeroes();
+    void SpawnCarriedHeroes();
     // Safety net: any COMPUTER + slot-active player without an AI
     // controller (map script never called StartMeleeAI) gets a
     // MeleeAIController so computer slots always play.
@@ -280,6 +287,10 @@ private:
     std::string pendingGlueMapLaunchResolvedPath_;
     int pendingGlueMapLaunchLocalPlayer_ = 0;
     bool glueMapLaunchInProgress_ = false;
+    // ChangeLevel hero carry-over (see CarriedHero): filled on the way out,
+    // consumed once on the way in. Fresh launches never inherit stale data.
+    std::vector<CarriedHero> carriedHeroes_;
+    bool arrivedViaChangeLevel_ = false;
     float simulationAccumulator_ = 0.0f;
     float lastTime_ = 0.0f;
 

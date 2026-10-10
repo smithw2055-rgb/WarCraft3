@@ -177,6 +177,8 @@ bool TestJassRandomFollowsSeed();
 bool TestIssueUnitOrderLogsAndForwards();
 bool TestHashStateDeterministic();
 bool TestReplayLogRoundTrip();
+bool TestHeroCarryRoundTrip();
+bool TestHeroCarryFilters();
 bool TestGetItemBehaviorPicksUp();
 bool TestDropItemBehaviorDrops();
 bool TestGiveItemBehaviorTransfers();
@@ -826,6 +828,8 @@ int main(int argc, char** argv) {
         {"IssueUnitOrder logs and forwards", TestIssueUnitOrderLogsAndForwards},
         {"HashState deterministic", TestHashStateDeterministic},
         {"ReplayLog round trip", TestReplayLogRoundTrip},
+        {"Hero carry round trip", TestHeroCarryRoundTrip},
+        {"Hero carry filters", TestHeroCarryFilters},
         {"GetItem behavior picks up", TestGetItemBehaviorPicksUp},
         {"DropItem behavior drops", TestDropItemBehaviorDrops},
         {"GiveItem behavior transfers", TestGiveItemBehaviorTransfers},
