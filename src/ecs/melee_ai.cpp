@@ -172,6 +172,29 @@ void MeleeAIController::DiscoverPlan() {
             }
         }
     }
+    // Altar: same-race building training hero units (ref altar revive).
+    // Hero: cheapest hero it trains. Skipped silently on hero-less data.
+    for (const auto& [id, type] : unitData->GetAllTypes()) {
+        if (!type || !type->IsBuilding()) continue;
+        if (type->GetUnitRace().name != race) continue;
+        if (id == plan_.townHall) continue;
+        int bestHeroCost = INT32_MAX;
+        War3ID bestHero;
+        for (War3ID trainedId : type->GetUnitsTrained()) {
+            const CUnitType* trained = unitData->GetUnitType(trainedId);
+            if (!trained || !trained->IsHero()) continue;
+            const int cost = trained->GetGoldCost() + trained->GetLumberCost();
+            if (cost < bestHeroCost) {
+                bestHeroCost = cost;
+                bestHero = trainedId;
+            }
+        }
+        if (bestHero.value != 0) {
+            plan_.altar = id;
+            plan_.hero = bestHero;
+            break;
+        }
+    }
     plan_.valid = true;
 }
 
@@ -336,12 +359,40 @@ int MeleeAIController::CountBuildings(const War3ID& type) const {
     if (!sim_ || type.value == 0) return 0;
     int count = 0;
     for (CUnit* unit : sim_->GetUnits()) {
-        if (unit && !unit->IsDead() && unit->GetPlayerIndex() == playerIndex_ &&
-            unit->GetTypeId() == type) {
-            count++;
-        }
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        if (unit->GetTypeId() == type) count++;
     }
     return count;
+}
+
+int MeleeAIController::CountHeroes() const {
+    if (!sim_) return 0;
+    int count = 0;
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        const CUnitType* type = unit->GetUnitType();
+        if (type && type->IsHero()) count++;
+    }
+    return count;
+}
+
+CUnit* MeleeAIController::FindDeadHero() const {
+    if (!sim_) return nullptr;
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (!unit || !unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        const CUnitType* type = unit->GetUnitType();
+        if (type && type->IsHero()) return unit;
+    }
+    return nullptr;
+}
+
+CUnit* MeleeAIController::FindAltar() const {
+    if (!sim_ || plan_.altar.value == 0) return nullptr;
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        if (unit->GetTypeId() == plan_.altar) return unit;
+    }
+    return nullptr;
 }
 
 bool MeleeAIController::FindAttackTarget(float& outX, float& outY) const {
@@ -462,11 +513,93 @@ bool MeleeAIController::TryTrainArmy() {
         player->GetLumber() < armyType->GetLumberCost()) {
         return false;
     }
+    // High upkeep (60% gold tax): only train when rich, so the AI does not
+    // tax-spiral. Level comes from food-derived thresholds (ref upkeep).
+    if (player->GetUpkeepLevel() >= 2 &&
+        player->GetGold() < armyType->GetGoldCost() + 300) {
+        return false;
+    }
     if (armyType->GetFoodUsed() > 0 &&
         player->GetFoodUsed() + armyType->GetFoodUsed() > player->GetFoodCap()) {
         return false;
     }
     IssueAiOrder(barracks, std::make_unique<COrderNoTarget>(static_cast<int>(plan_.armyUnit.value)));
+    return true;
+}
+
+bool MeleeAIController::TryBuildAltar() {
+    if (!sim_ || plan_.altar.value == 0 || CountBuildings(plan_.altar) > 0) return false;
+    // Altar after barracks: heroes need an army to protect them.
+    if (plan_.barracks.value != 0 && CountBuildings(plan_.barracks) == 0) return false;
+    CPlayer* player = sim_->GetPlayer(playerIndex_);
+    if (!player) return false;
+    // One construction at a time (ref TryBuildSupply).
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        CBehavior* behavior = unit->GetCurrentBehavior();
+        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) return false;
+    }
+    const CUnitType* altarType = sim_->GetUnitData()->GetUnitType(plan_.altar);
+    if (!altarType) return false;
+    if (player->GetGold() < altarType->GetGoldCost() + 100) return false;
+    if (player->GetLumber() < altarType->GetLumberCost()) return false;
+    CUnit* hall = FindTownHall();
+    if (!hall) return false;
+    CUnit* worker = FindWorkerForBuild();
+    if (!worker) return false;
+    float x = 0.0f, y = 0.0f;
+    if (!FindBuildSpot(hall->GetX(), hall->GetY(), plan_.altar, x, y)) return false;
+    worker->ClearOrders();
+    IssueAiOrder(worker,
+        std::make_unique<COrderTargetPoint>(static_cast<int>(plan_.altar.value), x, y));
+    return true;
+}
+
+int MeleeAIController::MaxHeroes() const {
+    // Retail hero limit is 3 per tavern tier in melee; the AI paces by
+    // difficulty so EASY fields a single hero.
+    if (difficulty_ == AIDifficulty::EASY) return 1;
+    if (difficulty_ == AIDifficulty::INSANE) return 3;
+    return 2;
+}
+
+bool MeleeAIController::TryTrainHero() {
+    if (!sim_ || plan_.hero.value == 0) return false;
+    if (CountHeroes() >= MaxHeroes()) return false;
+    if (FindDeadHero()) return false; // revive first; see TryReviveHeroes
+    // Economy first: no hero before the workforce is saturated and an
+    // escort exists, so early waves and worker targets are never starved.
+    const int workerTarget = difficulty_ == AIDifficulty::EASY ? 4
+        : difficulty_ == AIDifficulty::INSANE ? 8 : 6;
+    if (CountWorkers() < workerTarget || CountArmy() < 2) return false;
+    CUnit* altar = FindAltar();
+    if (!altar) return false;
+    const CUnitType* heroType = sim_->GetUnitData()->GetUnitType(plan_.hero);
+    if (!heroType) return false;
+    CPlayer* player = sim_->GetPlayer(playerIndex_);
+    if (!player) return false;
+    if (player->GetGold() < heroType->GetGoldCost() ||
+        player->GetLumber() < heroType->GetLumberCost()) {
+        return false;
+    }
+    if (heroType->GetFoodUsed() > 0 &&
+        player->GetFoodUsed() + heroType->GetFoodUsed() > player->GetFoodCap()) {
+        return false;
+    }
+    IssueAiOrder(altar, std::make_unique<COrderNoTarget>(static_cast<int>(plan_.hero.value)));
+    return true;
+}
+
+bool MeleeAIController::TryReviveHeroes() {
+    if (!sim_) return false;
+    CUnit* dead = FindDeadHero();
+    if (!dead) return false;
+    CUnit* altar = FindAltar();
+    if (!altar) return false;
+    // The revive order id is the dead hero's handle (ref CAbilityReviveHero);
+    // affordability is enforced by the ability itself (soft fail).
+    if (!altar->GetAbility(War3ID("Arev"))) return false;
+    IssueAiOrder(altar, std::make_unique<COrderNoTarget>(dead->GetHandleId()));
     return true;
 }
 
@@ -595,6 +728,9 @@ void MeleeAIController::Think() {
     // worker with an active BUILD behavior is not idle and keeps building).
     TryBuildSupply();
     TryBuildBarracks();
+    TryBuildAltar();
+    TryReviveHeroes();
+    TryTrainHero();
     TryTrainArmy();
     AssignIdleWorkers();
     const bool forced = lastCommand_ == 1;

@@ -123,6 +123,8 @@ bool TestMeleeAIDiscoversHumanPlan() {
     TEST_ASSERT(ai.GetPlan().farm == War3ID("hfar"));
     TEST_ASSERT(ai.GetPlan().barracks == War3ID("hbar"));
     TEST_ASSERT(ai.GetPlan().armyUnit == War3ID("hfoo"));
+    TEST_ASSERT(ai.GetPlan().altar == War3ID("haltar"));
+    TEST_ASSERT(ai.GetPlan().hero == War3ID("Hamg"));
     return true;
 }
 
@@ -415,5 +417,104 @@ bool TestMeleeAIResearchesUpgrades() {
     // Both levels researched to max (100g/50l each); no third starts.
     TEST_ASSERT(sim.GetPlayer(1)->GetTechLevel(War3ID("R001")) == 2);
     TEST_ASSERT(sim.GetPlayer(1)->GetGold() == 1800);
+    return true;
+}
+
+bool TestMeleeAITrainsHero() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    OpenGameData(mpq);
+    CGameplayConstants gc;
+    CUnitData unitData = CUnitData::LoadFromMpq(mpq, gc);
+    if (!HasMeleeIds(unitData)) return true;
+    if (!unitData.HasUnitType(War3ID("haltar")) || !unitData.HasUnitType(War3ID("Hamg"))) return true;
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "AI", CMapControl::COMPUTER));
+    sim.GetPlayer(1)->SetRace(1);
+    sim.GetPlayer(1)->SetGold(4000);
+    sim.GetPlayer(1)->SetFoodCap(100);
+
+    sim.CreateUnit(War3ID("hhou"), 1, 0, 0, 0);
+    CUnit* altar = sim.CreateUnit(War3ID("haltar"), 1, 400, 0, 0);
+    TEST_ASSERT(altar != nullptr);
+    for (int i = 0; i < 6; i++) {
+        sim.CreateUnit(War3ID("hpea"), 1, 200 + i * 40, 0, 0);
+    }
+    for (int i = 0; i < 3; i++) {
+        sim.CreateUnit(War3ID("hfoo"), 1, 100 + i * 30, 100, 0);
+    }
+
+    MeleeAIController ai(&sim, 1);
+    for (int i = 0; i < 1200; i++) {
+        sim.Update();
+        ai.Update();
+    }
+    // A hero mustered at the altar (economy/army guards passed).
+    int heroes = 0;
+    for (CUnit* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != 1) continue;
+        const CUnitType* type = unit->GetUnitType();
+        if (type && type->IsHero()) heroes++;
+    }
+    TEST_ASSERT(heroes >= 1);
+    return true;
+}
+
+bool TestMeleeAIUpkeepThrottlesArmy() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    OpenGameData(mpq);
+    CGameplayConstants gc;
+    CUnitData unitData = CUnitData::LoadFromMpq(mpq, gc);
+    if (!HasMeleeIds(unitData)) return true;
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "AI", CMapControl::COMPUTER));
+    sim.GetPlayer(1)->SetRace(1);
+    sim.GetPlayer(1)->SetFoodCap(100);
+
+    sim.CreateUnit(War3ID("hhou"), 1, 0, 0, 0);
+    CUnit* barracks = sim.CreateUnit(War3ID("hbar"), 1, 400, 0, 0);
+    TEST_ASSERT(barracks != nullptr);
+    for (int i = 0; i < 6; i++) {
+        sim.CreateUnit(War3ID("hpea"), 1, 200 + i * 40, 0, 0);
+    }
+    const CUnitType* foot = unitData.GetUnitType(War3ID("hfoo"));
+    TEST_ASSERT(foot != nullptr);
+    const int cost = foot->GetGoldCost();
+
+    // High upkeep (level 2) with a thin wallet: training must wait.
+    sim.GetPlayer(1)->SetFoodUsed(85);
+    sim.GetPlayer(1)->SetGold(cost + 100);
+    MeleeAIController ai(&sim, 1);
+    for (int i = 0; i < 120; i++) {
+        sim.Update();
+        ai.Update();
+    }
+    auto* queue = dynamic_cast<CAbilityQueue*>(barracks->GetAbility(War3ID("Aque")));
+    TEST_ASSERT(queue == nullptr || queue->GetQueueCount() == 0);
+    // Rich enough to absorb the tax: training proceeds.
+    sim.GetPlayer(1)->SetGold(cost + 500);
+    for (int i = 0; i < 120; i++) {
+        sim.Update();
+        ai.Update();
+    }
+    queue = dynamic_cast<CAbilityQueue*>(barracks->GetAbility(War3ID("Aque")));
+    bool trained = queue && queue->GetQueueCount() > 0;
+    if (!trained) {
+        // Already popped out of the queue: any player-1 footman proves it.
+        for (CUnit* unit : sim.GetUnits()) {
+            if (unit && !unit->IsDead() && unit->GetPlayerIndex() == 1 &&
+                unit->GetTypeId() == War3ID("hfoo")) {
+                trained = true;
+            }
+        }
+    }
+    TEST_ASSERT(trained);
     return true;
 }

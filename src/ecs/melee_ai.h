@@ -1,12 +1,14 @@
 #pragma once
 // Minimal melee AI: keeps an economy running (workers harvest, trains
-// replacements), expands supply/production, and sends attack waves.
+// replacements), expands supply/production, trains and revives heroes,
+// and sends attack waves.
 // Race-agnostic: production roles are discovered from unit data (train
-// lists, food output, harvest ability) instead of hardcoded rawcodes.
+// lists, food output, harvest ability, hero flag) instead of hardcoded
+// rawcodes.
 //
-// Limitations (documented): no heroes/altar play, no research/upgrades,
-// no static defense, undead/night-elf special harvest mechanics fall back
-// to gold-mining when the standard HARVEST order is rejected.
+// Limitations (documented): no expansion bases, no static defense,
+// undead/night-elf special harvest mechanics fall back to gold-mining
+// when the standard HARVEST order is rejected.
 
 #include <cstdint>
 #include <memory>
@@ -32,6 +34,8 @@ struct AIRacePlan {
     War3ID farm;
     War3ID barracks;
     War3ID armyUnit;
+    War3ID altar;
+    War3ID hero;
     bool valid = false;
 };
 
@@ -77,10 +81,20 @@ private:
     int CountWorkers() const;
     int CountArmy() const;
     int CountBuildings(const War3ID& type) const;
+    // Live owned heroes (any hero type, not just the plan pick).
+    int CountHeroes() const;
+    // Hero cap by difficulty (EASY 1 / NORMAL 2 / INSANE 3).
+    int MaxHeroes() const;
+    // Dead owned hero awaiting revive, if any.
+    CUnit* FindDeadHero() const;
+    CUnit* FindAltar() const;
     bool TryTrainWorkers();
     bool TryBuildSupply();
     bool TryBuildBarracks();
+    bool TryBuildAltar();
     bool TryTrainArmy();
+    bool TryTrainHero();
+    bool TryReviveHeroes();
     // Research one affordable upgrade per think on an idle production
     // building (ref gap: the AI never researched). Economy buffer scales
     // with difficulty so research never starves the army.

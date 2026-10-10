@@ -607,6 +607,8 @@ bool TestTimerDialogStyleNatives();
 bool TestMeleeAIDiscoversHumanPlan();
 bool TestMeleeAIEconomyGrows();
 bool TestMeleeAIAttackWave();
+bool TestMeleeAITrainsHero();
+bool TestMeleeAIUpkeepThrottlesArmy();
 bool TestMeleeAINativesWiring();
 bool TestMeleeAIOrdersEnterCommandLog();
 bool TestMeleeAIDifficultyPacing();
@@ -1254,6 +1256,8 @@ int main(int argc, char** argv) {
         {"Melee AI discovers human plan", TestMeleeAIDiscoversHumanPlan},
         {"Melee AI economy grows", TestMeleeAIEconomyGrows},
         {"Melee AI attack wave", TestMeleeAIAttackWave},
+        {"Melee AI trains hero", TestMeleeAITrainsHero},
+        {"Melee AI upkeep throttles army", TestMeleeAIUpkeepThrottlesArmy},
         {"Melee AI natives wiring", TestMeleeAINativesWiring},
         {"Melee AI orders enter command log", TestMeleeAIOrdersEnterCommandLog},
         {"Melee AI difficulty pacing", TestMeleeAIDifficultyPacing},
