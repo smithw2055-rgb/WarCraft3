@@ -132,3 +132,26 @@ bool TestConfiguredDefenseArmorDrivesReduction() {
     TEST_NEAR(lifeBefore - target.GetLife(), 220.0f * (1.0f - 1.2f / 2.2f), 0.05f);
     return true;
 }
+
+bool TestUnitClassificationKeys() {
+    // Retail UnitData.slk "type" keys (ref CUnitClassification), lowercased
+    // by the loader; "_" and unknown keys never match.
+    CUnitClassification cls = CUnitClassification::GIANT;
+    TEST_ASSERT(ParseUnitClassification("mechanical", cls) && cls == CUnitClassification::MECHANICAL);
+    TEST_ASSERT(ParseUnitClassification("undead", cls) && cls == CUnitClassification::UNDEAD);
+    TEST_ASSERT(ParseUnitClassification("townhall", cls) && cls == CUnitClassification::TOWNHALL);
+    TEST_ASSERT(ParseUnitClassification("ancient", cls) && cls == CUnitClassification::ANCIENT);
+    TEST_ASSERT(ParseUnitClassification("summoned", cls) && cls == CUnitClassification::SUMMONED);
+    TEST_ASSERT(ParseUnitClassification("peon", cls) && cls == CUnitClassification::PEON);
+    TEST_ASSERT(ParseUnitClassification("sapper", cls) && cls == CUnitClassification::SAPPER);
+    TEST_ASSERT(ParseUnitClassification("giant", cls) && cls == CUnitClassification::GIANT);
+    TEST_ASSERT(ParseUnitClassification("tree", cls) && cls == CUnitClassification::TREE);
+    TEST_ASSERT(ParseUnitClassification("ward", cls) && cls == CUnitClassification::WARD);
+    TEST_ASSERT(ParseUnitClassification("standon", cls) && cls == CUnitClassification::STANDON);
+    TEST_ASSERT(ParseUnitClassification("neutral", cls) && cls == CUnitClassification::NEUTRAL);
+    TEST_ASSERT(ParseUnitClassification("tauren", cls) && cls == CUnitClassification::TAUREN);
+    TEST_ASSERT(!ParseUnitClassification("_", cls));
+    TEST_ASSERT(!ParseUnitClassification("", cls));
+    TEST_ASSERT(!ParseUnitClassification("Mechanical", cls)); // loader lowercases first
+    return true;
+}

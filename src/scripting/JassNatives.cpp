@@ -304,6 +304,16 @@ static void ExecuteSyncFunction(JassVM* vm, const std::string& funcName) {
     (void)CallSyncFunction(vm, funcName);
 }
 
+// Ref Trigger.waitOnSleeps (per-trigger, default true): TriggerSleepAction
+// and TriggerWaitForSound consult the CURRENTLY executing trigger. No
+// trigger context (timers, map init) means waits are honored.
+static bool TriggerSleepsHonored(const std::shared_ptr<JassNativesData>& data) {
+    if (!data) return true;
+    auto it = data->triggers.find(data->currentTriggerId);
+    if (it == data->triggers.end() || !it->second) return true;
+    return it->second->waitOnSleeps;
+}
+
 // ============================================================
 // JassNativesData
 // ============================================================
@@ -516,10 +526,20 @@ int JassNatives::PumpQueuedThreads(int maxCount) {
         auto thread = std::move(queuedThreads_.front());
         queuedThreads_.pop_front();
 
+        // A woken TriggerExecuteWait caller finishes its join first: the
+        // callee remainder runs before the caller resumes. Re-sleep parks
+        // the thread back in sleepingThreads_ (handled inside).
+        if (thread.joinId != 0 && !ContinueTriggerJoin(thread)) {
+            pumped++;
+            continue;
+        }
+
         JassQueuedContext previous = CaptureContext();
         ApplyContext(thread.context);
         const size_t errorCountBefore = vm_.GetErrors().size();
+        activePumpThread_ = &thread;
         JassVM::ThreadRunResult result = vm_.RunThread(thread.vmState, thread.functionName);
+        activePumpThread_ = nullptr;
         const auto& errors = vm_.GetErrors();
         for (size_t i = errorCountBefore; i < errors.size(); ++i) {
             std::cerr << "JASS runtime error in " << thread.functionName << ": " << errors[i] << std::endl;
@@ -540,6 +560,49 @@ int JassNatives::PumpQueuedThreads(int maxCount) {
                   << " threads remain" << std::endl;
     }
     return pumped;
+}
+
+bool JassNatives::ContinueTriggerJoin(JassQueuedThread& thread) {
+    auto jit = triggerJoins_.find(thread.joinId);
+    if (jit == triggerJoins_.end()) {
+        thread.joinId = 0;
+        return true;
+    }
+    JassTriggerJoin& join = jit->second;
+    JassQueuedContext previous = CaptureContext();
+    ApplyContext(join.calleeContext);
+    // Finish the suspended child first; it may sleep again.
+    if (join.childActive) {
+        JassVM::ThreadRunResult result = vm_.RunThread(join.suspendedChild,
+                                                        join.suspendedChild.functionName);
+        if (!result.completed && result.sleeping) {
+            thread.sleepRemaining = result.sleepSeconds;
+            ApplyContext(previous);
+            sleepingThreads_.push_back(std::move(thread));
+            return false;
+        }
+        join.childActive = false;
+    }
+    // Then the not-yet-run actions, each of which may sleep in turn.
+    while (!join.pendingActions.empty()) {
+        std::string funcName = std::move(join.pendingActions.front());
+        join.pendingActions.erase(join.pendingActions.begin());
+        if (funcName.empty() || !vm_.HasFunction(funcName)) continue;
+        JassVM::ThreadState child;
+        JassVM::ThreadRunResult result = vm_.RunThread(child, funcName);
+        if (result.completed) continue;
+        if (!result.sleeping) continue;
+        join.suspendedChild = std::move(child);
+        join.childActive = true;
+        thread.sleepRemaining = result.sleepSeconds;
+        ApplyContext(previous);
+        sleepingThreads_.push_back(std::move(thread));
+        return false;
+    }
+    triggerJoins_.erase(jit);
+    thread.joinId = 0;
+    ApplyContext(previous);
+    return true;
 }
 
 bool JassNatives::EvaluateTriggerConditions(JassTrigger& trigger, const JassQueuedContext& context,
@@ -2287,21 +2350,25 @@ void JassNatives::RegisterTimerNatives() {
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("TriggerSleepAction", [vm = &vm_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("TriggerSleepAction", [vm = &vm_, data = data_](const std::vector<JassValue>& args) -> JassValue {
         float seconds = 0.0f;
         if (!args.empty()) {
             seconds = args[0].type == JassValue::REAL ? args[0].realVal : static_cast<float>(args[0].intVal);
         }
+        // Ref Jass2 TriggerSleepAction: a trigger with waitOnSleeps=false
+        // skips the wait and continues on the next statement.
+        if (!TriggerSleepsHonored(data)) return JassValue::Null();
         vm->RequestSleep(seconds);
         return JassValue::Null();
     });
     // PolledWait shares TriggerSleepAction semantics (ref polled wait):
     // suspend the current thread; the timer-advance pass resumes it.
-    vm_.RegisterNative("PolledWait", [vm = &vm_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("PolledWait", [vm = &vm_, data = data_](const std::vector<JassValue>& args) -> JassValue {
         float seconds = 0.0f;
         if (!args.empty()) {
             seconds = args[0].type == JassValue::REAL ? args[0].realVal : static_cast<float>(args[0].intVal);
         }
+        if (!TriggerSleepsHonored(data)) return JassValue::Null();
         vm->RequestSleep(seconds);
         return JassValue::Null();
     });
@@ -5571,25 +5638,54 @@ void JassNatives::RegisterTriggerNatives() {
         if (args.empty()) return JassValue::Null();
         auto it = data_->triggers.find(args[0].intVal);
         if (it == data_->triggers.end()) return JassValue::Null();
-        // Unlike TriggerExecute (queue and return), run the actions
-        // synchronously so the caller observes their effects before
-        // continuing (ref CTriggerExecuteWait semantics for the no-sleep
-        // case). Actions that request TriggerSleepAction abort their
-        // remaining statements, matching CallFunction behavior elsewhere.
-        JassQueuedContext context = CaptureContext();
-        context.currentTriggerId = args[0].intVal;
-        context.currentTriggerEventId = 0;
-        for (const auto& funcName : it->second->actionFuncNames) {
-            if (funcName.empty() || !vm_.HasFunction(funcName)) continue;
+        // Ref Jass2 TriggerExecuteWait: force the callee's waitOnSleeps on,
+        // then run its actions so the caller observes their effects (and
+        // their waits) before continuing.
+        it->second->waitOnSleeps = true;
+        JassQueuedContext calleeCtx = CaptureContext();
+        calleeCtx.currentTriggerId = args[0].intVal;
+        calleeCtx.currentTriggerEventId = 0;
+        const std::vector<std::string>& actions = it->second->actionFuncNames;
+        // Sync contexts (enum/filter callbacks, conditions) have no resumable
+        // caller thread and nested waits have nowhere to attach: run inline
+        // and drain sleeps, as before.
+        if (activePumpThread_ == nullptr || activePumpThread_->joinId != 0) {
             JassQueuedContext previous = CaptureContext();
-            ApplyContext(context);
-            vm_.CallFunction(funcName);
-            // A synchronous action cannot suspend: drop the sleep request so
-            // later executions are not poisoned (see RunThread for the
-            // queued-thread equivalent).
-            if (vm_.HasPendingSleep()) vm_.TakePendingSleepSeconds();
+            ApplyContext(calleeCtx);
+            for (const auto& funcName : actions) {
+                if (funcName.empty() || !vm_.HasFunction(funcName)) continue;
+                vm_.CallFunction(funcName);
+                if (vm_.HasPendingSleep()) vm_.TakePendingSleepSeconds();
+            }
             ApplyContext(previous);
+            return JassValue::Null();
         }
+        // Resumable caller: run each action as a child thread. The first
+        // sleep suspends the CALLER via a join; the wake pass finishes the
+        // callee remainder before the caller resumes (ContinueTriggerJoin).
+        JassQueuedContext previous = CaptureContext();
+        ApplyContext(calleeCtx);
+        for (size_t i = 0; i < actions.size(); ++i) {
+            const std::string& funcName = actions[i];
+            if (funcName.empty() || !vm_.HasFunction(funcName)) continue;
+            JassVM::ThreadState child;
+            JassVM::ThreadRunResult result = vm_.RunThread(child, funcName);
+            if (result.completed) continue;
+            if (!result.sleeping) continue;
+            JassTriggerJoin join;
+            join.calleeTriggerId = args[0].intVal;
+            join.calleeContext = calleeCtx;
+            join.pendingActions.assign(actions.begin() + i + 1, actions.end());
+            join.suspendedChild = std::move(child);
+            join.childActive = true;
+            const int joinId = nextJoinId_++;
+            triggerJoins_[joinId] = std::move(join);
+            activePumpThread_->joinId = joinId;
+            ApplyContext(previous);
+            vm_.RequestSleep(result.sleepSeconds);
+            return JassValue::Null();
+        }
+        ApplyContext(previous);
         return JassValue::Null();
     });
     vm_.RegisterNative("GetTriggerEvalCount", [data = data_](const std::vector<JassValue>& args) -> JassValue {
@@ -11038,6 +11134,8 @@ void JassNatives::RegisterTriggerSoundNatives() {
     });
     vm_.RegisterNative("TriggerWaitForSound", [data = data_, vm = &vm_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
+        // Ref Jass2 TriggerWaitForSound: same waitOnSleeps gate as sleep.
+        if (!TriggerSleepsHonored(data)) return JassValue::Null();
         const int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::SOUND);
         float seconds = 0.0f;
         if (id >= 0) {
@@ -11050,13 +11148,21 @@ void JassNatives::RegisterTriggerSoundNatives() {
         return JassValue::Null();
     });
     vm_.RegisterNative("TriggerWaitOnSleeps", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (!args.empty() && data) data->triggerWaitOnSleeps = args[0].boolVal;
+        // Retail: takes (trigger whichTrigger, boolean flag). The old code
+        // read args[0] (the trigger handle) as the flag; fixed to per-trigger.
+        if (args.size() < 2 || !data) return JassValue::Null();
+        auto it = data->triggers.find(args[0].intVal);
+        if (it != data->triggers.end() && it->second) {
+            it->second->waitOnSleeps = args[1].boolVal;
+        }
         return JassValue::Null();
     });
-    vm_.RegisterNative("IsTriggerWaitOnSleeps", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        // The executor always waits today; false is recorded for the pass
-        // that will honor it (documented limitation).
-        return JassValue::Bool(!data || data->triggerWaitOnSleeps);
+    vm_.RegisterNative("IsTriggerWaitOnSleeps", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        // Ref Jass2: (trigger != null) && trigger.isWaitOnSleeps().
+        if (args.empty() || !data) return JassValue::Bool(false);
+        auto it = data->triggers.find(args[0].intVal);
+        if (it == data->triggers.end() || !it->second) return JassValue::Bool(false);
+        return JassValue::Bool(it->second->waitOnSleeps);
     });
     vm_.RegisterNative("TriggerSyncStart", [data = data_](const std::vector<JassValue>&) -> JassValue {
         // Sync needs the net protocol; stays unready (documented).

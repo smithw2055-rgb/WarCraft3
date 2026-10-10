@@ -210,6 +210,13 @@ private:
                                                            const Mat4& view, const Mat4& proj,
                                                            int screenW, int screenH);
     bool IssuePendingCommandAtScreenPoint(float screenX, float screenY);
+    // Minimap command routing (retail: right-click issues SMART, targeted
+    // abilities resolve through the minimap too). Returns false when the
+    // screen point is outside the minimap.
+    bool MinimapWorldFromScreen(float screenX, float screenY, float* worldX, float* worldY) const;
+    // Nearest live, visible unit to a world point within radius (2D).
+    // Minimap-target approximation: clicks resolve to sub-pixel units.
+    CUnit* PickUnitNearWorldPoint(float worldX, float worldY, float radius) const;
 
     // --- Init helpers ---
     void OpenDataSources();

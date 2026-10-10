@@ -14,8 +14,27 @@ enum class PathingGridMovementType : uint8_t {
 enum class CUnitClassification : uint8_t {
     GIANT, UNDEAD, SUMMONED, MECHANICAL, PEON, SAPPER, TOWNHALL,
     ANCIENT, TREE, WARD, STANDONBUILDING, GOLD_MINE, STATUE,
-    WALKWAY, BRIDGE, FLYING, CANNOT_BUILD_ON_ME
+    WALKWAY, BRIDGE, FLYING, CANNOT_BUILD_ON_ME,
+    // Retail UnitData.slk "type" keys (ref CUnitClassification).
+    STANDON, NEUTRAL, TAUREN
 };
+
+inline bool ParseUnitClassification(const std::string& key, CUnitClassification& out) {
+    if (key == "giant") { out = CUnitClassification::GIANT; return true; }
+    if (key == "undead") { out = CUnitClassification::UNDEAD; return true; }
+    if (key == "summoned") { out = CUnitClassification::SUMMONED; return true; }
+    if (key == "mechanical") { out = CUnitClassification::MECHANICAL; return true; }
+    if (key == "peon") { out = CUnitClassification::PEON; return true; }
+    if (key == "sapper") { out = CUnitClassification::SAPPER; return true; }
+    if (key == "townhall") { out = CUnitClassification::TOWNHALL; return true; }
+    if (key == "ancient") { out = CUnitClassification::ANCIENT; return true; }
+    if (key == "tree") { out = CUnitClassification::TREE; return true; }
+    if (key == "ward") { out = CUnitClassification::WARD; return true; }
+    if (key == "standon") { out = CUnitClassification::STANDON; return true; }
+    if (key == "neutral") { out = CUnitClassification::NEUTRAL; return true; }
+    if (key == "tauren") { out = CUnitClassification::TAUREN; return true; }
+    return false;
+}
 
 enum class CPrimaryAttribute : uint8_t {
     STRENGTH, AGILITY, INTELLIGENCE

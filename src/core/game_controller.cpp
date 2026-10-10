@@ -3907,8 +3907,32 @@ void GameController::OnEvent(const sapp_event* ev) {
     }
 }
 
-void GameController::OnMouseDown(const sapp_event* ev) {
-    if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
+bool GameController::MinimapWorldFromScreen(float screenX, float screenY,
+                                             float* worldX, float* worldY) const {
+    if (!worldX || !worldY) return false;
+    if (hideHud_ || !minimap_.IsValid()) return false;
+    if (!minimap_.HitTest(screenX, screenY, sapp_width(), sapp_height())) return false;
+    minimap_.ScreenToWorld(screenX, screenY, sapp_width(), sapp_height(), worldX, worldY);
+    return true;
+}
+
+CUnit* GameController::PickUnitNearWorldPoint(float worldX, float worldY, float radius) const {
+    CUnit* best = nullptr;
+    float bestDistSq = radius * radius;
+    for (auto* unit : simulation_.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->IsHidden()) continue;
+        const float dx = unit->GetX() - worldX;
+        const float dy = unit->GetY() - worldY;
+        const float d2 = dx * dx + dy * dy;
+        if (d2 < bestDistSq) {
+            bestDistSq = d2;
+            best = unit;
+        }
+    }
+    return best;
+}
+
+void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
         const int multiSelectHandle = ui_.HitMultiSelection(ev->mouse_x, ev->mouse_y);
         if (multiSelectHandle >= 0 && selectedUnitHandlesSet_.find(multiSelectHandle) != selectedUnitHandlesSet_.end()) {
             if (audio_.IsValid() && frameCount_ > 10) audio_.Play2D("ui_click", 0.5f);
@@ -3964,6 +3988,34 @@ void GameController::OnMouseDown(const sapp_event* ev) {
         if (simulationInitialized_ && !selectedUnitHandles_.empty()) {
             std::vector<CUnit*> selUnits = GetSelectedSimulationUnits();
             if (!selUnits.empty()) {
+                // Minimap first: right-click issues SMART to the world point
+                // (retail). 3D raycasts from minimap pixels are meaningless,
+                // so widget targeting resolves by proximity instead.
+                float mmX = 0.0f, mmY = 0.0f;
+                if (MinimapWorldFromScreen(ev->mouse_x, ev->mouse_y, &mmX, &mmY)) {
+                    CUnit* nearUnit = PickUnitNearWorldPoint(mmX, mmY, 128.0f);
+                    for (auto* su : selUnits) {
+                        if (!su) continue;
+                        if (nearUnit && nearUnit != su) {
+                            bool targeted = false;
+                            if (auto* attackAbility = dynamic_cast<CAbilityAttack*>(
+                                    su->GetAbility(War3ID("Aatk")))) {
+                                if (attackAbility->CheckCanTarget(simulation_, su, OrderIds::SMART, nearUnit)) {
+                                    su->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::SMART, nearUnit));
+                                    targeted = true;
+                                }
+                            }
+                            if (!targeted) {
+                                su->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, mmX, mmY));
+                            }
+                        } else {
+                            su->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, mmX, mmY));
+                        }
+                    }
+                    issuedOrder = true;
+                }
+            }
+            if (!issuedOrder && !selUnits.empty()) {
                 int winW = sapp_width(), winH = sapp_height();
                 float aspect = (winH > 0) ? (float)winW / winH : 1.0f;
                 Mat4 view = camera_.GetViewMatrix();
@@ -4061,13 +4113,21 @@ bool GameController::IssuePendingCommandAtScreenPoint(float screenX, float scree
         return false;
     }
 
+    // Minimap routing first: 3D raycasts from minimap pixels are
+    // meaningless. Point orders land on the world point; widget-mode orders
+    // resolve the nearest live unit (retail minimap targeting).
+    float mmX = 0.0f, mmY = 0.0f;
+    const bool viaMinimap = MinimapWorldFromScreen(screenX, screenY, &mmX, &mmY);
+    CUnit* mmUnit = viaMinimap ? PickUnitNearWorldPoint(mmX, mmY, 128.0f) : nullptr;
+
     int winW = sapp_width(), winH = sapp_height();
     float aspect = (winH > 0) ? (float)winW / winH : 1.0f;
     Mat4 view = camera_.GetViewMatrix();
     Mat4 proj = camera_.GetProjectionMatrix(aspect);
-    CUnit* targetUnit = PickSimulationUnitAtScreenPoint(screenX, screenY,
-        view, proj, winW, winH, selectedUnitHandle_, false, true);
-    CDestructable* targetDest = targetUnit ? nullptr
+    CUnit* targetUnit = viaMinimap ? mmUnit
+        : PickSimulationUnitAtScreenPoint(screenX, screenY,
+            view, proj, winW, winH, selectedUnitHandle_, false, true);
+    CDestructable* targetDest = (targetUnit || viaMinimap) ? nullptr
         : PickSimulationDestructableAtScreenPoint(screenX, screenY, view, proj, winW, winH);
     CWidget* targetWidget = targetUnit ? static_cast<CWidget*>(targetUnit)
         : static_cast<CWidget*>(targetDest);
@@ -4075,8 +4135,9 @@ bool GameController::IssuePendingCommandAtScreenPoint(float screenX, float scree
     auto terrainH = [&](float x, float z) {
         return texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, z) : 0.0f;
     };
-    Vec3 wPos = picking::ScreenToWorld(screenX, screenY, view, proj, winW, winH,
-                                       texturedTerrain_.IsValid(), texturedTerrain_.GetRadius(), terrainH);
+    Vec3 wPos = viaMinimap ? Vec3(mmX, 0.0f, mmY)
+        : picking::ScreenToWorld(screenX, screenY, view, proj, winW, winH,
+                                 texturedTerrain_.IsValid(), texturedTerrain_.GetRadius(), terrainH);
 
     const auto pendingMode = ui_.GetPendingCommandMode();
     ui_.CompletePendingCommand();

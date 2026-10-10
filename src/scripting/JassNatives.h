@@ -92,6 +92,11 @@ enum JassEventType {
 struct JassTrigger {
     int id = -1;
     bool enabled = true;
+    // Ref Trigger.waitOnSleeps (default true): consulted by
+    // TriggerSleepAction/TriggerWaitForSound for the currently executing
+    // trigger; TriggerExecuteWait forces it true on the callee. Per-trigger,
+    // NOT global (retail signatures take whichTrigger).
+    bool waitOnSleeps = true;
     std::vector<int> registeredUnitHandles;
     std::vector<int> eventTypes;
     std::vector<std::string> conditionFuncNames;
@@ -669,7 +674,6 @@ public:
     std::unordered_map<int, bool> compAIpaused;
     // Live melee AI controllers by player index (ref StartMeleeAI).
     std::unordered_map<int, std::shared_ptr<MeleeAIController>> aiControllers;
-    bool triggerWaitOnSleeps = true;
     bool syncReady = false; // TriggerSync* needs the net protocol; stays false
     std::unordered_map<int, int> removedPlayerResults;
     struct JassUIConfig {
@@ -1174,6 +1178,19 @@ struct JassQueuedThread {
     JassQueuedContext context;
     JassVM::ThreadState vmState;
     float sleepRemaining = 0.0f;
+    // TriggerExecuteWait join (0 = none): the woken caller must finish the
+    // callee remainder before resuming; see ContinueTriggerJoin.
+    int joinId = 0;
+};
+
+// TriggerExecuteWait continuation (ref: caller suspends until the callee's
+// waits elapse). Holds the suspended callee child plus not-yet-run actions.
+struct JassTriggerJoin {
+    int calleeTriggerId = -1;
+    JassQueuedContext calleeContext;
+    std::vector<std::string> pendingActions;
+    JassVM::ThreadState suspendedChild;
+    bool childActive = false;
 };
 
 class JassNatives {
@@ -1307,6 +1324,15 @@ private:
     CSimulation* sim_ = nullptr;
     std::deque<JassQueuedThread> queuedThreads_;
     std::deque<JassQueuedThread> sleepingThreads_;
+    // TriggerExecuteWait joins by id; the thread currently driven by
+    // PumpQueuedThreads (null outside it) so the native can attach a join.
+    std::unordered_map<int, JassTriggerJoin> triggerJoins_;
+    int nextJoinId_ = 1;
+    JassQueuedThread* activePumpThread_ = nullptr;
+    // Runs a woken join to completion-or-next-sleep. Returns true when the
+    // join finished and the caller thread may resume; false when the caller
+    // was re-suspended (thread moved back to sleepingThreads_).
+    bool ContinueTriggerJoin(JassQueuedThread& thread);
     // Engine-side region membership (region sim id -> unit sim handles inside).
     // Used by UpdateRegions() to fire enter/leave triggers on migration.
     std::unordered_map<int, std::unordered_set<int>> regionMembership_;

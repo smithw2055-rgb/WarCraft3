@@ -121,3 +121,42 @@ ResyncPackage ResyncPackage::FromHistory(uint32_t seed,
     }
     return pkg;
 }
+
+std::vector<uint8_t> StartGamePackage::Serialize() const {
+    std::vector<uint8_t> out(16);
+    WriteLE32(out.data() + 0, seed);
+    WriteLE64(out.data() + 4, mapHash);
+    WriteLE32(out.data() + 12, (uint32_t)numPlayers);
+    return out;
+}
+
+bool StartGamePackage::Deserialize(const uint8_t* data, size_t size,
+                                   StartGamePackage& out) {
+    if (size < 16 || !data) return false;
+    out.seed = ReadLE32(data + 0);
+    out.mapHash = ReadLE64(data + 4);
+    out.numPlayers = (int32_t)ReadLE32(data + 12);
+    if (out.numPlayers < 0 || out.numPlayers > 64) return false;
+    return true;
+}
+
+bool DesyncTracker::Check(int32_t turn, uint64_t expected, uint64_t actual) {
+    if (expected == 0 && actual == 0) return true; // unstamped: nothing to compare
+    if (expected == actual) return true;
+    mismatchCount++;
+    if (!desynced) {
+        desynced = true;
+        firstTurn = turn;
+        expectedHash = expected;
+        actualHash = actual;
+    }
+    return false;
+}
+
+void DesyncTracker::Reset() {
+    desynced = false;
+    firstTurn = -1;
+    expectedHash = 0;
+    actualHash = 0;
+    mismatchCount = 0;
+}

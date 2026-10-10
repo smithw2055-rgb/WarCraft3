@@ -229,3 +229,29 @@ bool RecvResync(int fd, ResyncPackage& pkgOut, int timeoutMs) {
     if (!TcpTransport::RecvMessage(fd, wire, timeoutMs)) return false;
     return ResyncPackage::Deserialize(wire.data(), wire.size(), pkgOut);
 }
+
+int LockstepHost::BroadcastStartGame(const StartGamePackage& pkg) {
+    auto out = pkg.Serialize();
+    int reached = 0;
+    for (int fd : peerFds_) {
+        if (fd == TcpTransport::kInvalidFd) continue;
+        if (TcpTransport::SendMessage(fd, out.data(), out.size())) reached++;
+    }
+    for (int fd : watchers_) {
+        if (fd != TcpTransport::kInvalidFd) {
+            TcpTransport::SendMessage(fd, out.data(), out.size());
+        }
+    }
+    return reached;
+}
+
+bool SendStartGame(int fd, const StartGamePackage& pkg) {
+    auto out = pkg.Serialize();
+    return TcpTransport::SendMessage(fd, out.data(), out.size());
+}
+
+bool RecvStartGame(int fd, StartGamePackage& pkgOut, int timeoutMs) {
+    std::vector<uint8_t> wire;
+    if (!TcpTransport::RecvMessage(fd, wire, timeoutMs)) return false;
+    return StartGamePackage::Deserialize(wire.data(), wire.size(), pkgOut);
+}

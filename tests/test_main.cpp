@@ -91,6 +91,8 @@ bool TestOrderFromCommandShapes();
 bool TestTurnManagerCollectsAndSorts();
 bool TestLoopbackLockstepGameStaysInSync();
 bool TestDesyncIsDetected();
+bool TestStartGamePackageRoundTrip();
+bool TestDesyncTrackerLatchesFirst();
 bool TestHostRunsThreeTurns();
 bool TestSilentPeerIdles();
 bool TestAcceptRejectsWhenFullOrEmpty();
@@ -210,6 +212,7 @@ bool TestSpellsRowFallsBackToMagic();
 bool TestMalformedRowKeepsDefaults();
 bool TestConfiguredTableDrivesDamage();
 bool TestConfiguredDefenseArmorDrivesReduction();
+bool TestUnitClassificationKeys();
 bool TestWeaponRangedClassification();
 bool TestProjectileHitsAfterTravelTime();
 bool TestProjectileFizzlesOnDeadTarget();
@@ -589,6 +592,7 @@ bool TestGameFlowNatives();
 bool TestTriggerExtraNatives();
 bool TestSoundStateNatives();
 bool TestGroupEnumCountedNatives();
+bool TestTriggerExecuteWait();
 bool TestUIStateNatives();
 bool TestLightningAndIndicatorNatives();
 bool TestMinimapPingExpiry();
@@ -734,6 +738,8 @@ int main(int argc, char** argv) {
         {"Turn manager collects and sorts", TestTurnManagerCollectsAndSorts},
         {"Loopback lockstep game stays in sync", TestLoopbackLockstepGameStaysInSync},
         {"Desync is detected", TestDesyncIsDetected},
+        {"Start game package round trip", TestStartGamePackageRoundTrip},
+        {"Desync tracker latches first", TestDesyncTrackerLatchesFirst},
         {"Host runs three turns", TestHostRunsThreeTurns},
         {"Silent peer idles", TestSilentPeerIdles},
         {"Accept rejects when full or empty", TestAcceptRejectsWhenFullOrEmpty},
@@ -853,6 +859,7 @@ int main(int argc, char** argv) {
         {"Malformed row keeps defaults", TestMalformedRowKeepsDefaults},
         {"Configured table drives damage", TestConfiguredTableDrivesDamage},
         {"Configured defense armor drives reduction", TestConfiguredDefenseArmorDrivesReduction},
+        {"Unit classification keys", TestUnitClassificationKeys},
         {"Weapon ranged classification", TestWeaponRangedClassification},
         {"Projectile hits after travel time", TestProjectileHitsAfterTravelTime},
         {"Projectile fizzles on dead target", TestProjectileFizzlesOnDeadTarget},
@@ -1232,6 +1239,7 @@ int main(int argc, char** argv) {
         {"Trigger extra natives", TestTriggerExtraNatives},
         {"Sound state natives", TestSoundStateNatives},
         {"Group enum counted natives", TestGroupEnumCountedNatives},
+        {"Trigger execute wait", TestTriggerExecuteWait},
         {"UI state natives", TestUIStateNatives},
         {"Lightning and indicator natives", TestLightningAndIndicatorNatives},
         {"Minimap ping expiry", TestMinimapPingExpiry},

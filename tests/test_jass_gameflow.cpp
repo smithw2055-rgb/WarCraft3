@@ -235,10 +235,13 @@ bool TestTriggerExtraNatives() {
         }
         TEST_ASSERT(dialogCode);
     }
-    // Wait-on-sleeps round-trips; sync stays unready without net.
-    TEST_ASSERT(CallNative(f.vm, "IsTriggerWaitOnSleeps", {}).boolVal);
-    CallNative(f.vm, "TriggerWaitOnSleeps", {JassValue::Bool(false)});
-    TEST_ASSERT(!CallNative(f.vm, "IsTriggerWaitOnSleeps", {}).boolVal);
+    // Wait-on-sleeps round-trips per trigger (retail signatures take
+    // whichTrigger); unknown ids read false. Sync stays unready w/o net.
+    TEST_ASSERT(CallNative(f.vm, "IsTriggerWaitOnSleeps", {JassValue::Int(trig)}).boolVal);
+    TEST_ASSERT(!CallNative(f.vm, "IsTriggerWaitOnSleeps", {JassValue::Int(999999)}).boolVal);
+    CallNative(f.vm, "TriggerWaitOnSleeps", {JassValue::Int(trig), JassValue::Bool(false)});
+    TEST_ASSERT(!CallNative(f.vm, "IsTriggerWaitOnSleeps", {JassValue::Int(trig)}).boolVal);
+    CallNative(f.vm, "TriggerWaitOnSleeps", {JassValue::Int(trig), JassValue::Bool(true)});
     CallNative(f.vm, "TriggerSyncStart", {});
     TEST_ASSERT(!CallNative(f.vm, "TriggerSyncReady", {}).boolVal);
 
@@ -331,5 +334,61 @@ bool TestGroupEnumCountedNatives() {
         const int n = CallNative(f.vm, "CountUnitsInGroup", {JassValue::Int(grp)}).intVal;
         TEST_ASSERT(n == 3);
     }
+    return true;
+}
+
+bool TestTriggerExecuteWait() {
+    Fixture f;
+    const char* script = R"JASS(
+native TriggerSleepAction takes real timeout returns nothing
+native TriggerExecuteWait takes trigger whichTrigger returns nothing
+
+globals
+    integer step = 0
+    trigger calleeTrig = null
+endglobals
+
+function Callee takes nothing returns nothing
+    set step = 1
+    call TriggerSleepAction(1.0)
+    set step = 2
+endfunction
+
+function Caller takes nothing returns nothing
+    call TriggerExecuteWait(calleeTrig)
+    set step = 3
+endfunction
+)JASS";
+    TEST_ASSERT(f.vm.LoadScript(script));
+    const int callee = CallNative(f.vm, "CreateTrigger", {}).intVal;
+    CallNative(f.vm, "TriggerAddAction", {JassValue::Int(callee), JassValue::Str("Callee")});
+    f.vm.SetGlobal("calleeTrig", JassValue::Int(callee));
+    // ExecuteWait forces the callee's waitOnSleeps on (ref), even if cleared.
+    CallNative(f.vm, "TriggerWaitOnSleeps", {JassValue::Int(callee), JassValue::Bool(false)});
+    f.natives->QueueFunction("Caller");
+    f.natives->PumpQueuedThreads();
+    // Callee ran to its wait; the caller is suspended behind the join.
+    TEST_ASSERT(f.vm.GetGlobal("step").intVal == 1);
+    TEST_ASSERT(f.natives->HasQueuedThreads());
+    f.natives->UpdateTimers(0.5f);
+    f.natives->PumpQueuedThreads();
+    TEST_ASSERT(f.vm.GetGlobal("step").intVal == 1);
+    f.natives->UpdateTimers(0.6f);
+    f.natives->PumpQueuedThreads();
+    // Join finished the callee remainder before the caller resumed.
+    TEST_ASSERT(f.vm.GetGlobal("step").intVal == 3);
+    TEST_ASSERT(!f.natives->HasQueuedThreads());
+
+    // waitOnSleeps=false on the executing trigger skips waits entirely.
+    const int skipper = CallNative(f.vm, "CreateTrigger", {}).intVal;
+    CallNative(f.vm, "TriggerAddAction", {JassValue::Int(skipper), JassValue::Str("Callee")});
+    CallNative(f.vm, "TriggerWaitOnSleeps", {JassValue::Int(skipper), JassValue::Bool(false)});
+    f.vm.SetGlobal("step", JassValue::Int(0));
+    JassQueuedContext ctx;
+    ctx.currentTriggerId = skipper;
+    f.natives->QueueFunctionWithContext("Callee", ctx);
+    f.natives->PumpQueuedThreads();
+    TEST_ASSERT(f.vm.GetGlobal("step").intVal == 2);
+    TEST_ASSERT(!f.natives->HasQueuedThreads());
     return true;
 }

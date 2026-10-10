@@ -32,6 +32,36 @@ std::unique_ptr<COrder> OrderFromCommand(CSimulation& sim, const SimCommand& cmd
 // CSimulation::IssueUnitOrder. Returns the number applied.
 int ApplyBatch(CSimulation& sim, const TurnBatch& batch);
 
+// Game-start handshake (the missing seed distribution that made every MP
+// game desync-by-construction): the host broadcasts seed + map checksum +
+// seat count; peers seed their sim RNG and verify the map before turn 0.
+// Wire: seed LE32 + mapHash LE64 + numPlayers LE32 (fixed 16 bytes).
+struct StartGamePackage {
+    uint32_t seed = 0;
+    uint64_t mapHash = 0;
+    int32_t numPlayers = 0;
+
+    std::vector<uint8_t> Serialize() const;
+    static bool Deserialize(const uint8_t* data, size_t size, StartGamePackage& out);
+};
+
+// Peer-side desync detection for stamped TurnBatch.stateHash values.
+// Feed every received batch AFTER applying it: Check(turn, batch.stateHash,
+// sim.HashState()). A 0/0 pair (unstamped practice games) passes; any other
+// mismatch latches the first occurrence for the UI pause dialog. Resync
+// itself needs a full sim snapshot (not yet implemented); this only detects.
+struct DesyncTracker {
+    bool desynced = false;
+    int32_t firstTurn = -1;
+    uint64_t expectedHash = 0; // host's stamp
+    uint64_t actualHash = 0;   // local post-turn hash
+    int mismatchCount = 0;
+
+    // False on mismatch (first one latches). Never throws.
+    bool Check(int32_t turn, uint64_t expected, uint64_t actual);
+    void Reset();
+};
+
 // Full-game resync package for rejoining peers: the initial RNG seed plus
 // every command ever merged (turn-stamped, flat). A rejoiner seeds a fresh
 // sim, replays per turn, and lands on the live hash. Wire: seed LE32 +

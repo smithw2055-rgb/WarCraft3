@@ -60,6 +60,11 @@ public:
     // Returns the seat, or -1.
     int PromoteWatcher(int watcher, int seat);
 
+    // Game-start handshake (seed + map checksum distribution): call after
+    // the lobby fills and before turn 0. Broadcasts to every bound seat
+    // (plus watchers best-effort, like turn batches). Returns seats reached.
+    int BroadcastStartGame(const StartGamePackage& pkg);
+
     // One turn: hostCommands is seat 0's list; stateHash is stamped on the
     // broadcast. Returns the merged batch (also when peers time out).
     TurnBatch RunTurn(std::vector<SimCommand> hostCommands, int timeoutMs,
@@ -105,3 +110,10 @@ bool RecvSeatClaim(int fd, int& playerOut, int timeoutMs);
 // the rejoiner replays it to the live turn, then normal turns resume.
 bool SendResync(int fd, const ResyncPackage& pkg);
 bool RecvResync(int fd, ResyncPackage& pkgOut, int timeoutMs);
+
+// Game-start handshake after the lobby fills (before turn 0): the host
+// broadcasts seed + map checksum; peers block on RecvStartGame, verify
+// the map hash, and seed their sim. False on transport failure or a
+// malformed package (caller stays in the lobby).
+bool SendStartGame(int fd, const StartGamePackage& pkg);
+bool RecvStartGame(int fd, StartGamePackage& pkgOut, int timeoutMs);

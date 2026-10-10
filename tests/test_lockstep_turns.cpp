@@ -254,3 +254,42 @@ bool TestDesyncIsDetected() {
     TEST_ASSERT(batch.stateHash != client.HashState());
     return true;
 }
+
+bool TestStartGamePackageRoundTrip() {
+    StartGamePackage pkg;
+    pkg.seed = 12345;
+    pkg.mapHash = 0xDEADBEEFCAFEBABEull;
+    pkg.numPlayers = 4;
+    auto wire = pkg.Serialize();
+    TEST_ASSERT(wire.size() == 16);
+    StartGamePackage back;
+    TEST_ASSERT(StartGamePackage::Deserialize(wire.data(), wire.size(), back));
+    TEST_ASSERT(back.seed == 12345);
+    TEST_ASSERT(back.mapHash == 0xDEADBEEFCAFEBABEull);
+    TEST_ASSERT(back.numPlayers == 4);
+    // Truncation rejected; absurd seat counts rejected.
+    TEST_ASSERT(!StartGamePackage::Deserialize(wire.data(), 15, back));
+    TEST_ASSERT(!StartGamePackage::Deserialize(wire.data(), 3, back));
+    StartGamePackage bad;
+    bad.numPlayers = 99;
+    auto badWire = bad.Serialize();
+    TEST_ASSERT(!StartGamePackage::Deserialize(badWire.data(), badWire.size(), bad));
+    return true;
+}
+
+bool TestDesyncTrackerLatchesFirst() {
+    DesyncTracker tracker;
+    TEST_ASSERT(tracker.Check(0, 0, 0)); // unstamped practice games pass
+    TEST_ASSERT(tracker.Check(1, 0xAAAAull, 0xAAAAull));
+    TEST_ASSERT(!tracker.desynced);
+    TEST_ASSERT(!tracker.Check(2, 0xBBBBull, 0xCCCCull));
+    TEST_ASSERT(tracker.desynced);
+    TEST_ASSERT(tracker.firstTurn == 2);
+    TEST_ASSERT(tracker.expectedHash == 0xBBBBull && tracker.actualHash == 0xCCCCull);
+    TEST_ASSERT(!tracker.Check(3, 0xDDDDull, 0xEEEEull)); // latch keeps first
+    TEST_ASSERT(tracker.firstTurn == 2 && tracker.mismatchCount == 2);
+    tracker.Reset();
+    TEST_ASSERT(!tracker.desynced && tracker.firstTurn == -1 && tracker.mismatchCount == 0);
+    TEST_ASSERT(tracker.Check(4, 0x1111ull, 0x1111ull));
+    return true;
+}

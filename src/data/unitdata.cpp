@@ -673,6 +673,22 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
         }
 
         std::unordered_set<CUnitClassification> emptyClass;
+        // Retail UnitData.slk "type" column (ref CUnitData CLASSIFICATION):
+        // comma-separated editor keys, mixed case ("Mechanical",
+        // "TownHall,Ancient", "Summoned,Ward", "_"). Unknown keys are
+        // ignored so custom object data never breaks the load.
+        {
+            const std::string rawType =
+                GetMergedString(unitDataTxt, unitData, sid, "type");
+            std::vector<std::string> typeTokens;
+            ParseStringList(rawType, typeTokens);
+            for (auto& token : typeTokens) {
+                const std::string key = ToLowerCopy(TrimCopy(token));
+                if (key.empty() || key == "_") continue;
+                CUnitClassification cls = CUnitClassification::GIANT;
+                if (ParseUnitClassification(key, cls)) emptyClass.insert(cls);
+            }
+        }
         std::unordered_set<CTargetType> emptyTargeted;
         std::vector<War3ID> emptyVec;
         std::unordered_map<CUpgradeClass, War3ID> emptyUpgradeMap;
