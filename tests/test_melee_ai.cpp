@@ -518,3 +518,65 @@ bool TestMeleeAIUpkeepThrottlesArmy() {
     TEST_ASSERT(trained);
     return true;
 }
+
+bool TestMeleeAIExpandsToSecondMine() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    OpenGameData(mpq);
+    CGameplayConstants gc;
+    CUnitData unitData = CUnitData::LoadFromMpq(mpq, gc);
+    CDestructableData destData = CDestructableData::LoadFromMpq(mpq);
+    if (!HasMeleeIds(unitData)) return true;
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.SetDestructableData(&destData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "AI", CMapControl::COMPUTER));
+    sim.GetPlayer(1)->SetRace(1);
+    sim.GetPlayer(1)->SetGold(4000);
+    sim.GetPlayer(1)->SetFoodCap(100);
+
+    sim.CreateUnit(War3ID("hhou"), 1, 0, 0, 0);
+    sim.CreateUnit(War3ID("hbar"), 1, 500, 0, 0);
+    for (int i = 0; i < 6; i++) {
+        sim.CreateUnit(War3ID("hpea"), 1, 200 + i * 40, 0, 0);
+    }
+    // Main mine nearly dry, rich mine across the map.
+    CUnit* mainMine = sim.CreateUnit(War3ID("ngold"), 12, 700, 0, 0);
+    CUnit* expoMine = sim.CreateUnit(War3ID("ngold"), 12, 4000, 0, 0);
+    TEST_ASSERT(mainMine != nullptr && expoMine != nullptr);
+    auto* mainGold = dynamic_cast<CAbilityGoldMine*>(mainMine->GetAbility(War3ID("Agld")));
+    auto* expoGold = dynamic_cast<CAbilityGoldMine*>(expoMine->GetAbility(War3ID("Agld")));
+    if (!mainGold || !expoGold) return true; // mine shape differs; skip
+    mainGold->SetGold(500);
+    expoGold->SetGold(12500);
+
+    MeleeAIController ai(&sim, 1);
+    bool expoBuilt = false;
+    for (int i = 0; i < 8000 && !expoBuilt; i++) {
+        sim.Update();
+        ai.Update();
+        if (i % 100 != 0) continue;
+        int halls = 0;
+        for (CUnit* unit : sim.GetUnits()) {
+            if (unit && !unit->IsDead() && unit->GetPlayerIndex() == 1 &&
+                unit->GetTypeId() == War3ID("hhou")) {
+                halls++;
+            }
+        }
+        expoBuilt = halls >= 2;
+    }
+    TEST_ASSERT(expoBuilt);
+    // Transferred crew works the expo mine (not just the building).
+    int expoCrew = 0;
+    for (CUnit* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != 1) continue;
+        if (unit->GetTypeId() != War3ID("hpea")) continue;
+        const float dx = unit->GetX() - 4000.0f;
+        const float dy = unit->GetY() - 0.0f;
+        if (dx * dx + dy * dy < 1500.0f * 1500.0f) expoCrew++;
+    }
+    TEST_ASSERT(expoCrew >= 1);
+    return true;
+}

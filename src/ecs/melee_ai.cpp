@@ -365,6 +365,33 @@ int MeleeAIController::CountBuildings(const War3ID& type) const {
     return count;
 }
 
+std::vector<CUnit*> MeleeAIController::FindOwnedHalls() const {
+    std::vector<CUnit*> halls;
+    if (!sim_ || plan_.townHall.value == 0) return halls;
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        if (unit->GetTypeId() == plan_.townHall) halls.push_back(unit);
+    }
+    return halls;
+}
+
+CUnit* MeleeAIController::FindRichMine(float x, float y, const CUnit* exclude) const {
+    if (!sim_) return nullptr;
+    CUnit* best = nullptr;
+    float bestDist = 0.0f;
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (!unit || unit->IsDead() || unit->IsHidden() || unit == exclude) continue;
+        CMineAccess mine = MineAccessOf(unit);
+        if (!mine.ok() || mine.Gold() <= 0) continue;
+        const float d = Dist2(x, y, unit->GetX(), unit->GetY());
+        if (!best || d < bestDist) {
+            best = unit;
+            bestDist = d;
+        }
+    }
+    return best;
+}
+
 int MeleeAIController::CountHeroes() const {
     if (!sim_) return 0;
     int count = 0;
@@ -423,11 +450,13 @@ bool MeleeAIController::FindAttackTarget(float& outX, float& outY) const {
 
 bool MeleeAIController::TryTrainWorkers() {
     if (!sim_ || plan_.worker.value == 0) return false;
-    const int target = difficulty_ == AIDifficulty::EASY ? 4
-        : difficulty_ == AIDifficulty::INSANE ? 8 : 6;
+    const std::vector<CUnit*> halls = FindOwnedHalls();
+    if (halls.empty()) return false;
+    // ~5 workers per base: the expo staffs itself once it lands.
+    const int perBase = difficulty_ == AIDifficulty::EASY ? 4
+        : difficulty_ == AIDifficulty::INSANE ? 6 : 5;
+    const int target = perBase + 3 * ((int)halls.size() - 1);
     if (CountWorkers() >= target) return false;
-    CUnit* hall = FindTownHall();
-    if (!hall) return false;
     const CUnitType* workerType = sim_->GetUnitData()->GetUnitType(plan_.worker);
     if (!workerType) return false;
     CPlayer* player = sim_->GetPlayer(playerIndex_);
@@ -440,8 +469,21 @@ bool MeleeAIController::TryTrainWorkers() {
         player->GetFoodUsed() + workerType->GetFoodUsed() > player->GetFoodCap()) {
         return false;
     }
-    IssueAiOrder(hall, std::make_unique<COrderNoTarget>(static_cast<int>(plan_.worker.value)));
-    return true;
+    // First hall with queue room trains (expo halls join automatically).
+    for (CUnit* hall : halls) {
+        if (!hall) continue;
+        bool room = true;
+        for (CAbility* ab : hall->GetAbilities()) {
+            if (auto* queue = dynamic_cast<CAbilityQueue*>(ab)) {
+                if (queue->GetQueueCount() >= CAbilityQueue::MAX_QUEUE) room = false;
+                break;
+            }
+        }
+        if (!room) continue;
+        IssueAiOrder(hall, std::make_unique<COrderNoTarget>(static_cast<int>(plan_.worker.value)));
+        return true;
+    }
+    return false;
 }
 
 bool MeleeAIController::TryBuildSupply() {
@@ -555,6 +597,55 @@ bool MeleeAIController::TryBuildAltar() {
     return true;
 }
 
+bool MeleeAIController::TryExpand() {
+    if (!sim_ || plan_.townHall.value == 0) return false;
+    CUnit* mainHall = FindTownHall();
+    if (!mainHall) return false;
+    // One expo at a time; the second hall joins worker training by itself.
+    if ((int)FindOwnedHalls().size() >= 2) return false;
+    // The main mine still has reserves: no reason to walk across the map.
+    CUnit* mainMine = FindRichMine(mainHall->GetX(), mainHall->GetY(), nullptr);
+    if (!mainMine) return false;
+    if (MineAccessOf(mainMine).Gold() > 3000) return false;
+    // Richest unowned mine: nearest with real gold that is not the main one.
+    CUnit* expoMine = FindRichMine(mainHall->GetX(), mainHall->GetY(), mainMine);
+    if (!expoMine || MineAccessOf(expoMine).Gold() < 1500) return false;
+    CPlayer* player = sim_->GetPlayer(playerIndex_);
+    if (!player) return false;
+    const CUnitType* hallType = sim_->GetUnitData()->GetUnitType(plan_.townHall);
+    if (!hallType) return false;
+    if (player->GetGold() < hallType->GetGoldCost() + 200) return false;
+    if (player->GetLumber() < hallType->GetLumberCost()) return false;
+    // One construction at a time (ref TryBuildSupply).
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        CBehavior* behavior = unit->GetCurrentBehavior();
+        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) return false;
+    }
+    CUnit* worker = FindWorkerForBuild();
+    if (!worker) return false;
+    float x = 0.0f, y = 0.0f;
+    if (!FindBuildSpot(expoMine->GetX(), expoMine->GetY(), plan_.townHall, x, y)) return false;
+    worker->ClearOrders();
+    IssueAiOrder(worker,
+        std::make_unique<COrderTargetPoint>(static_cast<int>(plan_.townHall.value), x, y));
+    // Walk three harvesters over so the expo mines from landing: without a
+    // transfer the new hall idles (AssignIdleWorkers only claims idle ones).
+    int moved = 0;
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (moved >= 3) break;
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        if (unit->GetTypeId() != plan_.worker) continue;
+        if (unit == worker || unit->IsHidden() || unit->IsLoadedAboard()) continue;
+        CBehavior* behavior = unit->GetCurrentBehavior();
+        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) continue;
+        unit->ClearOrders();
+        IssueAiOrder(unit, std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, expoMine));
+        moved++;
+    }
+    return true;
+}
+
 int MeleeAIController::MaxHeroes() const {
     // Retail hero limit is 3 per tavern tier in melee; the AI paces by
     // difficulty so EASY fields a single hero.
@@ -569,8 +660,10 @@ bool MeleeAIController::TryTrainHero() {
     if (FindDeadHero()) return false; // revive first; see TryReviveHeroes
     // Economy first: no hero before the workforce is saturated and an
     // escort exists, so early waves and worker targets are never starved.
-    const int workerTarget = difficulty_ == AIDifficulty::EASY ? 4
-        : difficulty_ == AIDifficulty::INSANE ? 8 : 6;
+    // (Saturation matches TryTrainWorkers: per-base crew plus expo top-up.)
+    const int perBase = difficulty_ == AIDifficulty::EASY ? 4
+        : difficulty_ == AIDifficulty::INSANE ? 6 : 5;
+    const int workerTarget = perBase + 3 * ((int)FindOwnedHalls().size() - 1);
     if (CountWorkers() < workerTarget || CountArmy() < 2) return false;
     CUnit* altar = FindAltar();
     if (!altar) return false;
@@ -729,6 +822,7 @@ void MeleeAIController::Think() {
     TryBuildSupply();
     TryBuildBarracks();
     TryBuildAltar();
+    TryExpand();
     TryReviveHeroes();
     TryTrainHero();
     TryTrainArmy();

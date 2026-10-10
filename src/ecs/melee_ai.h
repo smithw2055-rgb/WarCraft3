@@ -81,6 +81,8 @@ private:
     int CountWorkers() const;
     int CountArmy() const;
     int CountBuildings(const War3ID& type) const;
+    // Owned town halls of the plan type (main first, then expos).
+    std::vector<CUnit*> FindOwnedHalls() const;
     // Live owned heroes (any hero type, not just the plan pick).
     int CountHeroes() const;
     // Hero cap by difficulty (EASY 1 / NORMAL 2 / INSANE 3).
@@ -95,6 +97,13 @@ private:
     bool TryTrainArmy();
     bool TryTrainHero();
     bool TryReviveHeroes();
+    // Expansion: when the main mine runs dry, plant the town hall at the
+    // nearest rich unowned mine and walk harvesters over. One expo at a
+    // time; new halls join worker training automatically (FindOwnedHalls).
+    bool TryExpand();
+    // Nearest mine with gold that is not the excluded one (null to compare
+    // all), skipping hidden/haunted backing mines like FindNearestGoldMine.
+    CUnit* FindRichMine(float x, float y, const CUnit* exclude) const;
     // Research one affordable upgrade per think on an idle production
     // building (ref gap: the AI never researched). Economy buffer scales
     // with difficulty so research never starves the army.
