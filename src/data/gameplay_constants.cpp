@@ -170,4 +170,5 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     etherealDamageBonusAlly = readMiscInt("EtherealDamageBonusAlly", 0) != 0;
     magicImmuneResistsDamage = readMiscInt("MagicImmunesResistDamage", 1) != 0;
     magicImmuneResistsUltimates = readMiscInt("MagicImmunesResistUltimates", 1) != 0;
+    pawnItemRate = readFloat("PawnItemRate", 0.5f);
 }

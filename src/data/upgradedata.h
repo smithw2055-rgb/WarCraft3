@@ -27,6 +27,8 @@ public:
 
     bool HasUpgrade(War3ID id) const;
     const CUpgradeType* GetUpgrade(War3ID id) const;
+    // Test and script registration. Replaces an existing row for the same id.
+    void RegisterUpgrade(War3ID id, std::unique_ptr<CUpgradeType> type) { upgrades_[id] = std::move(type); }
 
     static CUpgradeData LoadFromMpq(const class MpqManager& mpq);
     static CUpgradeData LoadFromMpq(const class MpqManager& mpq, const std::string& mapPath);

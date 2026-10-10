@@ -4,9 +4,16 @@
 #include <vector>
 #include <memory>
 
+#include <functional>
+#include <set>
+
 class FdfParser {
 public:
-    FdfParser(const std::string& content);
+    using FileResolver = std::function<bool(const std::string& path, std::string& outContent)>;
+
+    FdfParser(const std::string& content, FileResolver resolver = nullptr);
+    FdfParser(const std::string& content, FileResolver resolver,
+              std::shared_ptr<std::set<std::string>> includedFiles);
 
     FrameDefinition Parse();
 
@@ -52,6 +59,9 @@ private:
 
     std::map<std::string, std::string> decoratedStrings_;
     std::map<std::string, FrameDefinition> templates_;
+
+    FileResolver resolver_;
+    std::shared_ptr<std::set<std::string>> includedFiles_;
 
     static std::string Unquote(const std::string& s);
 };

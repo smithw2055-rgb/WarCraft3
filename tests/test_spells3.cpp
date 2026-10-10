@@ -91,13 +91,13 @@ bool TestMassTeleportMovesGroup() {
     AddPlayers(sim);
     auto* caster = AdoptAt(sim, 301, 0, 0, 0);
     auto* ally = AdoptAt(sim, 302, 0, 100, 0);
-    auto* foe = AdoptAt(sim, 303, 1, 100, 0);
+    auto* foe = AdoptAt(sim, 303, 1, 200, 0);
     Settle(sim);
     CAbilityMassTeleport spell(3001);
     spell.DoEffect(sim, caster, 1000, 1000);
     TEST_ASSERT(caster->GetX() == 1000.0f && caster->GetY() == 1000.0f);
     TEST_ASSERT(ally->GetX() == 1000.0f && ally->GetY() == 1000.0f);
-    TEST_ASSERT(foe->GetX() == 100.0f); // enemies stay
+    TEST_ASSERT(foe->GetX() == 200.0f); // enemies stay
     return true;
 }
 

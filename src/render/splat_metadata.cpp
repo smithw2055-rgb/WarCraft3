@@ -181,7 +181,8 @@ std::string SplatMetadataStore::PickSelectionCircleTexturePath(float selectionSi
 void SplatMetadataStore::RefreshRuntimeSplats(TexturedTerrain& terrain,
                                              bool simulationInitialized,
                                              CSimulation& simulation,
-                                             const std::unordered_set<int>& selectedHandles) const {
+                                             const std::unordered_set<int>& selectedHandles,
+                                             int hoveredHandle) const {
     if (!terrain.IsValid()) {
         return;
     }
@@ -190,6 +191,8 @@ void SplatMetadataStore::RefreshRuntimeSplats(TexturedTerrain& terrain,
     if (!simulationInitialized) {
         return;
     }
+
+    const CPlayer* localPlayer = simulation.GetPlayer(0);
 
     for (auto* unit : simulation.GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsHidden()) {
@@ -211,7 +214,10 @@ void SplatMetadataStore::RefreshRuntimeSplats(TexturedTerrain& terrain,
                 false);
         }
 
-        if (selectedHandles.find(unit->GetHandleId()) == selectedHandles.end()) {
+        const bool isSelected = selectedHandles.find(unit->GetHandleId()) != selectedHandles.end();
+        const bool isHovered = (hoveredHandle > 0 && unit->GetHandleId() == hoveredHandle);
+
+        if (!isSelected && !isHovered) {
             continue;
         }
 
@@ -223,15 +229,59 @@ void SplatMetadataStore::RefreshRuntimeSplats(TexturedTerrain& terrain,
         }
 
         const float halfSize = selectionSize * 0.5f;
-        terrain.AddRuntimeSplatRect(
-            "selection:" + std::to_string(unit->GetHandleId()),
-            texturePath,
-            unit->GetX() - halfSize,
-            unit->GetY() - halfSize,
-            unit->GetX() + halfSize,
-            unit->GetY() + halfSize,
-            6.0f,
-            true,
-            false);
+
+        // Determine alliance color:
+        // Local/Ally: Green (0, 1, 0)
+        // Enemy: Red (1, 0, 0)
+        // Neutral: Yellow (1, 1, 0)
+        Vec4 circleColor(1.0f, 1.0f, 0.0f, 1.0f);
+        const int pIdx = unit->GetPlayerIndex();
+        if (localPlayer) {
+            const CPlayer* targetPlayer = simulation.GetPlayer(pIdx);
+            if (pIdx == localPlayer->GetId() || (targetPlayer && localPlayer->HasAlliance(*targetPlayer, CAllianceType::SHARED_CONTROL))) {
+                circleColor = Vec4(0.0f, 1.0f, 0.0f, 1.0f);
+            } else if (targetPlayer && !localPlayer->HasAlliance(*targetPlayer, CAllianceType::PASSIVE)) {
+                circleColor = Vec4(1.0f, 0.0f, 0.0f, 1.0f);
+            } else {
+                circleColor = Vec4(1.0f, 1.0f, 0.0f, 1.0f);
+            }
+        }
+
+        if (isSelected) {
+            terrain.AddRuntimeSplatRect(
+                "selection:" + std::to_string(unit->GetHandleId()),
+                texturePath,
+                unit->GetX() - halfSize,
+                unit->GetY() - halfSize,
+                unit->GetX() + halfSize,
+                unit->GetY() + halfSize,
+                6.0f,
+                true,
+                false,
+                false, 0.0f,
+                circleColor,
+                Vec4(0.0f, 0.0f, 1.0f, 1.0f),
+                SplatModel::BlendMode::Blend,
+                true);
+        } else if (isHovered) {
+            // Hover preview ring: yellow (or friendly green if owned) with 0.75 alpha
+            Vec4 hoverTint = (circleColor.x > 0.5f && circleColor.y > 0.5f) ? circleColor : Vec4(1.0f, 1.0f, 0.0f, 0.75f);
+            hoverTint.w = 0.75f;
+            terrain.AddRuntimeSplatRect(
+                "hover:" + std::to_string(unit->GetHandleId()),
+                texturePath,
+                unit->GetX() - halfSize,
+                unit->GetY() - halfSize,
+                unit->GetX() + halfSize,
+                unit->GetY() + halfSize,
+                6.0f,
+                true,
+                false,
+                false, 0.0f,
+                hoverTint,
+                Vec4(0.0f, 0.0f, 1.0f, 1.0f),
+                SplatModel::BlendMode::Blend,
+                true);
+        }
     }
 }

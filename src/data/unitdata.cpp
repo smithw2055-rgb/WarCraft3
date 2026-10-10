@@ -499,13 +499,19 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
         const int sightNight = GetMergedInt(unitBalanceTxt, unitBalance, sid, "sightNight", 800);
         bool isBldg = GetMergedInt(unitBalanceTxt, unitBalance, sid, "isbldg",
                                    GetMergedInt(unitDataTxt, unitData, sid, "isbldg", 0)) != 0;
-        const std::string moveTypeStr = GetMergedString(unitBalanceTxt, unitBalance, sid, "moveType", "foot");
-        const float defaultFlyingHeight = GetMergedFloat(unitBalanceTxt, unitBalance, sid, "flyingHeight", 0.0f);
-        const float collisionSize = GetMergedFloat(unitBalanceTxt, unitBalance, sid, "collision", 32.0f);
-        const float propWindow = GetMergedFloat(unitBalanceTxt, unitBalance, sid, "propWin", 1.0f);
-        const float turnRate = GetMergedFloat(unitBalanceTxt, unitBalance, sid, "turnRate", 0.6f);
+        const std::string moveTypeStr = GetMergedString(unitDataTxt, unitData, sid, "moveType",
+            GetMergedString(unitBalanceTxt, unitBalance, sid, "moveType", "foot"));
+        const float defaultFlyingHeight = GetMergedFloat(unitDataTxt, unitData, sid, "moveHeight",
+            GetMergedFloat(unitBalanceTxt, unitBalance, sid, "flyingHeight", 0.0f));
+        const float collisionSize = GetMergedFloat(unitDataTxt, unitData, sid, "collision",
+            GetMergedFloat(unitBalanceTxt, unitBalance, sid, "collision", 32.0f));
+        const float propWindow = GetMergedFloat(unitDataTxt, unitData, sid, "propWin",
+            GetMergedFloat(unitBalanceTxt, unitBalance, sid, "propWin", 60.0f));
+        const float turnRate = GetMergedFloat(unitDataTxt, unitData, sid, "turnRate",
+            GetMergedFloat(unitBalanceTxt, unitBalance, sid, "turnRate", 0.6f));
         const float impactZ = GetMergedFloat(unitBalanceTxt, unitBalance, sid, "ImpactZ", 0.0f);
-        const float deathTime = GetMergedFloat(unitBalanceTxt, unitBalance, sid, "deathTime", 1.0f);
+        const float deathTime = GetMergedFloat(unitDataTxt, unitData, sid, "deathTime",
+            GetMergedFloat(unitBalanceTxt, unitBalance, sid, "deathTime", 1.0f));
         const bool canRaise = GetMergedInt(unitBalanceTxt, unitBalance, sid, "raise", 0) != 0;
         const bool canDecay = GetMergedInt(unitBalanceTxt, unitBalance, sid, "decay", 1) != 0;
         const float defaultAcq = GetMergedFloat(unitBalanceTxt, unitBalance, sid, "acqRange", 0.0f);
@@ -575,7 +581,8 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
         }
 
         std::vector<CUnitAttack> attacks;
-        const int attacksEnabled = GetMergedInt(unitBalanceTxt, unitBalance, sid, "weapsOn", 1);
+        const int attacksEnabled = GetMergedInt(unitWeaponsTxt, unitWeapons, sid, "weapsOn",
+            GetMergedInt(unitBalanceTxt, unitBalance, sid, "weapsOn", 0));
         for (int ai = 1; ai <= 2; ++ai) {
             const std::string suffix = std::to_string(ai);
             const std::string atkTypeStr = GetMergedString(unitWeaponsTxt, unitWeapons, sid, "atkType" + suffix);

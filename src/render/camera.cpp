@@ -8,6 +8,7 @@ OrbitCamera::OrbitCamera() {
 
 void OrbitCamera::SetTarget(float tx, float ty, float tz) {
     target_ = {tx, ty, tz};
+    ClampTarget();
 }
 
 void OrbitCamera::Orbit(float deltaYaw, float deltaPitch) {
@@ -52,6 +53,7 @@ void OrbitCamera::Pan(float dx, float dz) {
     float rightX = fx, rightZ = -fy;
     target_.x += rightX * dx + fwdX * dz;
     target_.z += rightZ * dx + fwdZ * dz;
+    ClampTarget();
 }
 
 Vec3 OrbitCamera::GetPosition() const {
@@ -128,6 +130,7 @@ void OrbitCamera::Update(float dt) {
     yaw_ += (targetYaw_ - yaw_) * t;
     pitch_ += (targetPitch_ - pitch_) * t;
     distance_ += (targetDistance_ - distance_) * t;
+    ClampTarget();
     noiseClock_ += dt * (noiseVel_ > 0.0f ? noiseVel_ : 1.0f);
     if (noiseMag_ <= 0.0f) {
         noiseOffset_ = {0, 0, 0};
@@ -139,4 +142,10 @@ void OrbitCamera::Update(float dt) {
         const bool horiz = any ? noiseHorizOnly_ : true;
         noiseOffset_ = {horiz ? s : 0.0f, vert ? c * 0.35f : 0.0f, horiz ? c : 0.0f};
     }
+}
+
+void OrbitCamera::ClampTarget() {
+    if (!hasBounds_) return;
+    target_.x = std::max(boundsMinX_, std::min(boundsMaxX_, target_.x));
+    target_.z = std::max(boundsMinZ_, std::min(boundsMaxZ_, target_.z));
 }

@@ -42,6 +42,8 @@ public:
 
     bool HasItem(War3ID id) const;
     const CItemType* GetItem(War3ID id) const;
+    // Test and script registration. Replaces an existing row for the same id.
+    void RegisterItemType(War3ID id, std::unique_ptr<CItemType> type) { items_[id] = std::move(type); }
     War3ID ChooseRandomItem(int level, std::function<float()> rand01) const;
     War3ID ChooseRandomItem(CItemClass itemClass, int level, std::function<float()> rand01) const;
 

@@ -64,17 +64,19 @@ struct OrderIds {
     static constexpr int MOVE_SMART = 851971;
     static constexpr int NEUTRALINTERACT = 852566;
 
-    // Building
+    // Building (retail ids, ref OrderIds: 851976 cancel; 851994 is the
+    // build *menu*, not a cancel).
     static constexpr int CANCEL = 851976;
-    static constexpr int CANCEL_BUILD = 851994;
-    static constexpr int CANCEL_TRAIN = 851994;
-    static constexpr int CANCEL_RESEARCH = 851995;
+    static constexpr int CANCEL_BUILD = 851976;
+    static constexpr int CANCEL_TRAIN = 851976;
+    static constexpr int CANCEL_RESEARCH = 851976;
 
-    // Race-specific build menus
-    static constexpr int HUMAN_BUILD = 852001;
-    static constexpr int ORC_BUILD = 852002;
-    static constexpr int UNDEAD_BUILD = 852003;
-    static constexpr int NIGHT_ELF_BUILD = 852004;
+    // Race-specific build menus (retail ids, ref OrderIds humanbuild /
+    // orcbuild / undeadbuild / nightelfbuild).
+    static constexpr int HUMAN_BUILD = 851995;
+    static constexpr int ORC_BUILD = 851996;
+    static constexpr int UNDEAD_BUILD = 851998;
+    static constexpr int NIGHT_ELF_BUILD = 851997;
 
     // Harvest / Return Resources (retail ids, ref OrderIds).
     static constexpr int HARVEST = 852018;
@@ -83,11 +85,11 @@ struct OrderIds {
     // Repair (retail id, ref OrderIds).
     static constexpr int REPAIR = 852024;
 
-    // Build structure (when placing a building from the build menu)
-    static constexpr int BUILD_HUMAN = 852020;
-    static constexpr int BUILD_ORC = 852021;
-    static constexpr int BUILD_UNDEAD = 852022;
-    static constexpr int BUILD_NIGHT_ELF = 852023;
+    // NOTE: a previous BUILD_HUMAN/_ORC/_UNDEAD/_NIGHT_ELF quartet
+    // (852020-852023) was removed here: unused anywhere, and each value
+    // collides with a real retail order (returnresources/autoharvestgold/
+    // autoharvestlumber/neutraldetectaoe). Build placement orders carry
+    // the building FourCC as the order id (see CAbilityBuild).
 
     // Inventory (slot-0 retail ids; avoids colliding with ability orders
     // such as waterelemental=852097, ref OrderIds itemuse00/dropitem).
@@ -95,9 +97,10 @@ struct OrderIds {
     static constexpr int ITEM_DROP = 852001;
     static constexpr int ITEM_GIVE = 852099;
 
-    // Hero
-    static constexpr int HERO_SKILL = 852095;
-    static constexpr int SELECT_SKILL = 852095;
+    // Hero skill menu (retail skillmenu, ref OrderIds; 852095 is
+    // thunderbolt, previously misassigned here).
+    static constexpr int HERO_SKILL = 852000;
+    static constexpr int SELECT_SKILL = 852000;
 
     // Rally
     static constexpr int SET_RALLY = 851980;
@@ -106,8 +109,8 @@ struct OrderIds {
     // Queue
     static constexpr int CANCEL_QUEUE = 851978;
 
-    // Upgrade
-    static constexpr int CANCEL_UPGRADE = 851977;
+    // Upgrade (in-game cancel button issues 851976 like every cancel).
+    static constexpr int CANCEL_UPGRADE = 851976;
 
     // Generic order base (most common orders start here)
     static constexpr int ORDER_FIRST = 851971;

@@ -273,5 +273,18 @@ bool TestW3dParsesTerrainDoodads() {
     TEST_ASSERT(w3d.terrainDoodads[0].location[1] == 22);
     TEST_ASSERT(w3d.terrainDoodads[1].location[0] == 33);
     TEST_ASSERT(w3d.terrainDoodads[1].location[1] == 44);
+    // ref Doodad.itemTable + RandomItemSet: drop tables must be retained,
+    // not skipped (parity with unitsdoo DroppedItemSet).
+    TEST_ASSERT(w3d.doodads[0].itemTable == 0);
+    TEST_ASSERT(w3d.doodads[0].itemSets.size() == 1);
+    TEST_ASSERT(w3d.doodads[0].itemSets[0].items.size() == 2);
+    TEST_ASSERT(w3d.doodads[0].itemSets[0].items[0].chance == 25);
+    TEST_ASSERT(w3d.doodads[0].itemSets[0].items[1].chance == 75);
+    const uint32_t expectI001 =
+        (uint32_t('I') << 24) | (uint32_t('0') << 16) | (uint32_t('0') << 8) | uint32_t('1');
+    const uint32_t expectI002 =
+        (uint32_t('I') << 24) | (uint32_t('0') << 16) | (uint32_t('0') << 8) | uint32_t('2');
+    TEST_ASSERT(w3d.doodads[0].itemSets[0].items[0].id == expectI001);
+    TEST_ASSERT(w3d.doodads[0].itemSets[0].items[1].id == expectI002);
     return true;
 }

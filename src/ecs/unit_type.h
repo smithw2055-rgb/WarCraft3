@@ -108,6 +108,7 @@ public:
     int GetSpeed() const { return speed_; }
     int GetDefense() const { return defense_; }
     int GetPointValue() const { return pointValue_; }
+    void SetPointValue(int v) { pointValue_ = v; }
     int GetDefenseUpgradeBonus() const { return defenseUpgradeBonus_; }
     War3ID GetDefaultAutocastAbility() const { return defaultAutocastAbility_; }
     const std::vector<War3ID>& GetAbilityList() const { return abilityList_; }
@@ -170,6 +171,9 @@ public:
     int GetGoldBountyAwardedBase() const { return goldBountyAwardedBase_; }
     int GetGoldBountyAwardedDice() const { return goldBountyAwardedDice_; }
     int GetGoldBountyAwardedSides() const { return goldBountyAwardedSides_; }
+    // Warsmash MeleeUIMinimap: neutral buildings with this flag draw the
+    // special minimap icon instead of a plain team-color dot.
+    bool IsNeutralBuildingShowMinimapIcon() const { return neutralBuildingShowMinimapIcon_; }
     // Response sound set name (UnitUI `unitSound`, e.g. "Footman"): resolved
     // against Units\UnitAckSounds.slk (`<name><What|Pissed|Yes|...>` rows)
     // by audio/UnitSoundset (ref UnitSoundset).

@@ -75,6 +75,15 @@ std::unique_ptr<AstNode> JassParser::ParseProgram() {
     auto program = std::make_unique<AstNode>(AstNodeType::PROGRAM);
     SkipNewlines();
 
+    // Pre-seed `LIBRARY_Name` presence flags (ref static library constants):
+    // optional-library guards may appear before the library definition.
+    for (size_t i = 0; i + 1 < tokens_.size(); i++) {
+        if (tokens_[i].type == JassTokenType::IDENTIFIER && tokens_[i].text == "library" &&
+            tokens_[i + 1].type == JassTokenType::IDENTIFIER) {
+            staticDefines_["LIBRARY_" + tokens_[i + 1].text] = true;
+        }
+    }
+
     while (Peek().type != JassTokenType::EOF_TOKEN) {
         // Top-level scope/library wrappers flatten into the program.
         // An optional private/public prefix is accepted and ignored here
@@ -92,12 +101,30 @@ std::unique_ptr<AstNode> JassParser::ParseProgram() {
             SkipNewlines();
             continue;
         }
+        // vJASS `static if` around top-level declarations.
+        if (Peek().type == JassTokenType::IDENTIFIER && Peek().text == "static" &&
+            PeekAt(1).type == JassTokenType::KW_IF) {
+            std::vector<RawDecl> extra;
+            ParseStaticIfDecls(extra, false);
+            for (auto& rd : extra) {
+                if (rd.node) program->children.push_back(std::move(rd.node));
+            }
+            SkipNewlines();
+            continue;
+        }
+        // vJASS `hook ORIG REPL` at top level.
+        if (AtHookDirective()) {
+            ParseHookDirective("");
+            SkipNewlines();
+            continue;
+        }
         std::string rawName;
         bool isPrivate = false;
         auto decl = ParseDecl(false, rawName, isPrivate);
         if (decl) program->children.push_back(std::move(decl));
         SkipNewlines();
     }
+    ResolveHooks();
     ExpandImplements(program.get());
     return program;
 }
@@ -397,6 +424,9 @@ std::unique_ptr<AstNode> JassParser::ParseBlock() {
 
 std::unique_ptr<AstNode> JassParser::ParseStatement() {
     auto& tok = Peek();
+
+    // vJASS `static if`: compile-time branch selection.
+    if (AtStaticIf()) return ParseStaticIfStmt();
 
     // debug statement - skip
     if (tok.type == JassTokenType::KW_DEBUG) {
@@ -1075,6 +1105,7 @@ void JassParser::ParseScopeOrLibrary(AstNode* program, bool isLibrary) {
     const std::string prefix = Expect(JassTokenType::IDENTIFIER).text;
     // Header: [initializer Name] [needs A, B, ...] in any order.
     std::vector<std::string> rawInitializers;
+    std::vector<std::string> rawNeeds;
     while (Peek().type != JassTokenType::NEWLINE && Peek().type != JassTokenType::EOF_TOKEN) {
         if (Peek().type == JassTokenType::IDENTIFIER && Peek().text == "initializer") {
             Advance();
@@ -1086,7 +1117,7 @@ void JassParser::ParseScopeOrLibrary(AstNode* program, bool isLibrary) {
         if (Peek().type == JassTokenType::IDENTIFIER && Peek().text == "needs") {
             Advance();
             while (Peek().type == JassTokenType::IDENTIFIER) {
-                Advance();
+                rawNeeds.push_back(Advance().text);
                 if (!Match(JassTokenType::COMMA)) break;
             }
             continue;
@@ -1102,6 +1133,26 @@ void JassParser::ParseScopeOrLibrary(AstNode* program, bool isLibrary) {
     const size_t implementMark = pendingImplements_.size();
     const JassTokenType ender = isLibrary ? JassTokenType::KW_ENDLIBRARY : JassTokenType::KW_ENDSCOPE;
     while (Peek().type != ender && Peek().type != JassTokenType::EOF_TOKEN) {
+        // vJASS `hook ORIG REPL` (resolved against scope privates at the end).
+        if (AtHookDirective()) {
+            ParseHookDirective(prefix);
+            SkipNewlines();
+            continue;
+        }
+        // vJASS `static if` around member declarations.
+        if (AtStaticIf()) {
+            std::vector<RawDecl> extra;
+            ParseStaticIfDecls(extra, defaultPrivate, prefix);
+            for (auto& rd : extra) {
+                if (!rd.node) continue;
+                if (rd.isPrivate && !rd.rawName.empty() && rd.node->type != AstNodeType::MODULE_DECL) {
+                    privates.insert(rd.rawName);
+                }
+                body.push_back(std::move(rd.node));
+            }
+            SkipNewlines();
+            continue;
+        }
         std::string rawName;
         bool isPrivate = false;
         auto decl = ParseDecl(defaultPrivate, rawName, isPrivate);
@@ -1117,6 +1168,9 @@ void JassParser::ParseScopeOrLibrary(AstNode* program, bool isLibrary) {
     }
     Expect(ender);
 
+    // vJASS static library constant for `static if LIBRARY_Name` guards.
+    if (isLibrary) staticDefines_["LIBRARY_" + prefix] = true;
+
     // Tag implements recorded inside this body with the scope prefix so
     // expansion resolves the (possibly mangled) struct.
     for (size_t i = implementMark; i < pendingImplements_.size(); i++) {
@@ -1129,6 +1183,18 @@ void JassParser::ParseScopeOrLibrary(AstNode* program, bool isLibrary) {
     for (auto& name : rawInitializers) {
         auto it = privates.find(name);
         initializers_.push_back(it != privates.end() ? prefix + "__" + name : name);
+    }
+    // Library dependency + hook records resolve at the end of the parse.
+    scopePrivates_[prefix] = privates;
+    if (isLibrary) {
+        for (auto& name : rawInitializers) {
+            auto it = privates.find(name);
+            LibraryInfo info;
+            info.name = prefix;
+            info.initializer = (it != privates.end() ? prefix + "__" + name : name);
+            info.needs = rawNeeds;
+            libraries_.push_back(std::move(info));
+        }
     }
     for (auto& decl : body) {
         program->children.push_back(std::move(decl));
@@ -1430,4 +1496,368 @@ void JassParser::ExpandImplements(AstNode* program) {
             }
         }
     }
+}
+
+// ============================================================
+// vJASS `static if` (ref compile-time conditionals)
+// ============================================================
+
+namespace {
+
+struct StaticValue {
+    enum class Kind { INT, REAL, BOOL, STR } kind = Kind::INT;
+    long long i = 0;
+    double r = 0.0;
+    bool b = false;
+    std::string s;
+};
+
+bool StaticTruthy(const StaticValue& v) {
+    switch (v.kind) {
+        case StaticValue::Kind::BOOL: return v.b;
+        case StaticValue::Kind::REAL: return v.r != 0.0;
+        case StaticValue::Kind::STR: return !v.s.empty();
+        default: return v.i != 0;
+    }
+}
+
+double StaticNumber(const StaticValue& v) {
+    if (v.kind == StaticValue::Kind::REAL) return v.r;
+    if (v.kind == StaticValue::Kind::BOOL) return v.b ? 1.0 : 0.0;
+    return (double)v.i;
+}
+
+} // namespace
+
+bool JassParser::EvalStaticCondition(const AstNode* expr, bool& out) {
+    // Evaluates a constant subexpression; records an error and returns
+    // false for anything depending on runtime state.
+    std::function<bool(const AstNode*, StaticValue&)> eval = [&](const AstNode* node,
+                                                                 StaticValue& val) -> bool {
+        if (!node) return false;
+        switch (node->type) {
+            case AstNodeType::LITERAL_INT:
+            case AstNodeType::LITERAL_RAWCODE:
+                val.kind = StaticValue::Kind::INT;
+                val.i = (long long)node->numberValue;
+                return true;
+            case AstNodeType::LITERAL_REAL:
+                val.kind = StaticValue::Kind::REAL;
+                val.r = node->numberValue;
+                return true;
+            case AstNodeType::LITERAL_BOOL:
+                val.kind = StaticValue::Kind::BOOL;
+                val.b = (node->text == "true");
+                return true;
+            case AstNodeType::LITERAL_STRING:
+                val.kind = StaticValue::Kind::STR;
+                val.s = node->text;
+                return true;
+            case AstNodeType::VARIABLE: {
+                auto it = staticDefines_.find(node->text);
+                if (it == staticDefines_.end()) {
+                    // Absent LIBRARY_* flags read false (ref optional-library
+                    // guards); anything else non-constant is an error.
+                    if (node->text.compare(0, 8, "LIBRARY_") == 0) {
+                        val.kind = StaticValue::Kind::BOOL;
+                        val.b = false;
+                        return true;
+                    }
+                    errors_.push_back("static if condition is not constant: '" + node->text +
+                                      "' at line " + std::to_string(node->line));
+                    return false;
+                }
+                val.kind = StaticValue::Kind::BOOL;
+                val.b = it->second;
+                return true;
+            }
+            case AstNodeType::UNARY_OP: {
+                StaticValue inner;
+                if (node->children.empty() || !eval(node->children[0].get(), inner)) return false;
+                if (node->text == "not") {
+                    val.kind = StaticValue::Kind::BOOL;
+                    val.b = !StaticTruthy(inner);
+                    return true;
+                }
+                if (node->text == "-") {
+                    if (inner.kind == StaticValue::Kind::STR) return false;
+                    if (inner.kind == StaticValue::Kind::REAL) {
+                        val.kind = StaticValue::Kind::REAL;
+                        val.r = -inner.r;
+                    } else {
+                        val.kind = StaticValue::Kind::INT;
+                        val.i = -(long long)StaticNumber(inner);
+                    }
+                    return true;
+                }
+                return false;
+            }
+            case AstNodeType::BINARY_OP: {
+                if (node->children.size() < 2) return false;
+                StaticValue lhs, rhs;
+                if (!eval(node->children[0].get(), lhs) || !eval(node->children[1].get(), rhs)) {
+                    return false;
+                }
+                const std::string& op = node->text;
+                if (op == "and" || op == "or") {
+                    val.kind = StaticValue::Kind::BOOL;
+                    val.b = (op == "and") ? (StaticTruthy(lhs) && StaticTruthy(rhs))
+                                          : (StaticTruthy(lhs) || StaticTruthy(rhs));
+                    return true;
+                }
+                if (op == "==" || op == "!=") {
+                    bool eq = false;
+                    if ((lhs.kind == StaticValue::Kind::STR) !=
+                        (rhs.kind == StaticValue::Kind::STR)) {
+                        eq = false;
+                    } else if (lhs.kind == StaticValue::Kind::STR) {
+                        eq = (lhs.s == rhs.s);
+                    } else if (lhs.kind == StaticValue::Kind::BOOL ||
+                               rhs.kind == StaticValue::Kind::BOOL) {
+                        eq = (StaticTruthy(lhs) == StaticTruthy(rhs));
+                    } else {
+                        eq = (StaticNumber(lhs) == StaticNumber(rhs));
+                    }
+                    val.kind = StaticValue::Kind::BOOL;
+                    val.b = (op == "==") ? eq : !eq;
+                    return true;
+                }
+                if (op == "<" || op == "<=" || op == ">" || op == ">=") {
+                    if (lhs.kind == StaticValue::Kind::STR || rhs.kind == StaticValue::Kind::STR ||
+                        lhs.kind == StaticValue::Kind::BOOL || rhs.kind == StaticValue::Kind::BOOL) {
+                        return false;
+                    }
+                    const double l = StaticNumber(lhs), r = StaticNumber(rhs);
+                    val.kind = StaticValue::Kind::BOOL;
+                    val.b = (op == "<") ? (l < r)
+                            : (op == "<=") ? (l <= r)
+                            : (op == ">") ? (l > r)
+                                          : (l >= r);
+                    return true;
+                }
+                if (op == "+" || op == "-" || op == "*" || op == "/") {
+                    if (lhs.kind == StaticValue::Kind::STR && rhs.kind == StaticValue::Kind::STR &&
+                        op == "+") {
+                        val.kind = StaticValue::Kind::STR;
+                        val.s = lhs.s + rhs.s;
+                        return true;
+                    }
+                    if (lhs.kind == StaticValue::Kind::STR || rhs.kind == StaticValue::Kind::STR ||
+                        lhs.kind == StaticValue::Kind::BOOL || rhs.kind == StaticValue::Kind::BOOL) {
+                        return false;
+                    }
+                    if (op == "/" && StaticNumber(rhs) == 0.0) {
+                        errors_.push_back("static if division by zero at line " +
+                                          std::to_string(node->line));
+                        return false;
+                    }
+                    const double l = StaticNumber(lhs), r = StaticNumber(rhs);
+                    const bool real = lhs.kind == StaticValue::Kind::REAL ||
+                                      rhs.kind == StaticValue::Kind::REAL || op == "/";
+                    if (real) {
+                        val.kind = StaticValue::Kind::REAL;
+                        val.r = (op == "+") ? (l + r)
+                                : (op == "-") ? (l - r)
+                                : (op == "*") ? (l * r)
+                                              : (l / r);
+                    } else {
+                        val.kind = StaticValue::Kind::INT;
+                        const long long li = (long long)l, ri = (long long)r;
+                        val.i = (op == "+") ? (li + ri)
+                                : (op == "-") ? (li - ri)
+                                              : (li * ri);
+                    }
+                    return true;
+                }
+                return false;
+            }
+            default:
+                errors_.push_back("static if condition is not constant at line " +
+                                  std::to_string(node->line));
+                return false;
+        }
+    };
+    StaticValue val;
+    if (!eval(expr, val)) return false;
+    out = StaticTruthy(val);
+    return true;
+}
+
+void JassParser::SkipStaticBranch() {
+    // Token-level skip: balances nested ifs so vanilla blocks inside the
+    // untaken region pass through; stops at elseif/else/endif at depth 1.
+    int depth = 1;
+    while (Peek().type != JassTokenType::EOF_TOKEN && depth > 0) {
+        const auto type = Peek().type;
+        if (type == JassTokenType::KW_IF) {
+            depth++;
+            Advance();
+        } else if (type == JassTokenType::KW_ENDIF) {
+            // The depth-1 terminator belongs to the caller (Expect ENDIF).
+            if (depth == 1) break;
+            depth--;
+            Advance();
+        } else if (depth == 1 &&
+                   (type == JassTokenType::KW_ELSEIF || type == JassTokenType::KW_ELSE)) {
+            break;
+        } else {
+            Advance();
+        }
+    }
+}
+
+std::unique_ptr<AstNode> JassParser::ParseStaticIfStmt() {
+    auto block = std::make_unique<AstNode>(AstNodeType::BLOCK);
+    Advance(); // contextual `static`
+    Expect(JassTokenType::KW_IF);
+    bool finished = false;
+    bool alreadyTaken = false;
+    auto atBoundary = [&]() {
+        const auto t = Peek().type;
+        return t == JassTokenType::KW_ELSEIF || t == JassTokenType::KW_ELSE ||
+               t == JassTokenType::KW_ENDIF || t == JassTokenType::EOF_TOKEN;
+    };
+    while (!finished) {
+        auto cond = ParseExpression();
+        Expect(JassTokenType::KW_THEN);
+        SkipNewlines();
+        bool take = false;
+        if (!alreadyTaken) {
+            bool value = false;
+            if (EvalStaticCondition(cond.get(), value) && value) {
+                take = true;
+                alreadyTaken = true;
+            }
+        }
+        if (take) {
+            while (!atBoundary()) {
+                if (Peek().type == JassTokenType::NEWLINE) {
+                    Advance();
+                    continue;
+                }
+                if (auto stmt = ParseStatement()) {
+                    block->children.push_back(std::move(stmt));
+                }
+                SkipNewlines();
+            }
+        } else {
+            SkipStaticBranch();
+        }
+        if (Match(JassTokenType::KW_ELSEIF)) {
+            continue;
+        }
+        if (Match(JassTokenType::KW_ELSE)) {
+            SkipNewlines();
+            if (!alreadyTaken) {
+                alreadyTaken = true;
+                while (!atBoundary()) {
+                    if (Peek().type == JassTokenType::NEWLINE) {
+                        Advance();
+                        continue;
+                    }
+                    if (auto stmt = ParseStatement()) {
+                        block->children.push_back(std::move(stmt));
+                    }
+                    SkipNewlines();
+                }
+            } else {
+                SkipStaticBranch();
+            }
+            Expect(JassTokenType::KW_ENDIF);
+            finished = true;
+        } else {
+            Expect(JassTokenType::KW_ENDIF);
+            finished = true;
+        }
+    }
+    return block;
+}
+
+void JassParser::ParseStaticIfDecls(std::vector<RawDecl>& out, bool defaultPrivate,
+                                    const std::string& scopePrefix) {
+    Advance(); // contextual `static`
+    Expect(JassTokenType::KW_IF);
+    bool finished = false;
+    bool alreadyTaken = false;
+    auto atBoundary = [&]() {
+        const auto t = Peek().type;
+        return t == JassTokenType::KW_ELSEIF || t == JassTokenType::KW_ELSE ||
+               t == JassTokenType::KW_ENDIF || t == JassTokenType::EOF_TOKEN;
+    };
+    auto parseTakenBody = [&]() {
+        while (!atBoundary()) {
+            if (Peek().type == JassTokenType::NEWLINE) {
+                Advance();
+                continue;
+            }
+            if (AtHookDirective()) {
+                ParseHookDirective(scopePrefix);
+                SkipNewlines();
+                continue;
+            }
+            std::string rawName;
+            bool isPrivate = false;
+            if (auto decl = ParseDecl(defaultPrivate, rawName, isPrivate)) {
+                out.push_back(RawDecl{std::move(decl), rawName, isPrivate});
+            }
+            SkipNewlines();
+        }
+    };
+    while (!finished) {
+        auto cond = ParseExpression();
+        Expect(JassTokenType::KW_THEN);
+        SkipNewlines();
+        bool take = false;
+        if (!alreadyTaken) {
+            bool value = false;
+            if (EvalStaticCondition(cond.get(), value) && value) {
+                take = true;
+                alreadyTaken = true;
+            }
+        }
+        if (take) {
+            parseTakenBody();
+        } else {
+            SkipStaticBranch();
+        }
+        if (Match(JassTokenType::KW_ELSEIF)) {
+            continue;
+        }
+        if (Match(JassTokenType::KW_ELSE)) {
+            SkipNewlines();
+            if (!alreadyTaken) {
+                alreadyTaken = true;
+                parseTakenBody();
+            } else {
+                SkipStaticBranch();
+            }
+            Expect(JassTokenType::KW_ENDIF);
+            finished = true;
+        } else {
+            Expect(JassTokenType::KW_ENDIF);
+            finished = true;
+        }
+    }
+}
+
+void JassParser::ParseHookDirective(const std::string& scopePrefix) {
+    Advance(); // contextual `hook`
+    const std::string orig = Expect(JassTokenType::IDENTIFIER).text;
+    const std::string repl = Expect(JassTokenType::IDENTIFIER).text;
+    hookRecords_.push_back(HookRecord{orig, repl, scopePrefix});
+}
+
+void JassParser::ResolveHooks() {
+    for (const auto& rec : hookRecords_) {
+        auto resolve = [&](const std::string& name) {
+            if (rec.scopePrefix.empty()) return name;
+            auto sit = scopePrivates_.find(rec.scopePrefix);
+            if (sit != scopePrivates_.end() && sit->second.count(name)) {
+                return rec.scopePrefix + "__" + name;
+            }
+            return name;
+        };
+        hooks_.emplace_back(resolve(rec.orig), resolve(rec.repl));
+    }
+    hookRecords_.clear();
 }

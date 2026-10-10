@@ -31,4 +31,6 @@ private:
     int lastProgressLogTick_ = -9999;
     bool pathFound_ = false;
     bool propelling_ = false;
+    int blockedTicks_ = 0;
+    int repathRetryCount_ = 0;
 };

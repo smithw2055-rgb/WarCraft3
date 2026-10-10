@@ -8,6 +8,8 @@
 #include "ecs/abilities/ability_root.h"
 #include "ecs/behaviors/behavior_build.h"
 #include "ecs/behaviors/behavior_move.h"
+#include "ecs/behaviors/behavior_move_into_range.h"
+#include "ecs/behaviors/behavior_root.h"
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"
 #include "ecs/unit_type.h"
@@ -136,5 +138,35 @@ bool TestHumanBuildPausesWhenWorkerLeaves() {
     TEST_ASSERT(!build.IsActivelyBuilding());
     // Human worker survives.
     TEST_ASSERT(sim.GetUnit(5201) != nullptr);
+    return true;
+}
+
+bool TestRootMorphBehaviorHoldsThenCompletes() {
+    // ref behaviors/root: morph holds the order queue for the duration,
+    // then completes. Ability already flipped IsRooted; the behavior only
+    // models the hold window.
+    CSimulation sim;
+    CUnit ancient(5001, MakeRootTestType(), 0, War3ID("hfoo"), 0, 0, 0);
+    CBehaviorRoot morph(0.5f);
+    morph.SetUnit(&ancient);
+    morph.Begin(sim);
+    // 0.5s morph at 1/32s steps (~16 ticks): still busy early...
+    TEST_ASSERT(morph.Update(sim) == false);
+    // ...and done after the window elapses.
+    for (int i = 0; i < 40 && !morph.Update(sim); i++) {}
+    TEST_ASSERT(morph.Update(sim) == true);
+    return true;
+}
+
+bool TestMoveIntoRangeHelper() {
+    // Shared helper (ref CBehaviorMoveIntoRangeFor): range check + step.
+    TEST_ASSERT(MoveIntoRange::IsWithinRange(0, 0, 3, 4, 5.0f));
+    TEST_ASSERT(!MoveIntoRange::IsWithinRange(0, 0, 3, 4, 4.9f));
+    float nx = 0, ny = 0;
+    TEST_ASSERT(MoveIntoRange::StepToward(0, 0, 10, 0, 4, nx, ny));
+    TEST_ASSERT(std::fabs(nx - 4.0f) < 0.001f && std::fabs(ny) < 0.001f);
+    // Overshoot clamps to the target.
+    TEST_ASSERT(MoveIntoRange::StepToward(0, 0, 3, 0, 99, nx, ny));
+    TEST_ASSERT(std::fabs(nx - 3.0f) < 0.001f);
     return true;
 }

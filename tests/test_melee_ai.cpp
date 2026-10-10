@@ -9,8 +9,10 @@
 #include "data/destructabledata.h"
 #include "data/gameplay_constants.h"
 #include "data/unitdata.h"
+#include "data/upgradedata.h"
 #include "ecs/abilities/ability_gold_mine.h"
 #include "ecs/abilities/ability_harvest.h"
+#include "ecs/abilities/ability_queue.h"
 #include "ecs/csimulation.h"
 #include "ecs/melee_ai.h"
 #include "ecs/player.h"
@@ -52,6 +54,40 @@ JassValue CallNative(JassVM& vm, const std::string& name, const std::vector<Jass
     auto it = natives.find(name);
     if (it == natives.end()) return JassValue::Null();
     return it->second(args);
+}
+
+// Synthetic lab type (no MPQ): bare building shell for queue research.
+CUnitType* MakeLabType() {
+    static std::vector<std::unique_ptr<CUnitType>> keep;
+    CUnitAttack atk;
+    atk.range = 100.0f;
+    atk.cooldown = 1.0f;
+    atk.damageBase = 10;
+    keep.push_back(std::make_unique<CUnitType>(
+        "Lab", "Lab", "icon", War3ID("hbla"),
+        10000, 1.0f, 0.5f, CRegenType::ALWAYS,
+        100, 200, 200, 0, War3ID(),
+        std::vector<War3ID>{}, false, PathingGridMovementType::FOOT,
+        0.0f, 32.0f, std::vector<std::string>{},
+        std::unordered_set<CUnitClassification>{},
+        std::vector<CUnitAttack>{atk},
+        1, std::string(""), false, true, CDefenseType::NONE,
+        0.0f, 1.0f, std::unordered_set<CTargetType>{},
+        600.0f, 0.0f, std::vector<War3ID>{}, std::vector<War3ID>{},
+        std::vector<War3ID>{}, std::vector<War3ID>{},
+        std::unordered_map<CUpgradeClass, War3ID>{}, std::vector<War3ID>{},
+        std::vector<War3ID>{}, std::vector<War3ID>{}, CUnitRace{"Human", War3ID("H")},
+        100, 50, 1, 0, 30, 0, 0, 0,
+        std::unordered_set<CBuildingPathingType>{},
+        std::unordered_set<CBuildingPathingType>{},
+        0.5f, 0.6f, std::vector<CUnitTypeRequirement>{},
+        std::vector<std::vector<CUnitTypeRequirement>>{},
+        1, false, 20, 2.0f, 15, 1.5f, 10, 1.0f,
+        CPrimaryAttribute::STRENGTH, std::vector<War3ID>{},
+        std::vector<std::string>{"Bob"}, 1, false, 1, false, 100,
+        0.3f, 0.3f, false, false, 1, 800, 600, false,
+        10, 1, 6, 5, 1, 3, false));
+    return keep.back().get();
 }
 
 } // namespace
@@ -337,5 +373,47 @@ bool TestMeleeAIThinkRate() {
     TEST_ASSERT(easy.GetThinkCount() == 5);
     TEST_ASSERT(normal.GetThinkCount() == 10);
     TEST_ASSERT(insane.GetThinkCount() == 20);
+    return true;
+}
+
+bool TestMeleeAIResearchesUpgrades() {
+    // Synthetic lab (no MPQ): rich player + upgrade data + idle queue.
+    CSimulation sim;
+    CUnitData unitData;
+    sim.SetUnitData(&unitData);
+    CUpgradeData upgradeData;
+    auto up = std::make_unique<CUpgradeType>();
+    up->id = War3ID("R001");
+    up->goldCost = 100;
+    up->lumberCost = 50;
+    up->researchTime = 5;
+    up->maxLevel = 2;
+    upgradeData.RegisterUpgrade(War3ID("R001"), std::move(up));
+    sim.SetUpgradeData(&upgradeData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "AI", CMapControl::COMPUTER));
+    sim.GetPlayer(1)->SetGold(2000);
+    sim.GetPlayer(1)->AddLumber(500);
+
+    auto* lab = sim.AdoptUnit(std::make_unique<CUnit>(7101, MakeLabType(), 1, War3ID("hbla"), 0, 0, 0));
+    TEST_ASSERT(lab != nullptr);
+    lab->AddAbility(sim, std::make_unique<CAbilityQueue>(7102));
+    // Queue ability rawcode varies; find it by scan.
+    CAbilityQueue* q = nullptr;
+    for (CAbility* ab : lab->GetAbilities()) {
+        q = dynamic_cast<CAbilityQueue*>(ab);
+        if (q) break;
+    }
+    TEST_ASSERT(q != nullptr);
+    q->AddResearch(War3ID("R001"));
+
+    MeleeAIController ai(&sim, 1);
+    for (int i = 0; i < 400; i++) {
+        sim.Update();
+        ai.Update();
+    }
+    // Both levels researched to max (100g/50l each); no third starts.
+    TEST_ASSERT(sim.GetPlayer(1)->GetTechLevel(War3ID("R001")) == 2);
+    TEST_ASSERT(sim.GetPlayer(1)->GetGold() == 1800);
     return true;
 }

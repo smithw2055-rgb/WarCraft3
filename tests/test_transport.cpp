@@ -1,5 +1,6 @@
 // Transport boarding tests: range behavior, cargo tracking, unload.
 #include <cmath>
+#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -7,8 +8,11 @@
 #include "ecs/abilities/ability_transport.h"
 #include "ecs/behaviors/behavior_board_transport.h"
 #include "ecs/csimulation.h"
+#include "ecs/player.h"
 #include "ecs/unit.h"
 #include "ecs/unit_type.h"
+#include "scripting/JassNatives.h"
+#include "scripting/JassVM.h"
 
 #define TEST_ASSERT(cond) do { if (!(cond)) return false; } while (0)
 #define TEST_NEAR(a, b, eps) do { if (std::fabs((a) - (b)) > (eps)) return false; } while (0)
@@ -157,5 +161,139 @@ bool TestTransportDeathKillsCargo() {
     sim.Update(); // death processing kills cargo
     TEST_ASSERT(ship->IsDead());
     TEST_ASSERT(foot->IsDead());
+    return true;
+}
+
+bool TestLoadFiresUnitLoadedCallback() {
+    // AdoptUnit hook: fresh boardings reach the sim callback exactly once;
+    // re-boarding an aboard passenger is a silent no-op.
+    CSimulation sim;
+    std::vector<std::pair<int, int>> loads;
+    sim.SetUnitLoadedCallback([&](int t, int p) { loads.emplace_back(t, p); });
+    auto* ship = sim.AdoptUnit(std::make_unique<CUnit>(21, MakeTransportType(), 0, War3ID("hfoo"), 0, 0, 0));
+    auto* foot = sim.AdoptUnit(std::make_unique<CUnit>(22, MakeTransportType(), 0, War3ID("hfoo"), 50, 0, 0));
+    TEST_ASSERT(ship->LoadUnit(foot));
+    TEST_ASSERT(loads.size() == 1);
+    TEST_ASSERT(loads[0].first == 21 && loads[0].second == 22);
+    TEST_ASSERT(ship->LoadUnit(foot)); // already aboard
+    TEST_ASSERT(loads.size() == 1);
+    return true;
+}
+
+namespace {
+
+const char* kLoadedScript = R"JASS(
+globals
+    integer loadedFires = 0
+    integer loadedSeen = 0
+    integer transportSeen = 0
+endglobals
+
+function OnLoaded takes nothing returns nothing
+    set loadedFires = loadedFires + 1
+    set loadedSeen = GetLoadedUnit()
+    set transportSeen = GetTransportUnit()
+endfunction
+)JASS";
+
+JassValue CallTransportNative(JassVM& vm, const std::string& name, const std::vector<JassValue>& args) {
+    const auto& natives = vm.GetRegisteredNatives();
+    auto it = natives.find(name);
+    if (it == natives.end()) {
+        std::cerr << "missing native " << name << "\n";
+        return JassValue::Null();
+    }
+    return it->second(args);
+}
+
+} // namespace
+
+bool TestLoadedTriggerEvent() {
+    JassVM vm;
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    if (!vm.LoadScript(kLoadedScript)) return false;
+    auto data = natives.GetData();
+    // Same wiring as JassCommonEnv.
+    sim.SetUnitLoadedCallback([&](int transportHandle, int passengerHandle) {
+        natives.FireLoadedEvent(transportHandle, passengerHandle);
+    });
+
+    auto* ship = sim.AdoptUnit(std::make_unique<CUnit>(23, MakeTransportType(), 0, War3ID("hfoo"), 0, 0, 0));
+    auto* foot = sim.AdoptUnit(std::make_unique<CUnit>(24, MakeTransportType(), 0, War3ID("hfoo"), 50, 0, 0));
+    TEST_ASSERT(ship && foot);
+    sim.Update();
+    const int hFoot = data->AllocHandle(JassHandleInfo::UNIT, 24);
+    const int trig = CallTransportNative(vm, "CreateTrigger", {}).intVal;
+    CallTransportNative(vm, "TriggerRegisterUnitEvent", {JassValue::Int(trig), JassValue::Int(hFoot), JassValue::Int(88)});
+    CallTransportNative(vm, "TriggerAddAction", {JassValue::Int(trig), JassValue::Str("OnLoaded")});
+
+    TEST_ASSERT(ship->LoadUnit(foot));
+    natives.PumpQueuedThreads(1024);
+    TEST_ASSERT(vm.GetGlobal("loadedFires").intVal == 1);
+    TEST_ASSERT(data->GetSimHandle(vm.GetGlobal("loadedSeen").intVal, JassHandleInfo::UNIT) == 24);
+    TEST_ASSERT(data->GetSimHandle(vm.GetGlobal("transportSeen").intVal, JassHandleInfo::UNIT) == 23);
+    return true;
+}
+
+bool TestDecayFiresUnitDecayCallback() {
+    // Corpse begins decaying: exactly one callback (deathTime 1s @ 20Hz).
+    CSimulation sim;
+    int fires = 0;
+    int firedHandle = -1;
+    sim.SetUnitDecayCallback([&](int h) { fires++; firedHandle = h; });
+    auto* foot = sim.AdoptUnit(std::make_unique<CUnit>(25, MakeTransportType(), 0, War3ID("hfoo"), 0, 0, 0));
+    foot->Damage(sim, nullptr, false, false, CAttackType::CHAOS, CDamageType::NORMAL, "", 1e9f, 0);
+    for (int i = 0; i < 500 && fires == 0; i++) sim.Update();
+    TEST_ASSERT(fires == 1 && firedHandle == 25);
+    for (int i = 0; i < 500; i++) sim.Update();
+    TEST_ASSERT(fires == 1); // one-shot: later decay stages never refire
+    return true;
+}
+
+namespace {
+
+const char* kDecayScript = R"JASS(
+globals
+    integer decayFires = 0
+    integer decayingSeen = 0
+endglobals
+
+function OnDecay takes nothing returns nothing
+    set decayFires = decayFires + 1
+    set decayingSeen = GetDecayingUnit()
+endfunction
+)JASS";
+
+} // namespace
+
+bool TestDecayTriggerEvent() {
+    JassVM vm;
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    if (!vm.LoadScript(kDecayScript)) return false;
+    auto data = natives.GetData();
+    // Same wiring as JassCommonEnv.
+    sim.SetUnitDecayCallback([&](int unitHandle) {
+        natives.FireDecayEvent(unitHandle);
+    });
+
+    auto* foot = sim.AdoptUnit(std::make_unique<CUnit>(26, MakeTransportType(), 0, War3ID("hfoo"), 0, 0, 0));
+    TEST_ASSERT(foot);
+    sim.Update();
+    const int hFoot = data->AllocHandle(JassHandleInfo::UNIT, 26);
+    const int trig = CallTransportNative(vm, "CreateTrigger", {}).intVal;
+    CallTransportNative(vm, "TriggerRegisterUnitEvent", {JassValue::Int(trig), JassValue::Int(hFoot), JassValue::Int(54)});
+    CallTransportNative(vm, "TriggerAddAction", {JassValue::Int(trig), JassValue::Str("OnDecay")});
+
+    foot->Damage(sim, nullptr, false, false, CAttackType::CHAOS, CDamageType::NORMAL, "", 1e9f, 0);
+    for (int i = 0; i < 500 && vm.GetGlobal("decayFires").intVal == 0; i++) sim.Update();
+    natives.PumpQueuedThreads(1024);
+    TEST_ASSERT(vm.GetGlobal("decayFires").intVal == 1);
+    TEST_ASSERT(data->GetSimHandle(vm.GetGlobal("decayingSeen").intVal, JassHandleInfo::UNIT) == 26);
     return true;
 }

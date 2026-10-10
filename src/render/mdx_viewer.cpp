@@ -471,7 +471,6 @@ static void AppendSequenceHintsFromTexturePath(uint32_t& hintMask, const std::st
     if (lowerText.find("decay") != std::string::npos
         || lowerText.find("corpse") != std::string::npos
         || lowerText.find("flesh") != std::string::npos
-        || lowerText.find("bone") != std::string::npos
         || lowerText.find("gutz") != std::string::npos
         || lowerText.find("smug") != std::string::npos) {
         hintMask |= BatchSequenceHint_Decay;
@@ -2716,6 +2715,9 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
     const bool currentSequenceIsDecay = SequenceNameContains(currentSequenceName, "decay")
         || SequenceNameContains(currentSequenceName, "corpse");
     auto shouldRenderBatchForCurrentSequence = [&](const Batch& batch) {
+        if (modelSource_ && !modelSource_->geosetAnims.empty()) {
+            return true;
+        }
         if ((batch.sequenceHintMask & BatchSequenceHint_Birth) != 0 && !currentSequenceIsBirth) {
             return false;
         }

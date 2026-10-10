@@ -11,6 +11,7 @@
 #include "ecs/abilities/spells16.h"
 #include "behaviors/behavior_move.h"
 #include "behaviors/behavior_attack.h"
+#include "behaviors/behavior_build.h"
 #include "behaviors/behavior_stop.h"
 #include "behaviors/behavior_hold_position.h"
 #include "behaviors/behavior_follow.h"
@@ -251,24 +252,33 @@ bool CUnit::TurnTowardPoint(float targetX, float targetY) {
     goalFacing = NormalizeFacingDegrees(goalFacing);
     float currentFacing = NormalizeFacingDegrees(facing_);
     float delta = NormalizeFacingDelta(goalFacing - currentFacing);
+    float absDelta = std::fabs(delta);
 
-    float propulsionWindow = 1.0f;
-    float turnStepDegrees = 180.0f;
-    if (unitType_) {
-        propulsionWindow = std::max(1.0f, GetEffectivePropWindow());
-    } else if (propWindow_ >= 0.0f) {
-        propulsionWindow = std::max(1.0f, propWindow_);
-    }
-    turnStepDegrees = std::max(0.1f, turnRate_ * 180.0f / kPi);
+    float turnStepDegrees = std::max(0.1f, turnRate_ * 180.0f / kPi);
 
-    if (std::fabs(delta) <= propulsionWindow) {
+    if (absDelta <= 1.0f && absDelta != 0.0f) {
         facing_ = goalFacing;
-        return true;
+        delta = 0.0f;
+        absDelta = 0.0f;
+    } else if (absDelta > 0.0f) {
+        float angleToAdd = (delta < 0.0f ? -1.0f : 1.0f) * turnStepDegrees;
+        if (absDelta < std::fabs(angleToAdd)) {
+            angleToAdd = delta;
+        }
+        facing_ = NormalizeFacingDegrees(currentFacing + angleToAdd);
+        delta = NormalizeFacingDelta(goalFacing - facing_);
+        absDelta = std::fabs(delta);
     }
 
-    const float appliedStep = std::min(std::fabs(delta), turnStepDegrees) * (delta < 0.0f ? -1.0f : 1.0f);
-    facing_ = NormalizeFacingDegrees(currentFacing + appliedStep);
-    return false;
+    float propulsionWindow = 60.0f;
+    if (unitType_) {
+        float eff = GetEffectivePropWindow();
+        if (eff > 0.0f) propulsionWindow = eff;
+    } else if (propWindow_ > 0.0f) {
+        propulsionWindow = propWindow_;
+    }
+
+    return absDelta <= propulsionWindow;
 }
 
 // ===== Ability System =====
@@ -441,6 +451,14 @@ void CUnit::SetSharesVisionWith(int player, bool share) {
     if (player < 0) return;
     if (share) sharedVision_.insert(player);
     else sharedVision_.erase(player);
+}
+
+bool CUnit::IsStealthed() const {
+    if (invisible_) return true;
+    for (const auto& buff : buffs_) {
+        if (buff && dynamic_cast<const CBuffWindWalk*>(buff.get())) return true;
+    }
+    return false;
 }
 
 bool CUnit::IsInvisibleTo(const CUnit* viewer) const {
@@ -735,6 +753,9 @@ bool CUnit::LoadUnit(CUnit* passenger) {
     passenger->loadedAboard_ = true;
     passenger->SetHidden(true);
     cargoUnits_.push_back(passenger);
+    if (unitLoadedHook_) {
+        unitLoadedHook_(passenger->GetHandleId());
+    }
     return true;
 }
 
@@ -755,8 +776,21 @@ bool CUnit::CanBeTargetedBy(CSimulation& simulation, CUnit* source,
 }
 
 void CUnit::IssueOrder(std::unique_ptr<COrder> order) {
-    if (order) lastOrderId_ = order->GetOrderId();
+    if (!order) return;
+    lastOrderId_ = order->GetOrderId();
+    const int targetKind = (int)order->GetTargetKind();
+    float x = 0.0f, y = 0.0f;
+    int targetHandle = -1;
+    if (auto* pt = dynamic_cast<COrderTargetPoint*>(order.get())) {
+        x = pt->GetX();
+        y = pt->GetY();
+    } else if (auto* wg = dynamic_cast<COrderTargetWidget*>(order.get())) {
+        if (wg->GetTarget()) targetHandle = wg->GetTarget()->GetHandleId();
+    }
     orderQueue_.push(std::move(order));
+    if (orderIssuedHook_) {
+        orderIssuedHook_(lastOrderId_, targetKind, x, y, targetHandle);
+    }
 }
 
 void CUnit::ClearOrders() {
@@ -907,6 +941,11 @@ bool CUnit::Update(CSimulation& simulation) {
                     return true;
                 }
                 deathTurnTick_ = currentTick;
+                // Decay begins (retail EVENT_UNIT_DECAY); one-shot by
+                // construction (corpse_ flips, this branch never reruns).
+                if (auto& decayCb = simulation.GetUnitDecayCallback()) {
+                    decayCb(handleId_);
+                }
             }
             return false;
         }
@@ -937,6 +976,25 @@ bool CUnit::Update(CSimulation& simulation) {
 
     // Apply health/mana regen
     ApplyRegen(simulation);
+
+    // ESC-cancel interrupts an unfinished construction immediately (queued
+    // orders otherwise wait for the active behavior to finish; ref
+    // cancel-build refunds, removes the foundation, fires the event).
+    if (!orderQueue_.empty() && currentBehavior_) {
+        const int frontId =
+            orderQueue_.front() ? orderQueue_.front()->GetOrderId() : -1;
+        if (frontId == OrderIds::CANCEL || frontId == OrderIds::CANCEL_BUILD) {
+            if (auto* build = dynamic_cast<CBehaviorBuild*>(currentBehavior_)) {
+                if (build->IsActivelyBuilding() || build->IsMovingToSite()) {
+                    // NOTE: no order callback here; it fired when the CANCEL
+                    // order was issued (AdoptUnit hook), and the queue has a
+                    // single push site (IssueOrder).
+                    orderQueue_.pop();
+                    build->CancelConstruction(simulation);
+                }
+            }
+        }
+    }
 
     // Process behavior
     if (currentBehavior_) {
@@ -1335,6 +1393,17 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
         }
     } else if (tryAbilityRange(false) || tryAbilityRange(true)) {
         return;
+    }
+
+    // If no ability handled a SMART order targeting a widget, fall back to moving to that widget's position
+    if (orderId == OrderIds::SMART) {
+        if (auto* widgetOrder = dynamic_cast<COrderTargetWidget*>(order.get())) {
+            auto* tgt = widgetOrder->GetTarget();
+            if (tgt) {
+                ConvertOrderToBehavior(simulation, std::make_unique<COrderTargetPoint>(OrderIds::SMART, tgt->GetX(), tgt->GetY()));
+                return;
+            }
+        }
     }
 
     // No ability handled this order - fallback to stop

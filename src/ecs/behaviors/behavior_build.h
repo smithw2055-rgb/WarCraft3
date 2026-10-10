@@ -23,6 +23,9 @@ public:
     bool IsMovingToSite() const { return movingToSite_; }
     bool IsActivelyBuilding() const { return building_ && !completed_; }
     bool IsPropelling() const { return propelling_; }
+    // ESC-cancel (ref construction cancel): full refund, foundation removed,
+    // worker released; no-op once completed.
+    void CancelConstruction(CSimulation& simulation);
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

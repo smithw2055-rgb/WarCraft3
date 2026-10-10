@@ -278,9 +278,32 @@ void TexturedTerrain::RebuildCornerData(const W3EMap& map) {
             int idx = y * columns_ + x;
             const auto& tile = map.tiles[idx];
             groundHeights_[idx] = tile.DecodeGroundHeight();
-            groundCornerHeights_[idx] = tile.FinalGroundHeight();
             waterHeights_[idx] = tile.DecodeWaterHeight();
             waterExistsData_[idx] = tile.IsWater() ? 255 : 0;
+
+            float rampHeight = 0.0f;
+            bool found = false;
+            for (int xOffset = -1; xOffset <= 0 && !found; ++xOffset) {
+                for (int yOffset = -1; yOffset <= 0 && !found; ++yOffset) {
+                    int cx = x + xOffset, cy = y + yOffset;
+                    if (cx >= 0 && cx < columns_ - 1 && cy >= 0 && cy < rows_ - 1) {
+                        int cellBase = cy * columns_ + cx;
+                        const auto& bl = map.tiles[cellBase];
+                        const auto& br = map.tiles[cellBase + 1];
+                        const auto& tl = map.tiles[cellBase + columns_];
+                        const auto& tr = map.tiles[cellBase + columns_ + 1];
+                        int base = std::min({bl.LayerHeight(), br.LayerHeight(),
+                                             tl.LayerHeight(), tr.LayerHeight()});
+                        if (tile.LayerHeight() != base) continue;
+                        if (isCornerRampEntrance(map, cx, cy)) {
+                            rampHeight = 0.5f;
+                            found = true;
+                        }
+                    }
+                }
+            }
+
+            groundCornerHeights_[idx] = tile.FinalGroundHeight() + rampHeight;
         }
     }
 
@@ -637,41 +660,53 @@ void TexturedTerrain::BuildCliffsGPU(const W3EMap& map) {
         MdxModel model;
         if (!MdxLoad(data.data(), data.size(), model) || model.geosets.empty()) return -1;
 
-        const auto& geo = model.geosets[0];
-        if (geo.vertices.empty() || geo.indices.empty()) return -1;
-
-        const std::vector<float>* uvSource = nullptr;
-        if (!geo.uvSets.empty() && !geo.uvSets[0].empty()) uvSource = &geo.uvSets[0];
-
-        int vc = (int)geo.vertices.size() / 3;
-        std::vector<CliffVertexGPU> verts(vc);
-        float minLocalZ = vc > 0 ? geo.vertices[2] : 0.0f;
-        float maxLocalZ = minLocalZ;
-        for (int i = 0; i < vc; ++i) {
-            verts[i].px = geo.vertices[i * 3 + 0];
-            verts[i].py = geo.vertices[i * 3 + 1];
-            verts[i].pz = geo.vertices[i * 3 + 2];
-            minLocalZ = std::min(minLocalZ, verts[i].pz);
-            maxLocalZ = std::max(maxLocalZ, verts[i].pz);
-            if (uvSource && uvSource->size() >= size_t(i * 2 + 2)) {
-                verts[i].tu = (*uvSource)[i * 2 + 0];
-                verts[i].tv = (*uvSource)[i * 2 + 1];
-            } else {
-                verts[i].tu = 0.0f;
-                verts[i].tv = 0.0f;
-            }
-            if (!geo.normals.empty()) {
-                verts[i].nx = geo.normals[i * 3 + 0];
-                verts[i].ny = geo.normals[i * 3 + 1];
-                verts[i].nz = geo.normals[i * 3 + 2];
-            } else {
-                verts[i].nx = 0.0f;
-                verts[i].ny = 0.0f;
-                verts[i].nz = 1.0f;
-            }
+        int totalVerts = 0;
+        int totalIndices = 0;
+        for (const auto& g : model.geosets) {
+            totalVerts += (int)g.vertices.size() / 3;
+            totalIndices += (int)g.indices.size();
         }
+        if (totalVerts == 0 || totalIndices == 0) return -1;
 
-        std::vector<uint32_t> indices(geo.indices.begin(), geo.indices.end());
+        std::vector<CliffVertexGPU> verts(totalVerts);
+        std::vector<uint32_t> indices(totalIndices);
+        int vOffset = 0;
+        int iOffset = 0;
+        float minLocalZ = model.geosets[0].vertices.size() >= 3 ? model.geosets[0].vertices[2] : 0.0f;
+        float maxLocalZ = minLocalZ;
+
+        for (const auto& geo : model.geosets) {
+            const int vc = (int)geo.vertices.size() / 3;
+            const std::vector<float>* uvSource = (!geo.uvSets.empty() && !geo.uvSets[0].empty()) ? &geo.uvSets[0] : nullptr;
+            for (int i = 0; i < vc; ++i) {
+                verts[vOffset + i].px = geo.vertices[i * 3 + 0];
+                verts[vOffset + i].py = geo.vertices[i * 3 + 1];
+                verts[vOffset + i].pz = geo.vertices[i * 3 + 2];
+                minLocalZ = std::min(minLocalZ, verts[vOffset + i].pz);
+                maxLocalZ = std::max(maxLocalZ, verts[vOffset + i].pz);
+                if (uvSource && uvSource->size() >= size_t(i * 2 + 2)) {
+                    verts[vOffset + i].tu = (*uvSource)[i * 2 + 0];
+                    verts[vOffset + i].tv = (*uvSource)[i * 2 + 1];
+                } else {
+                    verts[vOffset + i].tu = 0.0f;
+                    verts[vOffset + i].tv = 0.0f;
+                }
+                if (!geo.normals.empty()) {
+                    verts[vOffset + i].nx = geo.normals[i * 3 + 0];
+                    verts[vOffset + i].ny = geo.normals[i * 3 + 1];
+                    verts[vOffset + i].nz = geo.normals[i * 3 + 2];
+                } else {
+                    verts[vOffset + i].nx = 0.0f;
+                    verts[vOffset + i].ny = 0.0f;
+                    verts[vOffset + i].nz = 1.0f;
+                }
+            }
+            for (size_t idx = 0; idx < geo.indices.size(); ++idx) {
+                indices[iOffset + idx] = (uint32_t)(geo.indices[idx] + vOffset);
+            }
+            vOffset += vc;
+            iOffset += (int)geo.indices.size();
+        }
 
         CliffMeshGPU mesh;
         sg_buffer_desc vbd = {};
@@ -958,6 +993,7 @@ void TexturedTerrain::Render(const Mat4& view, const Mat4& proj, float time) {
             float showLighting, baseTexOnly;
             float fogColor[4], fogParams[4];
         } fsU = {};
+        fsU.showLighting = 1.0f; // match cliff pass: terrain honors day/night lights
         fsU.baseTexOnly = (debugMode_ == 4) ? 1.0f : 0.0f;
         fsU.fogColor[0] = fogColor_[0];
         fsU.fogColor[1] = fogColor_[1];
@@ -1133,24 +1169,22 @@ void TexturedTerrain::Render(const Mat4& view, const Mat4& proj, float time) {
             bind.vertex_buffers[0] = mesh.vbo;
             bind.index_buffer = mesh.ebo;
             bind.views[0] = heightTexView_;
-            bind.views[1] = shadowView_;
-            bind.views[2] = lightView_;
-            bind.views[3] = tileset_->GetCliffTextureArrayView();
-            bind.views[4] = shadowView_;
-            bind.views[5] = fogView_;
-            bind.views[6] = texDataView_;
+            bind.views[1] = lightView_;
+            bind.views[2] = tileset_->GetCliffTextureArrayView();
+            bind.views[3] = shadowView_;
+            bind.views[4] = fogView_;
+            bind.views[5] = texDataView_;
             for (int i = 0; i < groundTexCount && i < 17; ++i) {
-                bind.views[7 + i] = tileTexViews_[i];
+                bind.views[6 + i] = tileTexViews_[i];
             }
             bind.samplers[0] = linearSampler_;
-            bind.samplers[1] = linearSampler_;
-            bind.samplers[2] = lightManager_.GetLightSampler();
+            bind.samplers[1] = lightManager_.GetLightSampler();
+            bind.samplers[2] = linearSampler_;
             bind.samplers[3] = linearSampler_;
             bind.samplers[4] = linearSampler_;
-            bind.samplers[5] = linearSampler_;
-            bind.samplers[6] = nonFilterSampler_;
-            bind.samplers[7] = linearSampler_;
-            if (hasSuspiciousBoundView("cliff", bind, 7 + groundTexCount)) {
+            bind.samplers[5] = nonFilterSampler_;
+            bind.samplers[6] = linearSampler_;
+            if (hasSuspiciousBoundView("cliff", bind, 6 + groundTexCount)) {
                 continue;
             }
             sg_apply_bindings(&bind);
@@ -1302,7 +1336,27 @@ float TexturedTerrain::GetGroundHeight(float worldX, float worldY) const {
     return height * TILE_SIZE;
 }
 
-float TexturedTerrain::GetWaterHeight(float worldX, float worldY) const { (void)worldX; (void)worldY; return 0; }
+float TexturedTerrain::GetWaterHeight(float worldX, float worldY) const {
+    if (!waterHeights_ || columns_ <= 1 || rows_ <= 1) return 0.0f;
+    float gx = worldX - centerOffsetX_;
+    float gy = worldY - centerOffsetY_;
+    float cx = gx / TILE_SIZE, cy = gy / TILE_SIZE;
+    int ix = (int)std::floor(cx), iy = (int)std::floor(cy);
+    if (ix < 0 || ix >= columns_ - 1 || iy < 0 || iy >= rows_ - 1) return 0.0f;
+    float fx = cx - ix, fy = cy - iy;
+    int idx = iy * columns_ + ix;
+    float h00 = waterHeights_[idx];
+    float h10 = waterHeights_[idx + 1];
+    float h01 = waterHeights_[idx + columns_];
+    float h11 = waterHeights_[idx + columns_ + 1];
+    float height = 0.0f;
+    if ((fx + fy) < 1.0f) {
+        height = h00 + ((h10 - h00) * fx) + ((h01 - h00) * fy);
+    } else {
+        height = h11 + ((h10 - h11) * (1.0f - fy)) + ((h01 - h11) * (1.0f - fx));
+    }
+    return height * TILE_SIZE;
+}
 bool TexturedTerrain::InPlayableArea(float worldX, float worldY) const {
     (void)worldX; (void)worldY; return true;
 }
@@ -1803,6 +1857,9 @@ void TexturedTerrain::BuildCliffsFromMdx(const W3EMap& map) {
 
     for (const auto& inst : cliffInstances_) {
         if (inst.gridX < 0 || inst.gridY < 0 || inst.gridX >= (w - 1) || inst.gridY >= (h - 1)) {
+            continue;
+        }
+        if (isCornerRampEntrance(map, inst.gridX, inst.gridY)) {
             continue;
         }
         const int tileIndex = ((inst.gridY * (w - 1)) + inst.gridX) * 4 + 3;

@@ -225,15 +225,46 @@ void MapLoader::CreateSimulation(int localPlayerIndex) {
         CMapControl controller = CMapControl::USER;
         if (configData_) {
             const auto& playerConfig = configData_->playerMapConfig[i];
-            const bool active = playerConfig.slotActive
-                || (configData_->configuredPlayerCount > 0 && i < configData_->configuredPlayerCount);
-            controller = active ? CMapControl::USER : CMapControl::NONE;
+            // common.j ordinals: 0 USER, 1 COMPUTER, 2 RESCUABLE, 3 NEUTRAL,
+            // 4 CREEP, 5 NONE (note: C++ enum order differs, map explicitly).
+            // -1 = config never called SetPlayerController for this slot.
+            switch (playerConfig.controller) {
+                case 0: controller = CMapControl::USER; break;
+                case 1: controller = CMapControl::COMPUTER; break;
+                case 2: controller = CMapControl::RESCUABLE; break;
+                case 3: controller = CMapControl::NEUTRAL; break;
+                case 4: controller = CMapControl::CREEP; break;
+                case 5: controller = CMapControl::NONE; break;
+                default: {
+                    const bool active = playerConfig.slotActive
+                        || (configData_->configuredPlayerCount > 0 && i < configData_->configuredPlayerCount);
+                    controller = active ? CMapControl::USER : CMapControl::NONE;
+                    break;
+                }
+            }
         }
         auto player = std::make_unique<CPlayer>(i, "Player " + std::to_string(i + 1), controller);
         player->SetGold(500);
         player->SetLumber(200);
         player->SetFoodCap(10);
         if (configData_) {
+            const int cfgColor = configData_->playerMapConfig[i].color;
+            if (cfgColor >= 0) player->SetColor(cfgColor);
+            // Race for JASS GetPlayerRace / Blizzard.j MeleeStartingUnits
+            // (ref RACE_HUMAN=1..RACE_NIGHTELF=4; preferences are bitmasks:
+            // HUMAN=1, ORC=2, NIGHTELF=4, UNDEAD=8, RANDOM=32).
+            const int pref = configData_->playerMapConfig[i].racePreference;
+            int race = 0;
+            if (pref == 1) race = 1;        // human
+            else if (pref == 2) race = 2;   // orc
+            else if (pref == 8) race = 3;   // undead
+            else if (pref == 4) race = 4;   // night elf
+            else {
+                // RANDOM / unset: deterministic roll so every slot still
+                // gets race-correct melee starting units.
+                race = 1 + (int)(sim_.SimRand01() * 4.0f) % 4;
+            }
+            player->SetRace(race);
             int startIndex = configData_->playerMapConfig[i].startLocationIndex;
             if (startIndex < 0) startIndex = i;
             if (startIndex >= 0 && startIndex < (int)configData_->startLocations.size()) {

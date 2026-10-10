@@ -297,26 +297,36 @@ bool CAbilityAcolyteHarvest::CheckCanTarget(CSimulation& game, CUnit* unit, int 
     return mineUnit->GetAbility(War3ID("Abgm")) != nullptr;
 }
 
+void CAbilityAcolyteHarvest::Unbind(CSimulation& game) {
+    if (mineUnitHandle_ < 0) return;
+    if (CUnit* mineUnit = game.GetUnit(mineUnitHandle_)) {
+        if (auto* mine = dynamic_cast<CAbilityBlightedGoldMine*>(
+                mineUnit->GetAbility(War3ID("Abgm")))) {
+            mine->RemoveMiner();
+        }
+    }
+    mineUnitHandle_ = -1;
+}
+
 void CAbilityAcolyteHarvest::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)game;
     auto* mineUnit = dynamic_cast<CUnit*>(target);
     if (!caster || !mineUnit) return;
     auto* mine = dynamic_cast<CAbilityBlightedGoldMine*>(mineUnit->GetAbility(War3ID("Abgm")));
     if (!mine) return;
-    if (bound_ && bound_ != mine) bound_->RemoveMiner();
-    if (bound_ == mine) return;
-    if (!mine->AddMiner()) return;
-    bound_ = mine;
-    remaining_ = duration_;
+    if (mineUnitHandle_ == mineUnit->GetHandleId()) return; // already here
+    Unbind(game);
+    if (!mine->AddMiner()) return; // full: DENIED, stays unbound (ref error text)
+    mineUnitHandle_ = mineUnit->GetHandleId();
 }
 
-void CAbilityAcolyteHarvest::OnTick(CSimulation& game, CUnit* unit) {
+void CAbilityAcolyteHarvest::OnDeath(CSimulation& game, CUnit* unit) {
     (void)unit;
-    if (!bound_) return;
-    remaining_ -= game.GetSimStepTime();
-    if (remaining_ > 0.0f) return;
-    bound_->RemoveMiner();
-    bound_ = nullptr;
+    Unbind(game);
+}
+
+void CAbilityAcolyteHarvest::OnRemove(CSimulation& game, CUnit* unit) {
+    (void)unit;
+    Unbind(game);
 }
 
 CAbilityWispHarvest::CAbilityWispHarvest(int handleId)
@@ -328,25 +338,32 @@ CAbilityWispHarvest::CAbilityWispHarvest(int handleId)
 
 void CAbilityWispHarvest::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     (void)game;
-    (void)caster;
-    tree_ = dynamic_cast<CDestructable*>(target);
+    auto* tree = dynamic_cast<CDestructable*>(target);
+    if (!caster || !tree || tree->IsDead()) return;
+    treeHandle_ = tree->GetHandleId();
     accum_ = interval_;
+    // ref CBehaviorWispHarvest: instant jump onto the tree (no walkaround,
+    // no carry/return trips); lumber then trickles in OnTick.
+    caster->SetPosition(tree->GetX(), tree->GetY());
 }
 
 void CAbilityWispHarvest::OnTick(CSimulation& game, CUnit* unit) {
-    if (!unit || !tree_ || tree_->IsDead()) {
-        tree_ = nullptr;
+    if (!unit) return;
+    CDestructable* tree =
+        treeHandle_ >= 0 ? game.GetDestructable(treeHandle_) : nullptr;
+    if (!tree || tree->IsDead()) {
+        treeHandle_ = -1;
         return;
     }
     accum_ += game.GetSimStepTime();
     if (accum_ < interval_) return;
     accum_ -= interval_;
-    tree_->Damage(game, unit, false, false, CAttackType::NORMAL, CDamageType::NORMAL,
+    tree->Damage(game, unit, false, false, CAttackType::NORMAL, CDamageType::NORMAL,
                   "", damagePerInterval_, 0);
     if (CPlayer* player = game.GetPlayer(unit->GetPlayerIndex())) {
         player->AddLumber(lumberPerInterval_);
     }
-    if (tree_->IsDead()) tree_ = nullptr;
+    if (tree->IsDead()) treeHandle_ = -1;
 }
 
 CAbilityHarvestLumber::CAbilityHarvestLumber(int handleId)

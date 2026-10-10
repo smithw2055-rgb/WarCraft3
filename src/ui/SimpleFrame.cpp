@@ -7,6 +7,7 @@ SimpleFrame::~SimpleFrame() {
 
 void SimpleFrame::AddChild(UIFrame* child) {
     if (!child) return;
+    if (std::find(children_.begin(), children_.end(), child) != children_.end()) return;
     children_.push_back(child);
     child->SetParent(this);
 }

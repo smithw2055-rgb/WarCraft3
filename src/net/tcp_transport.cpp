@@ -8,6 +8,9 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#ifdef SendMessage
+#undef SendMessage
+#endif
 #pragma comment(lib, "Ws2_32.lib")
 using SocketType = SOCKET;
 static constexpr SocketType kBadSocket = INVALID_SOCKET;

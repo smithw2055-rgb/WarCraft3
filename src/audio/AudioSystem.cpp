@@ -87,6 +87,11 @@ bool AudioSystem::LoadSoundFromFile(const std::string& name, const std::string& 
 }
 
 int AudioSystem::playFromSource(SoundSource& src, float volume, float x, float y, float z, bool is3D) {
+    return playFromSourceEx(src, volume, x, y, z, is3D, 1.0f, 0.0f, 0.0f);
+}
+
+int AudioSystem::playFromSourceEx(SoundSource& src, float volume, float x, float y, float z,
+                                  bool is3D, float pitch, float minDist, float maxDist) {
     ma_decoder* decoder = new ma_decoder;
     ma_decoder_config decoderConfig = ma_decoder_config_init_default();
     ma_result result = ma_decoder_init_memory(src.data.data(), src.data.size(),
@@ -108,6 +113,11 @@ int AudioSystem::playFromSource(SoundSource& src, float volume, float x, float y
     }
 
     if (is3D) ma_sound_set_position(sound, x, y, z);
+    if (pitch > 0.0f && pitch != 1.0f) ma_sound_set_pitch(sound, pitch);
+    if (is3D) {
+        if (minDist > 0.0f) ma_sound_set_min_distance(sound, minDist);
+        if (maxDist > 0.0f) ma_sound_set_max_distance(sound, maxDist);
+    }
     ma_sound_set_volume(sound, volume * masterVolume_);
     ma_sound_start(sound);
 
@@ -162,6 +172,36 @@ int AudioSystem::Play3DPath(const std::string& mpqPath, float x, float y, float 
         if (it == soundCache_.end()) return -1;
     }
     return playFromSource(it->second, volume, x, y, z, true);
+}
+
+int AudioSystem::Play3DEx(const std::string& name, float x, float y, float z, float volume,
+                           float pitch, float minDist, float maxDist) {
+    if (!engine_) return -1;
+    auto it = soundCache_.find(name);
+    if (it == soundCache_.end()) {
+        if (mpq_) {
+            std::string mpqPath = "Sound\\Units\\" + name + ".wav";
+            if (!LoadSound(name, mpqPath, mpq_)) {
+                mpqPath = "Sound\\Interface\\" + name + ".wav";
+                LoadSound(name, mpqPath, mpq_);
+            }
+        }
+        it = soundCache_.find(name);
+        if (it == soundCache_.end()) return -1;
+    }
+    return playFromSourceEx(it->second, volume, x, y, z, true, pitch, minDist, maxDist);
+}
+
+int AudioSystem::Play3DPathEx(const std::string& mpqPath, float x, float y, float z, float volume,
+                               float pitch, float minDist, float maxDist) {
+    if (!engine_ || mpqPath.empty()) return -1;
+    auto it = soundCache_.find(mpqPath);
+    if (it == soundCache_.end()) {
+        if (!LoadSound(mpqPath, mpqPath, mpq_)) return -1;
+        it = soundCache_.find(mpqPath);
+        if (it == soundCache_.end()) return -1;
+    }
+    return playFromSourceEx(it->second, volume, x, y, z, true, pitch, minDist, maxDist);
 }
 
 void AudioSystem::Stop(int soundId) {

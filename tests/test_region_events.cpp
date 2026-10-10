@@ -236,3 +236,67 @@ bool TestLifecycleEventsAndPlayerUnitDualMatch() {
     TEST_ASSERT(vm.GetGlobal("revivedSeen").intVal != 0);
     return true;
 }
+
+const char* kRegionFilterScript = R"JASS(
+globals
+    integer filteredEnters = 0
+    integer openEnters = 0
+endglobals
+
+function RejectAll takes nothing returns boolean
+    return false
+endfunction
+
+function AcceptAll takes nothing returns boolean
+    return GetFilterUnit() != null
+endfunction
+
+function OnFilteredEnter takes nothing returns nothing
+    set filteredEnters = filteredEnters + 1
+endfunction
+
+function OnOpenEnter takes nothing returns nothing
+    set openEnters = openEnters + 1
+endfunction
+)JASS";
+
+bool TestRegionEnterFilterBlocks() {
+    JassVM vm;
+    CSimulation sim;
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    TEST_ASSERT(vm.LoadScript(kRegionFilterScript));
+
+    const int rect = CallNative(vm, "Rect", {JassValue::Real(-100.0f), JassValue::Real(-100.0f),
+                                             JassValue::Real(100.0f), JassValue::Real(100.0f)}).intVal;
+    TEST_ASSERT(rect != 0);
+    const int region = CallNative(vm, "CreateRegion", {}).intVal;
+    CallNative(vm, "RegionAddRect", {JassValue::Int(region), JassValue::Int(rect)});
+
+    // Rejecting filter: migration must not fire.
+    const int tReject = CallNative(vm, "CreateTrigger", {}).intVal;
+    CallNative(vm, "TriggerRegisterEnterRegion",
+               {JassValue::Int(tReject), JassValue::Int(region), JassValue::Str("RejectAll")});
+    CallNative(vm, "TriggerAddAction", {JassValue::Int(tReject), JassValue::Str("OnFilteredEnter")});
+    // Accepting filter: fires only when a real unit crosses.
+    const int tAccept = CallNative(vm, "CreateTrigger", {}).intVal;
+    CallNative(vm, "TriggerRegisterEnterRegion",
+               {JassValue::Int(tAccept), JassValue::Int(region), JassValue::Str("AcceptAll")});
+    CallNative(vm, "TriggerAddAction", {JassValue::Int(tAccept), JassValue::Str("OnOpenEnter")});
+
+    CUnitType* type = MakeRegionTestType();
+    auto* outsider = sim.AdoptUnit(std::make_unique<CUnit>(3001, type, 0, War3ID("hfoo"), 500, 500, 0));
+    TEST_ASSERT(outsider);
+    sim.Update();
+    natives.UpdateRegions();
+    natives.PumpQueuedThreads(1024);
+    TEST_ASSERT(vm.GetGlobal("filteredEnters").intVal == 0);
+    TEST_ASSERT(vm.GetGlobal("openEnters").intVal == 0);
+
+    outsider->SetPosition(10.0f, 10.0f);
+    natives.UpdateRegions();
+    natives.PumpQueuedThreads(1024);
+    TEST_ASSERT(vm.GetGlobal("filteredEnters").intVal == 0);
+    TEST_ASSERT(vm.GetGlobal("openEnters").intVal == 1);
+    return true;
+}

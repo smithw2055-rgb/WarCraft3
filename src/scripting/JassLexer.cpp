@@ -285,3 +285,192 @@ std::vector<JassToken> JassLexer::Tokenize() {
     tokens.push_back({JassTokenType::EOF_TOKEN, "", 0, line_, column_});
     return tokens;
 }
+
+namespace {
+
+// Split a runtextmacro argument list on top-level commas (paren- and
+// quote-aware so nested calls and strings survive).
+std::vector<std::string> SplitMacroArgs(const std::string& text) {
+    std::vector<std::string> args;
+    std::string cur;
+    int depth = 0;
+    bool inString = false;
+    for (size_t i = 0; i < text.size(); i++) {
+        const char c = text[i];
+        if (inString) {
+            cur += c;
+            if (c == '"') inString = false;
+        } else if (c == '"') {
+            inString = true;
+            cur += c;
+        } else if (c == '(') {
+            depth++;
+            cur += c;
+        } else if (c == ')') {
+            if (depth > 0) depth--;
+            cur += c;
+        } else if (c == ',' && depth == 0) {
+            args.push_back(cur);
+            cur.clear();
+        } else {
+            cur += c;
+        }
+    }
+    args.push_back(cur);
+    return args;
+}
+
+std::string TrimSpaces(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t\r");
+    if (b == std::string::npos) return "";
+    size_t e = s.find_last_not_of(" \t\r");
+    return s.substr(b, e - b + 1);
+}
+
+} // namespace
+
+std::string JassLexer::ExpandTextMacros(const std::string& source) {
+    struct Macro {
+        std::vector<std::string> params;
+        std::vector<std::string> body;
+    };
+    // Split into lines, keeping terminators for faithful reassembly.
+    std::vector<std::string> lines;
+    {
+        size_t start = 0;
+        while (start <= source.size()) {
+            size_t end = source.find('\n', start);
+            if (end == std::string::npos) {
+                lines.push_back(source.substr(start));
+                break;
+            }
+            lines.push_back(source.substr(start, end - start + 1));
+            start = end + 1;
+        }
+    }
+    auto isDirective = [](const std::string& line, const char* word) -> bool {
+        size_t p = line.find_first_not_of(" \t\r");
+        if (p == std::string::npos || line.compare(p, 3, "//!") != 0) return false;
+        p = line.find_first_not_of(" \t", p + 3);
+        if (p == std::string::npos) return false;
+        const size_t len = std::string(word).size();
+        if (line.compare(p, len, word) != 0) return false;
+        const size_t after = p + len;
+        return after >= line.size() || line[after] == ' ' || line[after] == '\t' ||
+               line[after] == '\r' || line[after] == '\n' || line[after] == '(';
+    };
+    auto directiveRest = [](const std::string& line) -> std::string {
+        size_t p = line.find_first_not_of(" \t\r");
+        p = line.find_first_not_of(" \t", p + 3);
+        p = line.find_first_of(" \t(", p);
+        if (p == std::string::npos) return "";
+        if (line[p] == '(') return line.substr(p);
+        return line.substr(line.find_first_not_of(" \t", p));
+    };
+    // Pass 1: collect definitions, drop their lines.
+    std::unordered_map<std::string, Macro> macros;
+    std::vector<std::string> code;
+    for (size_t i = 0; i < lines.size();) {
+        if (isDirective(lines[i], "textmacro")) {
+            std::string rest = TrimSpaces(directiveRest(lines[i]));
+            // Name, then space/comma separated params.
+            std::string name;
+            Macro macro;
+            {
+                size_t p = 0;
+                while (p < rest.size() && rest[p] != ' ' && rest[p] != '\t' && rest[p] != ',' &&
+                       rest[p] != '\r' && rest[p] != '\n') {
+                    name += rest[p++];
+                }
+                std::string param;
+                for (; p <= rest.size(); p++) {
+                    const char c = p < rest.size() ? rest[p] : ' ';
+                    if (c == ' ' || c == '\t' || c == ',' || c == '\r' || c == '\n') {
+                        if (!param.empty()) {
+                            macro.params.push_back(param);
+                            param.clear();
+                        }
+                    } else {
+                        param += c;
+                    }
+                }
+            }
+            i++;
+            while (i < lines.size() && !isDirective(lines[i], "endtextmacro")) {
+                macro.body.push_back(lines[i]);
+                i++;
+            }
+            if (i < lines.size()) i++; // drop endtextmacro
+            if (!name.empty()) macros[name] = std::move(macro);
+        } else {
+            code.push_back(lines[i]);
+            i++;
+        }
+    }
+    // Pass 2: expand invocations (bodies may nest; cap the passes).
+    for (int pass = 0; pass < 32; pass++) {
+        bool expanded = false;
+        std::vector<std::string> out;
+        for (const std::string& line : code) {
+            if (!isDirective(line, "runtextmacro")) {
+                out.push_back(line);
+                continue;
+            }
+            std::string rest = TrimSpaces(directiveRest(line));
+            std::string name;
+            std::vector<std::string> args;
+            {
+                size_t p = rest.find('(');
+                if (p == std::string::npos) {
+                    name = TrimSpaces(rest);
+                } else {
+                    name = TrimSpaces(rest.substr(0, p));
+                    size_t depth = 1;
+                    size_t q = p + 1;
+                    bool inString = false;
+                    while (q < rest.size() && depth > 0) {
+                        const char c = rest[q];
+                        if (inString) {
+                            if (c == '"') inString = false;
+                        } else if (c == '"') {
+                            inString = true;
+                        } else if (c == '(') {
+                            depth++;
+                        } else if (c == ')') {
+                            depth--;
+                        }
+                        q++;
+                    }
+                    const std::string inner = rest.substr(p + 1, (q - 1) - (p + 1));
+                    if (!TrimSpaces(inner).empty() || inner.find(',') != std::string::npos) {
+                        args = SplitMacroArgs(inner);
+                        for (auto& a : args) a = TrimSpaces(a);
+                    }
+                }
+            }
+            auto mit = macros.find(name);
+            if (mit == macros.end()) {
+                out.push_back(line); // unknown macro: stays a comment
+                continue;
+            }
+            expanded = true;
+            for (std::string bodyLine : mit->second.body) {
+                for (size_t pi = 0; pi < mit->second.params.size(); pi++) {
+                    const std::string marker = "$" + mit->second.params[pi] + "$";
+                    const std::string& value = pi < args.size() ? args[pi] : "";
+                    size_t at = 0;
+                    while ((at = bodyLine.find(marker, at)) != std::string::npos) {
+                        bodyLine.replace(at, marker.size(), value);
+                        at += value.size();
+                    }
+                }
+                out.push_back(bodyLine);
+            }
+        }
+        code.swap(out);
+        if (!expanded) break;
+    }
+    std::string result;
+    for (const auto& line : code) result += line;
+    return result;
+}

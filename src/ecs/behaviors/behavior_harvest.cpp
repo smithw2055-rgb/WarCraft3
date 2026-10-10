@@ -8,6 +8,7 @@
 #include "ecs/pathing/pathfinding.h"
 #include "ecs/pathing/world_collision.h"
 #include "data/destructabledata.h"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -90,18 +91,50 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
         float dy = target_->GetY() - unit_->GetY();
         float dist = std::sqrt(dx * dx + dy * dy);
 
-        if (dist < 128.0f) {
+        // Footprint-aware arrival (ref CBehaviorReturnResources): start
+        // gathering at the target's edge instead of orbiting big footprints.
+        float arrival = 128.0f;
+        if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+            arrival = std::max(220.0f, targetUnit->GetCollisionSize() + 96.0f);
+            if (resourceType_ == CResourceType::GOLD || targetUnit->GetAbility(War3ID("Agld")) || targetUnit->GetTypeId() == War3ID("ngol")) {
+                arrival = 256.0f;
+            }
+        }
+        if (dist < arrival) {
             movingToResource_ = false;
-            gathering_ = true;
-            gatherTimer_ = 0;
             propelling_ = false;
             unit_->TurnTowardPoint(target_->GetX(), target_->GetY());
+
+            // For gold mines, enter immediately if capacity allows (ref CBehaviorHarvest.java accept(CUnit))
+            if (resourceType_ == CResourceType::GOLD) {
+                auto* targetUnit = dynamic_cast<CUnit*>(target_);
+                if (targetUnit) {
+                    CMineAccess goldMine = MineAccessOf(targetUnit);
+                    if (goldMine.ok()) {
+                        if (goldMine.Gold() <= 0) {
+                            return true;
+                        }
+                        if (goldMine.CanAdd()) {
+                            goldMine.Add(this);
+                            unit_->SetHidden(true);
+                            unit_->SetInvulnerable(true);
+                            inMine_ = true;
+                            gathering_ = false;
+                            popoutFromMineTurnTick_ = simulation.GetGameTurnTick() + std::max(1, static_cast<int>(
+                                std::ceil(goldMine.Duration() / simulation.GetSimStepTime())));
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            gathering_ = true;
+            gatherTimer_ = 0;
             return false;
         }
 
         pathRecalcCooldown_--;
         auto* pathfinding = simulation.GetPathfinding();
-        const bool hasPathingMap = pathfinding && pathfinding->HasPathingMap();
         if (waypoints_.empty() || pathRecalcCooldown_ <= 0) {
             waypoints_.clear();
             if (pathfinding) {
@@ -110,8 +143,17 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                                                 target_->GetX(), target_->GetY(),
                                                 std::max(0.0f, unit_->GetCollisionSize()),
                                                 unit_->GetMovementType(), unit_, worldPath)) {
-                    for (size_t i = 1; i < worldPath.size(); i++)
-                        waypoints_.push_back(worldPath[i]);
+                    // Drop waypoints already reached: degenerate same-cell
+                    // paths would otherwise refill every tick and treadmill
+                    // in the pop branch forever (no turning, no movement).
+                    const float stepReach = std::max(1.0f,
+                        unit_->GetSpeed() * simulation.GetSimStepTime()) * 2.0f;
+                    for (size_t i = 1; i < worldPath.size(); i++) {
+                        const float rdx = worldPath[i].first - unit_->GetX();
+                        const float rdy = worldPath[i].second - unit_->GetY();
+                        if (rdx * rdx + rdy * rdy > stepReach * stepReach)
+                            waypoints_.push_back(worldPath[i]);
+                    }
                 }
             }
             pathRecalcCooldown_ = 8;
@@ -142,19 +184,26 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                     pathRecalcCooldown_ = 0;
                     return false;
                 }
-                if (auto* collision = simulation.GetWorldCollision()) {
-                    const float dynamicCollisionRadius = std::max(collisionRadius, 16.0f);
-                    if (collision->CheckCollision(nx, ny, dynamicCollisionRadius, unit_)) {
-                        propelling_ = false;
-                        waypoints_.clear();
-                        pathRecalcCooldown_ = 0;
-                        return false;
+                if (resourceType_ != CResourceType::GOLD) {
+                    if (auto* collision = simulation.GetWorldCollision()) {
+                        const float dynamicCollisionRadius = std::max(collisionRadius, 16.0f);
+                        if (collision->CheckCollision(nx, ny, dynamicCollisionRadius, unit_)) {
+                            propelling_ = false;
+                            waypoints_.clear();
+                            pathRecalcCooldown_ = 0;
+                            return false;
+                        }
                     }
                 }
                 unit_->SetPosition(nx, ny);
                 propelling_ = true;
             }
-        } else if (!hasPathingMap) {
+        } else {
+            // Direct approach when waypoints are exhausted: A* often
+            // resolves start/end into the same cell (empty waypoint list)
+            // while still hundreds of units out. The step below is still
+            // validated against the pathing map + dynamic collision, so a
+            // genuinely blocked unit stalls one tick and recalcs later.
             if (!unit_->TurnTowardPoint(target_->GetX(), target_->GetY())) {
                 propelling_ = false;
                 return false;
@@ -171,8 +220,6 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             }
             unit_->SetPosition(nx, ny);
             propelling_ = true;
-        } else {
-            propelling_ = false;
         }
         return false;
     }

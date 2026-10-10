@@ -17,6 +17,7 @@
 #include "ecs/abilities/ability_aura.h"
 #include <vector>
 #include <queue>
+#include <functional>
 #include <map>
 #include <memory>
 #include <unordered_set>
@@ -202,6 +203,17 @@ public:
     void Stop(CSimulation& simulation);
     // Last issued order id (ref GetUnitCurrentOrder); 0 when none issued.
     int GetLastOrderId() const { return lastOrderId_; }
+    // Order-issued hook (order id, target kind, point x/y, target sim
+    // handle or -1). Installed by CSimulation::AdoptUnit so every order —
+    // JASS, UI, AI, net — flows into the sim's unitOrderCallback_ (JASS
+    // issued-order trigger events + command log live there).
+    using OrderIssuedHook = std::function<void(int, int, float, float, int)>;
+    void SetOrderIssuedHook(OrderIssuedHook hook) { orderIssuedHook_ = std::move(hook); }
+    // Load hook (passenger sim handle). Installed by AdoptUnit; the sim
+    // forwards fresh boardings to unitLoadedCallback_ (JASS LOADED event).
+    // Fires only when the passenger actually boards (not already aboard).
+    using UnitLoadedHook = std::function<void(int)>;
+    void SetUnitLoadedHook(UnitLoadedHook hook) { unitLoadedHook_ = std::move(hook); }
 
     // Behavior storage (set by abilities on Add)
     CBehaviorMove* GetMoveBehavior() const { return moveBehavior_.get(); }
@@ -275,6 +287,9 @@ public:
     bool IsMagicImmune() const { return magicImmune_; }
     void SetMagicImmune(bool v) { magicImmune_ = v; }
     bool IsInvisibleTo(const CUnit* viewer) const;
+    // Stealth pre-check for fog rendering: invisible flag or a Wind Walk
+    // buff. Detector/Faerie-Fire resolution still needs IsInvisibleTo(viewer).
+    bool IsStealthed() const;
     bool IsConstructionPaused() const { return constructionPaused_; }
     void SetConstructionPaused(bool v) { constructionPaused_ = v; }
     float GetConstructionProgress() const { return constructionProgress_; }
@@ -499,6 +514,8 @@ private:
     CBehavior* currentBehavior_ = nullptr;
     std::queue<std::unique_ptr<COrder>> orderQueue_;
     int lastOrderId_ = 0;
+    OrderIssuedHook orderIssuedHook_;
+    UnitLoadedHook unitLoadedHook_;
 
     // Transport cargo (passengers hidden aboard this unit)
     std::vector<CUnit*> cargoUnits_;

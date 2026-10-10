@@ -1,4 +1,5 @@
 #include "asset/BLP.h"
+#include "asset/stb_image.h"
 
 #include <cstdint>
 #include <vector>
@@ -73,5 +74,41 @@ bool TestDecodeBLPDecodesMinimalPaletted() {
     TEST_ASSERT(out.pixels[1] == 20);
     TEST_ASSERT(out.pixels[2] == 30);
     TEST_ASSERT(out.pixels[3] == 40);
+    return true;
+}
+
+bool TestTgaDecodesViaStb() {
+    // TGA chain (ref TgaFile/TgaHandler): our Texture::LoadFromMemory
+    // decodes TGA through stb_image, so a minimal 2x2 BGR TGA must load.
+    // Bottom-left origin (descriptor 0), uncompressed true-color, 24bpp.
+    std::vector<uint8_t> tga = {
+        0,    // id length
+        0,    // colormap type
+        2,    // image type: uncompressed true-color
+        0, 0, 0, 0, 0, // colormap spec
+        0, 0, // x origin
+        0, 0, // y origin
+        2, 0, // width = 2
+        2, 0, // height = 2
+        24,   // bits per pixel
+        0,    // descriptor
+        // 4 pixels, BGR order: red, green, blue, white
+        0, 0, 255,  0, 255, 0,  255, 0, 0,  255, 255, 255,
+    };
+    int w = 0, h = 0, comp = 0;
+    stbi_uc* px = stbi_load_from_memory(tga.data(), (int)tga.size(), &w, &h, &comp, STBI_rgb_alpha);
+    TEST_ASSERT(px != nullptr);
+    TEST_ASSERT(w == 2 && h == 2);
+    // stb flips bottom-left origin to top-left row order, so scan all four
+    // pixels for the red one instead of assuming index 0.
+    bool foundRed = false;
+    for (int i = 0; i < 4; i++) {
+        if (px[i * 4 + 0] == 255 && px[i * 4 + 1] == 0 && px[i * 4 + 2] == 0 &&
+            px[i * 4 + 3] == 255) {
+            foundRed = true;
+        }
+    }
+    TEST_ASSERT(foundRed);
+    stbi_image_free(px);
     return true;
 }

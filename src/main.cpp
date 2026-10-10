@@ -36,7 +36,7 @@ sapp_desc sokol_main(int argc, char* argv[]) {
     desc.event_cb = event_cb;
     desc.width = 1280;
     desc.height = 720;
-    // Noesis renders the final UI directly on the default framebuffer. Keep the
+    // The FDF HUD renders into the default framebuffer. Keep the
     // swapchain single-sampled so a later MSAA resolve cannot overwrite it.
     desc.sample_count = 1;
     desc.window_title = "Warcraft III C++ Recreation (sokol)";

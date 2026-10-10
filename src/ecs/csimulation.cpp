@@ -144,6 +144,9 @@ void CSimulation::Update() {
     // Step projectiles after units so just-fired shots move the same tick.
     UpdateProjectiles();
     UpdateHazards();
+    // Push stacked units apart so clustered spawns and followers cannot
+    // hard-lock each other's collision checks forever (ref unit separation).
+    ResolveUnitSeparation();
 
     ProcessUnitRemovals();
     ProcessNewUnits();
@@ -212,8 +215,59 @@ void CSimulation::UpdateProjectiles() {
     }
 }
 
-void CSimulation::UpdateHazards() {
-    for (auto it = hazards_.begin(); it != hazards_.end();) {
+void CSimulation::ResolveUnitSeparation() {
+    // Positional separation for overlapping movable units. Buildings never
+    // move; a movable unit overlapping a building is pushed out alone.
+    // Hidden/loaded/dead units are skipped. Displacement per pair is capped
+    // so docking (harvest dropoff, repair) stays stable.
+    constexpr float kMaxPushPerTick = 6.0f;
+    const size_t n = units_.size();
+    for (size_t i = 0; i < n; ++i) {
+        CUnit* a = units_[i];
+        if (!a || a->IsDead() || a->IsHidden() || a->IsLoadedAboard()) continue;
+        const bool aStatic = a->IsBuilding() || !a->IsPathingEnabled();
+        for (size_t j = i + 1; j < n; ++j) {
+            CUnit* b = units_[j];
+            if (!b || b->IsDead() || b->IsHidden() || b->IsLoadedAboard()) continue;
+            const bool bStatic = b->IsBuilding() || !b->IsPathingEnabled();
+            if (aStatic && bStatic) continue;
+            const float ra = std::max(8.0f, a->GetCollisionSize());
+            const float rb = std::max(8.0f, b->GetCollisionSize());
+            const float minDist = ra + rb;
+            float dx = b->GetX() - a->GetX();
+            float dy = b->GetY() - a->GetY();
+            float d2 = dx * dx + dy * dy;
+            if (d2 >= minDist * minDist) continue;
+            float dist = std::sqrt(d2);
+            float nx = 0.0f;
+            float ny = 0.0f;
+            if (dist < 0.001f) {
+                // Exactly stacked: separate along a deterministic axis
+                // derived from handle order so the pair splits apart.
+                nx = (a->GetHandleId() < b->GetHandleId()) ? -1.0f : 1.0f;
+                ny = 0.0f;
+                dist = 0.0f;
+            } else {
+                nx = dx / dist;
+                ny = dy / dist;
+            }
+            const float overlap = minDist - dist;
+            float push = std::min(overlap * 0.5f, kMaxPushPerTick);
+            if (!aStatic && !bStatic) {
+                a->SetPosition(a->GetX() - nx * push, a->GetY() - ny * push);
+                b->SetPosition(b->GetX() + nx * push, b->GetY() + ny * push);
+            } else if (!aStatic) {
+                a->SetPosition(a->GetX() - nx * std::min(overlap, kMaxPushPerTick),
+                               a->GetY() - ny * std::min(overlap, kMaxPushPerTick));
+            } else {
+                b->SetPosition(b->GetX() + nx * std::min(overlap, kMaxPushPerTick),
+                               b->GetY() + ny * std::min(overlap, kMaxPushPerTick));
+            }
+        }
+    }
+}
+
+void CSimulation::UpdateHazards() {    for (auto it = hazards_.begin(); it != hazards_.end();) {
         SimHazard& h = *it;
         // Wander step (tornadoes).
         if (h.speed > 0.0f) {
@@ -322,6 +376,22 @@ bool CSimulation::IsPointBlighted(float x, float y) const {
 CUnit* CSimulation::AdoptUnit(std::unique_ptr<CUnit> unit) {
     if (!unit) return nullptr;
     CUnit* ptr = unit.get();
+    // Every order issued on this unit (JASS/UI/AI/net all call
+    // CUnit::IssueOrder directly) flows into the sim order callback:
+    // command log lives in IssueUnitOrder, JASS issued-order trigger
+    // events live behind unitOrderCallback_.
+    const int adoptedHandle = ptr->GetHandleId();
+    ptr->SetOrderIssuedHook([this, adoptedHandle](int orderId, int targetKind, float x, float y, int targetHandle) {
+        (void)targetKind;
+        if (unitOrderCallback_) {
+            unitOrderCallback_(adoptedHandle, orderId, targetHandle, x, y);
+        }
+    });
+    ptr->SetUnitLoadedHook([this, adoptedHandle](int passengerHandle) {
+        if (unitLoadedCallback_) {
+            unitLoadedCallback_(adoptedHandle, passengerHandle);
+        }
+    });
     unitMap_[ptr->GetHandleId()] = std::move(unit);
     newUnits_.push_back(ptr);
     return ptr;
@@ -350,6 +420,37 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
     if (!unitData_) return nullptr;
     auto* unitType = unitData_->GetUnitType(typeId);
     if (!unitType) return nullptr;
+
+    // Map-init dedupe: preplaced units exist both in war3mapUnits.doo and
+    // in the map script's CreateNeutral*/CreatePlayer* functions, which the
+    // engine runs on top of the doo load. During init only, fold an exact
+    // duplicate (same type + owner within 64 units) into the existing unit
+    // so creeps/mines/taverns are not doubled. Post-init creation (training,
+    // summons, revives) is never deduped.
+    if (mapInitPhase_) {
+        for (CUnit* existing : units_) {
+            if (!existing || existing->IsDead() || existing->GetTypeId() != typeId ||
+                existing->GetPlayerIndex() != playerIndex) {
+                continue;
+            }
+            const float dx = existing->GetX() - x;
+            const float dy = existing->GetY() - y;
+            if (dx * dx + dy * dy < 64.0f * 64.0f) {
+                return existing;
+            }
+        }
+        for (CUnit* pending : newUnits_) {
+            if (!pending || pending->IsDead() || pending->GetTypeId() != typeId ||
+                pending->GetPlayerIndex() != playerIndex) {
+                continue;
+            }
+            const float dx = pending->GetX() - x;
+            const float dy = pending->GetY() - y;
+            if (dx * dx + dy * dy < 64.0f * 64.0f) {
+                return pending;
+            }
+        }
+    }
 
     int handleId = handleIdAlloc_.CreateId();
 
@@ -438,6 +539,18 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
                 unit->AddAbility(*this, std::make_unique<CAbilityHarvest>(abilityHandle));
                 break;
             }
+        }
+        // Race workers always harvest (ref melee economy): data rows for
+        // some workers (e.g. acolyte) lack Ahar, which would leave AI and
+        // player harvest orders permanently rejected. Acolytes cannot chop
+        // lumber (retail), so their lumber capacity stays zero.
+        if (!unit->GetAbility(War3ID("Ahar")) &&
+            (typeId == War3ID("hpea") || typeId == War3ID("opeo") ||
+             typeId == War3ID("uaco") || typeId == War3ID("ewsp"))) {
+            abilityHandle = handleIdAlloc_.CreateId();
+            auto harvest = std::make_unique<CAbilityHarvest>(abilityHandle);
+            if (typeId == War3ID("uaco")) harvest->SetLumberCapacity(0);
+            unit->AddAbility(*this, std::move(harvest));
         }
 
         if (!unitType->GetStructuresBuilt().empty() && !unit->GetAbility(War3ID("AHbu"))
@@ -708,13 +821,11 @@ bool CSimulation::IssueUnitOrder(int unitHandle, std::unique_ptr<COrder> order) 
     }
     commandLog_.push_back(cmd);
     const int orderId = cmd.orderId;
-    const int targetHandle = cmd.targetHandle;
-    const float x = cmd.x;
-    const float y = cmd.y;
     unit->IssueOrder(std::move(order));
-    if (unitOrderCallback_) {
-        unitOrderCallback_(unitHandle, orderId, targetHandle, x, y);
-    }
+    // NOTE: no direct unitOrderCallback_ call here; CUnit::IssueOrder
+    // invokes the AdoptUnit-installed hook above, which fires it exactly
+    // once for every order path (sim, JASS, UI, AI, net).
+    (void)orderId;
     return true;
 }
 

@@ -35,6 +35,9 @@ public:
     void SetXP(CSimulation& game, CUnit* unit, int value);
     int GetHeroLevel() const { return heroLevel_; }
     void SetHeroLevel(CSimulation& game, CUnit* unit, int level);
+    // Retail UnitStripHeroLevel: drop levels (XP snaps to the new threshold,
+    // stats recomputed); false when already level 1 or levels <= 0.
+    bool StripLevels(CSimulation& game, CUnit* unit, int levels);
     bool SelectHeroSkill(CSimulation& game, CUnit* unit, War3ID skillCode);
 
     // Skill points

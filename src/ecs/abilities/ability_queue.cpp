@@ -150,6 +150,9 @@ bool CAbilityQueue::QueueUnit(CSimulation& game, CUnit* building, War3ID unitTyp
     }
 
     std::cout << "Queued unit: " << unitTypeId.ToString() << " in slot " << slot << std::endl;
+    if (const auto& cb = game.GetQueueEventCallback()) {
+        cb(building->GetHandleId(), (int)unitTypeId.value, 0, true);
+    }
     return false; // don't queue the order
 }
 
@@ -207,6 +210,9 @@ bool CAbilityQueue::QueueResearch(CSimulation& game, CUnit* building, War3ID upg
     }
 
     std::cout << "Queued research: " << upgradeId.ToString() << std::endl;
+    if (const auto& cb = game.GetQueueEventCallback()) {
+        cb(building->GetHandleId(), (int)upgradeId.value, 1, true);
+    }
     return false;
 }
 
@@ -265,6 +271,9 @@ bool CAbilityQueue::QueueReviveHero(CSimulation& game, CUnit* building, CUnit* h
 void CAbilityQueue::CancelQueueItem(CSimulation& game, CUnit* building, int slot) {
     if (slot < 0 || slot >= MAX_QUEUE) return;
     if (queueTypes_[slot] == CQueueItemType::NONE) return;
+    // Capture for the cancel event before the queue shifts.
+    const War3ID removedId = queue_[slot];
+    const CQueueItemType removedKind = queueTypes_[slot];
 
     // Refund resources
     auto* player = game.GetPlayer(building->GetPlayerIndex());
@@ -315,6 +324,15 @@ void CAbilityQueue::CancelQueueItem(CSimulation& game, CUnit* building, int slot
             buildTime_ = CalculateBuildTime(game, building, queue_[0], queueTypes_[0]);
         } else {
             buildTime_ = 0;
+        }
+    }
+
+    // Train/research cancellations observe the removed entry (hero-revive
+    // cancels have no retail event).
+    if (removedKind == CQueueItemType::UNIT || removedKind == CQueueItemType::RESEARCH) {
+        if (const auto& cb = game.GetQueueEventCallback()) {
+            cb(building->GetHandleId(), (int)removedId.value,
+               removedKind == CQueueItemType::UNIT ? 0 : 1, false);
         }
     }
 }

@@ -622,12 +622,17 @@ void ABActionTransferToCaster::Run(CSimulation& game, CUnit* caster, CWidget* un
     auto* target = dynamic_cast<CUnit*>(unitTarget);
     if (!caster || !target) return;
     if (target->GetPlayerIndex() == caster->GetPlayerIndex()) return;
+    const int prevOwner = target->GetPlayerIndex();
     if (CPlayer* oldOwner = game.GetPlayer(target->GetPlayerIndex())) {
         oldOwner->RemoveUnit(target);
     }
     target->SetPlayerIndex(caster->GetPlayerIndex());
     if (CPlayer* newOwner = game.GetPlayer(caster->GetPlayerIndex())) {
         newOwner->AddUnit(target);
+    }
+    // Ownership conversion (ref Charm): JASS CHANGE_OWNER triggers observe it.
+    if (const auto& cb = game.GetOwnerChangedCallback()) {
+        cb(target->GetHandleId(), prevOwner);
     }
 }
 

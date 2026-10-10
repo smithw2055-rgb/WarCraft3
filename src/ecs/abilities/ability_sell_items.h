@@ -40,6 +40,11 @@ public:
     void SetStockReplenishInterval(float v) { stockReplenishInterval_ = v; }
 
 private:
+    // Mercenary hire from unit-stock slots (order carries 0x10000).
+    bool HireUnit(CSimulation& game, CUnit* caster, int orderId);
+    // Pawn an inventory item back to this shop for gold (ref pawn shops).
+    bool PawnItem(CSimulation& game, CUnit* shop, CUnit* seller, int slot);
+
     std::vector<War3ID> itemsSold_;
     std::vector<StockEntry> stock_;
     int stockMax_ = 1;

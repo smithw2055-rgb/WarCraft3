@@ -81,28 +81,43 @@ private:
 };
 
 // Acolyte harvest (Aaha): stand at a haunted mine.
+//
+// ref CBehaviorAcolyteHarvest: the acolyte stays bound indefinitely (no
+// timeout) until death, removal, or a new order rebinds it elsewhere.
+// The binding is a mine-unit handle, not a raw ability pointer, so a dead
+// mine never dangles; Unbind() is idempotent. Gold itself trickles from
+// CAbilityBlightedGoldMine::OnTick (faster with more miners).
 class CAbilityAcolyteHarvest : public CAbilitySpellBase {
 public:
     explicit CAbilityAcolyteHarvest(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
-    void OnTick(CSimulation& game, CUnit* unit) override;
+    void OnDeath(CSimulation& game, CUnit* unit) override;
+    void OnRemove(CSimulation& game, CUnit* unit) override;
     bool CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const override;
 
+    bool IsBound() const { return mineUnitHandle_ >= 0; }
+    int GetBoundMineHandle() const { return mineUnitHandle_; }
+
 private:
-    CAbilityBlightedGoldMine* bound_ = nullptr;
-    float duration_ = 30.0f;
-    float remaining_ = 0.0f;
+    void Unbind(CSimulation& game);
+    int mineUnitHandle_ = -1;
 };
 
 // Wisp harvest (Awha): lumber straight to the player, tree takes damage.
+//
+// ref CBehaviorWispHarvest: the wisp jumps onto the tree (instant
+// reposition, no walk/carry/return trips) and trickles lumber until the
+// tree dies. The tree is tracked by handle so a removed tree never dangles.
 class CAbilityWispHarvest : public CAbilitySpellBase {
 public:
     explicit CAbilityWispHarvest(int handleId);
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
     void OnTick(CSimulation& game, CUnit* unit) override;
 
+    int GetBoundTreeHandle() const { return treeHandle_; }
+
 private:
-    CDestructable* tree_ = nullptr;
+    int treeHandle_ = -1;
     int lumberPerInterval_ = 5;
     float damagePerInterval_ = 5.0f;
     float interval_ = 1.0f;

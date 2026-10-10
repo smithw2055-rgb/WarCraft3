@@ -4,6 +4,7 @@
 #include "render/math.h"
 #include <vector>
 #include <random>
+#include <memory>
 
 class MdxAnimator;
 class MpqManager;
@@ -70,6 +71,10 @@ private:
     Vec3 RandomDirectionInCone(float latitude, std::mt19937& rng, std::uniform_real_distribution<float>& dist01);
 
     std::vector<ParticleEmitterState> emitters_;
+    // Synthesized Emitter2 views of CORN popcorn emitters (ref
+    // MdlxParticleEmitterPopcorn has no dedicated runtime here; mapped to
+    // billboard particles so campaign/Reforged effects are visible).
+    std::vector<std::unique_ptr<MdxParticleEmitter2>> popcornOwned_;
     sg_buffer quadBuffer_ = {0};
     sg_buffer indexBuffer_ = {0};
 

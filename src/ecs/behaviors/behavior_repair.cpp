@@ -68,7 +68,14 @@ bool CBehaviorRepair::RecalculatePath(CSimulation& simulation) {
     }
 
     for (size_t i = 1; i < worldPath.size(); ++i) {
-        waypoints_.push_back(worldPath[i]);
+        // Drop already-reached waypoints (ref CBehaviorHarvest: degenerate
+        // refills treadmill forever otherwise).
+        const float stepReach = std::max(1.0f,
+            unit_->GetSpeed() * simulation.GetSimStepTime()) * 2.0f;
+        const float rdx = worldPath[i].first - unit_->GetX();
+        const float rdy = worldPath[i].second - unit_->GetY();
+        if (rdx * rdx + rdy * rdy > stepReach * stepReach)
+            waypoints_.push_back(worldPath[i]);
     }
     return !waypoints_.empty();
 }
@@ -78,7 +85,6 @@ bool CBehaviorRepair::MoveTowardWaypoint(CSimulation& simulation) {
         return true;
     }
     auto* pathfinding = simulation.GetPathfinding();
-    const bool hasPathingMap = pathfinding && pathfinding->HasPathingMap();
 
     float targetX = target_->GetX();
     float targetY = target_->GetY();
@@ -96,10 +102,10 @@ bool CBehaviorRepair::MoveTowardWaypoint(CSimulation& simulation) {
         }
         targetX = wp.first;
         targetY = wp.second;
-    } else if (hasPathingMap) {
-        propelling_ = false;
-        return false;
     }
+    // Empty waypoints fall through to the direct approach below (same
+    // rationale as CBehaviorHarvest): the step stays validated against the
+    // pathing map + dynamic collision.
 
     if (!unit_->TurnTowardPoint(targetX, targetY)) {
         propelling_ = false;
@@ -181,9 +187,12 @@ bool CBehaviorRepair::Update(CSimulation& simulation) {
     const float dx = target_->GetX() - unit_->GetX();
     const float dy = target_->GetY() - unit_->GetY();
     const float dist = std::sqrt(dx * dx + dy * dy);
+    // Footprint-aware arrival (ref CBehaviorReturnResources): repair from
+    // the target's edge instead of orbiting big footprints.
+    const float arrival = std::max(repairRange, targetUnit->GetCollisionSize() + 64.0f);
 
     if (movingToTarget_) {
-        if (dist <= repairRange) {
+        if (dist <= arrival) {
             movingToTarget_ = false;
             repairing_ = true;
             propelling_ = false;
@@ -196,14 +205,8 @@ bool CBehaviorRepair::Update(CSimulation& simulation) {
             RecalculatePath(simulation);
             pathRecalcCooldown_ = 8;
         }
-        if (waypoints_.empty()) {
-            auto* pathfinding = simulation.GetPathfinding();
-            if (pathfinding && pathfinding->HasPathingMap()) {
-                propelling_ = false;
-                return false;
-            }
-        }
-
+        // Empty waypoints flow into MoveTowardWaypoint's direct approach
+        // (validated step); no stall here (ref CBehaviorHarvest).
         return MoveTowardWaypoint(simulation);
     }
 

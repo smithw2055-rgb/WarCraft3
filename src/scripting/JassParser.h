@@ -49,6 +49,16 @@ public:
     const std::vector<std::string>& GetErrors() const { return errors_; }
     // Scope/library initializers, in source order (run before main).
     const std::vector<std::string>& GetInitializers() const { return initializers_; }
+    // Library dependency records for initializer topological order (ref
+    // `library ... needs ...`: dependencies run first).
+    struct LibraryInfo {
+        std::string name;
+        std::string initializer;
+        std::vector<std::string> needs;
+    };
+    const std::vector<LibraryInfo>& GetLibraries() const { return libraries_; }
+    // vJASS `hook ORIG REPL` pairs, scope-resolved (ref function hooking).
+    const std::vector<std::pair<std::string, std::string>>& GetHooks() const { return hooks_; }
 
 private:
     // vJASS contextual keywords (kept as identifiers by the lexer to avoid
@@ -99,6 +109,29 @@ private:
     std::unique_ptr<AstNode> ParseNativeDecl(bool isConstant = false);
     std::unique_ptr<AstNode> ParseBlock();
     std::unique_ptr<AstNode> ParseStatement();
+    // vJASS `static if` (ref compile-time conditionals): true when the next
+    // tokens are the contextual `static` identifier followed by `if`.
+    bool AtStaticIf() const {
+        return Peek().type == JassTokenType::IDENTIFIER && Peek().text == "static" &&
+               PeekAt(1).type == JassTokenType::KW_IF;
+    }
+    // Compile-time condition value: constant literals, LIBRARY_* presence,
+    // arithmetic/comparison/logic over constants. False + error otherwise.
+    bool EvalStaticCondition(const AstNode* expr, bool& out);
+    // Advance past an untaken branch body (stops at elseif/else/endif at
+    // depth 1, or EOF). Balances nested ifs so vanilla blocks inside pass.
+    void SkipStaticBranch();
+    // Statement context: BLOCK holding the taken branch's statements.
+    std::unique_ptr<AstNode> ParseStaticIfStmt();
+    // Declaration context: appends taken declarations (with raw names and
+    // privacy for scope rewriting).
+    struct RawDecl {
+        std::unique_ptr<AstNode> node;
+        std::string rawName;
+        bool isPrivate = false;
+    };
+    void ParseStaticIfDecls(std::vector<RawDecl>& out, bool defaultPrivate,
+                            const std::string& scopePrefix = "");
     std::unique_ptr<AstNode> ParseExpression();
     std::unique_ptr<AstNode> ParseOrExpr();
     std::unique_ptr<AstNode> ParseAndExpr();
@@ -126,6 +159,31 @@ private:
     std::vector<ImplementRecord> pendingImplements_;
     std::vector<std::unique_ptr<AstNode>> moduleDefs_; // kept alive for expansion
     std::vector<std::unique_ptr<AstNode>> hoisted_; // nested module/interface lifted to the program
+    // vJASS `LIBRARY_Name` presence flags, defined as each library closes
+    // (ref static library constants for `static if` conditions).
+    std::unordered_map<std::string, bool> staticDefines_;
+    std::vector<LibraryInfo> libraries_;
+    std::vector<std::pair<std::string, std::string>> hooks_;
+    struct HookRecord {
+        std::string orig;
+        std::string repl;
+        std::string scopePrefix;
+    };
+    std::vector<HookRecord> hookRecords_;
+    std::unordered_map<std::string, std::unordered_set<std::string>> scopePrivates_;
+    // True for a top-level/scope-level `hook ORIG REPL` directive (two
+    // bare identifiers on one line; calls like hook(a) don't match).
+    bool AtHookDirective() const {
+        return Peek().type == JassTokenType::IDENTIFIER && Peek().text == "hook" &&
+               PeekAt(1).type == JassTokenType::IDENTIFIER &&
+               PeekAt(2).type == JassTokenType::IDENTIFIER &&
+               (PeekAt(3).type == JassTokenType::NEWLINE ||
+                PeekAt(3).type == JassTokenType::EOF_TOKEN);
+    }
+    // Consumes the directive, tagging the enclosing scope for later
+    // private-name resolution (empty prefix at top level).
+    void ParseHookDirective(const std::string& scopePrefix);
+    void ResolveHooks();
     // Expands pending implements into struct decls and drops MODULE_DECL
     // nodes. Runs once at the end of ParseProgram.
     void ExpandImplements(AstNode* program);

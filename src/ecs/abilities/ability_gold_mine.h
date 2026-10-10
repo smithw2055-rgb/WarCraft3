@@ -20,6 +20,7 @@ public:
 
     // Mining capacity
     int GetMiningCapacity() const { return miningCapacity_; }
+    void SetMiningCapacity(int v) { miningCapacity_ = v; }
     int GetActiveMinerCount() const { return static_cast<int>(activeMiners_.size()); }
     bool CanAddMiner() const { return GetActiveMinerCount() < miningCapacity_; }
     void AddMiner(CBehaviorHarvest* miner);
@@ -35,7 +36,9 @@ public:
 
 private:
     int gold_ = 12500; // standard WC3 gold mine
-    int miningCapacity_ = 3;
+    // Retail Agld DataC1 (mining capacity) = 5; blighted/overlay mines
+    // match at 5. Wired from data when available via SetMiningCapacity.
+    int miningCapacity_ = 5;
     float miningDuration_ = 5.0f; // seconds per mining trip
     int goldPerTrip_ = 10;
     std::vector<CBehaviorHarvest*> activeMiners_;

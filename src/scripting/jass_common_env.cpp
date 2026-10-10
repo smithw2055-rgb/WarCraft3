@@ -189,11 +189,105 @@ void JassCommonEnv::WireCallbacks(CSimulation& sim) {
         }
     );
 
+    // Transport boarding → JASS LOADED triggers
+    sim.SetUnitLoadedCallback(
+        [this](int transportHandle, int passengerHandle) {
+            if (natives_)
+                natives_->FireLoadedEvent(transportHandle, passengerHandle);
+        }
+    );
+
+    // Corpse begins decaying → JASS DECAY triggers
+    sim.SetUnitDecayCallback(
+        [this](int unitHandle) {
+            if (natives_)
+                natives_->FireDecayEvent(unitHandle);
+        }
+    );
+
     // Unit item manipulation events -> JASS trigger system
     sim.SetItemEventCallback(
         [this](int unitHandle, int itemHandle, int eventType) {
             if (natives_)
                 natives_->FireItemEvent(unitHandle, itemHandle, eventType);
+        }
+    );
+
+    // Shop sales (buyer/seller/item) -> JASS SELL_ITEM triggers
+    sim.SetShopEventCallback(
+        [this](int buyerHandle, int sellerHandle, int itemHandle) {
+            if (natives_)
+                natives_->FireSellItemEvent(buyerHandle, sellerHandle, itemHandle);
+        }
+    );
+
+    // Mercenary hires (buyer may be -1; seller/hired) -> SELL triggers
+    sim.SetShopUnitEventCallback(
+        [this](int buyerHandle, int sellerHandle, int hiredHandle) {
+            if (natives_)
+                natives_->FireSellUnitEvent(buyerHandle, sellerHandle, hiredHandle);
+        }
+    );
+
+    // Pawn-back sales (buyer shop, seller pawner) -> PAWN triggers
+    sim.SetPawnEventCallback(
+        [this](int buyerHandle, int sellerHandle, int itemHandle) {
+            if (natives_)
+                natives_->FirePawnItemEvent(sellerHandle, buyerHandle, itemHandle);
+        }
+    );
+
+    // Hero skill learning -> HERO_SKILL triggers
+    sim.SetHeroSkillCallback(
+        [this](int unitHandle, int skillId, int newLevel) {
+            if (natives_)
+                natives_->FireHeroSkillEvent(unitHandle, skillId, newLevel);
+        }
+    );
+
+    // Queue lifecycle (kind 0 = train, 1 = research, 2 = upgrade morph).
+    sim.SetQueueEventCallback(
+        [this](int buildingHandle, int typeId, int kind, bool started) {
+            if (!natives_) return;
+            if (kind == 0) {
+                if (started) {
+                    natives_->FireTrainStartEvent(buildingHandle, typeId);
+                } else {
+                    natives_->FireTrainCancelEvent(buildingHandle, typeId);
+                }
+            } else if (kind == 1) {
+                if (started) {
+                    natives_->FireResearchStartEvent(buildingHandle, typeId);
+                } else {
+                    natives_->FireResearchCancelEvent(buildingHandle, typeId);
+                }
+            } else {
+                if (started) {
+                    natives_->FireUpgradeStartEvent(buildingHandle, typeId);
+                } else {
+                    natives_->FireUpgradeFinishEvent(buildingHandle, typeId);
+                }
+            }
+        }
+    );
+
+    // Construction finish/cancel -> CONSTRUCT triggers
+    sim.SetConstructEventCallback(
+        [this](int buildingHandle, bool finished) {
+            if (!natives_) return;
+            if (finished) {
+                natives_->FireConstructFinishEvent(buildingHandle);
+            } else {
+                natives_->FireConstructCancelEvent(buildingHandle);
+            }
+        }
+    );
+
+    // Sim-side ownership conversions (charm/possession) -> CHANGE_OWNER
+    sim.SetOwnerChangedCallback(
+        [this](int unitHandle, int prevOwnerIndex) {
+            if (natives_)
+                natives_->FireChangeOwnerEvent(unitHandle, prevOwnerIndex);
         }
     );
 

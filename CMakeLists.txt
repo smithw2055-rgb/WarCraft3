@@ -18,7 +18,7 @@ else()
 endif()
 
 if(MSVC)
-    add_compile_options(/wd4819)
+    add_compile_options(/wd4819 /bigobj)
 endif()
 
 # -------------------------------------------------------------------
@@ -126,42 +126,9 @@ if(BUILD_APP)
         find_library(XCURSOR_LIBRARY Xcursor REQUIRED)
     endif()
 
-    set(AERO_SDK_DIR "${CMAKE_SOURCE_DIR}/third_party/AeroGUI")
-    set(AERO_BIN_DIR "${AERO_SDK_DIR}/Bin/x64-release-shared")
-    if(NOT EXISTS "${AERO_SDK_DIR}/Include/NsCore/Aero.h")
-        message(FATAL_ERROR "AeroGUI SDK not found at ${AERO_SDK_DIR}")
-    endif()
-
-    if(NOT EXISTS "${AERO_BIN_DIR}")
-        message(FATAL_ERROR "AeroGUI shared library directory not found at ${AERO_BIN_DIR}")
-    endif()
-
-    set(AERO_INCLUDE_DIRS
-        "${AERO_SDK_DIR}/Include"
-        "${AERO_SDK_DIR}/Packages/App/Launcher/Include"
-        "${AERO_SDK_DIR}/Packages/App/ApplicationLauncher/Include"
-        "${AERO_SDK_DIR}/Packages/App/Providers/Include"
-        "${AERO_SDK_DIR}/Packages/App/Theme/Include"
-        "${AERO_SDK_DIR}/Packages/Render/GLRenderDevice/Include"
-    )
-
-    find_library(AERO_CORE_LIBRARY
-        NAMES Aero
-        PATHS "${AERO_BIN_DIR}"
-        NO_DEFAULT_PATH
-    )
-    find_library(AERO_APP_LIBRARY
-        NAMES AeroApp
-        PATHS "${AERO_BIN_DIR}"
-        NO_DEFAULT_PATH
-    )
-
-    if(NOT AERO_CORE_LIBRARY OR NOT AERO_APP_LIBRARY)
-        message(FATAL_ERROR "AeroGUI libraries not found in ${AERO_BIN_DIR}")
-    endif()
-
-    set(NS_LICENSE_NAME_VALUE "$ENV{NS_LICENSE_NAME}")
-    set(NS_LICENSE_KEY_VALUE "$ENV{NS_LICENSE_KEY}")
+    # NOTE: the former AeroGUI/Noesis XAML HUD was removed in favor of the
+    # retail FDF UI stack (see src/ui/FdfHudHost.*). No proprietary UI SDK
+    # is required to build the app.
 endif()
 
 # -------------------------------------------------------------------
@@ -259,6 +226,7 @@ set(SOURCES
     src/ecs/abilities/ability_hero.cpp
     src/ecs/abilities/ability_inventory.cpp
     src/ecs/abilities/ability_build.cpp
+    src/ecs/abilities/ability_builder.cpp
     src/ecs/abilities/ability_harvest.cpp
     src/ecs/abilities/ability_gold_mine.cpp
     src/ecs/abilities/ability_return_resources.cpp
@@ -323,11 +291,13 @@ set(SOURCES
     src/ecs/behaviors/behavior_harvest.cpp
     src/ecs/behaviors/behavior_return_resources.cpp
     src/ecs/behaviors/behavior_spell.cpp
+    src/ecs/behaviors/behavior_root.cpp
     src/ecs/behaviors/behavior_channel.cpp
     src/ecs/behaviors/behavior_item.cpp
     src/ecs/pathing/world_collision.cpp
     src/ecs/pathing/pathfinding.cpp
     src/ecs/combat/combat_system.cpp
+    src/ecs/combat/projectile.cpp
     # ===== Scripting =====
     src/scripting/JassLexer.cpp
     src/scripting/JassParser.cpp
@@ -338,13 +308,10 @@ set(SOURCES
     src/audio/AudioSystem.cpp
     src/audio/UnitSoundset.cpp
     src/audio/AckSoundBank.cpp
-    # ===== UI =====
+    # ===== UI (retail FDF stack; no proprietary SDK) =====
     src/ui/UiRenderer.cpp
-    src/ui/GluePanels.cpp
-    src/ui/GlueMenuControl.cpp
-    src/ui/MdxSceneControl.cpp
-    src/ui/MdxUiSceneRenderer.cpp
-    src/ui/NoesisHudHost.cpp
+    src/ui/ConsoleHUD.cpp
+    src/ui/FdfHudHost.cpp
     src/ui/FrameDefinition.cpp
     src/ui/FdfParser.cpp
     src/ui/UIFrame.cpp
@@ -380,13 +347,11 @@ if(BUILD_APP)
     # Add executable
     add_executable(warsmash ${SOURCES})
 
-    target_include_directories(warsmash PRIVATE src ${AERO_INCLUDE_DIRS})
+    target_include_directories(warsmash PRIVATE src)
 
     # Pass project source root to code so it can find assets regardless of build location
     target_compile_definitions(warsmash PRIVATE
         PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-        NS_LICENSE_NAME="${NS_LICENSE_NAME_VALUE}"
-        NS_LICENSE_KEY="${NS_LICENSE_KEY_VALUE}"
         __STORMLIB_NO_STATIC_LINK__
     )
 
@@ -429,34 +394,21 @@ if(BUILD_APP)
     if(PLATFORM_WINDOWS)
         target_link_libraries(warsmash PRIVATE
             ${OPENGL_LIBRARIES}
-            ${AERO_CORE_LIBRARY}
-            ${AERO_APP_LIBRARY}
         )
         link_stormlib(warsmash)
         link_casclib(warsmash)
-        foreach(AERO_DLL Aero.dll AeroApp.dll)
-            if(EXISTS "${AERO_BIN_DIR}/${AERO_DLL}")
-                add_custom_command(TARGET warsmash POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${AERO_BIN_DIR}/${AERO_DLL}"
-                        "$<TARGET_FILE_DIR:warsmash>/"
-                    COMMENT "Copying ${AERO_DLL} to output"
-                )
-            endif()
-        endforeach()
         set_target_properties(warsmash PROPERTIES WIN32_EXECUTABLE FALSE)
     else()
         target_include_directories(warsmash PRIVATE ${OPENGL_INCLUDE_DIRS} ${X11_INCLUDE_DIR})
         target_link_libraries(warsmash PRIVATE
             ${OPENGL_LIBRARIES}
-            ${AERO_CORE_LIBRARY}
-            ${AERO_APP_LIBRARY}
             ${X11_LIBRARIES}
             ${XI_LIBRARY}
             ${XCURSOR_LIBRARY}
             dl pthread m
         )
         link_stormlib(warsmash)
+        link_casclib(warsmash)
     endif()
 
     # ---- Resource Auditor tool (console-only) ----
@@ -477,6 +429,11 @@ if(BUILD_APP)
         src/resource/casc.cpp
         src/resource/slk.cpp
     )
+    target_include_directories(dump_cliff PRIVATE src)
+    target_compile_definitions(dump_cliff PRIVATE
+        PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        __STORMLIB_NO_STATIC_LINK__
+    )
     link_stormlib(dump_cliff)
     link_casclib(dump_cliff)
 
@@ -484,6 +441,11 @@ if(BUILD_APP)
         tools/search_mdx.cpp
         src/resource/mpq_storm.cpp
         src/resource/casc.cpp
+    )
+    target_include_directories(search_mdx PRIVATE src)
+    target_compile_definitions(search_mdx PRIVATE
+        PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        __STORMLIB_NO_STATIC_LINK__
     )
     link_stormlib(search_mdx)
     link_casclib(search_mdx)

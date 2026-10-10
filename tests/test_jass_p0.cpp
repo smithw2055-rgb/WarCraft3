@@ -871,5 +871,13 @@ bool TestJassBonus() {
     const int ie = CallNative(vm, "IntExpr", {JassValue::Str("TickAct")}).intVal;
     TEST_ASSERT(ie != 0);
     CallNative(vm, "DestroyIntExpr", {JassValue::Int(ie)});
+
+    // StringHash must match Java String.hashCode() (retail/ref parity, not
+    // std::hash): golden values from Java semantics (31*h+c per char).
+    TEST_ASSERT(CallNative(vm, "StringHash", {JassValue::Str("")}).intVal == 0);
+    TEST_ASSERT(CallNative(vm, "StringHash", {JassValue::Str("a")}).intVal == 97);
+    TEST_ASSERT(CallNative(vm, "StringHash", {JassValue::Str("hello")}).intVal == 99162322);
+    TEST_ASSERT(CallNative(vm, "StringHash", {JassValue::Str("Warcraft")}).intVal == 552832088);
+    TEST_ASSERT(CallNative(vm, "StringHash", {JassValue::Str("TestString")}).intVal == -573753501);
     return true;
 }

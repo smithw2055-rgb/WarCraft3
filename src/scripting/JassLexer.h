@@ -51,6 +51,12 @@ public:
     std::vector<JassToken> Tokenize();
     const std::vector<std::string>& GetErrors() const { return errors_; }
 
+    // vJASS textmacro preprocessing (ref TextMacros): expands
+    // `//! textmacro` definitions and `//! runtextmacro` invocations with
+    // $param$ substitution before lexing. Other `//!` directives pass
+    // through as comments.
+    static std::string ExpandTextMacros(const std::string& source);
+
 private:
     char Peek() const;
     char Advance();

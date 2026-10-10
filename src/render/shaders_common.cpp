@@ -63,9 +63,7 @@ std::string ShaderUtils::FogSystem(bool useExp, const char* fragColor) {
 
 std::string ShaderUtils::GetFragmentChain(int count) {
     std::ostringstream ss;
-    ss << "vec4 get_fragment(uint id, vec3 uv) {\n"
-       << "    vec2 dx = dFdx(uv.xy);\n"
-       << "    vec2 dy = dFdy(uv.xy);\n"
+    ss << "vec4 get_fragment(uint id, vec3 uv, vec2 dx, vec2 dy) {\n"
        << "    switch(id) {\n";
     for (int i = 0; i < count; ++i) {
         ss << "        case " << i << "u:\n"
@@ -74,6 +72,11 @@ std::string ShaderUtils::GetFragmentChain(int count) {
     ss << "        default:\n"
        << "            return vec4(0, 0, 0, 0);\n"
        << "    }\n"
+       << "}\n"
+       << "vec4 get_fragment(uint id, vec3 uv) {\n"
+       << "    vec2 dx = dFdx(uv.xy);\n"
+       << "    vec2 dy = dFdy(uv.xy);\n"
+       << "    return get_fragment(id, uv, dx, dy);\n"
        << "}\n";
     return ss.str();
 }

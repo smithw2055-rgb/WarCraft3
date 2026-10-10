@@ -39,6 +39,8 @@ void CBehaviorMove::SetTarget(float x, float y) {
     pathRecalcCooldown_ = 0;
     lastProgressLogTick_ = -9999;
     pathFound_ = false;
+    blockedTicks_ = 0;
+    repathRetryCount_ = 0;
 }
 
 void CBehaviorMove::SetTargetWidget(CWidget* target) {
@@ -51,11 +53,15 @@ void CBehaviorMove::SetTargetWidget(CWidget* target) {
     pathRecalcCooldown_ = 0;
     lastProgressLogTick_ = -9999;
     pathFound_ = false;
+    blockedTicks_ = 0;
+    repathRetryCount_ = 0;
 }
 
 void CBehaviorMove::Begin(CSimulation& simulation) {
     propelling_ = false;
     lastProgressLogTick_ = -9999;
+    blockedTicks_ = 0;
+    repathRetryCount_ = 0;
     LogMoveDebug(unit_, "begin", unit_ ? unit_->GetX() : 0.0f, unit_ ? unit_->GetY() : 0.0f,
                  targetX_, targetY_);
     RecalculatePath(simulation);
@@ -112,6 +118,9 @@ bool CBehaviorMove::RecalculatePath(CSimulation& simulation) {
             extra += " lastWpDrift=" + std::to_string(lastDrift);
         }
         LogMoveDebug(unit_, "repath_ok", unit_->GetX(), unit_->GetY(), targetX_, targetY_, extra);
+        if (pathFound_) {
+            repathRetryCount_ = 0;
+        }
         return pathFound_;
     }
 
@@ -221,18 +230,24 @@ bool CBehaviorMove::MoveTowardWaypoint(CSimulation& simulation) {
 
         if (collision->CheckCollision(nx, ny, dynamicCollisionRadius, unit_)) {
             propelling_ = false;
+            blockedTicks_++;
             LogMoveDebug(unit_, "blocked", unit_->GetX(), unit_->GetY(), nx, ny,
-                         "radius=" + std::to_string(dynamicCollisionRadius));
-            pathFound_ = false;
-            waypoints_.clear();
-            pathRecalcCooldown_ = 0;
-            RecalculatePath(simulation);
+                         "radius=" + std::to_string(dynamicCollisionRadius) + " blockedTicks=" + std::to_string(blockedTicks_));
+            // Only repath after being blocked for multiple consecutive ticks
+            if (blockedTicks_ >= 5) {
+                pathFound_ = false;
+                waypoints_.clear();
+                pathRecalcCooldown_ = 0;
+                RecalculatePath(simulation);
+                blockedTicks_ = 0;
+            }
             return false; // blocked this frame
         }
     }
 
     unit_->SetPosition(nx, ny);
     propelling_ = true;
+    blockedTicks_ = 0;
     if ((simulation.GetGameTurnTick() - lastProgressLogTick_) >= 5) {
         lastProgressLogTick_ = simulation.GetGameTurnTick();
         const float targetDx = targetX_ - unit_->GetX();
@@ -274,13 +289,22 @@ bool CBehaviorMove::Update(CSimulation& simulation) {
         pathRecalcCooldown_ = 5;
     }
 
-    // If no path yet, try to find one
+    // If no path yet, try to find one with retry budget
     if (waypoints_.empty() && !pathFound_) {
-        RecalculatePath(simulation);
+        if (repathRetryCount_ < 10) {
+            repathRetryCount_++;
+            RecalculatePath(simulation);
+        } else {
+            propelling_ = false;
+            return true;
+        }
     }
 
     // Check if we're at the final target
     if (waypoints_.empty()) {
+        if (!pathFound_ && repathRetryCount_ < 10) {
+            return false;
+        }
         propelling_ = false;
         return true; // arrived
     }

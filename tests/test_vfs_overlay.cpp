@@ -94,25 +94,31 @@ bool TestVfsFolderShadowsArchive() {
 }
 
 bool TestVfsLastOpenedArchiveWins() {
-    MpqManager vfs;
     fs::path dir = UniqueTempDir("mpqs");
     fs::path first = dir / "first.mpq";
     fs::path second = dir / "second.mpq";
     if (!MakeTinyMpq(first, "test\\order.txt", "first-content")) {
-        fs::remove_all(dir);
+        std::error_code ec;
+        fs::remove_all(dir, ec);
         return true; // SKIP: MPQ creation unsupported here
     }
     TEST_ASSERT(MakeTinyMpq(second, "test\\order.txt", "second-content"));
-    TEST_ASSERT(vfs.Open(first.string()));
-    // Game archives: first opened wins so patches beat base data.
-    TEST_ASSERT(vfs.Open(second.string()));
-    TEST_ASSERT(ReadAll(vfs, "test\\order.txt") == "first-content");
-    // Map mounts shadow every game archive (ref CompoundDataSource).
-    MpqManager withMap;
-    TEST_ASSERT(withMap.Open(first.string()));
-    TEST_ASSERT(withMap.OpenOnTop(second.string()));
-    TEST_ASSERT(ReadAll(withMap, "test\\order.txt") == "second-content");
-    TEST_ASSERT(ReadAll(withMap, "test/order.txt") == "second-content");
-    fs::remove_all(dir);
+    {
+        MpqManager vfs;
+        TEST_ASSERT(vfs.Open(first.string()));
+        // Game archives: first opened wins so patches beat base data.
+        TEST_ASSERT(vfs.Open(second.string()));
+        TEST_ASSERT(ReadAll(vfs, "test\\order.txt") == "first-content");
+    }
+    {
+        // Map mounts shadow every game archive (ref CompoundDataSource).
+        MpqManager withMap;
+        TEST_ASSERT(withMap.Open(first.string()));
+        TEST_ASSERT(withMap.OpenOnTop(second.string()));
+        TEST_ASSERT(ReadAll(withMap, "test\\order.txt") == "second-content");
+        TEST_ASSERT(ReadAll(withMap, "test/order.txt") == "second-content");
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
     return true;
 }

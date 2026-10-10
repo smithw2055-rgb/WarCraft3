@@ -80,7 +80,19 @@ bool CWorldCollision::CheckCollision(float x, float y, float radius,
         const float r2 = combinedRadius * combinedRadius;
         float dx = u->GetX() - x;
         float dy = u->GetY() - y;
-        if (dx * dx + dy * dy < r2) return true;
+        const float d2 = dx * dx + dy * dy;
+        if (d2 < r2) {
+            if (ignoreUnit) {
+                const float prevDx = u->GetX() - ignoreUnit->GetX();
+                const float prevDy = u->GetY() - ignoreUnit->GetY();
+                const float prevD2 = prevDx * prevDx + prevDy * prevDy;
+                // If already penetrating/overlapping and this step increases or maintains distance, allow separating movement!
+                if (prevD2 < r2 && d2 >= prevD2) {
+                    continue;
+                }
+            }
+            return true;
+        }
     }
     return false;
 }

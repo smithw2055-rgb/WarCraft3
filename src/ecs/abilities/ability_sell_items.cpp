@@ -5,6 +5,8 @@
 #include "ecs/item.h"
 #include "ecs/abilities/ability_inventory.h"
 #include "data/itemdata.h"
+#include "data/unitdata.h"
+#include "ecs/unit_type.h"
 #include <iostream>
 #include <algorithm>
 
@@ -27,6 +29,31 @@ void CAbilitySellItems::OnAdd(CSimulation& game, CUnit* unit) {
 }
 
 bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, int orderId) {
+    // Unit-slot hire orders carry the 0x10000 bit (item orders do not).
+    if (orderId & 0x10000) {
+        return HireUnit(game, caster, orderId);
+    }
+    // Pawn orders carry the 0x20000 bit: seller holds the item in the slot.
+    if (orderId & 0x20000) {
+        int playerIndex = orderId & 0xFF;
+        if (playerIndex < 0 || playerIndex >= game.GetPlayerCount()) {
+            playerIndex = caster ? caster->GetPlayerIndex() : -1;
+        }
+        const int slot = ((orderId & 0xFF00) >> 8) - 1;
+        CUnit* seller = nullptr;
+        if (auto* player = game.GetPlayer(playerIndex)) {
+            for (auto* unit : player->GetUnits()) {
+                if (!unit || unit->IsDead()) continue;
+                auto* inv = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")));
+                if (inv && slot >= 0 && slot < inv->GetItemCapacity() && inv->GetItem(slot)) {
+                    seller = unit;
+                    break;
+                }
+            }
+        }
+        if (!seller) return true; // not a pawn order (no holder)
+        return PawnItem(game, caster, seller, slot);
+    }
     // OrderId encodes item index: (orderId & 0xFF00) >> 8 - 1
     int itemIndex = ((orderId & 0xFF00) >> 8) - 1;
     if (itemIndex < 0 || itemIndex >= (int)itemsSold_.size()) {
@@ -93,8 +120,104 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
     if (inventory) {
         inventory->PickUpItem(game, hero, item);
         std::cout << "Sold item " << itemTypeId.ToString() << " to hero" << std::endl;
+        // Shop sale event (ref SELL_ITEM): buyer hero, seller shop, sold item.
+        if (const auto& cb = game.GetShopEventCallback()) {
+            cb(hero->GetHandleId(), caster->GetHandleId(), item->GetHandleId());
+        }
     }
 
+    return false; // order consumed
+}
+
+bool CAbilitySellItems::HireUnit(CSimulation& game, CUnit* caster, int orderId) {
+    if (!caster) return false;
+    int playerIndex = orderId & 0xFF;
+    if (playerIndex < 0 || playerIndex >= game.GetPlayerCount()) {
+        playerIndex = caster->GetPlayerIndex();
+    }
+    auto* player = game.GetPlayer(playerIndex);
+    if (!player) return false;
+    // Unit-stock catalog in listed order (ref shop stock entries).
+    int slot = ((orderId & 0xFF00) >> 8) - 1;
+    int stockIdx = -1;
+    {
+        int seen = 0;
+        for (size_t i = 0; i < stock_.size(); i++) {
+            if (!stock_[i].isUnit) continue;
+            if (seen == slot) {
+                stockIdx = (int)i;
+                break;
+            }
+            seen++;
+        }
+    }
+    if (stockIdx < 0) return true; // not a valid unit order
+    const War3ID typeId = stock_[stockIdx].id;
+    const CUnitType* type =
+        game.GetUnitData() ? game.GetUnitData()->GetUnitType(typeId) : nullptr;
+    if (!type) return false;
+    const int goldCost = type->GetGoldCost();
+    const int lumberCost = type->GetLumberCost();
+    if (player->GetGold() < goldCost) {
+        std::cout << "Not enough gold to hire unit!" << std::endl;
+        return false;
+    }
+    if (player->GetLumber() < lumberCost) {
+        std::cout << "Not enough lumber to hire unit!" << std::endl;
+        return false;
+    }
+    if (stock_[stockIdx].current <= 0) {
+        std::cout << "Out of stock: " << typeId.ToString() << std::endl;
+        return false;
+    }
+    stock_[stockIdx].current--;
+
+    player->AddGold(-goldCost);
+    player->AddLumber(-lumberCost);
+
+    // Muster beside the shop, facing it (retail hires pop out alongside).
+    CUnit* hired = game.CreateUnit(typeId, playerIndex, caster->GetX() + 128.0f,
+                                   caster->GetY(), 270.0f);
+    if (!hired) {
+        player->AddGold(goldCost);
+        player->AddLumber(lumberCost);
+        stock_[stockIdx].current++;
+        return false;
+    }
+    std::cout << "Hired unit " << typeId.ToString() << std::endl;
+    // Merc hire event (ref SELL): buyer is player-level (-1), seller shop.
+    if (const auto& cb = game.GetShopUnitEventCallback()) {
+        cb(-1, caster->GetHandleId(), hired->GetHandleId());
+    }
+    return false; // order consumed
+}
+
+bool CAbilitySellItems::PawnItem(CSimulation& game, CUnit* shop, CUnit* seller, int slot) {
+    if (!shop || !seller) return false;
+    auto* inv = dynamic_cast<CAbilityInventory*>(seller->GetAbility(War3ID("AInv")));
+    if (!inv) return false;
+    CItem* item =
+        (slot >= 0 && slot < inv->GetItemCapacity()) ? inv->GetItem(slot) : nullptr;
+    if (!item) return false;
+    if (!item->IsPawnable()) {
+        std::cout << "Item cannot be pawned!" << std::endl;
+        return false;
+    }
+    const CItemType* type =
+        game.GetItemData() ? game.GetItemData()->GetItem(item->GetTypeId()) : nullptr;
+    const int goldCost = type ? type->goldCost : 0;
+    const int value = (int)(goldCost * game.GetGameplayConstants().pawnItemRate);
+    if (!inv->RemoveItemAt(game, seller, slot)) return false;
+    const int itemHandle = item->GetHandleId();
+    game.RemoveItem(item);
+    if (auto* player = game.GetPlayer(seller->GetPlayerIndex())) {
+        player->AddGold(value);
+    }
+    std::cout << "Pawned item for " << value << " gold" << std::endl;
+    // Pawn event (ref PAWN_ITEM): seller pawner, buyer shop.
+    if (const auto& cb = game.GetPawnEventCallback()) {
+        cb(shop->GetHandleId(), seller->GetHandleId(), itemHandle);
+    }
     return false; // order consumed
 }
 

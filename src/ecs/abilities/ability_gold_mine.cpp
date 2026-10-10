@@ -44,6 +44,9 @@ void CAbilityGoldMine::AddMiner(CBehaviorHarvest* miner) {
     if (!miner) {
         return;
     }
+    if (GetActiveMinerCount() >= miningCapacity_) {
+        return; // full: entry is refused at CanAdd() sites; enforce here too
+    }
     if (std::find(activeMiners_.begin(), activeMiners_.end(), miner) == activeMiners_.end()) {
         activeMiners_.push_back(miner);
     }
@@ -74,6 +77,7 @@ void CAbilityOverlayedGoldMine::SetGold(int v) {
 
 void CAbilityOverlayedGoldMine::AddMiner(CBehaviorHarvest* miner) {
     if (!miner) return;
+    if (GetActiveMinerCount() >= miningCapacity_) return; // full (retail 5)
     if (std::find(activeMiners_.begin(), activeMiners_.end(), miner) == activeMiners_.end()) {
         activeMiners_.push_back(miner);
     }

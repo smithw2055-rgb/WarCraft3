@@ -1,4 +1,5 @@
 #include "lightning.h"
+#include "render/renderer.h"
 #include "render/shader.h"
 #include "resource/slk.h"
 
@@ -92,10 +93,14 @@ LightningBoltParams DefaultBoltParams(const std::string& code) {
 LightningSystem::LightningSystem() = default;
 
 LightningSystem::~LightningSystem() {
-    if (resourcesReady_) {
-        if (vertexBuffer_.id) sg_destroy_buffer(vertexBuffer_);
-        if (indexBuffer_.id) sg_destroy_buffer(indexBuffer_);
+    if (!resourcesReady_) return;
+    if (!Renderer::IsActive()) {
+        // Static teardown after sg_shutdown: GL handles are already gone.
+        resourcesReady_ = false;
+        return;
     }
+    if (vertexBuffer_.id) sg_destroy_buffer(vertexBuffer_);
+    if (indexBuffer_.id) sg_destroy_buffer(indexBuffer_);
 }
 
 void LightningSystem::SetBolt(int id, float x1, float y1, float z1,

@@ -127,6 +127,8 @@ public:
 
     // Mouse state
     float mouseDX = 0, mouseDY = 0, mouseScroll = 0;
+    float mousePosX_ = 0, mousePosY_ = 0;
+    int hoveredUnitHandle_ = -1;
     bool mouseDown[3] = {};
 
     bool showMinimap = true;
@@ -158,12 +160,27 @@ private:
     void RenderUiOnlyGlueSpriteLayers(int screenW, int screenH);
     void StepSimulation(float dt);
     void SyncAndReconcileVisuals();
+    // Fog-of-war visibility for rendering (ref black mask/grey fog): buildings
+    // and statics show once explored; mobile units show to owner/allies or
+    // while visible (with stealth vs detectors). Picking follows visibility.
+    bool IsUnitVisibleInFog(const CUnit* unit) const;
+    void SyncFogStaticsVisibility();
     void SyncJassEffectVisuals();
     void SyncFogOfWar();
+    // Warsmash MeleeUIMinimap parity: fog overlay (black mask / grey fog)
+    // plus per-unit dots (player colors, gold/neutral specials, hero pulse
+    // with PASSIVE-ally vs enemy tint). Called before the minimap draw.
+    void SyncMinimapLayer();
+    // HUD live-data push (resource bar, upkeep indicator, timer dialog):
+    // mirrors the sim/local-player state into MainUI cached fields so the
+    // FDF console shows live values instead of UI-only debug defaults.
+    void SyncHudLiveData();
     void SyncLightnings();
     void SyncScriptDecor();
     void SyncWeather(float dt);
     void CollectUnitOverlays(int screenW, int screenH);
+    void RefreshRuntimeUnitSplats();
+    void AddActiveEventSplatsToTerrain();
     void CaptureScreenshotIfNeeded(int screenW, int screenH);
     bool WriteFramebufferPng(const std::string& path, int screenW, int screenH);
     void MaybeExitAfterFrame();
@@ -205,10 +222,16 @@ private:
     void DumpUnsupportedDiagnostics();
     void EnsureHumanMeleeStartsFromMapConfig();
     void EnsureHumanMeleeStartForPlayer(int playerIndex, float startX, float startY);
+    // Safety net: any COMPUTER + slot-active player without an AI
+    // controller (map script never called StartMeleeAI) gets a
+    // MeleeAIController so computer slots always play.
+    void EnsureComputerAIStarted();
+    // Diagnostic (WARSMASH_AI_STATUS=1): per-10s sim status of computer
+    // players (race/units/buildings/gold/AI thinks+waves) to validate the
+    // single-player game loop in real runs.
+    void MaybeLogAIStatus();
     void FlushStartupSimulationState();
     void FocusCameraAndMinimapOnInitialSpawn();
-    void RefreshRuntimeUnitSplats();
-    void AddActiveEventSplatsToTerrain();
     void DebugSelectFirstUnitForHud();
     void RunGameplaySmoke();
 
@@ -244,7 +267,7 @@ private:
     bool debugUiGlueMenu_ = false;
     std::string debugUiGlueMenuPage_;
     std::vector<std::string> debugUiGlueMenuActions_;
-    std::string hudXamlPath_ = "assets/ui/Hud.xaml";
+    std::string hudLayoutPath_ = "console";
     bool pendingGlueMapLaunch_ = false;
     std::string pendingGlueMapLaunchRequestedPath_;
     std::string pendingGlueMapLaunchResolvedPath_;
@@ -258,9 +281,17 @@ private:
     // Scripted-fog raster cache (re-uploaded only when CFogSystem changes).
     uint64_t fogVersionSynced_ = 0;
     std::vector<unsigned char> fogGrid_;
+    // Minimap fog-overlay cache (same version gate, minimap extents).
+    uint64_t minimapFogVersionSynced_ = uint64_t(-1);
+    std::vector<uint8_t> minimapFogRgba_;
+    std::vector<Minimap::UnitDot> minimapDotsScratch_;
+    // Static-instance fog sweep gate (doodads/items hide under black mask).
+    uint64_t fogStaticsVersionSynced_ = uint64_t(-1);
     // JASS lightning bolts mirrored into the scene (ids live here).
     bool lightningParamsLoaded_ = false;
     std::unordered_set<int> lightningSynced_;
+    // Last seen text-clear sequence (ClearTextMessages drops shown toasts).
+    int lastTextClearSeq_ = 0;
 
     // Rendering
     SceneManager scene_;
@@ -355,6 +386,9 @@ private:
 
     // UI
     MainUI ui_;
+    // Owned per-frame overlay cache (MainUI keeps a pointer to it; must
+    // outlive the frame — previously a dangling local).
+    std::vector<UnitOverlayInfo> overlayCache_;
 
     // JASS
     JassVM jass_;

@@ -22,7 +22,7 @@
 class CUnitData;
 class CSimulation;
 class CUnit;
-class NoesisHudHost;
+class FdfHudHost;
 struct sapp_event;
 
 // In-world unit overlay data (populated by main.cpp, rendered by MainUI)
@@ -116,16 +116,16 @@ public:
     ~MainUI();
 
     bool Init(MpqManager* mpq, int screenW, int screenH,
-              const std::string& hudXamlPath = "assets/ui/Hud.xaml", int gameVersion = 0);
-    bool SwitchNoesisXaml(MpqManager* mpq, int screenW, int screenH,
-                          const std::string& hudXamlPath, int gameVersion = 0);
+              const std::string& hudLayoutPath = "console", int gameVersion = 0);
+    bool SwitchHudLayout(MpqManager* mpq, int screenW, int screenH,
+                         const std::string& hudLayoutPath, int gameVersion = 0);
     // Reload ability/buff tooltip data with map-specific w3a/w3h object
     // modifications applied (no-op when the map has none).
     void ApplyMapAbilityMods(const std::string& mapPath);
     void Shutdown();
     void Update(int screenW, int screenH);
-    void RenderNoesisOffscreen();
-    void RenderNoesisOnly();
+    void RenderHudOffscreen();
+    void RenderHudOnly();
     void Render();
     void SetUnitData(const CUnitData* ud) { unitData_ = ud; }
     bool HandleEvent(const sapp_event* ev);
@@ -151,6 +151,21 @@ public:
     void SetGlueMenuCampaignsForUiOnly(const std::vector<War3UI::GlueCampaignListItem>& campaigns);
     void SetGlueMapLaunchCallback(War3UI::GlueMapLaunchCallback cb);
     void SetResourcesForUiOnly(int gold, int lumber, int foodUsed, int foodCap, const std::string& timeText);
+    // Live per-frame sim push (game_controller): same cached fields without
+    // the UI-only debug logging, plus upkeep level and timer dialog state.
+    void SetLiveResources(int gold, int lumber, int foodUsed, int foodCap,
+                          const std::string& timeText, int upkeepLevel);
+    void SetTimerDialog(const std::string& title, const std::string& value, bool visible);
+    // Cinematic presentation (ref SetCinematicMode/SetCinematicScene).
+    void SetCinematicMode(bool v) { cinematicMode_ = v; }
+    void SetCinematicScene(const std::string& speaker, const std::string& dialogue, bool visible);
+    void SetCineFilter(uint32_t rgba, bool visible) {
+        cineFilterColor_ = rgba;
+        cineFilterVisible_ = visible;
+    }
+    // Player text toasts (ref DisplayTextToPlayer family).
+    void ShowGameMessage(const std::string& text, float expireSeconds = 5.0f);
+    void ClearGameMessages();
     void SetSimulation(CSimulation* sim) { simulation_ = sim; }
     void SetSelectedUnit(int handleId);
     void WireCommandCardCallbacks();
@@ -238,7 +253,7 @@ private:
         bool visible = false;
         bool enabled = false;
         std::shared_ptr<Texture> icon;
-        std::string noesisIconUri;
+        std::string iconUri;
         HudResourceCosts resourceCosts;
         float cooldownRemaining = 0.0f;
         float cooldownMax = 0.0f;
@@ -257,7 +272,7 @@ private:
                           bool enabled,
                           const std::string& label,
                           const std::shared_ptr<Texture>& icon,
-                          const std::string& noesisIconUri,
+                          const std::string& iconUri,
                           int numberOverlay = -1,
                           const std::string& tooltip = std::string(),
                           const HudResourceCosts& resourceCosts = HudResourceCosts{},
@@ -275,14 +290,14 @@ private:
     void UpdatePortraitIconState();
     void UpdateBuffState();
     std::shared_ptr<Texture> LoadTextureFromMpq(const std::string& path);
-    std::string GetNoesisTextureUri(const std::string& path) const;
-    std::string ExportNoesisTexture(const std::string& normalizedPath, const std::vector<uint8_t>& data);
+    std::string GetIconUri(const std::string& path) const;
+    std::string ExportIconTexture(const std::string& normalizedPath, const std::vector<uint8_t>& data);
     void LoadFont();
 
     GameUI gameUI_;
     MpqManager* mpq_ = nullptr;
     SimpleFrame* rootFrame_ = nullptr;
-    std::unique_ptr<NoesisHudHost> hudHost_;
+    std::unique_ptr<FdfHudHost> hudHost_;
 
     // Text renderer
     TextRenderer textRenderer_;
@@ -290,7 +305,7 @@ private:
     CommandCard* commandCard_ = nullptr;
     ResourceBarFrame* resourceBar_ = nullptr;
     std::unordered_map<std::string, std::shared_ptr<Texture>> textures_;
-    std::unordered_map<std::string, std::string> noesisTextureUris_;
+    std::unordered_map<std::string, std::string> iconTextureUris_;
 
     // Data
     CAbilityData abilityData_;
@@ -323,7 +338,7 @@ private:
     int activeSubmenuOrderId_ = 0;
 
     // Current HUD state
-    std::string selectedName_ = "No unit selected";
+    std::string selectedName_ = "";
     int selectedLevel_ = 0;
     float selectedHp_ = 0.0f;
     float selectedMaxHp_ = 0.0f;
@@ -344,6 +359,16 @@ private:
     int playerFoodUsed_ = 0;
     int playerFoodCap_ = 0;
     std::string resourceTimeText_ = "12:00";
+    int upkeepLevel_ = 0;
+    bool timerDialogVisible_ = false;
+    std::string timerDialogTitle_;
+    std::string timerDialogValue_;
+    bool cinematicMode_ = false;
+    bool cinematicVisible_ = false;
+    std::string cinematicSpeaker_;
+    std::string cinematicDialogue_;
+    uint32_t cineFilterColor_ = 0;
+    bool cineFilterVisible_ = false;
 
     std::array<CommandSlot, 12> commandSlots_{};
     std::vector<HudQueueItem> queueItems_;

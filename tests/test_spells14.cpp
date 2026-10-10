@@ -221,8 +221,8 @@ bool TestFrostBreathChills() {
     AddPlayers(sim);
     auto* caster = AdoptAt(sim, 1441, 0, 0, 0);
     auto* target = AdoptAt(sim, 1442, 1, 100, 0);
-    auto* neighbor = AdoptAt(sim, 1443, 1, 200, 0);
-    auto* ally = AdoptAt(sim, 1444, 0, 150, 0);
+    auto* neighbor = AdoptAt(sim, 1443, 1, 160, 0);
+    auto* ally = AdoptAt(sim, 1444, 0, 100, 50);
     Settle(sim);
     const float targetBefore = target->GetLife();
     const float neighborBefore = neighbor->GetLife();

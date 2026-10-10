@@ -25,15 +25,15 @@ void DayNightCycle::SetMapFog(bool enabled, float r, float g, float b, float den
 }
 
 void DayNightCycle::Compute(float time) {
-    // Sun angle: 0 at midnight, rotates 360° per day
-    // At noon (0.5): sun is directly overhead or slightly angled
+    // Convention (daynight.h): 0.0 = midnight, 0.25 = dawn, 0.5 = noon,
+    // 0.75 = dusk. Elevation peaks at 0.5, so use -cos (was cos, which put
+    // midnight at 0.5 and left every map opening under night fog/lighting).
     float angle = time * 2.0f * 3.14159265f;
     float sinAngle = std::sin(angle);
     float cosAngle = std::cos(angle);
 
     // Sun elevation: -1 at midnight (below horizon), +1 at noon (overhead)
-    // Use cos(angle) with offset: midday is peak
-    float elevation = std::cos(angle); // 1 at noon, -1 at midnight
+    float elevation = -std::cos(angle); // 1 at noon (0.5), -1 at midnight (0.0)
     elevation = std::clamp(elevation, -0.3f, 1.0f); // sun doesn't go too far below
 
     // Sun position in sky (Y-up)

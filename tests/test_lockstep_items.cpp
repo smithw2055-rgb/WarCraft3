@@ -90,6 +90,8 @@ bool TestHashStateDeterministic() {
     return true;
 }
 
+#include <filesystem>
+
 bool TestReplayLogRoundTrip() {
     ReplayLog log;
     log.Begin(1234);
@@ -102,7 +104,7 @@ bool TestReplayLogRoundTrip() {
     cmd.x = 10.0f;
     cmd.y = 20.0f;
     log.Record(cmd);
-    const std::string path = "/tmp/test_replay_ws.bin";
+    const std::string path = (std::filesystem::temp_directory_path() / "test_replay_ws.bin").string();
     TEST_ASSERT(log.Save(path));
     ReplayLog loaded;
     TEST_ASSERT(loaded.Load(path));

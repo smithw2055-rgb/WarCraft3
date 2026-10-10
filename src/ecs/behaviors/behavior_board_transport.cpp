@@ -1,4 +1,5 @@
 #include "behavior_board_transport.h"
+#include "behavior_move_into_range.h"
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"
 #include "ecs/pathing/world_collision.h"
@@ -29,10 +30,10 @@ bool CBehaviorBoardTransport::TryLoadNow(CSimulation& simulation) {
 bool CBehaviorBoardTransport::Update(CSimulation& simulation) {
     if (!unit_ || !target_ || target_->IsDead()) return true;
 
-    const float dx = target_->GetX() - unit_->GetX();
-    const float dy = target_->GetY() - unit_->GetY();
-    const float dist = std::sqrt(dx * dx + dy * dy);
-    if (dist <= loadRange_) {
+    const float dist = MoveIntoRange::Distance2D(
+        unit_->GetX(), unit_->GetY(), target_->GetX(), target_->GetY());
+    if (MoveIntoRange::IsWithinRange(
+            unit_->GetX(), unit_->GetY(), target_->GetX(), target_->GetY(), loadRange_)) {
         return TryLoadNow(simulation);
     }
 
@@ -46,8 +47,11 @@ bool CBehaviorBoardTransport::Update(CSimulation& simulation) {
     if (speed <= 0.0f || dist <= 0.0f) return false;
     const float step = std::min(speed, dist - loadRange_ + 16.0f);
     if (step <= 0.0f) return TryLoadNow(simulation);
-    const float nx = unit_->GetX() + (dx / dist) * step;
-    const float ny = unit_->GetY() + (dy / dist) * step;
+    float nx = unit_->GetX(), ny = unit_->GetY();
+    if (!MoveIntoRange::StepToward(unit_->GetX(), unit_->GetY(),
+                                   target_->GetX(), target_->GetY(), step, nx, ny)) {
+        return TryLoadNow(simulation);
+    }
     if (auto* collision = simulation.GetWorldCollision()) {
         const float radius = std::max(unit_->GetCollisionSize(), 16.0f);
         if (collision->CheckCollision(nx, ny, radius, unit_)) {

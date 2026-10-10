@@ -742,6 +742,10 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
 
 bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
     if (!sequences_ || index < 0 || index >= (int)sequences_->size()) return false;
+    if (sequenceState_.sequenceIndex == index && sequenceState_.loop && loop && !sequenceState_.finished) {
+        sequenceState_.speed = speed;
+        return true;
+    }
     std::vector<Mat4> previous;
     if (blendTime_ > 0.0f && sequenceState_.sequenceIndex >= 0 && !boneMatrices_.empty()) {
         previous = boneMatrices_;

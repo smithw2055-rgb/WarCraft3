@@ -89,6 +89,16 @@ public:
         out[0] = mapBounds_[0]; out[1] = mapBounds_[1];
         out[2] = mapBounds_[2]; out[3] = mapBounds_[3];
     }
+    // Fog-texture extents: must match the ground-shader v_suv mapping
+    // (v_suv = (vPosition + tileIndex) / gridSize over the instance grid).
+    // Rasterizing fog over any other bounds (e.g. camera bounds) shifts the
+    // visible blobs away from their units.
+    void GetFogMapBounds(float out[4]) const {
+        const float spanX = columns_ > 1 ? (float)(columns_ - 1) * 128.0f : 0.0f;
+        const float spanY = rows_ > 1 ? (float)(rows_ - 1) * 128.0f : 0.0f;
+        out[0] = centerOffsetX_; out[1] = centerOffsetY_;
+        out[2] = centerOffsetX_ + spanX; out[3] = centerOffsetY_ + spanY;
+    }
     void SetW3i(const float cameraBounds[8]);
 
     void SetFogOfWarData(const unsigned char* data, int width, int height);

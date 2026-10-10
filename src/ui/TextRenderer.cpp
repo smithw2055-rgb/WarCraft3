@@ -34,8 +34,17 @@ void TextRenderer::Shutdown() {
 bool TextRenderer::LoadFromMpq(MpqManager* mpq, const char* fontPath, float fontSize) {
     if (!mpq) return false;
 
+    // Retail UI fonts live in the MPQ (ref war3skins.txt MasterFont).
+    // FRIZQT__.TTF is the Western UI face; the CJK faces follow.
     const char* paths[] = {
         fontPath,
+        "Fonts\\FRIZQT__.TTF",
+        "Fonts/FRIZQT__.TTF",
+        "Fonts\\NIM_____.ttf",
+        "Fonts\\DFHeiMd.ttf",
+        "Fonts\\dfst-m3u.ttf",
+        "Fonts\\tt5500m_.ttf",
+        "Fonts\\dffn_b31.ttf",
         "Fonts/Nimrod_Normal_12.TTF",
         "Fonts/Nimrod_Normal_14.TTF",
         "Fonts/Nimrod_Normal_16.TTF",
@@ -54,9 +63,17 @@ bool TextRenderer::LoadFromMpq(MpqManager* mpq, const char* fontPath, float font
     }
 
     const char* fallbackPaths[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
         "C:/Windows/Fonts/framd.ttf",
         "C:/Windows/Fonts/arial.ttf",
         "C:/Windows/Fonts/segoeui.ttf",
+        "/mnt/c/Windows/Fonts/framd.ttf",
+        "/mnt/c/Windows/Fonts/arial.ttf",
+        "/mnt/c/Windows/Fonts/segoeui.ttf",
     };
     for (auto p : fallbackPaths) {
         std::ifstream in(p, std::ios::binary | std::ios::ate);
@@ -253,15 +270,18 @@ float TextRenderer::MeasureText(const char* text, float size) const {
 void TextRenderer::RenderText(UiRenderer& r, float x, float y, const char* text, uint32_t color, float size) {
     if (!text || !atlasValid_) return;
 
+    // y is the TOP of the line box (all callers pass box tops); the stb
+    // glyph top offset (yoff, negative above the baseline) applies from the
+    // baseline below it.
     float scale = size / fontSize_;
+    float baselineY = y + ascender_ * scale;
     float posX = x;
-    float posY = y;
 
     while (*text) {
         unsigned char ch = (unsigned char)*text;
         if (ch == '\n') {
             posX = x;
-            posY += lineHeight_ * scale;
+            baselineY += lineHeight_ * scale;
             text++;
             continue;
         }
@@ -273,7 +293,7 @@ void TextRenderer::RenderText(UiRenderer& r, float x, float y, const char* text,
         const auto& g = glyphs_[ch - 32];
         if (g.bw > 0 && g.bh > 0) {
             float qx = posX + g.bl * scale;
-            float qy = posY - g.bt * scale;
+            float qy = baselineY + g.bt * scale;
             float qw = g.bw * scale;
             float qh = g.bh * scale;
             r.DrawTexturedQuad(qx, qy, qw, qh, atlasTex_,

@@ -142,6 +142,23 @@ bool CAbilityInventory::DropItem(CSimulation& game, CUnit* unit, CItem* item) {
     return DropItemAt(game, unit, item, unit ? unit->GetX() : 0.0f, unit ? unit->GetY() : 0.0f);
 }
 
+bool CAbilityInventory::RemoveItemAt(CSimulation& game, CUnit* unit, int slot) {
+    if (!unit) return false;
+    if (slot < 0 || slot >= itemCapacity_) return false;
+    if (!items_[slot]) return false;
+    CItem* item = items_[slot];
+    items_[slot] = nullptr;
+    RemoveItemBonuses(game, unit, item->GetBonuses());
+    for (auto& abilityId : item->GetAbilityList()) {
+        unit->RemoveAbility(game, abilityId);
+    }
+    item->SetInInventory(false);
+    item->SetInventorySlot(-1);
+    item->SetOwner(nullptr);
+    item->SetHidden(true);
+    return true;
+}
+
 bool CAbilityInventory::DropItemAt(CSimulation& game, CUnit* unit, CItem* item, float x, float y) {
     const int slot = FindItemSlot(item);
     if (slot < 0) return false;

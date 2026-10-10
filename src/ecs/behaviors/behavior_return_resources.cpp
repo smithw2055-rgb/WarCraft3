@@ -11,6 +11,7 @@
 #include "ecs/pathing/pathfinding.h"
 #include "ecs/pathing/world_collision.h"
 #include "data/destructabledata.h"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -163,16 +164,52 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
         float dx = target_->GetX() - unit_->GetX();
         float dy = target_->GetY() - unit_->GetY();
         float dist = std::sqrt(dx * dx + dy * dy);
+        // Footprint-aware arrival: big town halls (collision ~176) can
+        // never be approached within a fixed 128 units, so dock at the
+        // footprint edge instead of orbiting it forever.
+        float arrival = 128.0f;
+        if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+            arrival = std::max(220.0f, targetUnit->GetCollisionSize() + 96.0f);
+        }
         auto* pathfinding = simulation.GetPathfinding();
-        const bool hasPathingMap = pathfinding && pathfinding->HasPathingMap();
 
-        if (dist < 128.0f) {
+        if (dist < arrival) {
             movingToDropoff_ = false;
-            depositing_ = true;
-            depositTimer_ = 0;
+            depositing_ = false;
             propelling_ = false;
             unit_->TurnTowardPoint(target_->GetX(), target_->GetY());
-            return false;
+
+            // Deposit resources immediately matching warsmash CBehaviorReturnResources
+            auto* player = simulation.GetPlayer(unit_->GetPlayerIndex());
+            auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(unit_->GetAbility(War3ID("Ahar")));
+            if (player && harvestAbility) {
+                int amount = harvestAbility->GetCarriedAmount();
+                CResourceType type = harvestAbility->GetCarriedResourceType();
+
+                if (type == CResourceType::GOLD) {
+                    player->AddGold(player->ApplyUpkeepGoldTax(amount));
+                } else if (type == CResourceType::LUMBER) {
+                    player->AddLumber(amount);
+                }
+
+                CWidget* nextTarget = simulation.GetWidget(harvestAbility->GetLastTargetHandle());
+                if ((!nextTarget || nextTarget->IsDead()) && type == CResourceType::GOLD) {
+                    nextTarget = FindNearestMine(simulation, unit_);
+                } else if ((!nextTarget || nextTarget->IsDead()) && type == CResourceType::LUMBER) {
+                    CWidget* origin = simulation.GetWidget(harvestAbility->GetLastTargetHandle());
+                    if (!origin) {
+                        origin = unit_;
+                    }
+                    nextTarget = FindNearestTree(simulation, unit_, origin);
+                }
+
+                harvestAbility->ClearCarried();
+                if (nextTarget && !nextTarget->IsDead()) {
+                    harvestAbility->SetLastTargetHandle(nextTarget->GetHandleId());
+                    unit_->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, nextTarget));
+                }
+            }
+            return true; // behavior done
         }
 
         pathRecalcCooldown_--;
@@ -184,8 +221,16 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
                                                 target_->GetX(), target_->GetY(),
                                                 std::max(0.0f, unit_->GetCollisionSize()),
                                                 unit_->GetMovementType(), unit_, worldPath)) {
-                    for (size_t i = 1; i < worldPath.size(); i++)
-                        waypoints_.push_back(worldPath[i]);
+                    // Drop already-reached waypoints (ref CBehaviorHarvest:
+                    // degenerate refills treadmill forever otherwise).
+                    const float stepReach = std::max(1.0f,
+                        unit_->GetSpeed() * simulation.GetSimStepTime()) * 2.0f;
+                    for (size_t i = 1; i < worldPath.size(); i++) {
+                        const float rdx = worldPath[i].first - unit_->GetX();
+                        const float rdy = worldPath[i].second - unit_->GetY();
+                        if (rdx * rdx + rdy * rdy > stepReach * stepReach)
+                            waypoints_.push_back(worldPath[i]);
+                    }
                 }
             }
             pathRecalcCooldown_ = 8;
@@ -216,19 +261,13 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
                     pathRecalcCooldown_ = 0;
                     return false;
                 }
-                if (auto* collision = simulation.GetWorldCollision()) {
-                    const float dynamicCollisionRadius = std::max(collisionRadius, 16.0f);
-                    if (collision->CheckCollision(nx, ny, dynamicCollisionRadius, unit_)) {
-                        propelling_ = false;
-                        waypoints_.clear();
-                        pathRecalcCooldown_ = 0;
-                        return false;
-                    }
-                }
                 unit_->SetPosition(nx, ny);
                 propelling_ = true;
             }
-        } else if (!hasPathingMap) {
+        } else {
+            // Direct approach when waypoints are exhausted (same rationale
+            // as CBehaviorHarvest): the step stays validated against the
+            // pathing map.
             if (!unit_->TurnTowardPoint(target_->GetX(), target_->GetY())) {
                 propelling_ = false;
                 return false;
@@ -245,8 +284,6 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
             }
             unit_->SetPosition(nx, ny);
             propelling_ = true;
-        } else {
-            propelling_ = false;
         }
         return false;
     }
@@ -265,7 +302,7 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
                 CResourceType type = harvestAbility->GetCarriedResourceType();
 
                 if (type == CResourceType::GOLD) {
-                    player->AddGold(amount);
+                    player->AddGold(player->ApplyUpkeepGoldTax(amount));
                 } else if (type == CResourceType::LUMBER) {
                     player->AddLumber(amount);
                 }

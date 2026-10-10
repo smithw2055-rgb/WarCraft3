@@ -1,6 +1,7 @@
 #include "ability_root.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
+#include "ecs/behaviors/behavior_root.h"
 
 // ===== CAbilityRoot =====
 CAbilityRoot::CAbilityRoot(int handleId)
@@ -23,11 +24,14 @@ CBehavior* CAbilityRoot::BeginNoTarget(CSimulation& game, CUnit* caster, int ord
     // Halt any in-progress movement; attacks continue while rooted.
     caster->Stop(game);
     // Swap the command card: Root out, Uproot in (ref transformation swap).
-    if (CAbility* uproot = caster->GetAbility(War3ID("Aro1"))) {
-        uproot->SetDisabled(false, CAbilityDisableType::TRANSFORMATION);
+    if (CAbility* uprootAb = caster->GetAbility(War3ID("Aro1"))) {
+        uprootAb->SetDisabled(false, CAbilityDisableType::TRANSFORMATION);
     }
     SetDisabled(true, CAbilityDisableType::TRANSFORMATION);
-    return nullptr;
+    // Hold the order queue for the morph window (ref CBehaviorRoot
+    // AcceptingOrders=false gap); state itself is already flipped above so
+    // callers observing IsRooted() see the new value immediately.
+    return new CBehaviorRoot(0.5f);
 }
 
 // ===== CAbilityUproot =====
@@ -55,5 +59,5 @@ CBehavior* CAbilityUproot::BeginNoTarget(CSimulation& game, CUnit* caster, int o
         root->SetDisabled(false, CAbilityDisableType::TRANSFORMATION);
     }
     SetDisabled(true, CAbilityDisableType::TRANSFORMATION);
-    return nullptr;
+    return new CBehaviorUproot(0.5f);
 }

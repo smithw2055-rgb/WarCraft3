@@ -1,5 +1,6 @@
 #include "UIFrame.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 // --- GameUI ---
@@ -55,14 +56,15 @@ void UIFrame::SetAllPoints() {
 }
 
 void UIFrame::SetAllPoints(float inset) {
-    assignments_[FramePoint::TOPLEFT]    = { FramePoint::TOPLEFT, "", FramePoint::TOPLEFT, inset, -inset };
+    // Y-down screen space: TOP edge is bounds_.y, BOTTOM edge is y+h.
+    assignments_[FramePoint::TOPLEFT]    = { FramePoint::TOPLEFT, "", FramePoint::TOPLEFT, inset, inset };
     assignments_[FramePoint::LEFT]       = { FramePoint::LEFT, "", FramePoint::LEFT, inset, 0 };
-    assignments_[FramePoint::BOTTOMLEFT] = { FramePoint::BOTTOMLEFT, "", FramePoint::BOTTOMLEFT, inset, inset };
-    assignments_[FramePoint::BOTTOM]     = { FramePoint::BOTTOM, "", FramePoint::BOTTOM, 0, inset };
-    assignments_[FramePoint::BOTTOMRIGHT]= { FramePoint::BOTTOMRIGHT, "", FramePoint::BOTTOMRIGHT, -inset, inset };
+    assignments_[FramePoint::BOTTOMLEFT] = { FramePoint::BOTTOMLEFT, "", FramePoint::BOTTOMLEFT, inset, -inset };
+    assignments_[FramePoint::BOTTOM]     = { FramePoint::BOTTOM, "", FramePoint::BOTTOM, 0, -inset };
+    assignments_[FramePoint::BOTTOMRIGHT]= { FramePoint::BOTTOMRIGHT, "", FramePoint::BOTTOMRIGHT, -inset, -inset };
     assignments_[FramePoint::RIGHT]      = { FramePoint::RIGHT, "", FramePoint::RIGHT, -inset, 0 };
-    assignments_[FramePoint::TOPRIGHT]   = { FramePoint::TOPRIGHT, "", FramePoint::TOPRIGHT, -inset, -inset };
-    assignments_[FramePoint::TOP]        = { FramePoint::TOP, "", FramePoint::TOP, 0, -inset };
+    assignments_[FramePoint::TOPRIGHT]   = { FramePoint::TOPRIGHT, "", FramePoint::TOPRIGHT, -inset, inset };
+    assignments_[FramePoint::TOP]        = { FramePoint::TOP, "", FramePoint::TOP, 0, inset };
     assignments_[FramePoint::CENTER]     = { FramePoint::CENTER, "", FramePoint::CENTER, 0, 0 };
 }
 
@@ -86,12 +88,14 @@ float UIFrame::GetFrameX(FramePoint pt) const {
 }
 
 float UIFrame::GetFrameY(FramePoint pt) const {
+    // Y-down screen space (ref FDF bottom-left origin mapped at inflate):
+    // TOP edge is bounds_.y, BOTTOM edge is bounds_.y + bounds_.h.
     switch (pt) {
         case FramePoint::LEFT: case FramePoint::CENTER: case FramePoint::RIGHT:
             return bounds_.y + bounds_.h / 2;
-        case FramePoint::BOTTOMLEFT: case FramePoint::BOTTOM: case FramePoint::BOTTOMRIGHT:
-            return bounds_.y;
         case FramePoint::TOPLEFT: case FramePoint::TOP: case FramePoint::TOPRIGHT:
+            return bounds_.y;
+        case FramePoint::BOTTOMLEFT: case FramePoint::BOTTOM: case FramePoint::BOTTOMRIGHT:
             return bounds_.y + bounds_.h;
     }
     return bounds_.y;
@@ -134,11 +138,12 @@ void UIFrame::SetFrameY(FramePoint pt, float y) {
             bounds_.y = y - bounds_.h / 2;
             break;
         case FramePoint::TOPLEFT: case FramePoint::TOP: case FramePoint::TOPRIGHT:
-            bounds_.y = y - bounds_.h;
+            if (bp) { float oldB = bounds_.y + bounds_.h; bounds_.y = y; bounds_.h = oldB - y; }
+            else bounds_.y = y;
             break;
         case FramePoint::BOTTOMLEFT: case FramePoint::BOTTOM: case FramePoint::BOTTOMRIGHT:
-            if (tp) { float oldB = bounds_.y + bounds_.h; bounds_.y = y; bounds_.h = oldB - y; }
-            else bounds_.y = y;
+            if (tp) bounds_.h = y - bounds_.y;
+            else bounds_.y = y - bounds_.h;
             break;
         default: break;
     }
@@ -153,6 +158,16 @@ void UIFrame::PositionBounds(GameUI& gui) {
     auto bp = FindAssign(assignments_, kBottomPrio, 3);
     auto chp = FindAssign(assignments_, kCenterHPrio, 3);
     auto cvp = FindAssign(assignments_, kCenterVPrio, 3);
+
+    if (!lp && !rp && !tp && !bp && !chp && !cvp) {
+        // No positioning info: FDF-built frames snap to the parent origin
+        // (Java parity); explicitly placed code frames never take this path.
+        if (defaultToParent_) {
+            bounds_.x = parent_->GetFrameX(FramePoint::TOPLEFT);
+            bounds_.y = parent_->GetFrameY(FramePoint::TOPLEFT);
+        }
+        return;
+    }
 
     // Resolve target frames
     UIFrame* parent = parent_;
@@ -182,20 +197,20 @@ void UIFrame::PositionBounds(GameUI& gui) {
         bounds_.x = resolveTargetX(*chp, chTarget) - bounds_.w / 2;
     }
 
-    // Y position
+    // Y position (y-down: TOP edge is bounds_.y, BOTTOM edge is y+h)
     UIFrame* bTarget = resolveTarget(bp);
     UIFrame* tTarget = resolveTarget(tp);
     UIFrame* cvTarget = resolveTarget(cvp);
 
-    if (bp) {
-        bounds_.y = resolveTargetY(*bp, bTarget);
-        if (assignedH_ == 0) {
-            if (tp) bounds_.h = resolveTargetY(*tp, tTarget) - bounds_.y;
-            else if (cvp) bounds_.h = (resolveTargetY(*cvp, cvTarget) - bounds_.y) * 2;
-        }
+    if (bp && tp) {
+        float yTop = resolveTargetY(*tp, tTarget);
+        float yBot = resolveTargetY(*bp, bTarget);
+        bounds_.y = std::min(yTop, yBot);
+        if (assignedH_ == 0) bounds_.h = std::fabs(yBot - yTop);
+    } else if (bp) {
+        bounds_.y = resolveTargetY(*bp, bTarget) - bounds_.h;
     } else if (tp) {
-        bounds_.y = resolveTargetY(*tp, tTarget) - bounds_.h;
-        if (cvp) bounds_.h = (bounds_.y - resolveTargetY(*cvp, cvTarget)) * 2;
+        bounds_.y = resolveTargetY(*tp, tTarget);
     } else if (cvp) {
         bounds_.y = resolveTargetY(*cvp, cvTarget) - bounds_.h / 2;
     }

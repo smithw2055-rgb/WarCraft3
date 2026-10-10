@@ -16,6 +16,7 @@
 #include "ecs/abilities/ability_upgrade.h"
 #include "ecs/abilities/spells25.h"
 #include "ecs/behaviors/behavior.h"
+#include "ecs/behaviors/behavior_harvest.h"
 #include "ecs/item.h"
 #include "ecs/abilities/spells28.h"
 #include "ecs/ability_factory.h"
@@ -303,6 +304,89 @@ bool TestWispAndLumberHarvest() {
     lumber.DoEffect(sim, chopper, tree2);
     TEST_ASSERT(tree2->GetLife() < before);
     TEST_ASSERT(sim.GetPlayer(0)->GetLumber() == 15);
+    return true;
+}
+
+bool TestAcolyteBindingPersistsAndReleasesOnDeath() {
+    // ref CBehaviorAcolyteHarvest: bound indefinitely (no timeout) until
+    // death/removal/rebind. The old 30s auto-unbind silently slowed the
+    // mine trickle while the acolyte kept standing there.
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    auto* mineUnit = AdoptAt(sim, 2851, 0, 200, 0);
+    mineUnit->AddAbility(sim, std::make_unique<CAbilityBlightedGoldMine>(28953));
+    auto* live = dynamic_cast<CAbilityBlightedGoldMine*>(mineUnit->GetAbility(War3ID("Abgm")));
+    TEST_ASSERT(live != nullptr);
+    live->SetGold(100000);
+    auto* acolyte = AdoptAt(sim, 2852, 0, 220, 0);
+    acolyte->AddAbility(sim, std::make_unique<CAbilityAcolyteHarvest>(28954));
+    auto* harvest = dynamic_cast<CAbilityAcolyteHarvest*>(acolyte->GetAbility(War3ID("Aaha")));
+    TEST_ASSERT(harvest != nullptr);
+    harvest->DoEffect(sim, acolyte, mineUnit);
+    TEST_ASSERT(harvest->IsBound());
+    TEST_ASSERT(live->GetMinerCount() == 1);
+
+    // 40s of mine ticks (past the old 30s timeout): still bound, still paid.
+    const int goldBefore = sim.GetPlayer(0)->GetGold();
+    for (int i = 0; i < 800; i++) live->OnTick(sim, mineUnit);
+    TEST_ASSERT(live->GetMinerCount() == 1);
+    TEST_ASSERT(harvest->IsBound());
+    TEST_ASSERT(sim.GetPlayer(0)->GetGold() > goldBefore);
+
+    // Lethal damage dispatches OnDeath on the next Update -> slot released.
+    acolyte->Damage(sim, nullptr, false, false, CAttackType::CHAOS, CDamageType::NORMAL,
+                    "", 1e9f, 0);
+    for (int i = 0; i < 5; i++) sim.Update();
+    TEST_ASSERT(live->GetMinerCount() == 0);
+    TEST_ASSERT(!harvest->IsBound());
+    return true;
+}
+
+bool TestWispJumpsOntoTreeAndDetachesOnDeath() {
+    // ref CBehaviorWispHarvest: instant jump onto the tree, trickle until
+    // the tree dies, then detach (handle cleared, no dangling pointer).
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    auto* wisp = AdoptAt(sim, 2861, 0, 0, 0);
+    CDestructable* tree = sim.CreateDestructable(War3ID("LTlt"), 100, 0, 100.0f);
+    TEST_ASSERT(tree != nullptr);
+    CAbilityWispHarvest gather(28961);
+    gather.DoEffect(sim, wisp, tree);
+    TEST_ASSERT(wisp->GetX() == tree->GetX() && wisp->GetY() == tree->GetY());
+    TEST_ASSERT(gather.GetBoundTreeHandle() == tree->GetHandleId());
+    gather.OnTick(sim, wisp);
+    TEST_ASSERT(sim.GetPlayer(0)->GetLumber() == 5);
+
+    // Fell the tree: binding clears and trickling stops.
+    tree->Damage(sim, nullptr, false, false, CAttackType::NORMAL, CDamageType::NORMAL,
+                 "", 1e9f, 0);
+    TEST_ASSERT(tree->IsDead());
+    const int lumberBefore = sim.GetPlayer(0)->GetLumber();
+    gather.OnTick(sim, wisp);
+    TEST_ASSERT(gather.GetBoundTreeHandle() == -1);
+    TEST_ASSERT(sim.GetPlayer(0)->GetLumber() == lumberBefore);
+    return true;
+}
+
+bool TestGoldMineCapacityMatchesRetail() {
+    // Retail Agld DataC1 = 5 miners; the old hardcoded 3 starved the 4th/5th
+    // worker. Both AddMiner and CanAddMiner enforce the cap.
+    CAbilityGoldMine mine(29011);
+    TEST_ASSERT(mine.GetMiningCapacity() == 5);
+    CBehaviorHarvest m1, m2, m3, m4, m5, m6;
+    mine.AddMiner(&m1);
+    mine.AddMiner(&m2);
+    mine.AddMiner(&m3);
+    mine.AddMiner(&m4);
+    mine.AddMiner(&m5);
+    TEST_ASSERT(mine.GetActiveMinerCount() == 5);
+    TEST_ASSERT(!mine.CanAddMiner());
+    mine.AddMiner(&m6); // refused
+    TEST_ASSERT(mine.GetActiveMinerCount() == 5);
+    mine.RemoveMiner(&m1);
+    TEST_ASSERT(mine.CanAddMiner());
+    mine.AddMiner(&m6);
+    TEST_ASSERT(mine.GetActiveMinerCount() == 5);
     return true;
 }
 

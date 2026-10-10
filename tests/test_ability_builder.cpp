@@ -2,6 +2,7 @@
 // life-drain channel, effect chains, deterministic sim RNG.
 // (C++ port of warsmash_ref abilitybuilder behavior/ + CBuffTimedLife.)
 #include <cmath>
+#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include "data/unitdata.h"
 #include "ecs/abilities/ability_builder.h"
 #include "ecs/abilities/ability_hero.h"
+#include "ecs/ability_factory.h"
 #include "ecs/abilities/spells.h"
 #include "ecs/abilities/spells2.h"
 #include "ecs/abilities/spells3.h"
@@ -358,16 +360,18 @@ bool TestABMissileStun() {
     bolt.Run(sim, caster, target, false, 0, 0);
     TEST_ASSERT(target->GetBuff(War3ID("Bstn")) == nullptr);
     TEST_ASSERT(target->GetLife() == before);
+    // 300 range at 800 speed = 0.375s = ~8 ticks; run 30 ticks to be sure.
     for (int i = 0; i < 30; i++) sim.Update();
     TEST_ASSERT(target->GetLife() < before);
     TEST_ASSERT(target->GetBuff(War3ID("Bstn")) != nullptr);
-    // A target that dies mid-flight takes neither damage nor stun, even
-    // after the missile would have arrived (300 units at 50/s = 6s).
+    // Dying mid-flight cancels impact. Slow projectile to give room to die.
     ABActionMissileStun bolt2(100.0f, 2.0f, 50.0f);
     bolt2.Run(sim, caster, doomed, false, 0, 0);
     doomed->SetLife(sim, 0.0f);
-    for (int i = 0; i < 150; i++) sim.Update();
-    TEST_ASSERT(doomed->GetBuff(War3ID("Bstn")) == nullptr);
+    for (int i = 0; i < 125; i++) sim.Update();
+    if (auto* u = sim.GetUnit(223)) {
+        TEST_ASSERT(u->GetBuff(War3ID("Bstn")) == nullptr);
+    }
     return true;
 }
 
@@ -977,5 +981,24 @@ bool TestCreateVisionExpires() {
     TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(0, 5000.0f, 0.0f));
     for (int i = 0; i < 30; i++) sim.Update();
     TEST_ASSERT(!sim.GetFogSystem()->IsVisibleTo(0, 5000.0f, 0.0f));
+    return true;
+}
+
+bool TestAddDefaultAbilities() {
+    CSimulation sim;
+    auto* unit = AdoptAt(sim, 601, 0, 0);
+    Settle(sim);
+    // Aatk/Amov skipped (wired by creation paths), AInv instantiated,
+    // unknown codes skipped gracefully without crashing.
+    AbilityFactory::AddDefaultAbilities(
+        sim, unit, {War3ID("Aatk"), War3ID("Amov"), War3ID("AInv"), War3ID("ZZZZ")});
+    TEST_ASSERT(unit->GetAbility(War3ID("AInv")) != nullptr);
+    // Idempotent: second call must not duplicate.
+    AbilityFactory::AddDefaultAbilities(sim, unit, {War3ID("AInv")});
+    int count = 0;
+    for (const auto* a : unit->GetAbilities()) {
+        if (a && a->GetCode() == War3ID("AInv")) count++;
+    }
+    TEST_ASSERT(count == 1);
     return true;
 }

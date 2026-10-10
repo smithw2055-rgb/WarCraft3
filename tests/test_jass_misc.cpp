@@ -10,6 +10,7 @@
 #include "data/gameplay_constants.h"
 #include "data/unitdata.h"
 #include "ecs/abilities/ability_hero.h"
+#include "ecs/abilities/ability_rally.h"
 #include "ecs/csimulation.h"
 #include "ecs/destructable.h"
 #include "ecs/player.h"
@@ -252,5 +253,51 @@ bool TestUnitPointValue() {
     const CUnitType* type = unitData.GetUnitType(War3ID("hfoo"));
     TEST_ASSERT(type != nullptr);
     TEST_ASSERT(CallNative(vm, "GetUnitPointValueByType", {JassValue::Int(hfoo)}).intVal == type->GetPointValue());
+    return true;
+}
+
+bool TestAbilityIdConversion() {
+    Fixture f;
+    const int code = ((int)'A' << 24) | ((int)'H' << 16) | ((int)'b' << 8) | (int)'z';
+    TEST_ASSERT(CallNative(f.vm, "AbilityId", {JassValue::Str("AHbz")}).intVal == code);
+    TEST_ASSERT(CallNative(f.vm, "AbilityId2String", {JassValue::Int(code)}).strVal == "AHbz");
+    TEST_ASSERT(CallNative(f.vm, "AbilityId", {}).intVal == 0);
+    TEST_ASSERT(CallNative(f.vm, "AbilityId2String", {}).strVal.empty());
+    return true;
+}
+
+bool TestRallyTargetGetters() {
+    Fixture f;
+    auto* hall = f.sim.AdoptUnit(std::make_unique<CUnit>(9401, MakeMiscType(false), 0, War3ID("hfoo"), 0, 0, 0));
+    auto* target = f.sim.AdoptUnit(std::make_unique<CUnit>(9402, MakeMiscType(false), 0, War3ID("hfoo"), 500, 0, 0));
+    TEST_ASSERT(hall && target);
+    hall->AddAbility(f.sim, std::make_unique<CAbilityRally>(9403));
+    auto* rally = dynamic_cast<CAbilityRally*>(hall->GetAbility(War3ID("ARal")));
+    TEST_ASSERT(rally);
+    f.sim.Update();
+    const int hallHandle = f.data->AllocHandle(JassHandleInfo::UNIT, 9401);
+
+    // No rally set: both queries report null.
+    TEST_ASSERT(CallNative(f.vm, "GetUnitRallyUnit", {JassValue::Int(hallHandle)}).intVal == 0);
+    TEST_ASSERT(CallNative(f.vm, "GetUnitRallyDestructable", {JassValue::Int(hallHandle)}).intVal == 0);
+
+    // Rally a unit: unit getter resolves, destructable getter stays null.
+    rally->Begin(f.sim, hall, 0, target);
+    const int rallyUnit = CallNative(f.vm, "GetUnitRallyUnit", {JassValue::Int(hallHandle)}).intVal;
+    TEST_ASSERT(rallyUnit != 0);
+    TEST_ASSERT(f.data->GetSimHandle(rallyUnit, JassHandleInfo::UNIT) == 9402);
+    TEST_ASSERT(CallNative(f.vm, "GetUnitRallyDestructable", {JassValue::Int(hallHandle)}).intVal == 0);
+
+    // Rally a destructable: roles flip.
+    CDestructable* gate = f.sim.CreateDestructable(War3ID("ATtr"), 300, 0, 100.0f);
+    TEST_ASSERT(gate);
+    rally->Begin(f.sim, hall, 0, gate);
+    TEST_ASSERT(CallNative(f.vm, "GetUnitRallyUnit", {JassValue::Int(hallHandle)}).intVal == 0);
+    const int rallyDest = CallNative(f.vm, "GetUnitRallyDestructable", {JassValue::Int(hallHandle)}).intVal;
+    TEST_ASSERT(rallyDest != 0);
+    TEST_ASSERT(f.data->GetSimHandle(rallyDest, JassHandleInfo::DESTRUCTABLE) == gate->GetHandleId());
+
+    // Bad handle is a safe null.
+    TEST_ASSERT(CallNative(f.vm, "GetUnitRallyUnit", {JassValue::Int(999999)}).intVal == 0);
     return true;
 }

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "ecs/csimulation.h"
+#include "ecs/destructable.h"
 #include "ecs/orders/order.h"
 #include "ecs/player.h"
 #include "ecs/unit.h"
@@ -284,5 +285,139 @@ bool TestPlayerTeamNatives() {
     const int bounds = CallNative(vm, "GetWorldBounds", {}).intVal;
     TEST_ASSERT(CallNative(vm, "GetRectMinX", {JassValue::Int(bounds)}).realVal == 0.0f);
     TEST_ASSERT(CallNative(vm, "GetRectMaxX", {JassValue::Int(bounds)}).realVal == 256.0f);
+    return true;
+}
+
+bool TestOrderIssuedCallbackFiresForAllKinds() {
+    // AdoptUnit-installed hook: direct unit->IssueOrder (JASS/UI/AI) and
+    // sim.IssueUnitOrder both land in the sim callback exactly once.
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    struct Seen { int unit = -1, order = 0, kind = -1, target = -2; float x = -1, y = -1; };
+    std::vector<Seen> log;
+    sim.SetUnitOrderCallback([&](int u, int o, int t, float x, float y) {
+        log.push_back({u, o, -1, t, x, y});
+    });
+    auto* u1 = sim.AdoptUnit(std::make_unique<CUnit>(8201, MakeOrderType(), 0, War3ID("hfoo"), 0, 0, 0));
+    auto* u2 = sim.AdoptUnit(std::make_unique<CUnit>(8202, MakeOrderType(), 0, War3ID("hfoo"), 500, 0, 0));
+    TEST_ASSERT(u1 && u2);
+
+    u1->IssueOrder(std::make_unique<COrderNoTarget>(OrderIds::STOP));
+    u1->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::MOVE, 100.0f, 200.0f));
+    u1->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::ATTACK, u2));
+    TEST_ASSERT(log.size() == 3);
+    TEST_ASSERT(log[0].unit == 8201 && log[0].order == OrderIds::STOP && log[0].target == -1);
+    TEST_ASSERT(log[1].order == OrderIds::MOVE && log[1].x == 100.0f && log[1].y == 200.0f);
+    TEST_ASSERT(log[2].order == OrderIds::ATTACK && log[2].target == 8202);
+
+    // Sim path logs the command AND fires exactly once (no double-fire).
+    TEST_ASSERT(sim.IssueUnitOrder(8201, std::make_unique<COrderNoTarget>(OrderIds::HOLD_POSITION)));
+    TEST_ASSERT(log.size() == 4);
+    TEST_ASSERT(log[3].order == OrderIds::HOLD_POSITION && log[3].target == -1);
+    return true;
+}
+
+namespace {
+
+const char* kOrderEventScript = R"JASS(
+globals
+    integer orderFires = 0
+    integer pointFires = 0
+    integer targetFires = 0
+    integer orderSeen = 0
+    real pointSeenX = 0.0
+    real pointSeenY = 0.0
+    integer targetSeen = 0
+endglobals
+
+function OnOrder takes nothing returns nothing
+    set orderFires = orderFires + 1
+    set orderSeen = GetIssuedOrderId()
+endfunction
+
+function OnPointOrder takes nothing returns nothing
+    set pointFires = pointFires + 1
+    set pointSeenX = GetOrderPointX()
+    set pointSeenY = GetOrderPointY()
+endfunction
+
+function OnTargetOrder takes nothing returns nothing
+    set targetFires = targetFires + 1
+    set targetSeen = GetOrderTargetUnit()
+endfunction
+)JASS";
+
+void WireOrderEvents(JassNatives& natives, CSimulation& sim) {
+    // Same wiring as JassCommonEnv: sim order callback -> FireOrderEvent.
+    sim.SetUnitOrderCallback([&](int unitHandle, int orderId, int targetHandle, float x, float y) {
+        natives.FireOrderEvent(unitHandle, orderId, targetHandle, x, y);
+    });
+}
+
+} // namespace
+
+bool TestIssuedOrderTriggerEvents() {
+    JassVM vm;
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    TEST_ASSERT(vm.LoadScript(kOrderEventScript));
+    auto data = natives.GetData();
+    WireOrderEvents(natives, sim);
+
+    auto* u1 = sim.AdoptUnit(std::make_unique<CUnit>(8211, MakeOrderType(), 0, War3ID("hfoo"), 0, 0, 0));
+    auto* u2 = sim.AdoptUnit(std::make_unique<CUnit>(8212, MakeOrderType(), 0, War3ID("hfoo"), 500, 0, 0));
+    TEST_ASSERT(u1 && u2);
+    sim.Update();
+    const int h1 = data->AllocHandle(JassHandleInfo::UNIT, 8211);
+    const int h2 = data->AllocHandle(JassHandleInfo::UNIT, 8212);
+
+    const int t1 = CallNative(vm, "CreateTrigger", {}).intVal;
+    CallNative(vm, "TriggerRegisterUnitEvent", {JassValue::Int(t1), JassValue::Int(h1), JassValue::Int(75)});
+    CallNative(vm, "TriggerAddAction", {JassValue::Int(t1), JassValue::Str("OnOrder")});
+    const int t2 = CallNative(vm, "CreateTrigger", {}).intVal;
+    CallNative(vm, "TriggerRegisterUnitEvent", {JassValue::Int(t2), JassValue::Int(h1), JassValue::Int(76)});
+    CallNative(vm, "TriggerAddAction", {JassValue::Int(t2), JassValue::Str("OnPointOrder")});
+    const int t3 = CallNative(vm, "CreateTrigger", {}).intVal;
+    CallNative(vm, "TriggerRegisterUnitEvent", {JassValue::Int(t3), JassValue::Int(h1), JassValue::Int(77)});
+    CallNative(vm, "TriggerAddAction", {JassValue::Int(t3), JassValue::Str("OnTargetOrder")});
+
+    // JASS-issued orders (previously silent: direct unit->IssueOrder).
+    TEST_ASSERT(CallNative(vm, "IssueImmediateOrderById", {JassValue::Int(h1), JassValue::Int(OrderIds::STOP)}).boolVal);
+    TEST_ASSERT(CallNative(vm, "IssuePointOrderById", {JassValue::Int(h1), JassValue::Int(OrderIds::MOVE), JassValue::Real(100), JassValue::Real(200)}).boolVal);
+    TEST_ASSERT(CallNative(vm, "IssueTargetOrderById", {JassValue::Int(h1), JassValue::Int(OrderIds::ATTACK), JassValue::Int(h2)}).boolVal);
+    natives.PumpQueuedThreads(1024);
+
+    TEST_ASSERT(vm.GetGlobal("orderFires").intVal == 1);
+    TEST_ASSERT(vm.GetGlobal("pointFires").intVal == 1);
+    TEST_ASSERT(vm.GetGlobal("targetFires").intVal == 1);
+    TEST_ASSERT(vm.GetGlobal("orderSeen").intVal == OrderIds::STOP);
+    TEST_ASSERT(vm.GetGlobal("pointSeenX").realVal == 100.0f);
+    TEST_ASSERT(vm.GetGlobal("pointSeenY").realVal == 200.0f);
+    // GetOrderTargetUnit returns a unit handle resolving to u2 (8212).
+    const int seenTarget = vm.GetGlobal("targetSeen").intVal;
+    TEST_ASSERT(data->GetSimHandle(seenTarget, JassHandleInfo::UNIT) == 8212);
+    return true;
+}
+
+bool TestIssueTargetOrderAcceptsDestructable() {
+    // Retail target orders accept trees (harvest): the old UNIT-only
+    // resolution failed these closed.
+    JassVM vm;
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    auto data = natives.GetData();
+
+    auto* u1 = sim.AdoptUnit(std::make_unique<CUnit>(8221, MakeOrderType(), 0, War3ID("hfoo"), 0, 0, 0));
+    CDestructable* tree = sim.CreateDestructable(War3ID("LTlt"), 100, 0, 100.0f);
+    TEST_ASSERT(u1 && tree);
+    sim.Update();
+    const int h1 = data->AllocHandle(JassHandleInfo::UNIT, 8221);
+    const int treeH = data->AllocHandle(JassHandleInfo::DESTRUCTABLE, tree->GetHandleId());
+    TEST_ASSERT(CallNative(vm, "IssueTargetOrderById", {JassValue::Int(h1), JassValue::Int(OrderIds::HARVEST), JassValue::Int(treeH)}).boolVal);
+    TEST_ASSERT(u1->GetLastOrderId() == OrderIds::HARVEST);
     return true;
 }

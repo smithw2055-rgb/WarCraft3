@@ -19,6 +19,7 @@ bool TestW3ELoadValidMinimal();
 bool TestW3ELoadRejectsBadMagic();
 bool TestDecodeBLPRejectsBadMagic();
 bool TestDecodeBLPDecodesMinimalPaletted();
+bool TestTgaDecodesViaStb();
 bool TestMdlFixtureParses();
 bool TestMdlRejectsGarbage();
 bool TestMdxTimelineSamplesLinearValues();
@@ -120,6 +121,34 @@ bool TestDivineShieldStackingKeepsInvulnerable();
 bool TestOverlappingAurasTakeStrongest();
 bool TestAuraDispelStripsBonus();
 bool TestRegionEnterLeaveFiresOnMigration();
+bool TestRegionEnterFilterBlocks();
+bool TestUpkeepGoldTaxLevels();
+bool TestRacePrefSetQuery();
+bool TestTimerDialogSpeedScalesDecay();
+bool TestShopSellItemEvent();
+bool TestChangeOwnerEvent();
+bool TestSimDrivenChangeOwnerEvent();
+bool TestShopHireUnitEvent();
+bool TestShopPawnItemEvent();
+bool TestTextmacroBasic();
+bool TestPlayerAbilityAvailable();
+bool TestConstructFinishEvent();
+bool TestRescueTransfersOwner();
+bool TestConstructCancelEvent();
+bool TestTrainStartCancelEvent();
+bool TestTrainFinishEvent();
+bool TestResearchStartCancelEvent();
+bool TestUpgradeStartFinishEvent();
+bool TestStripHeroLevel();
+bool TestHeroSkillEvent();
+bool TestTextmacroNested();
+bool TestStaticIfBranches();
+bool TestStaticIfSkipsNestedIf();
+bool TestStaticIfLibraryForward();
+bool TestHookRedirects();
+bool TestHookInScope();
+bool TestHookUnknownErrors();
+bool TestLibraryNeedsOrder();
 bool TestLifecycleEventsAndPlayerUnitDualMatch();
 bool TestEnumDestructablesInRect();
 bool TestDoodadTableLoads();
@@ -135,6 +164,8 @@ bool TestThornsAuraGrantsReflectBuff();
 bool TestVampiricAuraHealsAttacker();
 bool TestVampiricAuraViaAuraAbility();
 bool TestRootUprootSwapAndHold();
+bool TestRootMorphBehaviorHoldsThenCompletes();
+bool TestMoveIntoRangeHelper();
 bool TestNightElfBuildConsumesWisp();
 bool TestHumanBuildPausesWhenWorkerLeaves();
 bool TestForGroupSleepDoesNotPoisonVm();
@@ -190,6 +221,10 @@ bool TestLoadCapacityEnforced();
 bool TestUnloadRestoresUnits();
 bool TestCargoFollowsTransport();
 bool TestTransportDeathKillsCargo();
+bool TestLoadFiresUnitLoadedCallback();
+bool TestLoadedTriggerEvent();
+bool TestDecayFiresUnitDecayCallback();
+bool TestDecayTriggerEvent();
 bool TestJassHeroXpAndStats();
 bool TestJassUnitRaceAndIdType();
 bool TestJassPlayerIdentityAndLocationZ();
@@ -206,6 +241,8 @@ bool TestJassTargeting();
 bool TestJassBonus();
 bool TestJassFiles();
 bool TestJassSmallBatch();
+bool TestFrameNatives();
+bool TestLocalStoreNatives();
 bool TestJassEventFiring();
 bool TestRetailMapSmoke();
 bool TestTimedLifeKillsBearerOnExpiry();
@@ -407,6 +444,9 @@ bool TestItemPickupAppliesBonuses();
 bool TestBuildRejectsUnbuildableCell();
 bool TestBlightAndHauntedMine();
 bool TestWispAndLumberHarvest();
+bool TestAcolyteBindingPersistsAndReleasesOnDeath();
+bool TestWispJumpsOntoTreeAndDetachesOnDeath();
+bool TestGoldMineCapacityMatchesRetail();
 bool TestCargoBurrowAndDrop();
 bool TestWaygateAndShops();
 bool TestSacrificeSummonsShade();
@@ -419,11 +459,14 @@ bool TestChannelAndDrunkenBrawler();
 bool TestSpells29FactoryCoverage();
 bool TestSpells29OrderIds();
 bool TestOrderStringTable();
+bool TestOrderIdConstantsMatchRetail();
 bool TestSpellBaseOrderIds();
 bool TestSpellOrderDispatch();
 bool TestWrongOrderDoesNotCast();
 bool TestSmartDoesNotCastSpells();
 bool TestPassiveNeverMatchesOrders();
+bool TestSmartPointOrderMovesUnit();
+bool TestSmartWidgetFallbackMovesUnit();
 bool TestFogUnexploredIsMasked();
 bool TestFogUnitSightReveals();
 bool TestFogExploredMemory();
@@ -438,6 +481,7 @@ bool TestFogEnableGate();
 bool TestFogSharedVision();
 bool TestUnitShareVisionReveals();
 bool TestTerrainDeformLowersHeight();
+bool TestStealthVisibilityRules();
 bool TestLightningSegmentCount();
 bool TestLightningDefaultParams();
 bool TestLightningEndpointsAndBounds();
@@ -498,6 +542,7 @@ bool TestMissileDeflected();
 bool TestHealIgnoresShield();
 bool TestCreateVisionModifier();
 bool TestCreateVisionExpires();
+bool TestAddDefaultAbilities();
 bool TestTextTagAgeAndExpiry();
 bool TestTextTagPermanentSurvives();
 bool TestTextTagPosUnitSnap();
@@ -516,6 +561,9 @@ bool TestW3iParsesTechAndRandomTables();
 bool TestUnitsDooRetainsDropsAndInventory();
 bool TestW3dParsesTerrainDoodads();
 bool TestIssueOrderByIdNatives();
+bool TestOrderIssuedCallbackFiresForAllKinds();
+bool TestIssuedOrderTriggerEvents();
+bool TestIssueTargetOrderAcceptsDestructable();
 bool TestTerrainQueryNatives();
 bool TestRectRegionCellNatives();
 bool TestPlayerTeamNatives();
@@ -543,6 +591,12 @@ bool TestSoundStateNatives();
 bool TestGroupEnumCountedNatives();
 bool TestUIStateNatives();
 bool TestLightningAndIndicatorNatives();
+bool TestMinimapPingExpiry();
+bool TestSelectionAndCooldownNatives();
+bool TestEndCinematicEvent();
+bool TestPlayerTextMessages();
+bool TestDawnDuskSwitch();
+bool TestCineFilterTransition();
 bool TestLeaderboardNatives();
 bool TestMultiboardNatives();
 bool TestTimerDialogStyleNatives();
@@ -553,6 +607,7 @@ bool TestMeleeAINativesWiring();
 bool TestMeleeAIOrdersEnterCommandLog();
 bool TestMeleeAIDifficultyPacing();
 bool TestMeleeAIThinkRate();
+bool TestMeleeAIResearchesUpgrades();
 bool TestMdxParsesRibbonEmitter();
 bool TestRibbonEmissionAndQuads();
 bool TestRibbonAboveBelowGeometry();
@@ -590,6 +645,8 @@ bool TestSelectUnitAndFood();
 bool TestDestructableNatives();
 bool TestCampaignAndFlowNatives();
 bool TestUnitPointValue();
+bool TestAbilityIdConversion();
+bool TestRallyTargetGetters();
 bool TestSetTerrainPathable();
 bool TestWaterDeformsAndDoodadAnim();
 bool TestTerrainDeformRegistry();
@@ -597,12 +654,15 @@ bool TestTerrainDeformRegistry();
 bool RunStormLibTests();
 #endif
 
-int main() {
+int main(int argc, char** argv) {
+    std::string filter;
+    if (argc > 1) filter = argv[1];
     std::vector<TestCase> tests = {
         {"W3E loads minimal valid payload", TestW3ELoadValidMinimal},
         {"W3E rejects invalid magic", TestW3ELoadRejectsBadMagic},
         {"BLP rejects invalid magic", TestDecodeBLPRejectsBadMagic},
         {"BLP decodes minimal paletted texture", TestDecodeBLPDecodesMinimalPaletted},
+        {"TGA decodes via stb_image", TestTgaDecodesViaStb},
         {"MDL fixture parses", TestMdlFixtureParses},
         {"MDL rejects garbage", TestMdlRejectsGarbage},
         {"MDX timeline samples linear values", TestMdxTimelineSamplesLinearValues},
@@ -704,6 +764,34 @@ int main() {
         {"Overlapping auras take strongest", TestOverlappingAurasTakeStrongest},
         {"Aura dispel strips bonus", TestAuraDispelStripsBonus},
         {"Region enter/leave fires on migration", TestRegionEnterLeaveFiresOnMigration},
+        {"Region enter filter blocks", TestRegionEnterFilterBlocks},
+        {"Upkeep gold tax levels", TestUpkeepGoldTaxLevels},
+        {"Race pref set query", TestRacePrefSetQuery},
+        {"Timer dialog speed scales decay", TestTimerDialogSpeedScalesDecay},
+        {"Shop sell item event", TestShopSellItemEvent},
+        {"Change owner event", TestChangeOwnerEvent},
+        {"Sim-driven change owner event", TestSimDrivenChangeOwnerEvent},
+        {"Shop hire unit event", TestShopHireUnitEvent},
+        {"Shop pawn item event", TestShopPawnItemEvent},
+        {"Textmacro basic", TestTextmacroBasic},
+        {"Player ability available", TestPlayerAbilityAvailable},
+        {"Construct finish event", TestConstructFinishEvent},
+        {"Rescue transfers owner", TestRescueTransfersOwner},
+        {"Construct cancel event", TestConstructCancelEvent},
+        {"Train start cancel event", TestTrainStartCancelEvent},
+        {"Train finish event", TestTrainFinishEvent},
+        {"Research start cancel event", TestResearchStartCancelEvent},
+        {"Upgrade start finish event", TestUpgradeStartFinishEvent},
+        {"Strip hero level", TestStripHeroLevel},
+        {"Hero skill event", TestHeroSkillEvent},
+        {"Textmacro nested", TestTextmacroNested},
+        {"Static if branches", TestStaticIfBranches},
+        {"Static if skips nested if", TestStaticIfSkipsNestedIf},
+        {"Static if library forward", TestStaticIfLibraryForward},
+        {"Hook redirects", TestHookRedirects},
+        {"Hook in scope", TestHookInScope},
+        {"Hook unknown errors", TestHookUnknownErrors},
+        {"Library needs order", TestLibraryNeedsOrder},
         {"Lifecycle events and player-unit dual match", TestLifecycleEventsAndPlayerUnitDualMatch},
         {"Enum destructables in rect", TestEnumDestructablesInRect},
         {"Doodad table loads", TestDoodadTableLoads},
@@ -719,6 +807,8 @@ int main() {
         {"Vampiric aura heals attacker", TestVampiricAuraHealsAttacker},
         {"Vampiric aura via aura ability", TestVampiricAuraViaAuraAbility},
         {"Root/uproot swap and hold", TestRootUprootSwapAndHold},
+        {"Root morph holds then completes", TestRootMorphBehaviorHoldsThenCompletes},
+        {"Move-into-range helper", TestMoveIntoRangeHelper},
         {"Night elf build consumes wisp", TestNightElfBuildConsumesWisp},
         {"Human build pauses when worker leaves", TestHumanBuildPausesWhenWorkerLeaves},
         {"ForGroup sleep does not poison VM", TestForGroupSleepDoesNotPoisonVm},
@@ -774,6 +864,10 @@ int main() {
         {"Unload restores units", TestUnloadRestoresUnits},
         {"Cargo follows transport", TestCargoFollowsTransport},
         {"Transport death kills cargo", TestTransportDeathKillsCargo},
+        {"Load fires unit loaded callback", TestLoadFiresUnitLoadedCallback},
+        {"Loaded trigger event", TestLoadedTriggerEvent},
+        {"Decay fires unit decay callback", TestDecayFiresUnitDecayCallback},
+        {"Decay trigger event", TestDecayTriggerEvent},
         {"JASS hero XP and stats", TestJassHeroXpAndStats},
         {"JASS unit race and id-type", TestJassUnitRaceAndIdType},
         {"JASS player identity and location Z", TestJassPlayerIdentityAndLocationZ},
@@ -790,6 +884,8 @@ int main() {
         {"JASS bonus", TestJassBonus},
         {"JASS files", TestJassFiles},
         {"JASS small batch", TestJassSmallBatch},
+        {"JASS frames", TestFrameNatives},
+        {"JASS localstore", TestLocalStoreNatives},
         {"JASS event firing", TestJassEventFiring},
         {"Retail map smoke", TestRetailMapSmoke},
         {"Timed life kills bearer on expiry", TestTimedLifeKillsBearerOnExpiry},
@@ -991,6 +1087,9 @@ int main() {
         {"Build rejects unbuildable cell", TestBuildRejectsUnbuildableCell},
         {"Blight and haunted mine", TestBlightAndHauntedMine},
         {"Wisp and lumber harvest", TestWispAndLumberHarvest},
+        {"Acolyte binding persists, releases on death", TestAcolyteBindingPersistsAndReleasesOnDeath},
+        {"Wisp jumps onto tree, detaches on death", TestWispJumpsOntoTreeAndDetachesOnDeath},
+        {"Gold mine capacity matches retail", TestGoldMineCapacityMatchesRetail},
         {"Cargo burrow and drop", TestCargoBurrowAndDrop},
         {"Waygate and shops", TestWaygateAndShops},
         {"Sacrifice summons shade", TestSacrificeSummonsShade},
@@ -1003,11 +1102,14 @@ int main() {
         {"Spells29 factory coverage", TestSpells29FactoryCoverage},
         {"Spells29 order ids", TestSpells29OrderIds},
         {"Order string table", TestOrderStringTable},
+        {"Order id constants match retail", TestOrderIdConstantsMatchRetail},
         {"Spell base order ids", TestSpellBaseOrderIds},
         {"Spell order dispatch", TestSpellOrderDispatch},
         {"Wrong order does not cast", TestWrongOrderDoesNotCast},
         {"SMART does not cast spells", TestSmartDoesNotCastSpells},
         {"Passive never matches orders", TestPassiveNeverMatchesOrders},
+        {"SMART point order moves unit", TestSmartPointOrderMovesUnit},
+        {"SMART widget fallback moves unit", TestSmartWidgetFallbackMovesUnit},
         {"Fog unexplored is masked", TestFogUnexploredIsMasked},
         {"Fog unit sight reveals", TestFogUnitSightReveals},
         {"Fog explored memory", TestFogExploredMemory},
@@ -1022,6 +1124,7 @@ int main() {
         {"Fog shared vision", TestFogSharedVision},
         {"Unit share vision reveals", TestUnitShareVisionReveals},
         {"Terrain deform lowers height", TestTerrainDeformLowersHeight},
+        {"Stealth visibility rules", TestStealthVisibilityRules},
         {"Lightning segment count", TestLightningSegmentCount},
         {"Lightning default params", TestLightningDefaultParams},
         {"Lightning endpoints and bounds", TestLightningEndpointsAndBounds},
@@ -1082,6 +1185,7 @@ int main() {
         {"Heal ignores shield", TestHealIgnoresShield},
         {"Create vision modifier", TestCreateVisionModifier},
         {"Create vision expires", TestCreateVisionExpires},
+        {"Add default abilities", TestAddDefaultAbilities},
         {"TextTag age and expiry", TestTextTagAgeAndExpiry},
         {"TextTag permanent survives", TestTextTagPermanentSurvives},
         {"TextTag PosUnit snap", TestTextTagPosUnitSnap},
@@ -1100,6 +1204,9 @@ int main() {
         {"Units.doo retains drops and inventory", TestUnitsDooRetainsDropsAndInventory},
         {"W3D parses terrain doodads", TestW3dParsesTerrainDoodads},
         {"Issue order-by-id natives", TestIssueOrderByIdNatives},
+        {"Order issued callback fires for all kinds", TestOrderIssuedCallbackFiresForAllKinds},
+        {"Issued order trigger events", TestIssuedOrderTriggerEvents},
+        {"Issue target order accepts destructable", TestIssueTargetOrderAcceptsDestructable},
         {"Terrain query natives", TestTerrainQueryNatives},
         {"Rect/region cell natives", TestRectRegionCellNatives},
         {"Player/team natives", TestPlayerTeamNatives},
@@ -1127,6 +1234,12 @@ int main() {
         {"Group enum counted natives", TestGroupEnumCountedNatives},
         {"UI state natives", TestUIStateNatives},
         {"Lightning and indicator natives", TestLightningAndIndicatorNatives},
+        {"Minimap ping expiry", TestMinimapPingExpiry},
+        {"Selection and cooldown natives", TestSelectionAndCooldownNatives},
+        {"End cinematic event", TestEndCinematicEvent},
+        {"Player text messages", TestPlayerTextMessages},
+        {"Dawn dusk switch", TestDawnDuskSwitch},
+        {"Cine filter transition", TestCineFilterTransition},
         {"Leaderboard natives", TestLeaderboardNatives},
         {"Multiboard natives", TestMultiboardNatives},
         {"Timer dialog style natives", TestTimerDialogStyleNatives},
@@ -1137,6 +1250,7 @@ int main() {
         {"Melee AI orders enter command log", TestMeleeAIOrdersEnterCommandLog},
         {"Melee AI difficulty pacing", TestMeleeAIDifficultyPacing},
         {"Melee AI think rate", TestMeleeAIThinkRate},
+        {"Melee AI researches upgrades", TestMeleeAIResearchesUpgrades},
         {"MDX parses ribbon emitter", TestMdxParsesRibbonEmitter},
         {"Ribbon emission and quads", TestRibbonEmissionAndQuads},
         {"Ribbon above/below geometry", TestRibbonAboveBelowGeometry},
@@ -1174,6 +1288,8 @@ int main() {
         {"Destructable natives", TestDestructableNatives},
         {"Campaign and flow natives", TestCampaignAndFlowNatives},
         {"Unit point value", TestUnitPointValue},
+        {"Ability id conversion", TestAbilityIdConversion},
+        {"Rally target getters", TestRallyTargetGetters},
         {"Set terrain pathable", TestSetTerrainPathable},
         {"Water deforms and doodad anim", TestWaterDeformsAndDoodadAnim},
         {"Terrain deform registry", TestTerrainDeformRegistry},
@@ -1184,6 +1300,9 @@ int main() {
 
     int failed = 0;
     for (const auto& tc : tests) {
+        if (!filter.empty() && std::string(tc.name).find(filter) == std::string::npos) {
+            continue;
+        }
         if (!RunTest(tc)) {
             ++failed;
         }

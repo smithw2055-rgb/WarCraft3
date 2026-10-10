@@ -74,6 +74,13 @@ public:
     std::vector<AnchorDef> anchors;
     std::vector<FrameDefinition> innerFrames;
 
+    // Deferred cross-file inheritance (ref multi-file FrameDef.toc loads):
+    // the parser fills these only when the parent is missing or itself
+    // unresolved in the same file; ResolveFdfInheritance applies them in
+    // dependency order and clears them, so nothing merges twice.
+    std::string inheritsFrom;
+    bool inheritsWithChildren = false;
+
     FrameDefinition() = default;
     FrameDefinition(FrameClass fc, const std::string& type, const std::string& name_)
         : frameClass(fc), frameType(type), name(name_) {}
@@ -104,3 +111,7 @@ public:
 
     void InheritFrom(const FrameDefinition& other, bool withChildren);
 };
+
+// Resolve deferred INHERITS links across a merged template map (fixpoint,
+// cycle-safe). Returns the number of still-unresolved parents.
+int ResolveFdfInheritance(std::map<std::string, FrameDefinition>& templates);

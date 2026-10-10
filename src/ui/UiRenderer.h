@@ -23,6 +23,14 @@ public:
                           sg_image tex, float u0=0, float v0=0,
                           float u1=1, float v1=1,
                           uint32_t color=0xFFFFFFFF);
+    // Transposed quad: the texture U axis runs along screen Y and V along
+    // screen X. Used for retail backdrop B/T edges, whose strip slices are
+    // authored vertically but laid horizontally (ref BackdropFrame, where
+    // Java rotates the tiles by 270 degrees).
+    void DrawTransposedQuad(float x, float y, float w, float h,
+                            sg_image tex, float su0=0, float sv0=0,
+                            float su1=1, float sv1=1,
+                            uint32_t color=0xFFFFFFFF);
 
     sg_image GetWhiteTexture() const { return whiteTex_; }
     sg_view GetOrCreateView(sg_image img);

@@ -47,17 +47,26 @@ static bool ParseDoodadRecords(const uint8_t* data, size_t size, size_t recordsO
 
         if (version > 7) {
             CHK(4);
-            off += 4; // itemTable
+            d.itemTable = (int)R32LE(data + off); off += 4;
             int itemSetCount = (int)R32LE(data + off); off += 4;
             if (itemSetCount < 0 || itemSetCount > 10000) return false;
+            d.itemSets.resize(itemSetCount);
             for (int s = 0; s < itemSetCount; s++) {
                 // ref RandomItemSet: uint32 item count, then 8 bytes per item
+                // (War3ID + int32 chance).
                 CHK(4);
                 int itemCount = (int)R32LE(data + off); off += 4;
                 if (itemCount < 0 || itemCount > 10000) return false;
                 CHK((size_t)itemCount * 8);
-                off += (size_t)itemCount * 8;
+                d.itemSets[s].items.resize(itemCount);
+                for (int k = 0; k < itemCount; k++) {
+                    d.itemSets[s].items[k].id = TagBE(data + off); off += 4;
+                    d.itemSets[s].items[k].chance = (int)R32LE(data + off); off += 4;
+                }
             }
+        } else {
+            d.itemTable = -1;
+            d.itemSets.clear();
         }
 
         CHK(4);

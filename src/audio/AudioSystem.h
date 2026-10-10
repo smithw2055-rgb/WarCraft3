@@ -34,6 +34,13 @@ public:
     int Play2D(const std::string& name, float volume = 1.0f);
     int Play3D(const std::string& name, float x, float y, float z, float volume = 1.0f);
     int Play3DPath(const std::string& mpqPath, float x, float y, float z, float volume = 1.0f);
+    // Full 3D voice with retail-style distance cutoff + pitch variance (ref
+    // UnitAckSoundDesc min/max distance, CSound pitch/pitchVariance).
+    // Defaults preserve legacy behavior (inverse attenuation, no cutoff).
+    int Play3DEx(const std::string& name, float x, float y, float z, float volume = 1.0f,
+                 float pitch = 1.0f, float minDist = 0.0f, float maxDist = 0.0f);
+    int Play3DPathEx(const std::string& mpqPath, float x, float y, float z, float volume = 1.0f,
+                     float pitch = 1.0f, float minDist = 0.0f, float maxDist = 0.0f);
 
     void Stop(int soundId);
     void StopAll();
@@ -74,4 +81,6 @@ private:
     bool initialized_ = false;
 
     int playFromSource(SoundSource& src, float volume, float x, float y, float z, bool is3D);
+    int playFromSourceEx(SoundSource& src, float volume, float x, float y, float z, bool is3D,
+                         float pitch, float minDist, float maxDist);
 };

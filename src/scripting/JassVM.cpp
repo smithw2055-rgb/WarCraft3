@@ -23,7 +23,8 @@ static bool JassValueToBool(const JassValue& value) {
 
 bool JassVM::LoadScript(const std::string& source) {
     auto started = std::chrono::steady_clock::now();
-    JassLexer lexer(source);
+    // vJASS textmacro expansion precedes lexing (ref TextMacros).
+    JassLexer lexer(JassLexer::ExpandTextMacros(source));
     auto tokens = lexer.Tokenize();
     auto lexed = std::chrono::steady_clock::now();
     if (!lexer.GetErrors().empty()) {
@@ -39,6 +40,15 @@ bool JassVM::LoadScript(const std::string& source) {
     for (const auto& init : parser.GetInitializers()) {
         if (std::find(initializers_.begin(), initializers_.end(), init) == initializers_.end()) {
             initializers_.push_back(init);
+        }
+    }
+    for (const auto& lib : parser.GetLibraries()) {
+        libInitByLib_[lib.name] = lib.initializer;
+        auto& needs = libNeedsByInit_[lib.initializer];
+        for (const auto& dep : lib.needs) {
+            if (std::find(needs.begin(), needs.end(), dep) == needs.end()) {
+                needs.push_back(dep);
+            }
         }
     }
 
@@ -117,6 +127,10 @@ bool JassVM::LoadScript(const std::string& source) {
                 }
             }
         }
+        // vJASS hooks apply once all functions of this script are indexed.
+        for (const auto& hook : parser.GetHooks()) {
+            HookFunction(hook.first, hook.second);
+        }
     }
     auto initialized = std::chrono::steady_clock::now();
     const auto lexMs = std::chrono::duration_cast<std::chrono::milliseconds>(lexed - started).count();
@@ -177,12 +191,78 @@ void JassVM::Execute(const std::string& funcName) {
 }
 
 void JassVM::ExecuteInitializers() {
-    for (const auto& name : initializers_) {
-        auto it = functions_.find(name);
-        if (it != functions_.end()) {
-            ExecuteFunction(it->second, {});
+    // Stable topological order honoring library `needs` (ref init order):
+    // repeatedly run the earliest-listed initializer whose deps are done.
+    // Absent (optional) libs and cycles fall back to listed order.
+    std::unordered_set<std::string> done;
+    std::vector<std::string> pending = initializers_;
+    auto depsMet = [&](const std::string& init) {
+        auto it = libNeedsByInit_.find(init);
+        if (it == libNeedsByInit_.end()) return true;
+        for (const auto& depLib : it->second) {
+            auto lit = libInitByLib_.find(depLib);
+            if (lit == libInitByLib_.end()) continue;
+            if (!done.count(lit->second)) return false;
+        }
+        return true;
+    };
+    bool progress = true;
+    while (!pending.empty() && progress) {
+        progress = false;
+        for (auto it = pending.begin(); it != pending.end();) {
+            if (!depsMet(*it)) {
+                ++it;
+                continue;
+            }
+            const std::string name = *it;
+            it = pending.erase(it);
+            auto fit = functions_.find(name);
+            if (fit != functions_.end()) {
+                ExecuteFunction(fit->second, {});
+            }
+            done.insert(name);
+            progress = true;
         }
     }
+    for (const auto& name : pending) {
+        auto fit = functions_.find(name);
+        if (fit != functions_.end()) {
+            ExecuteFunction(fit->second, {});
+        }
+    }
+}
+
+bool JassVM::HookFunction(const std::string& orig, const std::string& replacement) {
+    auto oit = functions_.find(orig);
+    if (oit == functions_.end()) {
+        errors_.push_back("hook: unknown function '" + orig + "'");
+        return false;
+    }
+    auto rit = functions_.find(replacement);
+    if (rit == functions_.end()) {
+        errors_.push_back("hook: unknown function '" + replacement + "'");
+        return false;
+    }
+    const AstNode* origNode = oit->second;
+    const AstNode* replNode = rit->second;
+    const std::string saved = orig + "@hooked" + std::to_string(++hookCounter_);
+    // Redirect references to ORIG inside the replacement to the saved
+    // original (nodes are owned by programs_; the rename is permanent).
+    std::function<void(AstNode*)> rewrite = [&](AstNode* node) {
+        if (!node) return;
+        if ((node->type == AstNodeType::FUNC_CALL ||
+             node->type == AstNodeType::LITERAL_FUNCTION_REF) &&
+            node->text == orig) {
+            node->text = saved;
+        }
+        for (auto& child : node->children) {
+            rewrite(child.get());
+        }
+    };
+    rewrite(const_cast<AstNode*>(replNode));
+    functions_[saved] = origNode;
+    functions_[orig] = replNode;
+    return true;
 }
 
 const JassVM::JassStructDef* JassVM::FindStructDef(const std::string& name) const {

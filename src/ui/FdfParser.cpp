@@ -5,7 +5,14 @@
 #include <algorithm>
 #include <iostream>
 
-FdfParser::FdfParser(const std::string& content) : input_(content) {}
+FdfParser::FdfParser(const std::string& content, FileResolver resolver)
+    : input_(content), resolver_(resolver),
+      includedFiles_(std::make_shared<std::set<std::string>>()) {}
+
+FdfParser::FdfParser(const std::string& content, FileResolver resolver,
+                     std::shared_ptr<std::set<std::string>> includedFiles)
+    : input_(content), resolver_(resolver),
+      includedFiles_(includedFiles ? includedFiles : std::make_shared<std::set<std::string>>()) {}
 
 std::string FdfParser::Unquote(const std::string& s) {
     if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
@@ -176,9 +183,33 @@ void FdfParser::ParseStringList() {
 void FdfParser::ParseInclude() {
     std::string path = ParseString();
     Expect(Token::COMMA);
-    // File include - would need external file loading
-    // For now, just record the path
-    (void)path;
+    if (!resolver_ || path.empty()) return;
+
+    std::string norm = path;
+    for (char& c : norm) {
+        if (c == '/') c = '\\';
+    }
+
+    if (includedFiles_ && includedFiles_->count(norm)) {
+        return;
+    }
+    if (includedFiles_) {
+        includedFiles_->insert(norm);
+    }
+
+    std::string content;
+    if (resolver_(path, content) || resolver_(norm, content)) {
+        FdfParser subParser(content, resolver_, includedFiles_);
+        subParser.Parse();
+        for (const auto& [name, def] : subParser.GetTemplates()) {
+            templates_[name] = def;
+        }
+        for (const auto& [key, value] : subParser.GetDecoratedStrings()) {
+            if (decoratedStrings_.count(key) == 0) {
+                decoratedStrings_[key] = value;
+            }
+        }
+    }
 }
 
 bool FdfParser::ParseFrameBodyItem(FrameDefinition& def) {
@@ -340,10 +371,14 @@ FrameDefinition FdfParser::ParseFrame() {
             }
             std::string parentName = ParseString();
             auto it = templates_.find(parentName);
-            if (it != templates_.end()) {
+            if (it != templates_.end() && it->second.inheritsFrom.empty()) {
                 def.InheritFrom(it->second, withChildren);
             } else {
-                std::cerr << "FDF: template '" << parentName << "' not found for inheritance" << std::endl;
+                // Deferred: missing here, or the parent itself awaits a
+                // cross-file parent. The caller merges multi-file templates
+                // and runs ResolveFdfInheritance (ref FrameDef.toc loads).
+                def.inheritsFrom = parentName;
+                def.inheritsWithChildren = withChildren;
             }
         }
 
@@ -369,8 +404,11 @@ FrameDefinition FdfParser::ParseFrame() {
             }
             std::string parentName = ParseString();
             auto it = templates_.find(parentName);
-            if (it != templates_.end()) {
+            if (it != templates_.end() && it->second.inheritsFrom.empty()) {
                 def.InheritFrom(it->second, withChildren);
+            } else {
+                def.inheritsFrom = parentName;
+                def.inheritsWithChildren = withChildren;
             }
         }
 

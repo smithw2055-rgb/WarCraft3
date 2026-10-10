@@ -46,5 +46,6 @@ struct SplatMetadataStore {
     void RefreshRuntimeSplats(TexturedTerrain& terrain,
                               bool simulationInitialized,
                               CSimulation& simulation,
-                              const std::unordered_set<int>& selectedHandles) const;
+                              const std::unordered_set<int>& selectedHandles,
+                              int hoveredHandle = -1) const;
 };

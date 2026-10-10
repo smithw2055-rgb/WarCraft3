@@ -2,6 +2,12 @@
 #define __STORMLIB_NO_STATIC_LINK__
 #endif
 #include <StormLib.h>
+#ifdef far
+#undef far
+#endif
+#ifdef near
+#undef near
+#endif
 #include "map/w3e.h"
 #include <cstdint>
 #include <cctype>

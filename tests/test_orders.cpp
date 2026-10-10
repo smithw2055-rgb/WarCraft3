@@ -19,6 +19,7 @@
 #include "ecs/player.h"
 #include "ecs/unit.h"
 #include "ecs/unit_type.h"
+#include "ecs/destructable.h"
 
 #define TEST_ASSERT(cond) do { if (!(cond)) { std::cerr << "ASSERT @" << __LINE__ << ": " #cond "\n"; return false; } } while (0)
 
@@ -102,6 +103,35 @@ bool TestOrderStringTable() {
     TEST_ASSERT(OrderStringFromId(852183) == "starfall");
     TEST_ASSERT(OrderStringFromId(851971) == "smart");
     TEST_ASSERT(OrderStringFromId(999999999) == "");
+    return true;
+}
+
+bool TestOrderIdConstantsMatchRetail() {
+    // order.h constants must equal the retail ids in ref OrderIds.java
+    // AND the generated string table, or JASS OrderId("...") comparisons
+    // against engine-issued ids silently never match. Guards the fixed
+    // misassignments (build menus were dropitem+; cancels were buildmenu).
+    TEST_ASSERT(OrderIds::HUMAN_BUILD == 851995);
+    TEST_ASSERT(OrderIds::ORC_BUILD == 851996);
+    TEST_ASSERT(OrderIds::NIGHT_ELF_BUILD == 851997);
+    TEST_ASSERT(OrderIds::UNDEAD_BUILD == 851998);
+    TEST_ASSERT(OrderIds::CANCEL == 851976);
+    TEST_ASSERT(OrderIds::CANCEL_BUILD == 851976);
+    TEST_ASSERT(OrderIds::CANCEL_TRAIN == 851976);
+    TEST_ASSERT(OrderIds::HERO_SKILL == 852000);
+    TEST_ASSERT(OrderIds::SELECT_SKILL == 852000);
+    TEST_ASSERT(OrderIdFromString("humanbuild") == OrderIds::HUMAN_BUILD);
+    TEST_ASSERT(OrderIdFromString("orcbuild") == OrderIds::ORC_BUILD);
+    TEST_ASSERT(OrderIdFromString("nightelfbuild") == OrderIds::NIGHT_ELF_BUILD);
+    TEST_ASSERT(OrderIdFromString("undeadbuild") == OrderIds::UNDEAD_BUILD);
+    TEST_ASSERT(OrderIdFromString("cancel") == OrderIds::CANCEL);
+    TEST_ASSERT(OrderIdFromString("skillmenu") == OrderIds::HERO_SKILL);
+    TEST_ASSERT(OrderIdFromString("dropitem") == OrderIds::ITEM_DROP);
+    TEST_ASSERT(OrderIdFromString("returnresources") == OrderIds::RETURN_RESOURCES);
+    // No collisions between the fixed groups.
+    TEST_ASSERT(OrderIds::HUMAN_BUILD != OrderIds::ITEM_DROP);
+    TEST_ASSERT(OrderIds::CANCEL_BUILD != OrderIds::HUMAN_BUILD);
+    TEST_ASSERT(OrderIds::RETURN_RESOURCES != OrderIds::HUMAN_BUILD);
     return true;
 }
 
@@ -201,5 +231,30 @@ bool TestPassiveNeverMatchesOrders() {
     TEST_ASSERT(!evasion->CheckCanTargetNoTarget(sim, unit, OrderIds::STOP));
     TEST_ASSERT(!evasion->CheckCanTargetNoTarget(sim, unit, OrderIds::SMART));
     TEST_ASSERT(evasion->CheckCanTargetNoTarget(sim, unit, 0));
+    return true;
+}
+
+bool TestSmartPointOrderMovesUnit() {
+    CSimulation sim;
+    AddPlayers(sim);
+    auto* unit = AdoptAt(sim, 1951, 0, 0, 0);
+    Settle(sim);
+    Grant(sim, unit, War3ID("Amov"), 19501);
+    unit->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, 300.0f, 0.0f));
+    for (int i = 0; i < 30; i++) sim.Update();
+    TEST_ASSERT(unit->GetX() > 20.0f);
+    return true;
+}
+
+bool TestSmartWidgetFallbackMovesUnit() {
+    CSimulation sim;
+    AddPlayers(sim);
+    auto* unit = AdoptAt(sim, 1961, 0, 0, 0);
+    Settle(sim);
+    Grant(sim, unit, War3ID("Amov"), 19601);
+    auto* dest = sim.CreateDestructable(War3ID("LTlt"), 400.0f, 0.0f, 100.0f);
+    unit->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::SMART, dest));
+    for (int i = 0; i < 30; i++) sim.Update();
+    TEST_ASSERT(unit->GetX() > 20.0f);
     return true;
 }

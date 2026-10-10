@@ -54,8 +54,14 @@ enum JassEventType {
     JASS_EVENT_UNIT_USE_ITEM = 87,
     JASS_EVENT_UNIT_LOADED = 88,
     JASS_EVENT_WIDGET_DEATH = 89,
+    JASS_EVENT_UNIT_SELL = 286,
+    JASS_EVENT_UNIT_CHANGE_OWNER = 287,
+    JASS_EVENT_UNIT_SELL_ITEM = 288,
+    JASS_EVENT_UNIT_PAWN_ITEM = 294,
     // Player unit events (TriggerRegisterPlayerUnitEvent) — ConvertPlayerUnitEvent ids.
+    JASS_EVENT_PLAYER_UNIT_RESCUED = 19,
     JASS_EVENT_PLAYER_UNIT_DEATH = 20,
+    JASS_EVENT_PLAYER_UNIT_DECAY = 21,
     JASS_EVENT_PLAYER_UNIT_TRAIN_FINISH = 34,
     JASS_EVENT_PLAYER_UNIT_RESEARCH_FINISH = 37,
     JASS_EVENT_PLAYER_UNIT_ISSUED_ORDER = 38,
@@ -67,6 +73,20 @@ enum JassEventType {
     JASS_EVENT_PLAYER_UNIT_PICKUP_ITEM = 49,
     JASS_EVENT_PLAYER_UNIT_USE_ITEM = 50,
     JASS_EVENT_PLAYER_UNIT_LOADED = 51,
+    JASS_EVENT_PLAYER_UNIT_UPGRADE_START = 29,
+    JASS_EVENT_PLAYER_UNIT_UPGRADE_CANCEL = 30,
+    JASS_EVENT_PLAYER_UNIT_UPGRADE_FINISH = 31,
+    JASS_EVENT_PLAYER_UNIT_TRAIN_START = 32,
+    JASS_EVENT_PLAYER_UNIT_TRAIN_CANCEL = 33,
+    JASS_EVENT_PLAYER_UNIT_RESEARCH_START = 35,
+    JASS_EVENT_PLAYER_UNIT_RESEARCH_CANCEL = 36,
+    JASS_EVENT_PLAYER_UNIT_CONSTRUCT_START = 26,
+    JASS_EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL = 27,
+    JASS_EVENT_PLAYER_UNIT_CONSTRUCT_FINISH = 28,
+    JASS_EVENT_PLAYER_UNIT_SELL = 269,
+    JASS_EVENT_PLAYER_UNIT_CHANGE_OWNER = 270,
+    JASS_EVENT_PLAYER_UNIT_SELL_ITEM = 271,
+    JASS_EVENT_PLAYER_UNIT_PAWN_ITEM = 277,
 };
 
 struct JassTrigger {
@@ -96,6 +116,14 @@ struct JassTrigger {
         bool inside = false;
     };
     std::vector<JassUnitInRangeEvent> unitInRangeEvents;
+    // Region enter/leave events (ref CRegionTriggerEnter/Leave): the filter
+    // boolexpr was dropped by the first port; retained here for the poll pass.
+    struct JassRegionEvent {
+        int regionHandle = 0;
+        int code = 0; // 4001 enter, 4002 leave
+        std::string filterFunc;
+    };
+    std::vector<JassRegionEvent> regionEvents;
     // Player-state threshold events (TriggerRegisterPlayerStateEvent).
     struct JassPlayerStateEvent {
         int playerHandle = 0;
@@ -339,7 +367,7 @@ struct JassHandleInfo {
         PRIMARY_TAG, SECONDARY_TAG, PRIMARY_TAGS, SECONDARY_TAGS,
         DIALOG, BUTTON, MULTIBOARD, MULTIBOARDITEM, LEADERBOARD,
         IMAGE, TRACKABLE, UBERSPLAT, HASHTABLE, GAMECACHE, PROJECTILE, TARGET_TYPES,
-        STAT_BONUS, STATE_MOD, HANDLE_LIST, STRING_LIST, INT_EXPR
+        STAT_BONUS, STATE_MOD, HANDLE_LIST, STRING_LIST, INT_EXPR, FRAME, LOCALSTORE
     };
     Type type;
     int id;
@@ -349,12 +377,19 @@ struct JassStartLocationConfig {
     float x = 0.0f;
     float y = 0.0f;
     bool defined = false;
+    // Start-location preference table (ref SetStartLocPrio/Count): slot ->
+    // (other start loc, priority). Unused by fixed placement, kept for AI/UI.
+    std::vector<std::pair<int, int>> prio;
 };
 
 struct JassPlayerMapConfig {
     int startLocationIndex = -1;
     bool slotActive = false;
     int team = -1;
+    int controller = -1; // mapcontrol ordinal from SetPlayerController (-1 unset)
+    int racePreference = -1;
+    bool raceSelectable = true;
+    int color = -1; // playercolor ordinal from SetPlayerColor (-1 unset)
 };
 
 class JassNativesData {
@@ -488,6 +523,7 @@ public:
         int endColor[4] = {255, 255, 255, 255};
         float duration = 0.0f;
         bool displayed = false;
+        float age = 0.0f; // seconds since DisplayCineFilter(true)
     };
     struct JassSkyState {
         std::string model;
@@ -651,6 +687,16 @@ public:
     JassUIConfig uiConfig;
     bool allyColorFilter = false;
     bool creepCampFilter = false;
+    bool dawnDuskEnabled = true; // retail day/night cycle switch
+    // Player text messages (ref DisplayTextToPlayer family): queued for the
+    // HUD push; duration <= 0 stays until ClearTextMessages.
+    struct JassTextMessage {
+        int player = -1;
+        std::string text;
+        float duration = 0.0f;
+    };
+    std::vector<JassTextMessage> textMessages;
+    int textClearSeq = 0; // bumped by ClearTextMessages so the HUD drops shown toasts
     std::unordered_set<int> supportedGameTypes;
     int resourceDensity = 0;
     int creatureDensity = 0;
@@ -659,6 +705,7 @@ public:
         float x = 0, y = 0, duration = 0;
         int red = 255, green = 0, blue = 0;
         bool extra = false;
+        float age = 0; // seconds since PingMinimap*; aged in UpdateTimers
     };
     std::vector<JassMinimapPing> minimapPings;
     struct JassDefeatCondition {
@@ -706,8 +753,8 @@ public:
         float range = 0.0f;
     };
     std::unordered_map<int, JassRescueInfo> unitRescue;
-    // Pending map switch for the controller (ref ChangeLevel); no
-    // consumer yet because runtime map reload is unimplemented.
+    // Pending map switch for the controller (ref ChangeLevel); consumed by
+    // GameController::Update which routes it through the runtime reload path.
     std::string pendingChangeLevel;
     bool pendingChangeLevelScore = false;
     bool noReplaySave = false;
@@ -728,8 +775,8 @@ public:
     };
     std::vector<JassFogRadiusRequest> fogRadiusRequests;
 
-    // Terrain deformations (ref TerrainDeform*): parameters retained for
-    // the terrain render pass; no mesh effect yet (documented).
+    // Terrain deformations (ref TerrainDeform*): parameters retained and
+    // applied in the terrain height pass via TerrainDeformOffset.
     struct JassTerrainDeform {
         int kind = 0; // 0 crater, 1 ripple, 2 wave, 3 random, 4 registration
         float x = 0, y = 0, radius = 0, depth = 0;
@@ -824,6 +871,26 @@ public:
     int eventLeavingUnitHandle = -1;
     int eventManipulatingUnitHandle = -1;
     int eventManipulatedItemHandle = -1;
+    // Shop transaction context (ref sell/buy events): buyer, seller shop,
+    // sold item/unit handles. Sold-unit stays -1 until unit hire lands.
+    int eventBuyingUnitHandle = -1;
+    int eventSellingUnitHandle = -1;
+    int eventSoldItemHandle = -1;
+    int eventSoldUnitHandle = -1;
+    // Ownership-change context: previous owner player handle.
+    int eventChangingUnitPrevOwnerHandle = -1;
+    // Construction lifecycle context (ref construct scope).
+    int eventConstructedUnitHandle = -1;
+    int eventCancelledUnitHandle = -1;
+    int eventConstructingUnitHandle = -1;
+    // Rescue context: the rescuing unit (GetRescuer).
+    int eventRescuerUnitHandle = -1;
+    // Queued production type id (train start/cancel observe the type before
+    // any unit exists; finish prefers the unit handle).
+    int eventTrainedUnitTypeId = 0;
+    // Hero skill learning context (ref HERO_SKILL event scope).
+    int eventLearnedSkillId = 0;
+    int eventLearnedSkillLevel = 0;
     int eventOrderedUnitHandle = -1;
     int eventIssuedOrderId = 0;
     float eventOrderPointX = 0.0f;
@@ -831,6 +898,7 @@ public:
     int eventOrderTargetHandle = -1;
     int eventKillingUnitHandle = -1;
     int eventDyingUnitHandle = -1;
+    int eventDecayingUnitHandle = -1;
     int eventRevivingUnitHandle = -1;
     int eventTransportUnitHandle = -1;
     int eventLoadedUnitHandle = -1;
@@ -950,6 +1018,48 @@ public:
     std::unordered_set<int> onTickTriggers;
     std::unordered_map<int, int> onUnitTickTriggers; // triggerHandle -> unitSimId
 
+    // FDF frame handles (ref Jass2 CreateFrame/CreateSimpleFrame/GetFrameByName
+    // + FrameSet*/SkinGetField/LoadTOCFile). Stored sim-side so custom UI
+    // scripts resolve; rendering still goes through FrameBuilder/GameUI.
+    struct JassFrameAnchor {
+        int point = 0;
+        float x = 0, y = 0;
+        bool absolute = false;
+        int otherHandle = 0;
+        int otherPoint = 0;
+    };
+    struct JassFrame {
+        std::string templateName;
+        std::string name;
+        int ownerHandle = 0;
+        int context = 0;
+        int priority = 0;
+        bool simple = false;
+        std::string text;
+        uint32_t textColor = 0xFFFFFFFF;
+        std::vector<JassFrameAnchor> anchors;
+        bool positioned = false;
+    };
+    std::unordered_map<int, std::shared_ptr<JassFrame>> frames;
+    int nextFrameId = 0x27000000;
+    std::unordered_map<std::string, int> framesByName; // name -> sim id
+    std::unordered_map<std::string, std::string> skinFields;
+    std::string skinName;
+    std::vector<std::string> loadedTocFiles;
+
+    // Warsmash LocalStore (ref CreateLocalStore/SetLocalStore*/GetLocalStore*):
+    // string-keyed typeless bag per handle so AB/config scripts round-trip.
+    struct JassLocalStore {
+        std::unordered_map<std::string, int> ints;
+        std::unordered_map<std::string, double> reals;
+        std::unordered_map<std::string, std::string> strs;
+        std::unordered_map<std::string, bool> bools;
+        std::unordered_map<std::string, int> handles;
+        std::unordered_map<std::string, int> codes;
+    };
+    std::unordered_map<int, std::shared_ptr<JassLocalStore>> localStores;
+    int nextLocalStoreId = 0x28000000;
+
     // Callbacks for external system access (set from main.cpp)
     std::function<float(float, float)> terrainGroundHeight;
     void SetTerrainHeightCallback(std::function<float(float, float)> cb) {
@@ -1011,6 +1121,26 @@ struct JassQueuedContext {
     int eventLeavingUnitHandle = -1;
     int eventManipulatingUnitHandle = -1;
     int eventManipulatedItemHandle = -1;
+    // Shop transaction context (ref sell/buy events): buyer, seller shop,
+    // sold item/unit handles. Sold-unit stays -1 until unit hire lands.
+    int eventBuyingUnitHandle = -1;
+    int eventSellingUnitHandle = -1;
+    int eventSoldItemHandle = -1;
+    int eventSoldUnitHandle = -1;
+    // Ownership-change context: previous owner player handle.
+    int eventChangingUnitPrevOwnerHandle = -1;
+    // Construction lifecycle context (ref construct scope).
+    int eventConstructedUnitHandle = -1;
+    int eventCancelledUnitHandle = -1;
+    int eventConstructingUnitHandle = -1;
+    // Rescue context: the rescuing unit (GetRescuer).
+    int eventRescuerUnitHandle = -1;
+    // Queued production type id (train start/cancel observe the type before
+    // any unit exists; finish prefers the unit handle).
+    int eventTrainedUnitTypeId = 0;
+    // Hero skill learning context (ref HERO_SKILL event scope).
+    int eventLearnedSkillId = 0;
+    int eventLearnedSkillLevel = 0;
     int eventOrderedUnitHandle = -1;
     int eventIssuedOrderId = 0;
     float eventOrderPointX = 0.0f;
@@ -1018,6 +1148,7 @@ struct JassQueuedContext {
     int eventOrderTargetHandle = -1;
     int eventKillingUnitHandle = -1;
     int eventDyingUnitHandle = -1;
+    int eventDecayingUnitHandle = -1;
     int eventRevivingUnitHandle = -1;
     int eventTransportUnitHandle = -1;
     int eventLoadedUnitHandle = -1;
@@ -1058,9 +1189,24 @@ public:
 
     void FireUnitEvent(int unitSimHandle, int eventType, int playerEventType = -1);
     void FireDeathEvent(int unitSimHandle, int killerSimHandle, int eventType);
+    // Corpse begins decaying (retail EVENT_UNIT_DECAY, unit + player 54/21).
+    void FireDecayEvent(int unitSimHandle);
     void FireDamageEvent(int unitSimHandle, int sourceSimHandle, float damage, int eventType);
     void FireOrderEvent(int unitSimHandle, int orderId, int targetSimHandle, float x, float y);
     void FireItemEvent(int unitSimHandle, int itemSimHandle, int eventType);
+    void FireSellItemEvent(int buyerSimHandle, int sellerSimHandle, int itemSimHandle);
+    void FireSellUnitEvent(int buyerSimHandle, int sellerSimHandle, int hiredSimHandle);
+    void FirePawnItemEvent(int sellerSimHandle, int shopSimHandle, int itemSimHandle);
+    void FireHeroSkillEvent(int unitSimHandle, int skillId, int newLevel);
+    void FireConstructFinishEvent(int buildingSimHandle);
+    void FireConstructCancelEvent(int buildingSimHandle);
+    void FireTrainStartEvent(int buildingSimHandle, int typeId);
+    void FireTrainCancelEvent(int buildingSimHandle, int typeId);
+    void FireResearchStartEvent(int buildingSimHandle, int upgradeId);
+    void FireResearchCancelEvent(int buildingSimHandle, int upgradeId);
+    void FireUpgradeStartEvent(int buildingSimHandle, int upgradeId);
+    void FireUpgradeFinishEvent(int buildingSimHandle, int upgradeId);
+    void FireChangeOwnerEvent(int unitSimHandle, int prevOwnerPlayerIndex);
     void FireRegionEvent(int regionSimId, int unitSimHandle, bool isEnter);
     void FireTrainedEvent(int buildingSimHandle, int trainedSimHandle);
     void FireSummonEvent(int summonerSimHandle, int summonedSimHandle);
@@ -1071,7 +1217,13 @@ public:
     void FireDialogButtonEvent(int buttonJassHandle);
     void FireChatEvent(int fromPlayerHandle, const std::string& message);
     void FireAllianceChange(int playerIdA, int playerIdB);
+    void FireCinematicSkipEvent(int playerIndex);
+    void FireRescueEvent(int rescuedSimHandle, int rescuerSimHandle);
+    // Transport boarding: trigger unit is the passenger (ref rescue shape);
+    // GetTransportUnit/GetLoadedUnit read the dedicated fields.
+    void FireLoadedEvent(int transportSimHandle, int passengerSimHandle);
     void UpdateRegions();
+    void UpdateRescue();
     void UpdateTextTags(float dt);
     void ForgetItem(int itemSimHandle);
     // Advances live melee AI controllers one sim tick.
@@ -1144,6 +1296,8 @@ private:
     void RegisterTargetingNatives();
     void RegisterBonusNatives();
     void RegisterMiscNatives();
+    void RegisterFrameNatives();
+    void RegisterAbilityBuilderNatives();
 
     void RegisterConfigPlayerNatives();
 

@@ -59,7 +59,6 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
         float dy = buildY_ - unit_->GetY();
         float dist = std::sqrt(dx * dx + dy * dy);
         auto* pathfinding = simulation.GetPathfinding();
-        const bool hasPathingMap = pathfinding && pathfinding->HasPathingMap();
 
         if (dist < 128.0f) {
             movingToSite_ = false;
@@ -79,8 +78,16 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
                                                 buildX_, buildY_,
                                                 std::max(0.0f, unit_->GetCollisionSize()),
                                                 unit_->GetMovementType(), unit_, worldPath)) {
-                    for (size_t i = 1; i < worldPath.size(); i++)
-                        waypoints_.push_back(worldPath[i]);
+                    // Drop already-reached waypoints (ref CBehaviorHarvest:
+                    // degenerate refills treadmill forever otherwise).
+                    const float stepReach = std::max(1.0f,
+                        unit_->GetSpeed() * simulation.GetSimStepTime()) * 2.0f;
+                    for (size_t i = 1; i < worldPath.size(); i++) {
+                        const float rdx = worldPath[i].first - unit_->GetX();
+                        const float rdy = worldPath[i].second - unit_->GetY();
+                        if (rdx * rdx + rdy * rdy > stepReach * stepReach)
+                            waypoints_.push_back(worldPath[i]);
+                    }
                 }
             }
             pathRecalcCooldown_ = 8;
@@ -123,7 +130,10 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
                 unit_->SetPosition(nx, ny);
                 propelling_ = true;
             }
-        } else if (!hasPathingMap) {
+        } else {
+            // Direct approach when waypoints are exhausted (same rationale
+            // as CBehaviorHarvest): the step stays validated against the
+            // pathing map + dynamic collision.
             if (!unit_->TurnTowardPoint(buildX_, buildY_)) {
                 propelling_ = false;
                 return false;
@@ -140,8 +150,6 @@ bool CBehaviorBuild::Update(CSimulation& simulation) {
             }
             unit_->SetPosition(nx, ny);
             propelling_ = true;
-        } else {
-            propelling_ = false;
         }
         return false;
     }
@@ -274,6 +282,9 @@ void CBehaviorBuild::CompleteBuilding(CSimulation& simulation) {
         }
 
         std::cout << "Building completed: " << buildingTypeId_.ToString() << std::endl;
+        if (const auto& cb = simulation.GetConstructEventCallback()) {
+            cb(building->GetHandleId(), true);
+        }
     }
 
     // Race-specific worker handling on completion
@@ -300,5 +311,37 @@ void CBehaviorBuild::CompleteBuilding(CSimulation& simulation) {
         case CBuildModel::UNDEAD:
             // Undead: worker is already outside, just stop working
             break;
+    }
+}
+
+void CBehaviorBuild::CancelConstruction(CSimulation& simulation) {
+    if (completed_ || !unit_) return;
+    completed_ = true;
+
+    auto* building = simulation.GetUnit(createdUnitHandle_);
+    // Full refund of the deducted cost (retail cancel); nothing was spent
+    // yet when still walking to the site.
+    if (building_) {
+        auto* player = simulation.GetPlayer(unit_->GetPlayerIndex());
+        auto* unitData = simulation.GetUnitData();
+        if (player && unitData) {
+            if (auto* buildType = unitData->GetUnitType(buildingTypeId_)) {
+                player->AddGold(buildType->GetGoldCost());
+                player->AddLumber(buildType->GetLumberCost());
+            }
+        }
+    }
+    // Hidden riders (orc peon, night-elf wisp) emerge; the wisp is only
+    // consumed on completion, so cancel keeps it.
+    if (buildModel_ == CBuildModel::ORC || buildModel_ == CBuildModel::NIGHT_ELF) {
+        unit_->SetHidden(false);
+    }
+    if (building_ && building) {
+        // Fire before removal so trigger matching still sees the structure.
+        if (const auto& cb = simulation.GetConstructEventCallback()) {
+            cb(building->GetHandleId(), false);
+        }
+        simulation.RemoveUnit(building);
+        std::cout << "Building cancelled: " << buildingTypeId_.ToString() << std::endl;
     }
 }

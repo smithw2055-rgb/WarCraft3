@@ -8,6 +8,7 @@ public:
     TextureFrame(const std::string& name, UIFrame* parent = nullptr);
 
     void SetTexture(const std::shared_ptr<Texture>& tex) { texture_ = tex; }
+    bool HasTexture() const { return texture_ && texture_->IsValid(); }
     void SetTexture(sg_image img) { image_ = img; hasImage_ = true; }
     void SetColor(uint32_t c) { color_ = c; }
     void SetTexCoords(float u0, float v0, float u1, float v1) {

@@ -89,6 +89,14 @@ add_executable(warsmash_tests
     test_ribbons.cpp
     test_jass_cache.cpp
     test_jass_misc.cpp
+    test_jass_frames.cpp
+    test_jass_construct.cpp
+    test_jass_rescue.cpp
+    test_jass_queueevents.cpp
+    test_jass_heroavail.cpp
+    test_jass_preproc.cpp
+    test_jass_shopevents.cpp
+    test_jass_upkeep.cpp
     test_jass_unimplemented.cpp
     test_jass_p0.cpp
     test_map_smoke.cpp
@@ -195,6 +203,7 @@ add_executable(warsmash_tests
     ../src/ecs/behaviors/behavior_return_resources.cpp
     ../src/ecs/behaviors/behavior_repair.cpp
     ../src/ecs/behaviors/behavior_spell.cpp
+    ../src/ecs/behaviors/behavior_root.cpp
     ../src/ecs/behaviors/behavior_channel.cpp
     ../src/ecs/behaviors/behavior_item.cpp
     ../src/ecs/abilities/ability_attack.cpp

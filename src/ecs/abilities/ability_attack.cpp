@@ -1,4 +1,5 @@
 #include "ability_attack.h"
+#include "ecs/destructable.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/behaviors/behavior_attack.h"
@@ -45,17 +46,39 @@ bool CAbilityAttack::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
         if (targetUnit->IsInvisibleTo(unit)) return false;
     }
 
-    // Check if target is an enemy (not allied)
     auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (targetUnit) {
-        auto* player = game.GetPlayer(unit->GetPlayerIndex());
-        auto* targetPlayer = game.GetPlayer(targetUnit->GetPlayerIndex());
-        if (player && targetPlayer) {
-            // Check if allied (can't attack allies)
-            if (player->HasAlliance(*targetPlayer, CAllianceType::PASSIVE)) {
+    auto* targetDest = dynamic_cast<CDestructable*>(target);
+
+    // On SMART order, right-clicking destructables (trees) or gold mines never attacks
+    if (orderId == OrderIds::SMART) {
+        if (targetDest) return false;
+        if (targetUnit) {
+            if (targetUnit->GetAbility(War3ID("Agld")) || targetUnit->GetTypeId() == War3ID("ngol")) {
                 return false;
             }
         }
+    }
+
+    // Check if target is an enemy (not allied)
+    if (targetUnit) {
+        if (targetUnit->GetAbility(War3ID("Agld")) || targetUnit->GetTypeId() == War3ID("ngol")) {
+            return false;
+        }
+        auto* player = game.GetPlayer(unit->GetPlayerIndex());
+        auto* targetPlayer = game.GetPlayer(targetUnit->GetPlayerIndex());
+        if (player && targetPlayer) {
+            // Check if allied or passive
+            if (player->HasAlliance(*targetPlayer, CAllianceType::PASSIVE)) {
+                return false;
+            }
+            // Neutral passive player (usually 15 or >= 24) cannot be targeted with right click
+            if (targetPlayer->GetId() >= 15 && orderId == OrderIds::SMART) {
+                return false;
+            }
+        }
+    } else if (targetDest) {
+        // Normal unit attacks don't target trees unless force-ordered with attack
+        if (orderId != OrderIds::ATTACK) return false;
     }
 
     // Check if unit has any attacks available

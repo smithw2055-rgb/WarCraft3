@@ -8,18 +8,42 @@
 // subclasses preserve the state on top of SimpleFrame/UIFrame so existing
 // layout/render paths keep working while parity improves.
 #include "SimpleFrame.h"
+#include "ButtonFrame.h"
 #include <string>
 #include <vector>
 
-class CheckBoxFrame : public SimpleFrame {
+class CheckBoxFrame : public ButtonFrame {
 public:
     CheckBoxFrame(const std::string& name, UIFrame* parent = nullptr)
-        : SimpleFrame(name, parent) {}
+        : ButtonFrame(name, parent) {}
     bool IsChecked() const { return checked_; }
     void SetChecked(bool v) { checked_ = v; }
 
+    void SetCheckBoxCheckHighlight(UIFrame* f) { checkHighlight_ = f; }
+    void SetCheckBoxDisabledCheckHighlight(UIFrame* f) { disabledCheckHighlight_ = f; }
+
+    void Render(UiRenderer& renderer) override {
+        if (!visible_) return;
+        if (checkHighlight_) {
+            checkHighlight_->SetVisible(checked_ && enabled_);
+        }
+        if (disabledCheckHighlight_) {
+            disabledCheckHighlight_->SetVisible(checked_ && !enabled_);
+        }
+        ButtonFrame::Render(renderer);
+    }
+
+    UIFrame* OnMouseUp(float sx, float sy, int btn) override {
+        if (btn == 0 && pressed_ && enabled_) {
+            checked_ = !checked_;
+        }
+        return ButtonFrame::OnMouseUp(sx, sy, btn);
+    }
+
 private:
     bool checked_ = false;
+    UIFrame* checkHighlight_ = nullptr;
+    UIFrame* disabledCheckHighlight_ = nullptr;
 };
 
 class EditBoxFrame : public SimpleFrame {
@@ -71,15 +95,26 @@ private:
     float max_ = 1.0f;
 };
 
-class PopupMenuFrame : public ListBoxFrame {
+class PopupMenuFrame : public ButtonFrame {
 public:
     PopupMenuFrame(const std::string& name, UIFrame* parent = nullptr)
-        : ListBoxFrame(name, parent) {}
+        : ButtonFrame(name, parent) {}
+    void AddItem(const std::string& s) { items_.push_back(s); }
+    void ClearItems() { items_.clear(); selected_ = -1; }
+    int GetSelected() const { return selected_; }
+    void SetSelected(int i) { selected_ = i; }
+    size_t GetCount() const { return items_.size(); }
+    const std::string& GetItem(size_t i) const { return items_.at(i); }
     bool IsOpen() const { return open_; }
     void SetOpen(bool v) { open_ = v; }
+    void SetPopupMenu(UIFrame* menu) { popupMenu_ = menu; if (menu) menu->SetVisible(false); }
+    UIFrame* GetPopupMenu() const { return popupMenu_; }
 
 private:
+    std::vector<std::string> items_;
+    int selected_ = -1;
     bool open_ = false;
+    UIFrame* popupMenu_ = nullptr;
 };
 
 class TextAreaFrame : public EditBoxFrame {

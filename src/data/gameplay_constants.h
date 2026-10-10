@@ -37,6 +37,9 @@ struct CGameplayConstants {
     bool etherealDamageBonusAlly = false;
     bool magicImmuneResistsDamage = true;
     bool magicImmuneResistsUltimates = true;
+    // Pawn shops pay goldCost * pawnItemRate for pawnable items (ref
+    // CGameplayConstants PawnItemRate from Units\MiscGame.txt).
+    float pawnItemRate = 0.5f;
 
     CGameplayConstants();
     explicit CGameplayConstants(const TxtTable& miscData);

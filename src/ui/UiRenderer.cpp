@@ -3,8 +3,6 @@
 #include <cstring>
 #include <cstdio>
 
-static UiRenderer* g_activeRenderer = nullptr;
-
 UiRenderer::UiRenderer() {
     verts_.resize(MAX_VERTS);
     indices_.resize(MAX_INDICES);
@@ -20,7 +18,6 @@ UiRenderer::~UiRenderer() {
     if (whiteTex_.id) sg_destroy_image(whiteTex_);
     if (whiteView_.id) sg_destroy_view(whiteView_);
     for (auto& e : viewCache_) sg_destroy_view(e.view);
-    if (g_activeRenderer == this) g_activeRenderer = nullptr;
 }
 
 static sg_image make_white_tex() {
@@ -60,8 +57,8 @@ sg_view UiRenderer::GetOrCreateView(sg_image img) {
 }
 
 bool UiRenderer::Init(int /*screenW*/, int /*screenH*/) {
-    if (g_activeRenderer) return false;
-
+    // Multiple UiRenderer instances may coexist (MainUI overlay renderer
+    // plus the FDF HUD host renderer); each owns its GL objects.
     whiteTex_ = make_white_tex();
     if (!sg_query_image_state(whiteTex_)) return false;
 
@@ -201,7 +198,6 @@ bool UiRenderer::Init(int /*screenW*/, int /*screenH*/) {
         vbo_ = sg_make_buffer(&desc);
     }
 
-    g_activeRenderer = this;
     return true;
 }
 
@@ -268,6 +264,29 @@ void UiRenderer::DrawTexturedQuad(float x, float y, float w, float h,
     verts_[vi + 1] = { x,     y,     u0, v0, color };
     verts_[vi + 2] = { x + w, y + h, u1, v1, color };
     verts_[vi + 3] = { x + w, y,     u1, v0, color };
+
+    quadCount_++;
+}
+
+void UiRenderer::DrawTransposedQuad(float x, float y, float w, float h,
+                                     sg_image tex, float su0, float sv0,
+                                     float su1, float sv1, uint32_t color) {
+    if (tex.id != currentTex_.id) {
+        Flush();
+        currentTex_ = tex;
+    }
+
+    if (quadCount_ >= MAX_QUADS) {
+        Flush();
+    }
+
+    // U runs across the edge thickness (screen Y in [su0, su1]),
+    // V runs along edge length (screen X in [sv0, sv1]).
+    int vi = quadCount_ * 4;
+    verts_[vi + 0] = { x,     y + h, su1, sv0, color };
+    verts_[vi + 1] = { x,     y,     su0, sv0, color };
+    verts_[vi + 2] = { x + w, y + h, su1, sv1, color };
+    verts_[vi + 3] = { x + w, y,     su0, sv1, color };
 
     quadCount_++;
 }

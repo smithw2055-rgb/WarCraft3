@@ -19,6 +19,11 @@ struct WarsmashConfig {
     std::string tilesetDefault = "L";
     int localPlayerIndex = -1;
 
+    // Single-player setup overrides (CLI --ai/--closed/--local-player):
+    // slots forced to COMPUTER / closed (NONE+inactive) after config().
+    std::vector<int> aiPlayerSlots;
+    std::vector<int> closedPlayerSlots;
+
     bool Load(const std::string& iniPath);
     void SetDefaults();
 };

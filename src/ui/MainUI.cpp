@@ -1,5 +1,5 @@
 #include "MainUI.h"
-#include "NoesisHudHost.h"
+#include "FdfHudHost.h"
 #include "../data/unitdata.h"
 #include "../data/upgradedata.h"
 #include "../ecs/unit_type.h"
@@ -37,7 +37,7 @@ constexpr int kCommandCols = 4;
 constexpr int kCommandRows = 3;
 constexpr int kCommandCount = kCommandCols * kCommandRows;
 constexpr int kHudBuffCount = 8;
-constexpr const char* kDefaultNoesisCommandIconUri = "assets/ui/widgets/console/human/DefaultButton.png";
+constexpr const char* kDefaultCommandIconUri = "assets/ui/widgets/console/human/DefaultButton.png";
 
 std::string TrimCopy(const std::string& value) {
     size_t first = value.find_first_not_of(" \t\r\n");
@@ -162,13 +162,13 @@ std::string AttackDamageText(const CUnitType* unitType) {
     if (minDamage == maxDamage) {
         return std::to_string(minDamage);
     }
-    return std::to_string(minDamage) + "-" + std::to_string(maxDamage);
+    return std::to_string(minDamage) + " - " + std::to_string(maxDamage);
 }
 
 std::string InfoAttackIconKey(const CUnitType* unitType) {
-    if (!unitType) return "DamageNormal";
+    if (!unitType) return {};
     const auto& attacks = unitType->GetAttacks();
-    if (attacks.empty() || unitType->GetAttacksEnabled() <= 0) return "DamageNormal";
+    if (attacks.empty() || unitType->GetAttacksEnabled() <= 0) return {};
 
     const bool hasWeaponUpgrade = unitType->HasUpgradeClass(CUpgradeClass::ATTACK) ||
         unitType->HasUpgradeClass(CUpgradeClass::RANGED) ||
@@ -185,11 +185,11 @@ std::string InfoAttackIconKey(const CUnitType* unitType) {
         case CAttackType::NORMAL: key = "DamageNormal"; break;
         default: key = "DamageUnknown"; break;
     }
-    return key + suffix;
+    return "InfoPanelIcon" + key + suffix;
 }
 
 std::string InfoArmorIconKey(const CUnitType* unitType) {
-    if (!unitType) return "ArmorSmall";
+    if (!unitType) return "InfoPanelIconArmorSmallNeutral";
     const bool hasArmorUpgrade = unitType->HasUpgradeClass(CUpgradeClass::ARMOR);
     const char* suffix = hasArmorUpgrade ? "" : "Neutral";
     std::string key;
@@ -203,7 +203,7 @@ std::string InfoArmorIconKey(const CUnitType* unitType) {
         case CDefenseType::UNARMORED: key = "ArmorNone"; break;
         default: key = "ArmorUnknown"; break;
     }
-    return key + suffix;
+    return "InfoPanelIcon" + key + suffix;
 }
 
 HudInfoStats BuildInfoStats(const CUnitType* unitType, const CUnit* unit) {
@@ -310,7 +310,7 @@ void MainUI::LoadFont() {
 }
 
 bool MainUI::Init(MpqManager* mpq, int screenW, int screenH,
-                  const std::string& hudXamlPath, int gameVersion) {
+                  const std::string& hudLayoutPath, int gameVersion) {
     mpq_ = mpq;
     if (!gameUI_.Init(screenW, screenH)) {
         std::fprintf(stderr, "MainUI: GameUI init failed\n");
@@ -336,9 +336,9 @@ bool MainUI::Init(MpqManager* mpq, int screenW, int screenH,
     gameUI_.rootFrame = rootFrame_;
     gameUI_.frameRegistry["Root"] = rootFrame_;
 
-    hudHost_ = std::make_unique<NoesisHudHost>();
-    if (!hudHost_->Initialize(PROJECT_SOURCE_DIR, screenW, screenH, hudXamlPath, mpq_, gameVersion)) {
-        std::fprintf(stderr, "MainUI: Aero HUD host init failed\n");
+    hudHost_ = std::make_unique<FdfHudHost>();
+    if (!hudHost_->Initialize(PROJECT_SOURCE_DIR, screenW, screenH, hudLayoutPath, mpq_, gameVersion)) {
+        std::fprintf(stderr, "MainUI: FDF HUD host init failed\n");
         return false;
     }
 
@@ -349,8 +349,8 @@ bool MainUI::Init(MpqManager* mpq, int screenW, int screenH,
     return true;
 }
 
-bool MainUI::SwitchNoesisXaml(MpqManager* mpq, int screenW, int screenH,
-                              const std::string& hudXamlPath, int gameVersion) {
+bool MainUI::SwitchHudLayout(MpqManager* mpq, int screenW, int screenH,
+                              const std::string& hudLayoutPath, int gameVersion) {
     mpq_ = mpq;
     if (mpq_) {
         abilityData_ = CAbilityData::LoadFromMpq(*mpq_);
@@ -360,10 +360,10 @@ bool MainUI::SwitchNoesisXaml(MpqManager* mpq, int screenW, int screenH,
         }
     }
     if (!hudHost_) {
-        hudHost_ = std::make_unique<NoesisHudHost>();
-        return hudHost_->Initialize(PROJECT_SOURCE_DIR, screenW, screenH, hudXamlPath, mpq_, gameVersion);
+        hudHost_ = std::make_unique<FdfHudHost>();
+        return hudHost_->Initialize(PROJECT_SOURCE_DIR, screenW, screenH, hudLayoutPath, mpq_, gameVersion);
     }
-    return hudHost_->ReloadXaml(hudXamlPath, mpq_, gameVersion);
+    return hudHost_->ReloadLayout(hudLayoutPath, mpq_, gameVersion);
 }
 
 void MainUI::ApplyMapAbilityMods(const std::string& mapPath) {
@@ -412,7 +412,7 @@ void MainUI::SetCommandSlotAt(int row, int col,
                               bool enabled,
                               const std::string& label,
                               const std::shared_ptr<Texture>& icon,
-                              const std::string& noesisIconUri,
+                              const std::string& iconUri,
                               int numberOverlay,
                               const std::string& tooltip,
                               const HudResourceCosts& resourceCosts,
@@ -430,7 +430,7 @@ void MainUI::SetCommandSlotAt(int row, int col,
     slot.visible = true;
     slot.enabled = enabled;
     slot.icon = icon;
-    slot.noesisIconUri = noesisIconUri;
+    slot.iconUri = iconUri;
     slot.resourceCosts = resourceCosts;
     slot.cooldownRemaining = std::max(0.0f, cooldownRemaining);
     slot.cooldownMax = std::max(0.0f, cooldownMax);
@@ -519,6 +519,19 @@ void MainUI::Update(int screenW, int screenH) {
 
     hudHost_->Resize(screenW, screenH);
     hudHost_->SetResources(playerGold_, playerLumber_, playerFoodUsed_, playerFoodCap_, resourceTimeText_);
+    hudHost_->SetUpkeepLevel(upkeepLevel_);
+    hudHost_->SetCinematicMode(cinematicMode_);
+    hudHost_->SetCineFilter(cineFilterColor_, cineFilterVisible_);
+    if (cinematicVisible_) {
+        hudHost_->ShowCinematic(cinematicSpeaker_, cinematicDialogue_);
+    } else {
+        hudHost_->HideCinematic();
+    }
+    if (timerDialogVisible_) {
+        hudHost_->ShowTimerDialog(timerDialogTitle_, timerDialogValue_);
+    } else {
+        hudHost_->HideTimerDialog();
+    }
     hudHost_->SetSelection(selectedName_, selectedLevel_, selectedHp_, selectedMaxHp_,
                            selectedMp_, selectedMaxMp_, heroVisible_,
                            heroXp_, heroMaxXp_,
@@ -535,7 +548,7 @@ void MainUI::Update(int screenW, int screenH) {
         HudCommandSlot hudSlot;
         hudSlot.label = commandSlots_[i].label;
         hudSlot.tooltip = commandSlots_[i].tooltip;
-        hudSlot.iconUri = commandSlots_[i].noesisIconUri;
+        hudSlot.iconUri = commandSlots_[i].iconUri;
         hudSlot.resourceCosts = commandSlots_[i].resourceCosts;
         hudSlot.cooldownRemaining = commandSlots_[i].cooldownRemaining;
         hudSlot.cooldownMax = commandSlots_[i].cooldownMax;
@@ -558,14 +571,14 @@ void MainUI::Update(int screenW, int screenH) {
     hudHost_->Update(uiTime_);
 }
 
-void MainUI::RenderNoesisOffscreen() {
+void MainUI::RenderHudOffscreen() {
     if (hudHost_) {
         hudHost_->RenderOffscreen();
         sg_reset_state_cache();
     }
 }
 
-void MainUI::RenderNoesisOnly() {
+void MainUI::RenderHudOnly() {
     if (!hudHost_) return;
     hudHost_->Render();
     sg_reset_state_cache();
@@ -626,7 +639,7 @@ void MainUI::UpdateQueueState() {
         std::string iconUri;
         if (!iconPath.empty()) {
             std::shared_ptr<Texture> icon = LoadTextureFromMpq(iconPath);
-            iconUri = icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri;
+            iconUri = icon ? GetIconUri(iconPath) : kDefaultCommandIconUri;
         }
         queueItems_.push_back(HudQueueItem{i, label, iconUri, true});
     }
@@ -682,7 +695,7 @@ void MainUI::UpdateInventoryState() {
         std::string iconPath = item->GetIcon();
         if (!iconPath.empty()) {
             std::shared_ptr<Texture> icon = LoadTextureFromMpq(iconPath);
-            hudItem.iconUri = icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri;
+            hudItem.iconUri = icon ? GetIconUri(iconPath) : kDefaultCommandIconUri;
         }
 
         if (hudItem.iconUri.empty()) {
@@ -720,7 +733,7 @@ void MainUI::UpdatePortraitIconState() {
     const std::string& iconPath = unitType->GetIconPath();
     if (iconPath.empty()) return;
     std::shared_ptr<Texture> icon = LoadTextureFromMpq(iconPath);
-    selectedPortraitIconUri_ = icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri;
+    selectedPortraitIconUri_ = icon ? GetIconUri(iconPath) : kDefaultCommandIconUri;
 }
 
 void MainUI::UpdateBuffState() {
@@ -740,7 +753,7 @@ void MainUI::UpdateBuffState() {
         std::string iconUri;
         if (def && !def->iconArt.empty()) {
             std::shared_ptr<Texture> icon = LoadTextureFromMpq(def->iconArt);
-            iconUri = icon ? GetNoesisTextureUri(def->iconArt) : kDefaultNoesisCommandIconUri;
+            iconUri = icon ? GetIconUri(def->iconArt) : kDefaultCommandIconUri;
         }
         selectedBuffs_.push_back(BuildBuffItem(*buff, def, iconUri));
         if ((int)selectedBuffs_.size() >= kHudBuffCount) {
@@ -776,9 +789,13 @@ bool MainUI::HandleEvent(const sapp_event* ev) {
             hudHost_->SetPressedUpperButton(upperButton);
             hudHost_->SetPressedCommand(-1);
             hudHost_->SetPressedMinimapButton(-1);
-            if (upperButton == 1) {
-                hudHost_->OpenGameMenu();
-            }
+            // Retail upper-bar routing (ref UpperButtonBar.fdf): Quests,
+            // Menu, Allies, Chat each open their FDF dialog.
+            hudHost_->HandleUpperButtonAction(upperButton);
+            return true;
+        }
+
+        if (hudHost_->HandleModalClick(ev->mouse_x, ev->mouse_y)) {
             return true;
         }
 
@@ -852,15 +869,26 @@ bool MainUI::HandleEvent(const sapp_event* ev) {
         if (hoveredCommand >= 0 && !commandSlots_[hoveredCommand].tooltip.empty()) {
             const CommandSlot& slot = commandSlots_[hoveredCommand];
             ShowTooltip(slot.tooltip, ev->mouse_x, ev->mouse_y, slot.resourceCosts);
-        } else if (tooltipActive_ || !pendingTooltipText_.empty()) {
-            HideTooltip();
+        } else if (ev->mouse_y >= (float)sapp_height() * 0.73f || ev->mouse_y <= 40.0f) {
+            if (tooltipActive_ || !pendingTooltipText_.empty()) {
+                HideTooltip();
+            }
         }
     }
 
     switch (ev->type) {
     case SAPP_EVENTTYPE_KEY_DOWN:
         if (!chatOpen_ && (ev->key_code == SAPP_KEYCODE_ESCAPE || ev->key_code == SAPP_KEYCODE_F10)) {
-            if (hudHost_) hudHost_->ToggleGameMenu();
+            if (hudHost_) {
+                // Modal dialogs close first (Quest/Chat/Alliance), then the
+                // Esc menu toggles (ref retail Esc/quest dialog behavior).
+                if (hudHost_->IsQuestDialogOpen() || hudHost_->IsChatDialogOpen() ||
+                    hudHost_->IsAllianceDialogOpen()) {
+                    hudHost_->CloseAllDialogs();
+                } else {
+                    hudHost_->ToggleGameMenu();
+                }
+            }
             return true;
         }
 
@@ -928,9 +956,11 @@ bool MainUI::OnMouseDown(float x, float y, int btn) {
             hudHost_->SetPressedUpperButton(upperButton);
             hudHost_->SetPressedCommand(-1);
             hudHost_->SetPressedMinimapButton(-1);
-            if (upperButton == 1) {
-                hudHost_->OpenGameMenu();
-            }
+            hudHost_->HandleUpperButtonAction(upperButton);
+            return true;
+        }
+
+        if (hudHost_->HandleModalClick(x, y)) {
             return true;
         }
 
@@ -989,7 +1019,12 @@ bool MainUI::OnMouseUp(float x, float y, int btn) {
 
 void MainUI::OnKeyDown(int key) {
     if (hudHost_ && !chatOpen_ && (key == SAPP_KEYCODE_ESCAPE || key == SAPP_KEYCODE_F10)) {
-        hudHost_->ToggleGameMenu();
+        if (hudHost_->IsQuestDialogOpen() || hudHost_->IsChatDialogOpen() ||
+            hudHost_->IsAllianceDialogOpen()) {
+            hudHost_->CloseAllDialogs();
+        } else {
+            hudHost_->ToggleGameMenu();
+        }
     }
 }
 
@@ -1148,15 +1183,6 @@ void MainUI::RenderOverlays(UiRenderer& r) {
         float sx = info.screenX;
         float sy = info.screenY;
 
-        float ringSize = 8.0f;
-        uint32_t selColor = 0x6600FF66;
-        float fx = info.footX, fy = info.footY;
-        r.DrawQuad(fx - ringSize, fy - 1, ringSize * 2, 2, selColor);
-        r.DrawQuad(fx - 1, fy - ringSize, 2, ringSize * 2, selColor);
-        uint32_t innerColor = 0xCC33FF88;
-        float innerSize = ringSize * 0.4f;
-        r.DrawQuad(fx - innerSize, fy - 1, innerSize * 2, 1, innerColor);
-        r.DrawQuad(fx - 1, fy - innerSize, 1, innerSize * 2, innerColor);
 
         float barW = 48.0f;
         float barH = 6.0f;
@@ -1202,7 +1228,7 @@ void MainUI::UpdateInfoPanel(War3ID unitTypeId, const std::string& name, int lev
 }
 
 void MainUI::ClearInfoPanel() {
-    selectedName_ = "No unit selected";
+    selectedName_ = "";
     selectedLevel_ = 0;
     selectedHp_ = 0.0f;
     selectedMaxHp_ = 0.0f;
@@ -1283,12 +1309,12 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
             cooldownMax = spell->GetCooldown();
         }
         const War3ID defaultAutocast = unit->GetUnitType() ? unit->GetUnitType()->GetDefaultAutocastAbility() : War3ID{};
-        const bool defaultAutocastActive = defaultAutocast.value != 0 && defaultAutocast == ability->GetAlias();
-        const int autocastOrderId = defaultAutocastActive ? orderId : 0;
+        const bool isAutocast = ability->IsAutocastActive() || (defaultAutocast.value != 0 && defaultAutocast == ability->GetAlias());
+        const int autocastOrderId = isAutocast ? orderId : 0;
         SetCommandSlotAt(row, col, orderId, clickMode, !ability->IsDisabled() && enabledOverride,
-                         label, icon, icon ? GetNoesisTextureUri(def->iconArt) : kDefaultNoesisCommandIconUri, -1,
+                         label, icon, icon ? GetIconUri(def->iconArt) : kDefaultCommandIconUri, -1,
                          BuildCommandTooltipText(def->tooltip.empty() ? def->name : def->tooltip, def->uberTip),
-                         costs, cooldownRemaining, cooldownMax, autocastOrderId, defaultAutocastActive);
+                         costs, cooldownRemaining, cooldownMax, autocastOrderId, isAutocast);
         return true;
     };
 
@@ -1301,8 +1327,8 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                                        const char* iconPath) {
         std::shared_ptr<Texture> icon = iconPath ? LoadTextureFromMpq(iconPath) : nullptr;
         SetCommandSlotAt(row, col, orderId, clickMode, enabled, {},
-                         icon, icon ? GetNoesisTextureUri(iconPath)
-                                    : (iconPath ? kDefaultNoesisCommandIconUri : std::string()), -1,
+                         icon, icon ? GetIconUri(iconPath)
+                                    : (iconPath ? kDefaultCommandIconUri : std::string()), -1,
                          label ? label : std::string());
         if (!commandSlots_[SlotIndex(row, col)].icon) {
             commandSlots_[SlotIndex(row, col)].label = label ? label : std::string();
@@ -1348,7 +1374,7 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 SetCommandSlotAt(row, col, static_cast<int>(structureId.value), CommandClickMode::POINT_ONLY,
                                  !ability->IsDisabled() && PlayerCanAfford(player, costs), icon ? std::string() : label,
                                  icon, iconPath.empty() ? std::string()
-                                                        : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
+                                                        : (icon ? GetIconUri(iconPath) : kDefaultCommandIconUri), -1,
                                  structureType ? structureType->GetName() : structureId.ToString(),
                                  costs);
             }
@@ -1362,14 +1388,14 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
     if (!unit->IsBuilding() && unit->GetMoveBehavior()) {
         addFallbackButton(0, 0, OrderIds::MOVE, CommandClickMode::TARGET, true, "Move",
                           "ReplaceableTextures\\CommandButtons\\BTNMove.blp");
-        addFallbackButton(0, 1, OrderIds::PATROL, CommandClickMode::TARGET, true, "Patrol",
-                          "ReplaceableTextures\\CommandButtons\\BTNPatrol.blp");
-        addFallbackButton(0, 2, OrderIds::ATTACK, CommandClickMode::TARGET, true, "Attack",
-                          "ReplaceableTextures\\CommandButtons\\BTNAttack.blp");
-        addFallbackButton(0, 3, OrderIds::HOLD_POSITION, CommandClickMode::IMMEDIATE, true, "Hold",
-                          "ReplaceableTextures\\CommandButtons\\BTNHoldPosition.blp");
-        addFallbackButton(2, 3, OrderIds::STOP, CommandClickMode::IMMEDIATE, true, "Stop",
+        addFallbackButton(0, 1, OrderIds::STOP, CommandClickMode::IMMEDIATE, true, "Stop",
                           "ReplaceableTextures\\CommandButtons\\BTNStop.blp");
+        addFallbackButton(0, 2, OrderIds::HOLD_POSITION, CommandClickMode::IMMEDIATE, true, "Hold",
+                          "ReplaceableTextures\\CommandButtons\\BTNHoldPosition.blp");
+        addFallbackButton(0, 3, OrderIds::ATTACK, CommandClickMode::TARGET, true, "Attack",
+                          "ReplaceableTextures\\CommandButtons\\BTNAttack.blp");
+        addFallbackButton(1, 0, OrderIds::PATROL, CommandClickMode::TARGET, true, "Patrol",
+                          "ReplaceableTextures\\CommandButtons\\BTNPatrol.blp");
     }
 
     for (auto* ability : unit->GetAbilities()) {
@@ -1393,7 +1419,13 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
             continue;
         }
         if (auto* rallyAbility = dynamic_cast<CAbilityRally*>(ability)) {
-            addAbilityButton(rallyAbility, OrderIds::SET_RALLY, CommandClickMode::TARGET);
+            const auto* def = abilityData_.GetAbility(rallyAbility->GetAlias());
+            int rCol = (def && def->buttonPosX >= 0 && def->buttonPosX < kCommandCols) ? def->buttonPosX : 3;
+            int rRow = (def && def->buttonPosY >= 0 && def->buttonPosY < kCommandRows) ? def->buttonPosY : 0;
+            std::string rArt = (def && !def->iconArt.empty()) ? def->iconArt : "ReplaceableTextures\\CommandButtons\\BTNRallyPoint.blp";
+            std::shared_ptr<Texture> icon = LoadTextureFromMpq(rArt);
+            SetCommandSlotAt(rRow, rCol, OrderIds::SET_RALLY, CommandClickMode::TARGET, true,
+                             icon ? std::string() : "Rally", icon, GetIconUri(rArt), -1, "Set Rally Point");
             continue;
         }
         if (auto* spellAbility = dynamic_cast<CAbilitySpellBase*>(ability)) {
@@ -1425,6 +1457,7 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
             std::sort(trained.begin(), trained.end(),
                       [](const War3ID& lhs, const War3ID& rhs) { return lhs.value < rhs.value; });
             for (const War3ID& trainedId : trained) {
+                const auto* trainedType = unitData_ ? unitData_->GetUnitType(trainedId) : nullptr;
                 const int nextIndex = FindNextOpenCommandSlot();
                 if (nextIndex < 0) {
                     break;
@@ -1433,7 +1466,6 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 const int col = nextIndex % kCommandCols;
                 std::string label = trainedId.ToString();
                 std::string iconPath;
-                const auto* trainedType = unitData_ ? unitData_->GetUnitType(trainedId) : nullptr;
                 if (trainedType) {
                     label = ShortLabel(trainedType->GetName());
                     iconPath = trainedType->GetIconPath();
@@ -1445,7 +1477,7 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 SetCommandSlotAt(row, col, static_cast<int>(trainedId.value), CommandClickMode::IMMEDIATE,
                                  !ability->IsDisabled() && canQueue && PlayerCanAfford(player, costs), icon ? std::string() : label,
                                  icon, iconPath.empty() ? std::string()
-                                                        : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
+                                                        : (icon ? GetIconUri(iconPath) : kDefaultCommandIconUri), -1,
                                  trainedType ? trainedType->GetName() : trainedId.ToString(),
                                  costs);
             }
@@ -1477,7 +1509,7 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 SetCommandSlotAt(row, col, static_cast<int>(researchId.value), CommandClickMode::IMMEDIATE,
                                  !ability->IsDisabled() && canQueue && notMaxed && PlayerCanAfford(player, costs), icon ? std::string() : label,
                                  icon, iconPath.empty() ? std::string()
-                                                        : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
+                                                        : (icon ? GetIconUri(iconPath) : kDefaultCommandIconUri), -1,
                                  upgrade ? upgrade->name : researchId.ToString(),
                                  costs);
             }
@@ -1493,15 +1525,19 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
             std::sort(upgrades.begin(), upgrades.end(),
                       [](const War3ID& lhs, const War3ID& rhs) { return lhs.value < rhs.value; });
             for (const War3ID& upgradeId : upgrades) {
-                const int nextIndex = FindNextOpenCommandSlot();
-                if (nextIndex < 0) {
-                    break;
+                const auto* upgradeType = unitData_ ? unitData_->GetUnitType(upgradeId) : nullptr;
+                int row = 1;
+                int col = 0;
+                if (commandSlots_[SlotIndex(row, col)].visible) {
+                    const int nextIndex = FindNextOpenCommandSlot();
+                    if (nextIndex < 0) {
+                        break;
+                    }
+                    row = nextIndex / kCommandCols;
+                    col = nextIndex % kCommandCols;
                 }
-                const int row = nextIndex / kCommandCols;
-                const int col = nextIndex % kCommandCols;
                 std::string label = upgradeId.ToString();
                 std::string iconPath;
-                const auto* upgradeType = unitData_ ? unitData_->GetUnitType(upgradeId) : nullptr;
                 if (upgradeType) {
                     label = ShortLabel(upgradeType->GetName());
                     iconPath = upgradeType->GetIconPath();
@@ -1512,7 +1548,7 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 SetCommandSlotAt(row, col, static_cast<int>(upgradeId.value), CommandClickMode::IMMEDIATE,
                                  !ability->IsDisabled() && PlayerCanAfford(player, costs), icon ? std::string() : label,
                                  icon, iconPath.empty() ? std::string()
-                                                        : (icon ? GetNoesisTextureUri(iconPath) : kDefaultNoesisCommandIconUri), -1,
+                                                        : (icon ? GetIconUri(iconPath) : kDefaultCommandIconUri), -1,
                                  upgradeType ? upgradeType->GetName() : upgradeId.ToString(),
                                  costs);
             }
@@ -1534,10 +1570,10 @@ void MainUI::PopulateCommandCardFromAbilities(const std::vector<War3ID>& ability
 
     const FixedOrder fixed[] = {
         { War3ID("Amov"), 0, 0, "Move", OrderIds::MOVE },
-        { War3ID("Apat"), 1, 0, "Patrol", OrderIds::PATROL },
-        { War3ID("Aatk"), 2, 0, "Attack", OrderIds::ATTACK },
-        { War3ID("Ahrl"), 3, 0, "Hold", OrderIds::HOLD_POSITION },
-        { War3ID("Astp"), 3, 2, "Stop", OrderIds::STOP },
+        { War3ID("Astp"), 1, 0, "Stop", OrderIds::STOP },
+        { War3ID("Ahrl"), 2, 0, "Hold", OrderIds::HOLD_POSITION },
+        { War3ID("Aatk"), 3, 0, "Attack", OrderIds::ATTACK },
+        { War3ID("Apat"), 0, 1, "Patrol", OrderIds::PATROL },
     };
 
     for (const auto& fo : fixed) {
@@ -1551,7 +1587,7 @@ void MainUI::PopulateCommandCardFromAbilities(const std::vector<War3ID>& ability
         std::string tooltip = fo.label;
         if (def && !def->iconArt.empty()) {
             slot.icon = LoadTextureFromMpq(def->iconArt);
-            slot.noesisIconUri = slot.icon ? GetNoesisTextureUri(def->iconArt) : kDefaultNoesisCommandIconUri;
+            slot.iconUri = slot.icon ? GetIconUri(def->iconArt) : kDefaultCommandIconUri;
             costs.mana = def->manaCost;
             tooltip = BuildCommandTooltipText(def->tooltip.empty() ? def->name : def->tooltip, def->uberTip);
         }
@@ -1560,7 +1596,7 @@ void MainUI::PopulateCommandCardFromAbilities(const std::vector<War3ID>& ability
             fallbackPath += fo.label;
             fallbackPath += ".blp";
             slot.icon = LoadTextureFromMpq(fallbackPath);
-            slot.noesisIconUri = slot.icon ? GetNoesisTextureUri(fallbackPath) : kDefaultNoesisCommandIconUri;
+            slot.iconUri = slot.icon ? GetIconUri(fallbackPath) : kDefaultCommandIconUri;
         }
         slot.tooltip = tooltip;
         slot.resourceCosts = costs;
@@ -1579,7 +1615,7 @@ void MainUI::PopulateCommandCardFromAbilities(const std::vector<War3ID>& ability
         if (!slot.label.empty()) continue;
 
         slot.icon = LoadTextureFromMpq(def->iconArt);
-        slot.noesisIconUri = slot.icon ? GetNoesisTextureUri(def->iconArt) : kDefaultNoesisCommandIconUri;
+        slot.iconUri = slot.icon ? GetIconUri(def->iconArt) : kDefaultCommandIconUri;
         slot.label = slot.icon ? std::string() : ShortLabel(def->name);
         slot.tooltip = BuildCommandTooltipText(def->tooltip.empty() ? def->name : def->tooltip, def->uberTip);
         slot.resourceCosts = HudResourceCosts{};
@@ -1603,17 +1639,17 @@ void MainUI::PopulateDebugCommandCardForUiOnly() {
     UpdateInfoPanel(War3ID("hfoo"), "UI Debug Hero", 5, 385.0f, 725.0f, 120.0f, 220.0f);
 
     SetCommandSlotAt(0, 0, 851986, CommandClickMode::POINT_ONLY, true, "Move", nullptr,
-                     kDefaultNoesisCommandIconUri, -1, "Move", HudResourceCosts{});
+                     kDefaultCommandIconUri, -1, "Move", HudResourceCosts{});
     SetCommandSlotAt(0, 1, 851983, CommandClickMode::POINT_ONLY, true, "Patrol", nullptr,
-                     kDefaultNoesisCommandIconUri, 1, "Patrol", HudResourceCosts{});
+                     kDefaultCommandIconUri, 1, "Patrol", HudResourceCosts{});
     commandSlots_[SlotIndex(0, 1)].active = true;
     SetCommandSlotAt(0, 2, 851983, CommandClickMode::POINT_ONLY, false, "Attack", nullptr,
-                     kDefaultNoesisCommandIconUri, -1, "Attack", HudResourceCosts{});
+                     kDefaultCommandIconUri, -1, "Attack", HudResourceCosts{});
     SetCommandSlotAt(1, 0, 852095, CommandClickMode::IMMEDIATE, true, "Auto", nullptr,
-                     kDefaultNoesisCommandIconUri, -1, "Autocast", HudResourceCosts{},
+                     kDefaultCommandIconUri, -1, "Autocast", HudResourceCosts{},
                      0.0f, 0.0f, 852096, true);
     SetCommandSlotAt(1, 1, 852066, CommandClickMode::IMMEDIATE, true, "Cooldown", nullptr,
-                     kDefaultNoesisCommandIconUri, -1, "Cooldown", HudResourceCosts{},
+                     kDefaultCommandIconUri, -1, "Cooldown", HudResourceCosts{},
                      8.0f, 15.0f);
 
     multiSelectionUnits_.clear();
@@ -1686,15 +1722,41 @@ void MainUI::SetGlueMapLaunchCallback(War3UI::GlueMapLaunchCallback cb) {
 }
 
 void MainUI::SetResourcesForUiOnly(int gold, int lumber, int foodUsed, int foodCap, const std::string& timeText) {
+    SetLiveResources(gold, lumber, foodUsed, foodCap, timeText, upkeepLevel_);
+    std::cout << "UI-only mode: debug resources gold=" << playerGold_
+              << " lumber=" << playerLumber_
+              << " food=" << playerFoodUsed_ << "/" << playerFoodCap_
+              << " time=" << resourceTimeText_ << std::endl;
+}
+
+void MainUI::SetLiveResources(int gold, int lumber, int foodUsed, int foodCap,
+                              const std::string& timeText, int upkeepLevel) {
     playerGold_ = gold;
     playerLumber_ = lumber;
     playerFoodUsed_ = foodUsed;
     playerFoodCap_ = foodCap;
     resourceTimeText_ = timeText.empty() ? "12:00" : timeText;
-    std::cout << "UI-only mode: debug resources gold=" << playerGold_
-              << " lumber=" << playerLumber_
-              << " food=" << playerFoodUsed_ << "/" << playerFoodCap_
-              << " time=" << resourceTimeText_ << std::endl;
+    upkeepLevel_ = upkeepLevel;
+}
+
+void MainUI::SetTimerDialog(const std::string& title, const std::string& value, bool visible) {
+    timerDialogTitle_ = title;
+    timerDialogValue_ = value;
+    timerDialogVisible_ = visible;
+}
+
+void MainUI::SetCinematicScene(const std::string& speaker, const std::string& dialogue, bool visible) {
+    cinematicSpeaker_ = speaker;
+    cinematicDialogue_ = dialogue;
+    cinematicVisible_ = visible;
+}
+
+void MainUI::ShowGameMessage(const std::string& text, float expireSeconds) {
+    if (hudHost_) hudHost_->ShowGameMessage(text, expireSeconds);
+}
+
+void MainUI::ClearGameMessages() {
+    if (hudHost_) hudHost_->ClearGameMessages();
 }
 
 std::vector<War3ID> MainUI::GetUnitAbilities(War3ID unitTypeId) {
@@ -1752,15 +1814,15 @@ int MainUI::HitInventorySlot(float x, float y) const {
     return hudHost_ ? hudHost_->HitInventorySlot(x, y) : -1;
 }
 
-std::string MainUI::GetNoesisTextureUri(const std::string& path) const {
+std::string MainUI::GetIconUri(const std::string& path) const {
     std::string normalized = NormalizeAssetPath(path);
     if (normalized.empty()) return {};
 
-    auto it = noesisTextureUris_.find(normalized);
-    return it != noesisTextureUris_.end() ? it->second : std::string();
+    auto it = iconTextureUris_.find(normalized);
+    return it != iconTextureUris_.end() ? it->second : std::string();
 }
 
-std::string MainUI::ExportNoesisTexture(const std::string& normalizedPath, const std::vector<uint8_t>& data) {
+std::string MainUI::ExportIconTexture(const std::string& normalizedPath, const std::vector<uint8_t>& data) {
     if (normalizedPath.empty() || data.empty()) return {};
 
     std::filesystem::path relativePath = std::filesystem::path("assets") / "ui" / "cache" / "icons"
@@ -1770,7 +1832,7 @@ std::string MainUI::ExportNoesisTexture(const std::string& normalizedPath, const
     std::error_code ec;
     std::filesystem::create_directories(absolutePath.parent_path(), ec);
     if (ec) {
-        std::cerr << "MainUI: failed to create Aero icon cache directory: " << ec.message() << std::endl;
+        std::cerr << "MainUI: failed to create Icon cache directory: " << ec.message() << std::endl;
         return {};
     }
 
@@ -1804,7 +1866,7 @@ std::string MainUI::ExportNoesisTexture(const std::string& normalizedPath, const
     if (width <= 0 || height <= 0 || rgba.empty()) return {};
 
     if (!stbi_write_png(absolutePath.string().c_str(), width, height, 4, rgba.data(), width * 4)) {
-        std::cerr << "MainUI: failed to write Aero icon cache: " << absolutePath.string() << std::endl;
+        std::cerr << "MainUI: failed to write Icon cache: " << absolutePath.string() << std::endl;
         return {};
     }
 
@@ -1826,7 +1888,7 @@ std::shared_ptr<Texture> MainUI::LoadTextureFromMpq(const std::string& path) {
     auto tex = std::make_shared<Texture>();
     if (!tex->LoadFromMemory(buf.data(), buf.size())) return nullptr;
 
-    noesisTextureUris_[normalized] = ExportNoesisTexture(normalized, buf);
+    iconTextureUris_[normalized] = ExportIconTexture(normalized, buf);
     textures_[normalized] = tex;
     return tex;
 }

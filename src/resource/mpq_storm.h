@@ -3,12 +3,18 @@
 #define __STORMLIB_NO_STATIC_LINK__
 #endif
 #include <StormLib.h>
+#ifdef far
+#undef far
+#endif
+#ifdef near
+#undef near
+#endif
 #include <cstdint>
 #include <string>
 #include <vector>
 #include <unordered_map>
 
-#include "resource/casc.h"
+#include "casc.h"
 
 struct MpqArchive {
     std::string path;
@@ -55,8 +61,15 @@ private:
     // mounted first; then CASC storages in open order; then game archives
     // in open order (patches first).
     const MpqArchive* FindFileInArchives(const std::string& filename) const;
+    const MpqArchive* FindFileInTopArchives(const std::string& filename) const;
+    const MpqArchive* FindFileInGameArchives(const std::string& filename) const;
     const CascStorage* FindFileInCasc(const std::string& filename) const;
     bool FindFileInFolders(const std::string& filename, std::string& outPath) const;
+    // Map import fallback (ref SubdirDataSource(map, "war3mapImported\")):
+    // map editors store imports under war3mapImported\<path> but game code
+    // requests <path>; retry with the prefix inside map mounts/folders.
+    bool FindMapImport(const std::string& filename, std::string& folderOut,
+                       const MpqArchive** archiveOut) const;
     std::vector<MpqArchive> archives_;
     std::vector<MpqArchive> topArchives_; // map mounts shadow everything
     std::vector<CascStorage> cascStorages_;

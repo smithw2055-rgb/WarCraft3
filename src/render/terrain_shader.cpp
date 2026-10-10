@@ -27,11 +27,11 @@ static std::string BuildGroundVertex() {
        << "uniform sampler2D lightTexture;\n"
        << "uniform float lightCount;\n"
        << "uniform float lightTextureHeight;\n"
-       << "out vec2 UV;\nflat out uvec4 texture_indices;\nout vec2 pathing_map_uv;\nout vec3 position;\nout vec3 ShadowCoord;\nout vec2 v_suv;\nout vec3 shadeColor;\n"
+       << "out vec2 UV;\nout vec2 vContinuousUV;\nflat out uvec4 texture_indices;\nout vec2 pathing_map_uv;\nout vec3 position;\nout vec3 ShadowCoord;\nout vec2 v_suv;\nout vec3 shadeColor;\n"
        << "void main() {\n"
        << "    ivec2 size = textureSize(terrain_texture_list, 0);\n"
        << "    ivec2 pos = ivec2(gl_InstanceID % size.x, gl_InstanceID / size.x);\n"
-       << "    ivec2 height_pos = ivec2(vPosition + pos);\n"
+       << "    ivec2 height_pos = ivec2(round(vPosition)) + pos;\n"
        << "    vec4 height = texelFetch(height_cliff_texture, height_pos, 0);\n"
        << "    ivec3 off = ivec3(1, 1, 0);\n"
        << "    float hL = texelFetch(height_texture, height_pos - off.xz, 0).r;\n"
@@ -39,7 +39,8 @@ static std::string BuildGroundVertex() {
        << "    float hD = texelFetch(height_texture, height_pos - off.zy, 0).r;\n"
        << "    float hU = texelFetch(height_texture, height_pos + off.zy, 0).r;\n"
        << "    vec3 normal = normalize(vec3(hL - hR, 2.0, hD - hU));\n"
-       << "    UV = vec2(vPosition.x, 1 - vPosition.y);\n"
+       << "    UV = vec2(vPosition.x, 1.0 - vPosition.y);\n"
+       << "    vContinuousUV = vec2(vPosition.x + float(pos.x), 1.0 - (vPosition.y + float(pos.y)));\n"
        << "    texture_indices = texelFetch(terrain_texture_list, pos, 0);\n"
        << "    pathing_map_uv = (vPosition + pos) * 4;\n"
        << "    vec3 positionWorld = vec3((vPosition.x + pos.x) * 128.0 + centerOffsetX, height.r * 128.0, (vPosition.y + pos.y) * 128.0 + centerOffsetY);\n"
@@ -61,13 +62,15 @@ static std::string BuildGroundFragment(int textureCount) {
        << SamplerDeclarations(textureCount)
        << "uniform sampler2D shadowMap;\nuniform sampler2D fogOfWarMap;\n"
        << "uniform vec4 u_fogColor;\nuniform vec4 u_fogParams;\n"
-       << "in vec2 UV;\nflat in uvec4 texture_indices;\nin vec2 pathing_map_uv;\nin vec3 position;\nin vec3 ShadowCoord;\nin vec2 v_suv;\nin vec3 shadeColor;\nout vec4 color;\n"
+       << "in vec2 UV;\nin vec2 vContinuousUV;\nflat in uvec4 texture_indices;\nin vec2 pathing_map_uv;\nin vec3 position;\nin vec3 ShadowCoord;\nin vec2 v_suv;\nin vec3 shadeColor;\nout vec4 color;\n"
        << ShaderUtils::GetFragmentChain(textureCount)
        << "void main() {\n"
-       << "    color = get_fragment(texture_indices.a & 31u, vec3(UV, texture_indices.a >> 5));\n"
-       << "    color = color * color.a + get_fragment(texture_indices.b & 31u, vec3(UV, texture_indices.b >> 5)) * (1.0 - color.a);\n"
-       << "    color = color * color.a + get_fragment(texture_indices.g & 31u, vec3(UV, texture_indices.g >> 5)) * (1.0 - color.a);\n"
-       << "    color = color * color.a + get_fragment(texture_indices.r & 31u, vec3(UV, texture_indices.r >> 5)) * (1.0 - color.a);\n"
+       << "    vec2 dx = dFdx(vContinuousUV);\n"
+       << "    vec2 dy = dFdy(vContinuousUV);\n"
+       << "    color = get_fragment(texture_indices.a & 31u, vec3(UV, texture_indices.a >> 5), dx, dy);\n"
+       << "    color = color * color.a + get_fragment(texture_indices.b & 31u, vec3(UV, texture_indices.b >> 5), dx, dy) * (1.0 - color.a);\n"
+       << "    color = color * color.a + get_fragment(texture_indices.g & 31u, vec3(UV, texture_indices.g >> 5), dx, dy) * (1.0 - color.a);\n"
+       << "    color = color * color.a + get_fragment(texture_indices.r & 31u, vec3(UV, texture_indices.r >> 5), dx, dy) * (1.0 - color.a);\n"
        << "    if (base_texture_only) { color = vec4(color.rgb, 1.0); return; }\n"
        << "    float shadow = texture(shadowMap, v_suv).r;\n"
        << "    float fogOfWarData = texture(fogOfWarMap, v_suv).r;\n"
@@ -84,7 +87,7 @@ static std::string BuildCliffVertex() {
        << "in vec3 vPosition;\nin vec2 vUV;\nin vec3 vNormal;\n"
        << "uniform mat4 MVP;\nuniform float centerOffsetX;\nuniform float centerOffsetY;\n"
        << "uniform vec4 cliffOffset;\n"
-       << "uniform sampler2D height_texture;\nuniform sampler2D shadowMap;\nuniform sampler2D lightTexture;\n"
+       << "uniform sampler2D height_texture;\nuniform sampler2D lightTexture;\n"
        << "uniform float lightCount;\nuniform float lightTextureHeight;\n"
        << "out vec3 UV;\nout vec3 Normal;\nout vec2 pathing_map_uv;\nout vec3 vWorldPos;\nout vec2 v_suv;\nout vec3 shadeColor;\nout float vLocalHeight;\n"
        << "void main() {\n"
@@ -96,8 +99,7 @@ static std::string BuildCliffVertex() {
        << "    vec2 terrainTilePos = vec2((positionWorld.x - centerOffsetX) / 128.0,\n"
        << "                              (positionWorld.z - centerOffsetY) / 128.0);\n"
        << "    pathing_map_uv = terrainTilePos * 4.0;\n"
-       << "    ivec2 shadowSize = textureSize(shadowMap, 0);\n"
-       << "    v_suv = clamp(terrainTilePos / max(vec2(shadowSize), vec2(1.0)), vec2(0.0), vec2(1.0));\n"
+       << "    v_suv = clamp(terrainTilePos / max(vec2(size), vec2(1.0)), vec2(0.0), vec2(1.0));\n"
        << "    gl_Position = MVP * vec4(positionWorld, 1.0);\n"
        << "    UV = vec3(vUV, cliffOffset.w);\n"
        << "    vLocalHeight = vPosition.z;\n"
@@ -124,10 +126,10 @@ static std::string BuildCliffVertex() {
 static std::string BuildCliffFragment(int groundTextureCount) {
     std::ostringstream ss;
     ss << "#version 410 core\n"
-       << SamplerDeclarations(groundTextureCount)
        << "uniform sampler2DArray cliff_textures;\n"
        << "uniform sampler2D shadowMap;\nuniform sampler2D fogOfWarMap;\n"
        << "uniform usampler2D terrain_texture_list;\n"
+       << SamplerDeclarations(groundTextureCount)
        << "uniform bool show_lighting;\nuniform bool base_texture_only;\n"
        << "uniform vec4 u_fogColor;\nuniform vec4 u_fogParams;\n"
        << "uniform vec4 u_cliffBandParams0;\n"
@@ -141,11 +143,13 @@ static std::string BuildCliffFragment(int groundTextureCount) {
        << "    ivec2 clampedCell = clamp(cell, ivec2(0), max(size - ivec2(1), ivec2(0)));\n"
        << "    uvec4 textureIndices = texelFetch(terrain_texture_list, clampedCell, 0);\n"
        << "    textureIndices.a &= 32767u;\n"
+       << "    vec2 dx = dFdx(uv);\n"
+       << "    vec2 dy = dFdy(uv);\n"
        << "    vec2 wrappedUv = fract(uv);\n"
-       << "    vec4 terrainColor = get_fragment(textureIndices.a & 31u, vec3(wrappedUv, textureIndices.a >> 5));\n"
-       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.b & 31u, vec3(wrappedUv, textureIndices.b >> 5)) * (1.0 - terrainColor.a);\n"
-       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.g & 31u, vec3(wrappedUv, textureIndices.g >> 5)) * (1.0 - terrainColor.a);\n"
-       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.r & 31u, vec3(wrappedUv, textureIndices.r >> 5)) * (1.0 - terrainColor.a);\n"
+       << "    vec4 terrainColor = get_fragment(textureIndices.a & 31u, vec3(wrappedUv, textureIndices.a >> 5), dx, dy);\n"
+       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.b & 31u, vec3(wrappedUv, textureIndices.b >> 5), dx, dy) * (1.0 - terrainColor.a);\n"
+       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.g & 31u, vec3(wrappedUv, textureIndices.g >> 5), dx, dy) * (1.0 - terrainColor.a);\n"
+       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.r & 31u, vec3(wrappedUv, textureIndices.r >> 5), dx, dy) * (1.0 - terrainColor.a);\n"
        << "    return terrainColor;\n"
        << "}\n"
        << "vec4 sample_triplanar_terrain(ivec2 cell, vec3 worldPos, vec3 worldNormal) {\n"
@@ -318,12 +322,14 @@ static std::string BuildUberSplatFragment(int textureCount) {
        << "vec4 sample_terrain_color(vec2 terrainCellCoord) {\n"
        << "    ivec2 size = textureSize(u_terrainTextureList, 0);\n"
        << "    ivec2 cell = clamp(ivec2(floor(terrainCellCoord)), ivec2(0), max(size - ivec2(1), ivec2(0)));\n"
+       << "    vec2 dx = dFdx(terrainCellCoord);\n"
+       << "    vec2 dy = dFdy(terrainCellCoord);\n"
        << "    vec2 localUv = clamp(fract(terrainCellCoord), vec2(0.0), vec2(1.0));\n"
        << "    uvec4 textureIndices = texelFetch(u_terrainTextureList, cell, 0);\n"
-       << "    vec4 terrainColor = get_fragment(textureIndices.a & 31u, vec3(localUv, textureIndices.a >> 5));\n"
-       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.b & 31u, vec3(localUv, textureIndices.b >> 5)) * (1.0 - terrainColor.a);\n"
-       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.g & 31u, vec3(localUv, textureIndices.g >> 5)) * (1.0 - terrainColor.a);\n"
-       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.r & 31u, vec3(localUv, textureIndices.r >> 5)) * (1.0 - terrainColor.a);\n"
+       << "    vec4 terrainColor = get_fragment(textureIndices.a & 31u, vec3(localUv, textureIndices.a >> 5), dx, dy);\n"
+       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.b & 31u, vec3(localUv, textureIndices.b >> 5), dx, dy) * (1.0 - terrainColor.a);\n"
+       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.g & 31u, vec3(localUv, textureIndices.g >> 5), dx, dy) * (1.0 - terrainColor.a);\n"
+       << "    terrainColor = terrainColor * terrainColor.a + get_fragment(textureIndices.r & 31u, vec3(localUv, textureIndices.r >> 5), dx, dy) * (1.0 - terrainColor.a);\n"
        << "    return terrainColor;\n"
        << "}\n"
        << "void main() {\n"
@@ -464,20 +470,19 @@ sg_shader TerrainShaders::CreateCliffShader(int cliffTextureCount, int groundTex
 
     int p = 0;
     AddTexSmpPair(desc, 0, 0, SG_SHADERSTAGE_VERTEX, SG_IMAGETYPE_2D, SG_IMAGESAMPLETYPE_FLOAT, "height_texture", p);
-    AddTexSmpPair(desc, 1, 1, SG_SHADERSTAGE_VERTEX, SG_IMAGETYPE_2D, SG_IMAGESAMPLETYPE_FLOAT, "shadowMap", p);
-    AddTexSmpPair(desc, 2, 2, SG_SHADERSTAGE_VERTEX, SG_IMAGETYPE_2D, SG_IMAGESAMPLETYPE_FLOAT, "lightTexture", p);
-    AddTexSmpPair(desc, 3, 3, SG_SHADERSTAGE_FRAGMENT, SG_IMAGETYPE_ARRAY, SG_IMAGESAMPLETYPE_FLOAT, "cliff_textures", p);
-    AddTexSmpPair(desc, 4, 4, SG_SHADERSTAGE_FRAGMENT, SG_IMAGETYPE_2D, SG_IMAGESAMPLETYPE_FLOAT, "shadowMap", p);
-    AddTexSmpPair(desc, 5, 5, SG_SHADERSTAGE_FRAGMENT, SG_IMAGETYPE_2D, SG_IMAGESAMPLETYPE_FLOAT, "fogOfWarMap", p);
-    desc.views[6].texture.stage = SG_SHADERSTAGE_FRAGMENT;
-    desc.views[6].texture.image_type = SG_IMAGETYPE_2D;
-    desc.views[6].texture.sample_type = SG_IMAGESAMPLETYPE_UINT;
-    desc.samplers[6].stage = SG_SHADERSTAGE_FRAGMENT;
-    desc.samplers[6].sampler_type = SG_SAMPLERTYPE_NONFILTERING;
+    AddTexSmpPair(desc, 1, 1, SG_SHADERSTAGE_VERTEX, SG_IMAGETYPE_2D, SG_IMAGESAMPLETYPE_FLOAT, "lightTexture", p);
+    AddTexSmpPair(desc, 2, 2, SG_SHADERSTAGE_FRAGMENT, SG_IMAGETYPE_ARRAY, SG_IMAGESAMPLETYPE_FLOAT, "cliff_textures", p);
+    AddTexSmpPair(desc, 3, 3, SG_SHADERSTAGE_FRAGMENT, SG_IMAGETYPE_2D, SG_IMAGESAMPLETYPE_FLOAT, "shadowMap", p);
+    AddTexSmpPair(desc, 4, 4, SG_SHADERSTAGE_FRAGMENT, SG_IMAGETYPE_2D, SG_IMAGESAMPLETYPE_FLOAT, "fogOfWarMap", p);
+    desc.views[5].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+    desc.views[5].texture.image_type = SG_IMAGETYPE_2D;
+    desc.views[5].texture.sample_type = SG_IMAGESAMPLETYPE_UINT;
+    desc.samplers[5].stage = SG_SHADERSTAGE_FRAGMENT;
+    desc.samplers[5].sampler_type = SG_SAMPLERTYPE_NONFILTERING;
     desc.texture_sampler_pairs[p].stage = SG_SHADERSTAGE_FRAGMENT;
     desc.texture_sampler_pairs[p].glsl_name = "terrain_texture_list";
-    desc.texture_sampler_pairs[p].view_slot = 6;
-    desc.texture_sampler_pairs[p].sampler_slot = 6;
+    desc.texture_sampler_pairs[p].view_slot = 5;
+    desc.texture_sampler_pairs[p].sampler_slot = 5;
     p++;
     std::vector<std::string> samplerNames;
     samplerNames.reserve(groundTextureCount);
@@ -485,7 +490,7 @@ sg_shader TerrainShaders::CreateCliffShader(int cliffTextureCount, int groundTex
         samplerNames.push_back("sample" + std::to_string(i));
     }
     for (int i = 0; i < groundTextureCount; ++i) {
-        AddTexSmpPair(desc, 7 + i, 7, SG_SHADERSTAGE_FRAGMENT, SG_IMAGETYPE_ARRAY, SG_IMAGESAMPLETYPE_FLOAT, samplerNames[i].c_str(), p);
+        AddTexSmpPair(desc, 6 + i, 6, SG_SHADERSTAGE_FRAGMENT, SG_IMAGETYPE_ARRAY, SG_IMAGESAMPLETYPE_FLOAT, samplerNames[i].c_str(), p);
     }
     sg_shader s = sg_make_shader(&desc);
     if (sg_query_shader_state(s) != SG_RESOURCESTATE_VALID) s = {0};

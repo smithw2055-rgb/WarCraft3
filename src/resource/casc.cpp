@@ -1,4 +1,4 @@
-#include "resource/casc.h"
+#include "casc.h"
 
 #ifdef WITHOUT_CASCLIB
 // Header-only fallback; nothing to compile.

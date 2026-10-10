@@ -131,6 +131,12 @@ public:
         if (index < 0 || index >= (int)instances_.size()) return nullptr;
         return instances_[index]->viewer;
     }
+    // Fog-of-war sweep access: statics (doodads/items) hide under black mask.
+    int GetInstanceCount() const { return (int)instances_.size(); }
+    const PlacedModel* GetInstance(int index) const {
+        if (index < 0 || index >= (int)instances_.size()) return nullptr;
+        return instances_[index];
+    }
     bool IntersectInstanceRayWithCollision(int index, const picking::PickRay& ray, float& outT) const;
 
 private:

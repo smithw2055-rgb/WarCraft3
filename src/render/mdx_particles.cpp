@@ -65,7 +65,7 @@ MdxParticleSystem::MdxParticleSystem()
 MdxParticleSystem::~MdxParticleSystem() { Destroy(); }
 
 void MdxParticleSystem::Destroy() {
-    if (!Renderer::IsActive()) { emitters_.clear(); return; }
+    if (!Renderer::IsActive()) { emitters_.clear(); popcornOwned_.clear(); return; }
     for (auto& e : emitters_) {
         if (e.instanceBuffer.id) sg_destroy_buffer(e.instanceBuffer);
         if (e.textureView.id) sg_destroy_view(e.textureView);
@@ -73,11 +73,13 @@ void MdxParticleSystem::Destroy() {
         if (e.texture.id) sg_destroy_image(e.texture);
     }
     emitters_.clear();
+    popcornOwned_.clear();
 }
 
 void MdxParticleSystem::Init(const MdxModel& model, MpqManager* mpq) {
     Destroy();
-    if (model.particleEmitters2.empty()) return;
+    popcornOwned_.clear();
+    if (model.particleEmitters2.empty() && model.particleEmittersPopcorn.empty()) return;
 
     InitSharedParticleResources();
     sg_sampler_desc smp = {};
@@ -130,6 +132,71 @@ void MdxParticleSystem::Init(const MdxModel& model, MpqManager* mpq) {
         state.instanceBuffer = sg_make_buffer(&ibd);
 
         emitters_.push_back(state);
+    }
+
+    // Popcorn (CORN) fallback: map to billboard Emitter2 states so the
+    // effects actually render instead of being parsed-but-invisible.
+    for (auto& pop : model.particleEmittersPopcorn) {
+        auto synth = std::make_unique<MdxParticleEmitter2>();
+        synth->name = pop.name;
+        synth->objectId = pop.objectId;
+        synth->parentId = pop.parentId;
+        synth->flags = (int)pop.flags;
+        synth->speed = pop.speed;
+        synth->variation = 0.0f;
+        synth->latitude = 45.0f;
+        synth->gravity = 0.0f;
+        synth->lifeSpan = pop.lifeSpan > 0.0f ? pop.lifeSpan : 1.0f;
+        synth->emissionRate = pop.emissionRate;
+        synth->length = 16.0f;
+        synth->width = 16.0f;
+        synth->rows = 1;
+        synth->columns = 1;
+        synth->timeMiddle = 0.5f;
+        for (int i = 0; i < 3; i++) {
+            synth->segmentColors[i][0] = pop.color[0];
+            synth->segmentColors[i][1] = pop.color[1];
+            synth->segmentColors[i][2] = pop.color[2];
+            synth->segmentScaling[i] = 24.0f;
+        }
+        const unsigned char a = (unsigned char)std::clamp((int)(pop.alpha * 255.0f), 0, 255);
+        synth->segmentAlphas[0] = synth->segmentAlphas[1] = synth->segmentAlphas[2] = a ? a : 255;
+        synth->textureId = -1;
+        synth->timelines = pop.timelines;
+
+        ParticleEmitterState state;
+        state.emitterData = synth.get();
+        sg_image texHandle = {0};
+        if (!pop.path.empty()) {
+            std::string path = pop.path;
+            for (auto& c : path) if (c == '/') c = '\\';
+            texHandle = LoadTex(mpq, path);
+        } else if (pop.replaceableId != 0) {
+            const char* rp = ReplaceableIds::GetPathString(pop.replaceableId);
+            if (rp && rp[0]) {
+                std::string fp = "ReplaceableTextures\\" + std::string(rp) + ".blp";
+                texHandle = LoadTex(mpq, fp);
+            }
+            state.replaceableId = pop.replaceableId;
+        }
+        state.texture = texHandle;
+        if (texHandle.id) {
+            sg_view_desc vd = {}; vd.texture.image = texHandle;
+            state.textureView = sg_make_view(&vd);
+            state.sampler = sg_make_sampler(&smp);
+        }
+        const int maxParticles = 512;
+        state.instanceCapacity = maxParticles;
+        sg_buffer_desc ibd = {};
+        ibd.usage.vertex_buffer = true;
+        ibd.usage.stream_update = true;
+        ibd.size = (size_t)maxParticles * sizeof(InstanceData);
+        state.instanceBuffer = sg_make_buffer(&ibd);
+
+        popcornOwned_.push_back(std::move(synth));
+        // Re-point after push (deque-stable via unique_ptr heap object).
+        emitters_.push_back(state);
+        emitters_.back().emitterData = popcornOwned_.back().get();
     }
 }
 

@@ -58,6 +58,28 @@ public:
     void AddGold(int v) { gold_ += v; }
     void AddLumber(int v) { lumber_ += v; }
 
+    // Upkeep (ref CPlayer gold/lumberUpkeepRate + retail food thresholds):
+    // rates are percent points set via PLAYER_STATE_GOLD/LUMBER_UPKEEP_RATE;
+    // the food-derived level taxes gold income only (lumber untouched).
+    // 0 = none (food <= 50), 1 = low (51-80, 30% tax), 2 = high (81+, 60%).
+    int GetGoldUpkeepRate() const { return goldUpkeepRate_; }
+    int GetLumberUpkeepRate() const { return lumberUpkeepRate_; }
+    void SetGoldUpkeepRate(int v) { goldUpkeepRate_ = v; }
+    void SetLumberUpkeepRate(int v) { lumberUpkeepRate_ = v; }
+    int GetUpkeepLevel() const {
+        if (foodUsed_ > 80) return 2;
+        if (foodUsed_ > 50) return 1;
+        return 0;
+    }
+    int ApplyUpkeepGoldTax(int amount) const {
+        if (amount <= 0) return amount;
+        int taxPct = goldUpkeepRate_ > 0 ? goldUpkeepRate_
+                     : (GetUpkeepLevel() == 2 ? 60 : GetUpkeepLevel() == 1 ? 30 : 0);
+        if (taxPct <= 0) return amount;
+        if (taxPct >= 100) return 0;
+        return amount - amount * taxPct / 100;
+    }
+
     // Tech tree
     bool IsTechUnlocked(War3ID id) const;
     void AddTechUnlocked(CSimulation& simulation, War3ID id);
@@ -115,6 +137,8 @@ private:
     int foodCap_ = 0;
     int foodUsed_ = 0;
     float foodCapCeiling_ = 100.0f;
+    int goldUpkeepRate_ = 0;
+    int lumberUpkeepRate_ = 0;
 
     float startX_ = 0;
     float startY_ = 0;

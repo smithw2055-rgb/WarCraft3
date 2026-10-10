@@ -18,11 +18,39 @@ struct JassValue {
     std::string strVal;
 
     JassValue() : type(NULL_VAL) {}
-    static JassValue Int(int v) { JassValue j; j.type = INTEGER; j.intVal = v; return j; }
-    static JassValue Real(float v) { JassValue j; j.type = REAL; j.realVal = v; return j; }
+    static JassValue Int(int v) {
+        JassValue j;
+        j.type = INTEGER;
+        j.intVal = v;
+        j.realVal = static_cast<float>(v);
+        return j;
+    }
+    static JassValue Real(float v) {
+        JassValue j;
+        j.type = REAL;
+        j.realVal = v;
+        j.intVal = static_cast<int>(v);
+        return j;
+    }
     static JassValue Bool(bool v) { JassValue j; j.type = BOOLEAN; j.boolVal = v; return j; }
     static JassValue Str(const std::string& v) { JassValue j; j.type = STRING; j.strVal = v; return j; }
     static JassValue Null() { return JassValue(); }
+
+    float AsReal() const {
+        if (type == REAL) return realVal;
+        if (type == INTEGER) return static_cast<float>(intVal);
+        return realVal;
+    }
+    int AsInt() const {
+        if (type == INTEGER) return intVal;
+        if (type == REAL) return static_cast<int>(realVal);
+        return intVal;
+    }
+    bool AsBool() const {
+        if (type == BOOLEAN) return boolVal;
+        if (type == INTEGER) return intVal != 0;
+        return boolVal;
+    }
 };
 
 class JassVM {
@@ -154,6 +182,13 @@ private:
     std::unordered_map<std::string, JassValue> structStatics_;
     int nextStructId_ = 1;
     std::vector<std::string> initializers_;
+    // vJASS `hook ORIG REPL` (ref function hooking): calls to ORIG run
+    // REPL, whose own references to ORIG reach the saved original.
+    bool HookFunction(const std::string& orig, const std::string& replacement);
+    int hookCounter_ = 0;
+    // Library initializer dependencies (ref `library ... needs ...`).
+    std::unordered_map<std::string, std::string> libInitByLib_;
+    std::unordered_map<std::string, std::vector<std::string>> libNeedsByInit_;
     // Enclosing method-call stack for thistype@ resolution: (struct, id),
     // id 0 means static context. Lets `thistype.member` inside instance
     // methods reach the current instance (ref JassHelper behavior).

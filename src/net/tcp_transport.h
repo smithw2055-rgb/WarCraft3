@@ -11,6 +11,9 @@
 #include <vector>
 
 #include "ecs/lockstep.h"
+#ifdef SendMessage
+#undef SendMessage
+#endif
 
 class TcpTransport {
 public:

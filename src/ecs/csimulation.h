@@ -60,6 +60,10 @@ public:
 
     // Unit management
     virtual CUnit* CreateUnit(War3ID typeId, int playerIndex, float x, float y, float facing);
+    // Map-init dedupe window (ref CreateUnit): true while loading units.doo
+    // and running the map script's placement functions; false in live play.
+    void SetMapInitPhase(bool v) { mapInitPhase_ = v; }
+    bool IsMapInitPhase() const { return mapInitPhase_; }
     int AllocateHandleId() { return handleIdAlloc_.CreateId(); }
     CUnit* GetUnit(int handleId) const;
     virtual void RemoveUnit(CUnit* unit);
@@ -252,6 +256,60 @@ public:
         itemEventCallback_ = std::move(cb);
     }
     const std::function<void(int, int, int)>& GetItemEventCallback() const { return itemEventCallback_; }
+    // Transport boarding (transport handle, passenger handle): JASS LOADED.
+    void SetUnitLoadedCallback(std::function<void(int transportHandle, int passengerHandle)> cb) {
+        unitLoadedCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int)>& GetUnitLoadedCallback() const { return unitLoadedCallback_; }
+    // Corpse begins decaying (retail EVENT_UNIT_DECAY): unit handle.
+    void SetUnitDecayCallback(std::function<void(int unitHandle)> cb) {
+        unitDecayCallback_ = std::move(cb);
+    }
+    const std::function<void(int)>& GetUnitDecayCallback() const { return unitDecayCallback_; }
+    // Shop sales need the seller too (buyer/seller/item sim handles).
+    void SetShopEventCallback(std::function<void(int buyerHandle, int sellerHandle, int itemHandle)> cb) {
+        shopEventCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, int)>& GetShopEventCallback() const { return shopEventCallback_; }
+    // Mercenary hire (buyer may be -1; seller shop and hired unit sim handles).
+    void SetShopUnitEventCallback(std::function<void(int buyerHandle, int sellerHandle, int hiredHandle)> cb) {
+        shopUnitEventCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, int)>& GetShopUnitEventCallback() const {
+        return shopUnitEventCallback_;
+    }
+    // Pawn-back sales (buyer shop, seller pawner, item sim handles).
+    void SetPawnEventCallback(std::function<void(int buyerHandle, int sellerHandle, int itemHandle)> cb) {
+        pawnEventCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, int)>& GetPawnEventCallback() const { return pawnEventCallback_; }
+    // Hero skill learning (unit handle, skill rawcode, new skill level).
+    void SetHeroSkillCallback(std::function<void(int unitHandle, int skillId, int newLevel)> cb) {
+        heroSkillCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, int)>& GetHeroSkillCallback() const { return heroSkillCallback_; }
+    // Queue lifecycle (building handle, type rawcode, kind 0 = train,
+    // 1 = research, 2 = upgrade morph; started false = cancelled, except
+    // upgrades where it means finished).
+    void SetQueueEventCallback(std::function<void(int buildingHandle, int typeId, int kind, bool started)> cb) {
+        queueEventCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, int, bool)>& GetQueueEventCallback() const {
+        return queueEventCallback_;
+    }
+    // Construction lifecycle (building handle, true = finished).
+    void SetConstructEventCallback(std::function<void(int buildingHandle, bool finished)> cb) {
+        constructEventCallback_ = std::move(cb);
+    }
+    const std::function<void(int, bool)>& GetConstructEventCallback() const {
+        return constructEventCallback_;
+    }
+    // Sim-side ownership changes (charm/possession transfers): unit handle
+    // plus previous owner player index. JASS SetUnitOwner fires directly.
+    void SetOwnerChangedCallback(std::function<void(int unitHandle, int prevOwnerIndex)> cb) {
+        ownerChangedCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int)>& GetOwnerChangedCallback() const { return ownerChangedCallback_; }
     void SetItemRemovedCallback(std::function<void(int itemHandle)> cb) {
         itemRemovedCallback_ = std::move(cb);
     }
@@ -278,12 +336,16 @@ public:
 private:
     void ProcessUnitRemovals();
     void ProcessNewUnits();
-    void ProcessDestructableRemovals();
+    // Separation steering: positional push-apart for overlapping movable
+    // units (deterministic: units_ order, no RNG).
+    void ResolveUnitSeparation();    void ProcessDestructableRemovals();
     void ProcessNewDestructables();
     void ProcessItemRemovals();
 
     int gameTurnTick_ = 0;
     bool paused_ = false;
+    // Map-init dedupe window backing flag (default off).
+    bool mapInitPhase_ = false;
 
     // Game state
     float gameTimeOfDay_ = 12.0f; // noon
@@ -345,6 +407,15 @@ private:
     std::function<void(int, int, float)> unitDamageCallback_;
     std::function<void(int, int, int, float, float)> unitOrderCallback_;
     std::function<void(int, int, int)> itemEventCallback_;
+    std::function<void(int, int)> unitLoadedCallback_;
+    std::function<void(int)> unitDecayCallback_;
+    std::function<void(int, int, int)> shopEventCallback_;
+    std::function<void(int, int, int)> shopUnitEventCallback_;
+    std::function<void(int, int, int)> pawnEventCallback_;
+    std::function<void(int, int, int)> heroSkillCallback_;
+    std::function<void(int, bool)> constructEventCallback_;
+    std::function<void(int, int, int, bool)> queueEventCallback_;
+    std::function<void(int, int)> ownerChangedCallback_;
     std::function<void(int)> itemRemovedCallback_;
     std::function<void(int, int)> unitTrainedCallback_;
     std::function<void(int, int)> unitSummonedCallback_;

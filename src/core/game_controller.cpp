@@ -11,10 +11,13 @@
 #include "../ecs/widget.h"
 #include "../ecs/destructable.h"
 #include "../ecs/item.h"
+#include "../ecs/abilities/ability_attack.h"
 #include "../ecs/abilities/ability_build.h"
 #include "../ecs/abilities/ability_gold_mine.h"
 #include "../ecs/abilities/ability_harvest.h"
+#include "../ecs/abilities/ability_move.h"
 #include "../ecs/abilities/ability_queue.h"
+#include "../ecs/abilities/ability_repair.h"
 #include "../core/map_path_resolver.h"
 #include "../core/path_utils.h"
 #include "../platform/platform.h"
@@ -28,6 +31,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -1039,7 +1043,7 @@ void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController*
     bool isMoving = animation_utils::ComputeUnitVisualIsMoving(unit, g->simUnitVisualLastPositions);
     bool wasMoving = g->simUnitVisualMovingStates.count(handleId) && g->simUnitVisualMovingStates[handleId];
 
-    bool needsResolve = posChanged || (isMoving != wasMoving);
+    bool needsResolve = (isMoving != wasMoving);
     if (g->simUnitPendingAnimations.count(handleId)) needsResolve = true;
 
     if (needsResolve) {
@@ -1183,33 +1187,33 @@ void GameController::ParseArgs(int argc, char* argv[]) {
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 debugUiGlueMenuPage_ = argv[++i];
             }
-            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
-                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            if (hudLayoutPath_ == "console") {
+                hudLayoutPath_ = "glue";
             }
         } else if (std::strncmp(arg, "--debug-ui-glue-menu=", 21) == 0) {
             debugUiGlueMenu_ = true;
             debugUiGlueMenuPage_ = arg + 21;
-            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
-                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            if (hudLayoutPath_ == "console") {
+                hudLayoutPath_ = "glue";
             }
         } else if ((std::strcmp(arg, "--debug-ui-glue-action") == 0 ||
                     std::strcmp(arg, "--debug-ui-glue-actions") == 0) && i + 1 < argc) {
             AppendCommaSeparatedArgs(debugUiGlueMenuActions_, argv[++i]);
             debugUiGlueMenu_ = true;
-            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
-                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            if (hudLayoutPath_ == "console") {
+                hudLayoutPath_ = "glue";
             }
         } else if (std::strncmp(arg, "--debug-ui-glue-action=", 23) == 0) {
             AppendCommaSeparatedArgs(debugUiGlueMenuActions_, arg + 23);
             debugUiGlueMenu_ = true;
-            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
-                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            if (hudLayoutPath_ == "console") {
+                hudLayoutPath_ = "glue";
             }
         } else if (std::strncmp(arg, "--debug-ui-glue-actions=", 24) == 0) {
             AppendCommaSeparatedArgs(debugUiGlueMenuActions_, arg + 24);
             debugUiGlueMenu_ = true;
-            if (hudXamlPath_ == "assets/ui/Hud.xaml") {
-                hudXamlPath_ = "assets/ui/GlueMenu.xaml";
+            if (hudLayoutPath_ == "console") {
+                hudLayoutPath_ = "glue";
             }
         } else if (std::strcmp(arg, "--debug-ui-upper-button") == 0 && i + 1 < argc) {
             debugUiUpperButton_ = argv[++i];
@@ -1227,10 +1231,10 @@ void GameController::ParseArgs(int argc, char* argv[]) {
             } else {
                 std::cerr << "Invalid --debug-ui-resources value. Expected gold,lumber,foodUsed,foodCap[,time]" << std::endl;
             }
-        } else if (std::strcmp(arg, "--hud-xaml") == 0 && i + 1 < argc) {
-            hudXamlPath_ = argv[++i];
-        } else if (std::strncmp(arg, "--hud-xaml=", 11) == 0) {
-            hudXamlPath_ = arg + 11;
+        } else if (std::strcmp(arg, "--hud-layout") == 0 && i + 1 < argc) {
+            hudLayoutPath_ = argv[++i];
+        } else if (std::strncmp(arg, "--hud-layout=", 11) == 0) {
+            hudLayoutPath_ = arg + 11;
         } else if (std::strncmp(arg, "--run=", 6) == 0) {
             mapPath_ = arg + 6;
         } else if (std::strcmp(arg, "--run") == 0 && i + 1 < argc) {
@@ -1241,6 +1245,25 @@ void GameController::ParseArgs(int argc, char* argv[]) {
             mapPath_ = argv[++i];
         } else if (std::strcmp(arg, "--debug-select-first-unit") == 0) {
             debugSelectFirstUnitForHud_ = true;
+        } else if (std::strncmp(arg, "--ai=", 5) == 0) {
+            // Single-player setup: force slots to COMPUTER AI (ref
+            // MeleeStartingAI/PickMeleeAI; e.g. --ai=1,2).
+            std::vector<std::string> parts;
+            AppendCommaSeparatedArgs(parts, arg + 5);
+            for (const auto& p : parts) {
+                const int slot = std::atoi(p.c_str());
+                if (slot >= 0 && slot < 24) config_.aiPlayerSlots.push_back(slot);
+            }
+        } else if (std::strncmp(arg, "--closed=", 9) == 0) {
+            // Force slots closed (NONE controller + inactive; e.g. --closed=3).
+            std::vector<std::string> parts;
+            AppendCommaSeparatedArgs(parts, arg + 9);
+            for (const auto& p : parts) {
+                const int slot = std::atoi(p.c_str());
+                if (slot >= 0 && slot < 24) config_.closedPlayerSlots.push_back(slot);
+            }
+        } else if (std::strncmp(arg, "--local-player=", 15) == 0) {
+            config_.localPlayerIndex = std::max(0, std::atoi(arg + 15));
         } else if (arg[0] != '-') {
             mapPath_ = arg;
         }
@@ -1264,7 +1287,7 @@ bool GameController::Initialize() {
         if (debugUiGlueMenu_) {
             OpenDataSources();
         }
-        if (!ui_.Init(debugUiGlueMenu_ ? &mpq_ : nullptr, 1280, 720, hudXamlPath_, config_.gameVersion)) {
+        if (!ui_.Init(debugUiGlueMenu_ ? &mpq_ : nullptr, 1280, 720, hudLayoutPath_, config_.gameVersion)) {
             std::cerr << "UI-only mode: MainUI init failed" << std::endl;
             return false;
         }
@@ -1379,13 +1402,30 @@ bool GameController::Initialize() {
     }
 
     if (!hideHud_) {
-        if (!ui_.Init(&mpq_, 1280, 720, hudXamlPath_, config_.gameVersion)) {
+        if (!ui_.Init(&mpq_, 1280, 720, hudLayoutPath_, config_.gameVersion)) {
             std::cerr << "GameController: MainUI init failed" << std::endl;
             return false;
         }
         ui_.SetGlueMapLaunchCallback([this](const std::string& path, int localPlayer) {
             HandleGlueMapLaunchRequest(path, localPlayer);
         });
+        // Headless/smoke support: open the game menu like the ui-only debug
+        // path does, so textured menu chrome can be verified in full mode.
+        if (debugUiGameMenu_) {
+            if (!debugUiGameMenuPanel_.empty()) {
+                ui_.OpenGameMenuPanelForUiOnly(debugUiGameMenuPanel_);
+            } else {
+                ui_.OpenGameMenuForUiOnly();
+            }
+        }
+        // Upper-button dialogs (quests/allies/chat) for in-game verification,
+        // mirroring the ui-only path (ref --debug-ui-upper-button).
+        if (!debugUiUpperButton_.empty()) {
+            if (!ui_.InvokeUpperButtonForUiOnly(debugUiUpperButton_)) {
+                std::cerr << "GameController: failed to invoke upper button '"
+                          << debugUiUpperButton_ << "'" << std::endl;
+            }
+        }
     } else {
         std::cout << "GameController: HUD init skipped (--hide-hud)" << std::endl;
     }
@@ -1507,7 +1547,7 @@ bool GameController::StartPendingGlueMapLaunch(int screenW, int screenH) {
     }
 
     hideHud_ = false;
-    if (!ui_.SwitchNoesisXaml(&mpq_, screenW, screenH, "assets/ui/Hud.xaml", config_.gameVersion)) {
+    if (!ui_.SwitchHudLayout(&mpq_, screenW, screenH, "console", config_.gameVersion)) {
         hideHud_ = true;
         MoveDebugLogLine("GlueMapLaunch: HUD reload failed; continuing map launch with HUD hidden");
     } else {
@@ -1610,6 +1650,39 @@ void GameController::InitMapConfig() {
         int configuredCount = configEnv_->GetConfiguredPlayerCount();
         if (configuredCount > 0) {
             std::cout << "JASS Config: " << configuredCount << " players configured" << std::endl;
+        }
+        // Campaign maps put the human on a non-zero slot (Human01: Player 1 =
+        // MAP_CONTROL_USER). With no explicit --map local player, follow the
+        // first USER slot instead of blindly using slot 0 (ref SetPlayerController).
+        if (config_.localPlayerIndex < 0) {
+            if (auto cfgData = configEnv_->GetData()) {
+                for (int i = 0; i < (int)cfgData->playerMapConfig.size(); ++i) {
+                    if (cfgData->playerMapConfig[i].controller == 0 /* MAP_CONTROL_USER */) {
+                        config_.localPlayerIndex = i;
+                        std::cout << "LocalPlayer: auto-selected USER slot " << i << " from config" << std::endl;
+                        break;
+                    }
+                }
+            }
+        }
+        // Single-player slot overrides (CLI --ai/--closed): applied after
+        // config() so map-defined starts/teams survive; only the controller
+        // and slot-active flag are rewritten (ref SetPlayerController).
+        if (auto cfgData = configEnv_->GetData()) {
+            for (int slot : config_.aiPlayerSlots) {
+                if (slot >= 0 && slot < (int)cfgData->playerMapConfig.size()) {
+                    cfgData->playerMapConfig[(size_t)slot].controller = 1; // MAP_CONTROL_COMPUTER
+                    cfgData->playerMapConfig[(size_t)slot].slotActive = true;
+                    std::cout << "SlotOverride: player " << slot << " -> COMPUTER AI" << std::endl;
+                }
+            }
+            for (int slot : config_.closedPlayerSlots) {
+                if (slot >= 0 && slot < (int)cfgData->playerMapConfig.size()) {
+                    cfgData->playerMapConfig[(size_t)slot].controller = 5; // MAP_CONTROL_NONE
+                    cfgData->playerMapConfig[(size_t)slot].slotActive = false;
+                    std::cout << "SlotOverride: player " << slot << " -> CLOSED" << std::endl;
+                }
+            }
         }
     }
 
@@ -1733,9 +1806,9 @@ void GameController::InitInGame() {
             camera_.SaveHomeState();
             std::cout << "OverviewCamera: map center (" << center.x << ", " << center.y << ", " << center.z << ")" << std::endl;
         }
-        else {
-            FocusCameraAndMinimapOnInitialSpawn();
-        }
+        // Spawn focus runs after JASS main + melee fallback below (town
+        // halls/workers must exist for FindInitialSpawnFocusPosition).
+        // Camera stays map-centered until then.
     }
 
     if (debugHudGameMode_) {
@@ -1744,6 +1817,11 @@ void GameController::InitInGame() {
         commonEnv_ = std::make_unique<JassCommonEnv>();
         if (commonEnv_->Init(mpq_, mapPath_, &simulation_, config_.jassFileList,
                              configEnv_ ? configEnv_->GetData() : nullptr)) {
+            // Map-init dedupe window: units.doo placement and the map
+            // script's CreateNeutral*/CreatePlayer* overlap; fold exact
+            // duplicates instead of doubling creeps/mines (ref
+            // CSimulation::SetMapInitPhase).
+            simulation_.SetMapInitPhase(true);
             commonEnv_->Main();
             commonEnv_->PumpQueuedThreads(4096);
             jassNatives_ = commonEnv_->ReleaseNatives();
@@ -1753,11 +1831,21 @@ void GameController::InitInGame() {
             if (jassNatives_) {
                 jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
                 jassNatives_->UpdateRegions();
+                jassNatives_->UpdateRescue();
                 jassNatives_->UpdateTextTags(CSimulation::SIM_STEP_TIME);
                 jassNatives_->PumpQueuedThreads(1024);
             }
             EnsureHumanMeleeStartsFromMapConfig();
             FlushStartupSimulationState();
+            EnsureComputerAIStarted();
+            simulation_.SetMapInitPhase(false);
+            // Real-game opening: focus the local start (town hall) now that
+            // JASS main + melee fallback have created the starting units.
+            // Previously this ran before spawns existed, silently failed, and
+            // left the camera over unexplored map center (all-black fog).
+            if (!overviewCamera_ && !debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
+                FocusCameraAndMinimapOnInitialSpawn();
+            }
         } else {
             std::cerr << "JASS Common: unavailable; terrain/static scene remains ready" << std::endl;
         }
@@ -2190,6 +2278,100 @@ void GameController::WireJassCallbacks() {
         }
     );
 
+    simulation_.SetUnitLoadedCallback(
+        [this](int transportHandle, int passengerHandle) {
+            if (jassNatives_) {
+                jassNatives_->FireLoadedEvent(transportHandle, passengerHandle);
+            }
+        }
+    );
+
+    simulation_.SetUnitDecayCallback(
+        [this](int unitHandle) {
+            if (jassNatives_) {
+                jassNatives_->FireDecayEvent(unitHandle);
+            }
+        }
+    );
+
+    simulation_.SetShopEventCallback(
+        [this](int buyerHandle, int sellerHandle, int itemHandle) {
+            if (jassNatives_) {
+                jassNatives_->FireSellItemEvent(buyerHandle, sellerHandle, itemHandle);
+            }
+        }
+    );
+
+    simulation_.SetShopUnitEventCallback(
+        [this](int buyerHandle, int sellerHandle, int hiredHandle) {
+            if (jassNatives_) {
+                jassNatives_->FireSellUnitEvent(buyerHandle, sellerHandle, hiredHandle);
+            }
+        }
+    );
+
+    simulation_.SetPawnEventCallback(
+        [this](int buyerHandle, int sellerHandle, int itemHandle) {
+            if (jassNatives_) {
+                jassNatives_->FirePawnItemEvent(sellerHandle, buyerHandle, itemHandle);
+            }
+        }
+    );
+
+    simulation_.SetHeroSkillCallback(
+        [this](int unitHandle, int skillId, int newLevel) {
+            if (jassNatives_) {
+                jassNatives_->FireHeroSkillEvent(unitHandle, skillId, newLevel);
+            }
+        }
+    );
+
+    // Queue lifecycle (kind 0 = train, 1 = research, 2 = upgrade morph;
+    // upgrades have no cancel path: started=false means finished).
+    simulation_.SetQueueEventCallback(
+        [this](int buildingHandle, int typeId, int kind, bool started) {
+            if (!jassNatives_) return;
+            if (kind == 0) {
+                if (started) {
+                    jassNatives_->FireTrainStartEvent(buildingHandle, typeId);
+                } else {
+                    jassNatives_->FireTrainCancelEvent(buildingHandle, typeId);
+                }
+            } else if (kind == 1) {
+                if (started) {
+                    jassNatives_->FireResearchStartEvent(buildingHandle, typeId);
+                } else {
+                    jassNatives_->FireResearchCancelEvent(buildingHandle, typeId);
+                }
+            } else {
+                if (started) {
+                    jassNatives_->FireUpgradeStartEvent(buildingHandle, typeId);
+                } else {
+                    jassNatives_->FireUpgradeFinishEvent(buildingHandle, typeId);
+                }
+            }
+        }
+    );
+
+    simulation_.SetConstructEventCallback(
+        [this](int buildingHandle, bool finished) {
+            if (!jassNatives_) return;
+            if (finished) {
+                jassNatives_->FireConstructFinishEvent(buildingHandle);
+            } else {
+                jassNatives_->FireConstructCancelEvent(buildingHandle);
+            }
+        }
+    );
+
+    simulation_.SetOwnerChangedCallback(
+        [this](int unitHandle, int prevOwnerIndex) {
+            if (jassNatives_) {
+                jassNatives_->FireChangeOwnerEvent(unitHandle, prevOwnerIndex);
+            }
+        }
+    );
+
     simulation_.SetItemRemovedCallback(
         [this](int itemHandle) {
             if (jassNatives_) {
@@ -2246,6 +2428,32 @@ void GameController::Update(int screenW, int screenH, float dt) {
     if (uiOnlyMode_) {
         frameCount_++;
         return;
+    }
+
+    // Campaign ChangeLevel: JASS queued a map switch (ref ChangeLevel).
+    // Resolve like a glue launch and reuse the runtime reload path so
+    // campaign missions actually chain instead of stalling on victory.
+    if (jassNatives_ && simulationInitialized_) {
+        auto jd = jassNatives_->GetData();
+        if (jd && !jd->pendingChangeLevel.empty()) {
+            const std::string next = jd->pendingChangeLevel;
+            jd->pendingChangeLevel.clear();
+            fs::path projectRoot = PROJECT_SOURCE_DIR;
+            fs::path resourcesDir = projectRoot / "resources";
+            std::string resolved;
+            if (ResolveMapPathForLoad(resourcesDir, mpq_, next, resolved) && !resolved.empty()) {
+                pendingGlueMapLaunch_ = true;
+                pendingGlueMapLaunchRequestedPath_ = next;
+                pendingGlueMapLaunchResolvedPath_ = resolved;
+                pendingGlueMapLaunchLocalPlayer_ = config_.localPlayerIndex;
+                MoveDebugLogLine("ChangeLevel: queued campaign map switch to '" + resolved + "'");
+                StartPendingGlueMapLaunch(screenW, screenH);
+                frameCount_++;
+                return;
+            } else {
+                MoveDebugLogLine("ChangeLevel: could not resolve next map '" + next + "'");
+            }
+        }
     }
 
     if (stateTransition_) {
@@ -2374,6 +2582,42 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
     // Simulation step
     StepSimulation(dt);
 
+    // Hovered unit raycast
+    if (simulationInitialized_ && !sapp_mouse_locked() && !selectionDragVisible_) {
+        const float bottomConsoleY = (float)screenH * 0.73f;
+        if (mousePosY_ > 40.0f && mousePosY_ < bottomConsoleY && mousePosX_ >= 0.0f && mousePosX_ <= (float)screenW) {
+            float aspect = (screenH > 0) ? (float)screenW / screenH : 1.0f;
+            Mat4 view = camera_.GetViewMatrix();
+            Mat4 proj = camera_.GetProjectionMatrix(aspect);
+            CUnit* hovered = PickSimulationUnitAtScreenPoint(mousePosX_, mousePosY_, view, proj, screenW, screenH, -1, false, false);
+            if (hovered && !hovered->IsDead() && !hovered->IsHidden()) {
+                hoveredUnitHandle_ = hovered->GetHandleId();
+                std::string hoverText;
+                if (hovered->GetUnitType() && (hovered->GetUnitType()->GetTypeId() == War3ID("ngol") || hovered->GetAbility(War3ID("Agld")))) {
+                    int gold = 13500;
+                    if (auto* gm = dynamic_cast<CAbilityGoldMine*>(hovered->GetAbility(War3ID("Agld")))) {
+                        gold = gm->GetGold();
+                    }
+                    hoverText = "Gold Mine\nGold: " + std::to_string(gold);
+                } else if (hovered->GetUnitType()) {
+                    hoverText = hovered->GetUnitType()->GetName();
+                }
+                if (!hoverText.empty()) {
+                    ui_.ShowTooltip(hoverText, mousePosX_, mousePosY_, HudResourceCosts{});
+                }
+            } else {
+                if (hoveredUnitHandle_ >= 0) ui_.HideTooltip();
+                hoveredUnitHandle_ = -1;
+            }
+        } else {
+            if (hoveredUnitHandle_ >= 0) ui_.HideTooltip();
+            hoveredUnitHandle_ = -1;
+        }
+    } else {
+        if (hoveredUnitHandle_ >= 0) ui_.HideTooltip();
+        hoveredUnitHandle_ = -1;
+    }
+
     // After sim step, sync visuals
     if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
         SyncAndReconcileVisuals();
@@ -2393,6 +2637,7 @@ void GameController::StepSimulation(float dt) {
         if (jassNatives_) {
             jassNatives_->UpdateTimers(simStep);
             jassNatives_->UpdateRegions();
+            jassNatives_->UpdateRescue();
             jassNatives_->UpdateAI();
             jassNatives_->PumpQueuedThreads(1024);
         }
@@ -2408,23 +2653,257 @@ void GameController::StepSimulation(float dt) {
         SyncLightnings();
         SyncScriptDecor();
         RefreshSelectionUi(false);
+        MaybeLogAIStatus();
     }
 }
 
 void GameController::SyncFogOfWar() {
     if (!simulationInitialized_ || !terrainLoaded_) return;
+    if (std::getenv("WARSMASH_NO_FOG")) return; // diagnostic: leave fog texture cleared (all visible)
     const uint64_t version = simulation_.GetFogSystem()->Version();
     if (version == fogVersionSynced_) return;
     fogVersionSynced_ = version;
     const int localPlayer = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+    // Fog must rasterize over the instance-grid extents (ref ground shader
+    // v_suv), not the camera bounds: otherwise visible blobs shift away from
+    // their units and spawn stays black.
     float bounds[4] = {-4096, -4096, 4096, 4096};
-    texturedTerrain_.GetMapBounds(bounds);
+    texturedTerrain_.GetFogMapBounds(bounds);
     constexpr int kFogGrid = 128;
     fogGrid_.assign(kFogGrid * kFogGrid, 0);
     simulation_.GetFogSystem()->Rasterize(localPlayer, kFogGrid, kFogGrid,
                                           bounds[0], bounds[1], bounds[2], bounds[3],
                                           fogGrid_.data());
     texturedTerrain_.SetFogOfWarData(fogGrid_.data(), kFogGrid, kFogGrid);
+}
+
+void GameController::SyncMinimapLayer() {
+    if (!simulationInitialized_ || !minimap_.IsValid()) return;
+    const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+    const CFogSystem* fog = simulation_.GetFogSystem();
+
+    // --- Fog overlay (ref MeleeUIMinimap fog pass) ---
+    // Rasterize over the minimap world bounds at modest resolution; row 0 =
+    // worldMinY matches Minimap::Generate() pixel order so the overlay aligns
+    // with the base image and WorldToScreen dots.
+    {
+        const uint64_t version = fog ? fog->Version() : 0;
+        float minX = 0, minY = 0, maxX = 1, maxY = 1;
+        minimap_.GetWorldBounds(minX, minY, maxX, maxY);
+        constexpr int kFogW = 96;
+        constexpr int kFogH = 96;
+        if (version != minimapFogVersionSynced_ || minimapFogRgba_.empty()) {
+            minimapFogVersionSynced_ = version;
+            std::vector<unsigned char> grid((size_t)kFogW * kFogH, 0);
+            if (fog) {
+                fog->Rasterize(local, kFogW, kFogH, minX, minY, maxX, maxY, grid.data());
+            }
+            minimapFogRgba_.assign((size_t)kFogW * kFogH * 4, 0);
+            for (int i = 0; i < kFogW * kFogH; ++i) {
+                const unsigned char v = grid[(size_t)i];
+                uint8_t alpha = 0;
+                if (v >= 200) alpha = 255;       // MASKED: opaque black
+                else if (v >= 64) alpha = 128;    // FOGGED: 50% black
+                minimapFogRgba_[(size_t)i * 4 + 0] = 0;
+                minimapFogRgba_[(size_t)i * 4 + 1] = 0;
+                minimapFogRgba_[(size_t)i * 4 + 2] = 0;
+                minimapFogRgba_[(size_t)i * 4 + 3] = alpha;
+            }
+            minimap_.SetFogOverlay(kFogW, kFogH, minimapFogRgba_);
+        }
+    }
+
+    // --- Unit dots (ref MeleeUIMinimap unit pass) ---
+    static const uint32_t kMinimapPlayerColors[12] = {
+        0xFFFF0000u, 0xFF0042FFu, 0xFF1CE6B6u, 0xFF540081u,
+        0xFFFFFC00u, 0xFFFE8A0Eu, 0xFF20C000u, 0xFFE55BB0u,
+        0xFF959697u, 0xFF7EBFF1u, 0xFF106246u, 0xFF4F2B05u,
+    };
+    auto argbToRgba = [](uint32_t argb) -> uint32_t {
+        return ((argb & 0x00FFFFFFu) << 8) | ((argb >> 24) & 0xFFu);
+    };
+    // Hero pulse 0.50..0.95 triangle wave over ~80 frames (ref heroAlpha).
+    const int kPulsePeriod = 80;
+    const int pulseT = frameCount_ % (2 * kPulsePeriod);
+    const float pulseTri = pulseT < kPulsePeriod
+        ? (float)pulseT / (float)kPulsePeriod
+        : (float)(2 * kPulsePeriod - pulseT) / (float)kPulsePeriod;
+    const float heroAlpha = 0.50f + 0.45f * pulseTri;
+    const uint8_t heroAlphaByte = (uint8_t)std::clamp((int)(heroAlpha * 255.0f), 0, 255);
+
+    const CPlayer* localPlayer = simulation_.GetPlayer(local);
+    minimapDotsScratch_.clear();
+    minimapDotsScratch_.reserve(simulation_.GetUnits().size());
+    for (const CUnit* unit : simulation_.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->IsHidden() || unit->IsLoadedAboard()) continue;
+        if (!IsUnitVisibleInFog(unit)) continue;
+        const float ux = unit->GetX();
+        const float uy = unit->GetY();
+        const int owner = unit->GetPlayerIndex();
+        const CUnitType* type = unit->GetUnitType();
+
+        const bool hasOverlayMine = unit->GetAbility(War3ID("Agl2")) != nullptr
+            || unit->GetAbility(War3ID("Aegm")) != nullptr
+            || unit->GetAbility(War3ID("Abgm")) != nullptr;
+        const bool hasBaseMine = !hasOverlayMine
+            && unit->GetAbility(War3ID("Agld")) != nullptr;
+        const bool isNeutralIcon = type && type->IsNeutralBuildingShowMinimapIcon();
+        Minimap::UnitDot dot;
+        dot.worldX = ux;
+        dot.worldY = uy;
+        if (hasBaseMine) {
+            dot.rgba = 0xFFCC00FFu;      // gold mine (yellow, opaque)
+            dot.sizePixels = 11.0f;
+        } else if (hasOverlayMine) {
+            const bool entangled = unit->GetAbility(War3ID("Aegm")) != nullptr
+                || unit->GetAbility(War3ID("Aenc")) != nullptr;
+            const bool haunted = unit->GetAbility(War3ID("Abgm")) != nullptr;
+            if (entangled) dot.rgba = 0x00E676FFu;       // entangled (green)
+            else if (haunted) dot.rgba = 0xE040FBFFu;    // haunted (purple)
+            else dot.rgba = 0xFFCC00FFu;
+            dot.sizePixels = 11.0f;
+        } else if (isNeutralIcon) {
+            dot.rgba = 0xFFF59DFFu;      // neutral special (pale yellow)
+            dot.sizePixels = 11.0f;
+        } else if (unit->IsHero()) {
+            bool allied = false;
+            if (localPlayer && owner >= 0) {
+                if (const CPlayer* other = simulation_.GetPlayer(owner)) {
+                    allied = localPlayer->HasAlliance(*other, CAllianceType::PASSIVE);
+                } else {
+                    allied = (owner == local);
+                }
+            } else {
+                allied = (owner == local);
+            }
+            if (allied) {
+                dot.rgba = (0xFFFFFF00u | heroAlphaByte);  // white pulse
+            } else {
+                dot.rgba = (0xFF333300u | heroAlphaByte);  // red pulse
+            }
+            dot.sizePixels = 14.0f;
+        } else {
+            uint32_t argb = 0xFF888888u;
+            if (owner >= 0 && owner < 12) argb = kMinimapPlayerColors[owner];
+            dot.rgba = argbToRgba(argb);
+            dot.sizePixels = (type && type->IsBuilding()) ? 7.0f : 4.0f;
+        }
+        minimapDotsScratch_.push_back(dot);
+    }
+    minimap_.SetUnitDots(minimapDotsScratch_);
+
+    // Script ping markers (ref MeleeUI minimap pings): live JASS pings draw
+    // on top; aging/expiry happens in JassNatives::UpdateTimers.
+    minimap_.ClearScriptMarkers();
+    if (jassNatives_ && jassNatives_->GetData()) {
+        for (const auto& ping : jassNatives_->GetData()->minimapPings) {
+            const auto clampByte = [](int v) -> uint32_t {
+                return (uint32_t)std::clamp(v, 0, 255);
+            };
+            const uint32_t rgba = (clampByte(ping.red) << 24) | (clampByte(ping.green) << 16) |
+                                  (clampByte(ping.blue) << 8) | 0xFFu;
+            minimap_.AddScriptMarker(ping.x, ping.y, rgba, ping.extra ? 14.0f : 10.0f);
+        }
+    }
+}
+
+void GameController::SyncHudLiveData() {
+    if (!simulationInitialized_) return;
+    const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+    // Resource bar + upkeep + clock from the local player (ref melee UI).
+    if (const CPlayer* player = simulation_.GetPlayer(local)) {
+        const float hod = simulation_.GetGameTimeOfDay();
+        const int totalMin = (int)(hod * 60.0f);
+        char clock[16] = {};
+        std::snprintf(clock, sizeof(clock), "%02d:%02d", (totalMin / 60) % 24, totalMin % 60);
+        ui_.SetLiveResources(player->GetGold(), player->GetLumber(), player->GetFoodUsed(),
+                             player->GetFoodCap(), clock, player->GetUpkeepLevel());
+    }
+    // Timer dialog: first displayed JASS dialog wins (ref CTimerDialog).
+    std::string title, value;
+    bool show = false;
+    if (jassNatives_ && jassNatives_->GetData()) {
+        auto data = jassNatives_->GetData();
+        for (const auto& [id, dialog] : data->timerDialogs) {
+            (void)id;
+            if (!dialog || !dialog->displayed) continue;
+            float remain = 0.0f;
+            auto tit = data->timers.find(dialog->timerSimId);
+            if (tit != data->timers.end() && tit->second) remain = std::max(0.0f, tit->second->remaining);
+            const int totalSec = (int)remain;
+            char buf[16] = {};
+            std::snprintf(buf, sizeof(buf), "%d:%02d", totalSec / 60, totalSec % 60);
+            title = dialog->title;
+            value = buf;
+            show = true;
+            break;
+        }
+    }
+    ui_.SetTimerDialog(title, value, show);
+    // Cinematic presentation: letterbox follows the mode flag; the subtitle
+    // panel follows the live scene while it carries speaker text or dialogue.
+    bool cineMode = false;
+    std::string speaker, dialogue;
+    bool cineVisible = false;
+    if (jassNatives_ && jassNatives_->GetData()) {
+        auto data = jassNatives_->GetData();
+        cineMode = data->cinematicMode;
+        if (data->cinematic.playing &&
+            (!data->cinematic.speakerTitle.empty() || !data->cinematic.text.empty())) {
+            speaker = data->cinematic.speakerTitle;
+            dialogue = data->cinematic.text;
+            cineVisible = true;
+        }
+    }
+    ui_.SetCinematicMode(cineMode);
+    ui_.SetCinematicScene(speaker, dialogue, cineVisible);
+    // Cinematic filter: start->end color transition over duration (ref
+    // CCineFilter); texture/UV/blend variants fall back to the color tint.
+    {
+        uint32_t rgba = 0;
+        bool showFilter = false;
+        if (jassNatives_ && jassNatives_->GetData()) {
+            const auto& filter = jassNatives_->GetData()->cineFilter;
+            if (filter.displayed) {
+                const float t = filter.duration > 0.0f
+                    ? std::clamp(filter.age / filter.duration, 0.0f, 1.0f)
+                    : 1.0f;
+                auto lerp = [t](int a, int b) {
+                    return (uint32_t)std::clamp((int)(a + (b - a) * t), 0, 255);
+                };
+                rgba = (lerp(filter.startColor[3], filter.endColor[3]) << 24) |
+                       (lerp(filter.startColor[0], filter.endColor[0]) << 16) |
+                       (lerp(filter.startColor[1], filter.endColor[1]) << 8) |
+                       lerp(filter.startColor[2], filter.endColor[2]);
+                showFilter = (rgba >> 24) != 0;
+            }
+        }
+        ui_.SetCineFilter(rgba, showFilter);
+    }
+    // Player text messages: forward local-player messages to HUD toasts;
+    // sticky messages live in the UI until cleared. A ClearTextMessages
+    // since the last push also clears already-shown toasts. Remote-player
+    // messages are retained for future multiplayer routing.
+    // Day/night cycle follows the JASS switch (ref EnableDawnDusk).
+    if (jassNatives_ && jassNatives_->GetData()) {
+        auto data = jassNatives_->GetData();
+        if (data->textClearSeq != lastTextClearSeq_) {
+            lastTextClearSeq_ = data->textClearSeq;
+            ui_.ClearGameMessages();
+        }
+        auto& queue = data->textMessages;
+        for (const auto& msg : queue) {
+            if (msg.player == local || msg.player < 0) {
+                ui_.ShowGameMessage(msg.text, msg.duration > 0.0f ? msg.duration : 5.0f);
+            }
+        }
+        queue.erase(std::remove_if(queue.begin(), queue.end(),
+                                   [local](const JassNativesData::JassTextMessage& msg) {
+                                       return msg.player == local || msg.player < 0;
+                                   }),
+                    queue.end());
+        dayNight_.SetEnabled(data->dawnDuskEnabled);
+    }
 }
 
 void GameController::SyncLightnings() {
@@ -2719,6 +3198,58 @@ void GameController::SyncJassEffectVisuals() {
     for (int id : gone) effectVisuals_.erase(id);
 }
 
+static bool IsAllyForFog(const CSimulation& sim, int local, int owner) {
+    if (owner == local) return true;
+    if (local < 0 || owner < 0) return false;
+    const CPlayer* self = sim.GetPlayer(local);
+    const CPlayer* other = sim.GetPlayer(owner);
+    return self && other && self->HasAlliance(*other, CAllianceType::ALLIED);
+}
+
+bool GameController::IsUnitVisibleInFog(const CUnit* unit) const {
+    if (!unit) return false;
+    // Buildings/structures persist on the map once scouted (grey fog shows
+    // bases); only the black mask hides them.
+    const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+    const CFogSystem* fog = simulation_.GetFogSystem();
+    if (unit->GetUnitType() && unit->GetUnitType()->IsBuilding()) {
+        return !fog->IsMaskedTo(local, unit->GetX(), unit->GetY());
+    }
+    // Own and allied forces are always shown (ref alliance vision).
+    if (IsAllyForFog(simulation_, local, unit->GetPlayerIndex())) return true;
+    // Enemies (and neutrals/creeps) need live sight ...
+    if (!fog->IsVisibleTo(local, unit->GetX(), unit->GetY())) return false;
+    // ... and stealth needs a local detector (or Faerie Fire) on top.
+    if (!unit->IsStealthed()) return true;
+    for (auto* viewer : simulation_.GetUnits()) {
+        if (!viewer || viewer->IsDead()) continue;
+        const int vp = viewer->GetPlayerIndex();
+        if (vp != local && !IsAllyForFog(simulation_, local, vp)) continue;
+        if (!unit->IsInvisibleTo(viewer)) return true;
+    }
+    return false;
+}
+
+void GameController::SyncFogStaticsVisibility() {
+    if (!simulationInitialized_) return;
+    const uint64_t version = simulation_.GetFogSystem()->Version();
+    if (version == fogStaticsVersionSynced_) return;
+    fogStaticsVersionSynced_ = version;
+    const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+    const CFogSystem* fog = simulation_.GetFogSystem();
+    const int count = scene_.GetInstanceCount();
+    for (int i = 0; i < count; ++i) {
+        const PlacedModel* inst = scene_.GetInstance(i);
+        if (!inst || inst->transient) continue;
+        // Units and ground items are driven by sim state, not by position.
+        if (inst->debugKind == "unit" || inst->debugKind == "item") continue;
+        // Spell visuals punch through fog like in retail.
+        if (inst->debugKind == "event-spawn" || inst->debugKind == "attached-effect") continue;
+        const bool explored = !fog->IsMaskedTo(local, inst->pos[0], inst->pos[2]);
+        scene_.SetInstanceVisible(i, explored);
+    }
+}
+
 void GameController::SyncAndReconcileVisuals() {
     // Sync all sim units to visuals
     for (auto* unit : simulation_.GetUnits()) {
@@ -2726,16 +3257,22 @@ void GameController::SyncAndReconcileVisuals() {
         int handleId = unit->GetHandleId();
 
         auto visualIt = simUnitToVisualIdx.find(handleId);
-        if (visualIt != simUnitToVisualIdx.end()) {
-        if (auto* viewer = scene_.GetViewer(visualIt->second)) {
-            if (jassNatives_ && jassNatives_->GetData()) {
-                auto blend = jassNatives_->GetData()->unitBlendTimes.find(handleId);
-                if (blend != jassNatives_->GetData()->unitBlendTimes.end()) {
-                    viewer->SetBlendTime(blend->second);
-                }
-            }
-            SyncSimulationUnitAnimation(unit, viewer, this);
+        if (visualIt == simUnitToVisualIdx.end()) {
+            EnsureSimulationUnitVisual(unit);
+            visualIt = simUnitToVisualIdx.find(handleId);
         }
+        if (visualIt != simUnitToVisualIdx.end()) {
+            if (auto* viewer = scene_.GetViewer(visualIt->second)) {
+                if (jassNatives_ && jassNatives_->GetData()) {
+                    auto blend = jassNatives_->GetData()->unitBlendTimes.find(handleId);
+                    if (blend != jassNatives_->GetData()->unitBlendTimes.end()) {
+                        viewer->SetBlendTime(blend->second);
+                    }
+                }
+                SyncSimulationUnitAnimation(unit, viewer, this);
+            }
+            scene_.SetInstanceVisible(visualIt->second,
+                !unit->IsHidden() && !unit->IsLoadedAboard() && IsUnitVisibleInFog(unit));
         }
     }
 
@@ -2753,7 +3290,12 @@ void GameController::SyncAndReconcileVisuals() {
                 : 0.0f;
             float pos[3] = {item->GetX(), height, item->GetY()};
             scene_.UpdateInstancePosition(visualIt->second, pos, 0.0f);
-            scene_.SetInstanceVisible(visualIt->second, !item->IsHidden());
+            bool explored = true;
+            if (simulationInitialized_) {
+                const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+                explored = !simulation_.GetFogSystem()->IsMaskedTo(local, item->GetX(), item->GetY());
+            }
+            scene_.SetInstanceVisible(visualIt->second, !item->IsHidden() && explored);
         }
     }
 
@@ -2762,11 +3304,19 @@ void GameController::SyncAndReconcileVisuals() {
     for (auto& [handleId, visualIdx] : simUnitToVisualIdx) {
         CUnit* unit = simulation_.GetUnit(handleId);
         if (!unit || unit->IsDead()) {
+            scene_.SetInstanceVisible(visualIdx, false);
             removedHandles.push_back(handleId);
         }
     }
     for (int handleId : removedHandles) {
         simUnitToVisualIdx.erase(handleId);
+        simUnitVisualRegistrationFailed.erase(handleId);
+        simUnitVisualMovingStates.erase(handleId);
+        simUnitVisualLastPositions.erase(handleId);
+        simUnitPendingAnimations.erase(handleId);
+        simUnitQueuedAnimations.erase(handleId);
+        simUnitVisualPropertyTags.erase(handleId);
+        simUnitAnimationPropertyTags.erase(handleId);
         selectedUnitHandlesSet_.erase(handleId);
         selectedUnitHandles_.erase(
             std::remove(selectedUnitHandles_.begin(), selectedUnitHandles_.end(), handleId),
@@ -2787,6 +3337,7 @@ void GameController::SyncAndReconcileVisuals() {
         simItemVisualRegistrationFailed.erase(handleId);
     }
 
+    SyncFogStaticsVisibility();
     SyncJassEffectVisuals();
 }
 
@@ -2801,10 +3352,13 @@ void GameController::CollectUnitOverlays(int screenW, int screenH) {
     Mat4 view = camera_.GetViewMatrix();
     Mat4 proj = camera_.GetProjectionMatrix(aspect);
 
-    std::vector<UnitOverlayInfo> overlays;
+    std::vector<UnitOverlayInfo>& overlays = overlayCache_;
+    overlays.clear();
     if (simulationInitialized_) {
         for (auto* unit : simulation_.GetUnits()) {
             if (unit->IsDead()) continue;
+            // Bars/rings follow the same fog rule as the model itself.
+            if (unit->IsHidden() || unit->IsLoadedAboard() || !IsUnitVisibleInFog(unit)) continue;
 
             float gndH = texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(unit->GetX(), unit->GetY()) : 0.0f;
 
@@ -2852,7 +3406,7 @@ void GameController::Render(int screenW, int screenH) {
         sg_reset_state_cache();
         sg_apply_viewport(0, 0, screenW, screenH, true);
         sg_apply_scissor_rect(0, 0, screenW, screenH, true);
-        ui_.RenderNoesisOnly();
+        ui_.RenderHudOnly();
         if (screenshotFrame >= 0) {
             screenshotFrame = std::min(screenshotFrame, frameCount_);
             CaptureScreenshotIfNeeded(screenW, screenH);
@@ -2876,7 +3430,7 @@ void GameController::Render(int screenW, int screenH) {
             sg_reset_state_cache();
             sg_apply_viewport(0, 0, screenW, screenH, true);
             sg_apply_scissor_rect(0, 0, screenW, screenH, true);
-            ui_.RenderNoesisOnly();
+            ui_.RenderHudOnly();
             CaptureScreenshotIfNeeded(screenW, screenH);
             Renderer::EndFrame();
             MaybeExitAfterFrame();
@@ -2992,7 +3546,10 @@ void GameController::Render(int screenW, int screenH) {
         minimap_.SetScreenRect(minimapRect.x, minimapRect.y, minimapRect.w, minimapRect.h);
     }
 
+    if (!hideHud_) SyncHudLiveData();
+
     if (!hideHud_ && showMinimap && minimap_.IsValid()) {
+        SyncMinimapLayer();
         sg_reset_state_cache();
         sg_apply_viewport(0, 0, screenW, screenH, true);
         sg_apply_scissor_rect(0, 0, screenW, screenH, true);
@@ -3008,7 +3565,7 @@ void GameController::Render(int screenW, int screenH) {
         sg_apply_scissor_rect(0, 0, screenW, screenH, true);
         ui_.Render();
 
-        ui_.RenderNoesisOnly();
+        ui_.RenderHudOnly();
     }
     CaptureScreenshotIfNeeded(screenW, screenH);
     Renderer::EndFrame();
@@ -3032,7 +3589,7 @@ void GameController::RenderUiOnly(int screenW, int screenH) {
     sg_apply_viewport(0, 0, screenW, screenH, true);
     sg_apply_scissor_rect(0, 0, screenW, screenH, true);
 
-    ui_.RenderNoesisOnly();
+    ui_.RenderHudOnly();
 
     CaptureScreenshotIfNeeded(screenW, screenH);
     Renderer::EndFrame();
@@ -3421,29 +3978,59 @@ void GameController::OnMouseDown(const sapp_event* ev) {
                 int pendingCmd = ui_.GetPendingCommand();
                 if (pendingCmd >= 0) {
                     issuedOrder = IssuePendingCommandAtScreenPoint(ev->mouse_x, ev->mouse_y);
-                } else if (targetWidget) {
-                    for (auto* su : selUnits) {
-                        if (!su) continue;
-                        int orderId = OrderIds::SMART;
-                        if (targetDest) {
-                            if (auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(su->GetAbility(War3ID("Ahar")))) {
-                                if (harvestAbility->CheckCanTarget(simulation_, su, OrderIds::HARVEST, targetWidget)) {
-                                    orderId = OrderIds::HARVEST;
-                                }
-                            }
-                        }
-                        su->IssueOrder(std::make_unique<COrderTargetWidget>(orderId, targetWidget));
-                    }
-                    issuedOrder = true;
                 } else {
                     auto terrainH = [&](float x, float z) {
                         return texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, z) : 0.0f;
                     };
                     Vec3 wPos = picking::ScreenToWorld(ev->mouse_x, ev->mouse_y, view, proj, winW, winH,
                                                        texturedTerrain_.IsValid(), texturedTerrain_.GetRadius(), terrainH);
+
                     for (auto* su : selUnits) {
                         if (!su) continue;
-                        su->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, wPos.x, wPos.z));
+                        int orderId = OrderIds::SMART;
+                        bool canTargetWidget = false;
+
+                        if (targetWidget) {
+                            if (auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(su->GetAbility(War3ID("Ahar")))) {
+                                if (harvestAbility->CheckCanTarget(simulation_, su, OrderIds::HARVEST, targetWidget)) {
+                                    orderId = OrderIds::HARVEST;
+                                    canTargetWidget = true;
+                                } else if (targetUnit && harvestAbility->CheckCanTarget(simulation_, su, OrderIds::RETURN_RESOURCES, targetWidget)) {
+                                    orderId = OrderIds::RETURN_RESOURCES;
+                                    canTargetWidget = true;
+                                }
+                            }
+                            if (!canTargetWidget) {
+                                if (auto* repairAbility = dynamic_cast<CAbilityRepair*>(su->GetAbility(War3ID("Arep")))) {
+                                    if (repairAbility->CheckCanTarget(simulation_, su, OrderIds::REPAIR, targetWidget)) {
+                                        orderId = OrderIds::REPAIR;
+                                        canTargetWidget = true;
+                                    }
+                                }
+                            }
+                            if (!canTargetWidget) {
+                                if (auto* attackAbility = dynamic_cast<CAbilityAttack*>(su->GetAbility(War3ID("Aatk")))) {
+                                    if (attackAbility->CheckCanTarget(simulation_, su, OrderIds::SMART, targetWidget)) {
+                                        orderId = OrderIds::SMART;
+                                        canTargetWidget = true;
+                                    }
+                                }
+                            }
+                            if (!canTargetWidget && targetUnit) {
+                                if (auto* moveAbility = dynamic_cast<CAbilityMove*>(su->GetAbility(War3ID("Amov")))) {
+                                    if (moveAbility->CheckCanTarget(simulation_, su, OrderIds::SMART, targetWidget)) {
+                                        orderId = OrderIds::SMART;
+                                        canTargetWidget = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (canTargetWidget) {
+                            su->IssueOrder(std::make_unique<COrderTargetWidget>(orderId, targetWidget));
+                        } else {
+                            su->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, wPos.x, wPos.z));
+                        }
                     }
                     issuedOrder = true;
                 }
@@ -3498,7 +4085,18 @@ bool GameController::IssuePendingCommandAtScreenPoint(float screenX, float scree
         if (pendingMode == MainUI::PendingCommandMode::POINT_ONLY) {
             su->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
         } else if (targetWidget) {
-            su->IssueOrder(std::make_unique<COrderTargetWidget>(pendingCmd, targetWidget));
+            bool canTarget = false;
+            for (auto* ab : su->GetAbilities()) {
+                if (ab && !ab->IsDisabled() && ab->CheckCanTarget(simulation_, su, pendingCmd, targetWidget)) {
+                    canTarget = true;
+                    break;
+                }
+            }
+            if (canTarget) {
+                su->IssueOrder(std::make_unique<COrderTargetWidget>(pendingCmd, targetWidget));
+            } else {
+                su->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
+            }
         } else {
             su->IssueOrder(std::make_unique<COrderTargetPoint>(pendingCmd, wPos.x, wPos.z));
         }
@@ -3560,7 +4158,12 @@ void GameController::OnMouseUp(const sapp_event* ev) {
 }
 
 void GameController::OnMouseMove(const sapp_event* ev) {
-    if (!sapp_mouse_locked() && ui_.HandleEvent(ev)) return;
+    mousePosX_ = ev->mouse_x;
+    mousePosY_ = ev->mouse_y;
+    if (!sapp_mouse_locked() && ui_.HandleEvent(ev)) {
+        hoveredUnitHandle_ = -1;
+        return;
+    }
     if (mouseDown[0] && selectionPressActive_ && !sapp_mouse_locked()) {
         selectionCurrentX_ = ev->mouse_x;
         selectionCurrentY_ = ev->mouse_y;
@@ -3588,7 +4191,14 @@ void GameController::OnMouseScroll(const sapp_event* ev) {
 void GameController::OnKeyDown(const sapp_event* ev) {
     if (ui_.HandleEvent(ev)) return;
     switch (ev->key_code) {
-    case SAPP_KEYCODE_P:
+    case SAPP_KEYCODE_ESCAPE:
+        // Cinematic skip (ref ESC -> EVENT_PLAYER_END_CINEMATIC): only the
+        // local player's skip triggers fire, and only in cinematic mode.
+        if (jassNatives_ && jassNatives_->GetData() && jassNatives_->GetData()->cinematicMode) {
+            const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+            jassNatives_->FireCinematicSkipEvent(local);
+        }
+        break;    case SAPP_KEYCODE_P:
         showPathing = !showPathing;
         texturedTerrain_.SetShowPathing(showPathing);
         break;
@@ -3613,10 +4223,17 @@ void GameController::OnKeyDown(const sapp_event* ev) {
         }
         break;
     }
-    case SAPP_KEYCODE_F2:
-        dayNight_.SetEnabled(!dayNight_.IsEnabled());
-        std::cout << "Day/night: " << (dayNight_.IsEnabled() ? "on" : "off") << std::endl;
+    case SAPP_KEYCODE_F2: {
+        const bool enabled = !dayNight_.IsEnabled();
+        dayNight_.SetEnabled(enabled);
+        // Keep the JASS switch in sync so the per-frame HUD sync (ref
+        // EnableDawnDusk owner) does not immediately revert the toggle.
+        if (jassNatives_ && jassNatives_->GetData()) {
+            jassNatives_->GetData()->dawnDuskEnabled = enabled;
+        }
+        std::cout << "Day/night: " << (enabled ? "on" : "off") << std::endl;
         break;
+    }
     case SAPP_KEYCODE_F3: {
         static float speed = 1.0f;
         speed = (speed >= 8.0f) ? 1.0f : speed * 2.0f;
@@ -3655,7 +4272,11 @@ std::vector<CUnit*> GameController::GetSelectedSimulationUnits() const {
 // --- Init helpers (melee start, etc.) ---
 
 static bool IsHumanTownHallType(War3ID typeId) {
-    return typeId == War3ID("htow") || typeId == War3ID("hkee") || typeId == War3ID("hcas");
+    // Any-race town hall tier (ref melee starting town halls per race).
+    return typeId == War3ID("htow") || typeId == War3ID("hkee") || typeId == War3ID("hcas")
+        || typeId == War3ID("ogre") || typeId == War3ID("ofrt") || typeId == War3ID("ostr")
+        || typeId == War3ID("unpl") || typeId == War3ID("unp1") || typeId == War3ID("unp2")
+        || typeId == War3ID("etol") || typeId == War3ID("etoa") || typeId == War3ID("etoe");
 }
 
 static int CountPlayerUnitsOfType(CSimulation& sim, int playerIndex, War3ID typeId) {
@@ -3766,8 +4387,15 @@ static bool FindPlayerStartLocationPosition(const JassNativesData* data, int pla
 }
 
 static bool FindInitialSpawnFocusPosition(CSimulation& sim, GameController* g, float& outX, float& outY) {
-    if (FindPlayerTownHallPosition(sim, 0, outX, outY)) return true;
+    const int local = g ? g->GetConfig().localPlayerIndex : -1;
+    // Prefer the local (human) slot: campaign maps put it off slot 0
+    // (Human01: Player 1). Fall back to the old slot-0-first order.
+    if (local >= 0) {
+        if (FindPlayerTownHallPosition(sim, local, outX, outY)) return true;
+    }
     auto* data = g->GetJassNatives() ? g->GetJassNatives()->GetData().get() : nullptr;
+    if (local >= 0 && FindPlayerStartLocationPosition(data, local, outX, outY)) return true;
+    if (FindPlayerTownHallPosition(sim, 0, outX, outY)) return true;
     if (FindPlayerStartLocationPosition(data, 0, outX, outY)) return true;
     if (!data) return false;
     int playerLimit = data->configuredPlayerCount > 0
@@ -3792,8 +4420,32 @@ void GameController::FocusCameraAndMinimapOnInitialSpawn() {
     std::cout << "InitialFocus: spawn at (" << focusX << ", " << focusY << ")" << std::endl;
 }
 
+static War3ID RaceTownHallId(int race) {
+    switch (race) {
+        case 2: return War3ID("ogre");
+        case 3: return War3ID("unpl");
+        case 4: return War3ID("etol");
+        default: return War3ID("htow");
+    }
+}
+
+static War3ID RaceWorkerId(int race) {
+    switch (race) {
+        case 2: return War3ID("opeo");
+        case 3: return War3ID("uaco");
+        case 4: return War3ID("ewsp");
+        default: return War3ID("hpea");
+    }
+}
+
 void GameController::EnsureHumanMeleeStartForPlayer(int playerIndex, float startX, float startY) {
-    if (!unitData_.HasUnitType(War3ID("htow")) || !unitData_.HasUnitType(War3ID("hpea"))) return;
+    // Race-correct fallback when the map script did not create starting
+    // units (ref Blizzard.j MeleeStartingUnitsHuman/Orc/Undead/NightElf).
+    const CPlayer* player = simulation_.GetPlayer(playerIndex);
+    const int race = player ? player->GetRace() : 1;
+    const War3ID townHallId = RaceTownHallId(race);
+    const War3ID workerId = RaceWorkerId(race);
+    if (!unitData_.HasUnitType(townHallId) || !unitData_.HasUnitType(workerId)) return;
 
     constexpr float townHallFacing = 270.0f;
     constexpr float peasantFacing = 90.0f;
@@ -3803,14 +4455,14 @@ void GameController::EnsureHumanMeleeStartForPlayer(int playerIndex, float start
     };
 
     if (CountPlayerTownHalls(simulation_, playerIndex) == 0) {
-        simulation_.CreateUnit(War3ID("htow"), playerIndex, startX, startY, townHallFacing);
+        simulation_.CreateUnit(townHallId, playerIndex, startX, startY, townHallFacing);
         std::cout << "MeleeFallback: created Town Hall for player " << playerIndex << std::endl;
     }
     float thX = startX, thY = startY;
     FindPlayerTownHallPosition(simulation_, playerIndex, thX, thY);
-    int existingPeasants = CountPlayerUnitsOfType(simulation_, playerIndex, War3ID("hpea"));
+    int existingPeasants = CountPlayerUnitsOfType(simulation_, playerIndex, workerId);
     for (int i = existingPeasants; i < 5; ++i) {
-        simulation_.CreateUnit(War3ID("hpea"), playerIndex, thX + peasantOffsets[i][0], thY + peasantOffsets[i][1], peasantFacing);
+        simulation_.CreateUnit(workerId, playerIndex, thX + peasantOffsets[i][0], thY + peasantOffsets[i][1], peasantFacing);
     }
     if (existingPeasants < 5)
         std::cout << "MeleeFallback: created " << (5 - existingPeasants) << " Peasants for player " << playerIndex << std::endl;
@@ -3833,21 +4485,149 @@ void GameController::EnsureHumanMeleeStartsFromMapConfig() {
     for (int pi = 0; pi < playerLimit; ++pi) {
         const auto& pc = data->playerMapConfig[pi];
         if (pc.startLocationIndex < 0) continue;
-        if (!pc.slotActive && CountPlayerTownHalls(simulation_, pi) > 0) continue;
+        // Inactive/closed slots never get starting units (ref slotActive).
+        if (!pc.slotActive) continue;
         const int si = pc.startLocationIndex;
         if (si < 0 || si >= (int)data->startLocations.size()) continue;
         const auto& start = data->startLocations[si];
         if (!start.defined) continue;
         if (auto* player = simulation_.GetPlayer(pi)) player->SetStartLocation(start.x, start.y);
 
+        const int raceForCount = simulation_.GetPlayer(pi) ? simulation_.GetPlayer(pi)->GetRace() : 1;
+        const War3ID workerForCount = RaceWorkerId(raceForCount);
         int beforeTH = CountPlayerTownHalls(simulation_, pi);
-        int beforePeasants = CountPlayerUnitsOfType(simulation_, pi, War3ID("hpea"));
+        int beforePeasants = CountPlayerUnitsOfType(simulation_, pi, workerForCount);
         EnsureHumanMeleeStartForPlayer(pi, start.x, start.y);
         if (CountPlayerTownHalls(simulation_, pi) > beforeTH ||
-            CountPlayerUnitsOfType(simulation_, pi, War3ID("hpea")) > beforePeasants)
+            CountPlayerUnitsOfType(simulation_, pi, workerForCount) > beforePeasants)
             createdAny = true;
     }
     if (createdAny) simulation_.Update();
+}
+
+void GameController::MaybeLogAIStatus() {
+    if (!std::getenv("WARSMASH_AI_STATUS")) return;
+    if (!simulationInitialized_ || !jassNatives_) return;
+    const int tick = simulation_.GetGameTurnTick();
+    static int lastLoggedTick = -100000;
+    if (tick - lastLoggedTick < 200) return; // ~10s sim time
+    lastLoggedTick = tick;
+    auto data = jassNatives_->GetData();
+    for (int pi = 0; pi < simulation_.GetPlayerCount(); ++pi) {
+        const CPlayer* player = simulation_.GetPlayer(pi);
+        if (!player || player->GetController() != CMapControl::COMPUTER) continue;
+        int units = 0, buildings = 0, workers = 0;
+        for (const CUnit* u : simulation_.GetUnits()) {
+            if (!u || u->IsDead() || u->GetPlayerIndex() != pi) continue;
+            ++units;
+            const CUnitType* t = u->GetUnitType();
+            if (t && t->IsBuilding()) { ++buildings; continue; }
+            const War3ID id = u->GetTypeId();
+            if (id == War3ID("hpea") || id == War3ID("opeo") ||
+                id == War3ID("uaco") || id == War3ID("ewsp") ||
+                u->GetAbility(War3ID("Ahar")) != nullptr) {
+                ++workers;
+            }
+        }
+        int thinks = -1, waves = -1;
+        if (data) {
+            auto it = data->aiControllers.find(pi);
+            if (it != data->aiControllers.end() && it->second) {
+                thinks = it->second->GetThinkCount();
+                waves = it->second->GetWaveNumber();
+            }
+        }
+        std::cout << "AIStatus: t=" << tick << " player=" << pi
+                  << " race=" << player->GetRace()
+                  << " units=" << units << " buildings=" << buildings
+                  << " workers=" << workers << " gold=" << player->GetGold()
+                  << " lumber=" << player->GetLumber()
+                  << " thinks=" << thinks << " waves=" << waves;
+        // Probe first worker: ability + behavior, to diagnose harvest stalls.
+        for (const CUnit* u : simulation_.GetUnits()) {
+            if (!u || u->IsDead() || u->GetPlayerIndex() != pi) continue;
+            const War3ID id = u->GetTypeId();
+            if (id == War3ID("hpea") || id == War3ID("opeo") ||
+                id == War3ID("uaco") || id == War3ID("ewsp")) {
+                const bool hasHar = u->GetAbility(War3ID("Ahar")) != nullptr;
+                const CBehavior* b = u->GetCurrentBehavior();
+                int carried = 0;
+                if (const auto* har = dynamic_cast<const CAbilityHarvest*>(
+                        u->GetAbility(War3ID("Ahar")))) {
+                    carried = har->GetCarriedAmount();
+                }
+                float hallDist = -1.0f;
+                for (const CUnit* h : simulation_.GetUnits()) {
+                    if (!h || h->IsDead() || h->GetPlayerIndex() != pi) continue;
+                    if (h->GetUnitType() && h->GetUnitType()->IsBuilding()) {
+                        const float dx = h->GetX() - u->GetX();
+                        const float dy = h->GetY() - u->GetY();
+                        const float d = std::sqrt(dx * dx + dy * dy);
+                        if (hallDist < 0.0f || d < hallDist) hallDist = d;
+                    }
+                }
+                std::cout << " probeWorker=" << id.ToString()
+                          << " hasAhar=" << (hasHar ? 1 : 0)
+                          << " queued=" << (u->HasQueuedOrders() ? 1 : 0)
+                          << " behav=" << (b ? (int)b->GetCategory() : -1)
+                          << " carried=" << carried
+                          << " pos=(" << (int)u->GetX() << "," << (int)u->GetY() << ")"
+                          << " hallDist=" << (int)hallDist
+                          << " speed=" << u->GetSpeed()
+                          << " turnRate=" << u->GetTurnRate()
+                          << " moveType=" << (u->GetUnitType() ? (int)u->GetMovementType() : -1)
+                          << " facing=" << (int)u->GetFacing()
+                          << " coll=" << u->GetCollisionSize();
+                if (auto* pf = simulation_.GetPathfinding()) {
+                    std::cout << " steps=";
+                    for (int dir = 0; dir < 8; ++dir) {
+                        const float ang = dir * 3.14159265f / 4.0f;
+                        const float nx = u->GetX() + std::cos(ang) * 24.0f;
+                        const float ny = u->GetY() + std::sin(ang) * 24.0f;
+                        const bool ok = pf->IsWorldPointPathableForUnit(
+                            nx, ny, std::max(0.0f, u->GetCollisionSize()),
+                            u->GetMovementType(), const_cast<CUnit*>(u));
+                        std::cout << (ok ? '1' : '0');
+                    }
+                    std::cout << " near=[";
+                    int shown = 0;
+                    for (const CUnit* o : simulation_.GetUnits()) {
+                        if (!o || o == u || o->IsDead()) continue;
+                        const float dx = o->GetX() - u->GetX();
+                        const float dy = o->GetY() - u->GetY();
+                        if (dx * dx + dy * dy > 200.0f * 200.0f) continue;
+                        if (shown++ > 0) std::cout << ",";
+                        std::cout << o->GetTypeId().ToString() << "p" << o->GetPlayerIndex()
+                                  << "@" << (int)std::sqrt(dx * dx + dy * dy)
+                                  << "c" << (int)o->GetCollisionSize()
+                                  << (o->IsHidden() ? "H" : "");
+                    }
+                    std::cout << "]";
+                }
+                break;
+            }
+        }
+        std::cout << std::endl;
+    }
+}
+
+void GameController::EnsureComputerAIStarted() {
+    if (!jassNatives_ || !simulationInitialized_) return;
+    auto data = jassNatives_->GetData();
+    if (!data) return;
+    for (int pi = 0; pi < simulation_.GetPlayerCount(); ++pi) {
+        const CPlayer* player = simulation_.GetPlayer(pi);
+        if (!player || player->GetController() != CMapControl::COMPUTER) continue;
+        if (pi < (int)data->playerMapConfig.size() && !data->playerMapConfig[(size_t)pi].slotActive) continue;
+        auto it = data->aiControllers.find(pi);
+        if (it != data->aiControllers.end() && it->second) continue;
+        auto controller = std::make_shared<MeleeAIController>(&simulation_, pi);
+        controller->SetDifficulty(data->playerAI[pi].difficulty);
+        auto paused = data->compAIpaused.find(pi);
+        if (paused != data->compAIpaused.end() && paused->second) controller->SetEnabled(false);
+        data->aiControllers[pi] = std::move(controller);
+        std::cout << "ComputerAI: started MeleeAIController for player " << pi << std::endl;
+    }
 }
 
 void GameController::FlushStartupSimulationState() {
@@ -3862,6 +4642,7 @@ void GameController::FlushStartupSimulationState() {
         simulation_.Update();
         int timers = jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
         jassNatives_->UpdateRegions();
+        jassNatives_->UpdateRescue();
         int pumped = jassNatives_->PumpQueuedThreads(1024);
         if (!diagnoseMapOnly_ && !debugGameplaySmoke_) {
             SyncAndReconcileVisuals();
@@ -3871,7 +4652,7 @@ void GameController::FlushStartupSimulationState() {
 }
 
 void GameController::RefreshRuntimeUnitSplats() {
-    splatMeta_.RefreshRuntimeSplats(texturedTerrain_, simulationInitialized_, simulation_, selectedUnitHandlesSet_);
+    splatMeta_.RefreshRuntimeSplats(texturedTerrain_, simulationInitialized_, simulation_, selectedUnitHandlesSet_, hoveredUnitHandle_);
     AddActiveEventSplatsToTerrain();
 }
 
@@ -3960,6 +4741,8 @@ bool GameController::EnsureSimulationUnitVisual(CUnit* unit) {
     if (auto* viewer = scene_.GetViewer(visualIdx)) {
         SyncSimulationUnitAnimation(unit, viewer, this);
     }
+    scene_.SetInstanceVisible(visualIdx,
+        !unit->IsHidden() && !unit->IsLoadedAboard() && IsUnitVisibleInFog(unit));
     return true;
 }
 
@@ -3982,7 +4765,12 @@ bool GameController::EnsureSimulationItemVisual(CItem* item) {
     }
 
     simItemToVisualIdx[handleId] = visualIdx;
-    scene_.SetInstanceVisible(visualIdx, !item->IsHidden());
+    bool explored = true;
+    if (simulationInitialized_) {
+        const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+        explored = !simulation_.GetFogSystem()->IsMaskedTo(local, item->GetX(), item->GetY());
+    }
+    scene_.SetInstanceVisible(visualIdx, !item->IsHidden() && explored);
     return true;
 }
 
@@ -4153,6 +4941,7 @@ void GameController::RunGameplaySmoke() {
             if (jassNatives_) {
                 jassNatives_->UpdateTimers(CSimulation::SIM_STEP_TIME);
                 jassNatives_->UpdateRegions();
+                jassNatives_->UpdateRescue();
                 jassNatives_->PumpQueuedThreads(128);
             }
             if (done && done()) return i + 1;
@@ -4625,9 +5414,8 @@ CUnit* GameController::PickSimulationUnitAtScreenPoint(float sx, float sy, const
 CDestructable* GameController::PickSimulationDestructableAtScreenPoint(float sx, float sy, const Mat4& view,
                                                                         const Mat4& proj, int screenW, int screenH) {
     if (!simulationInitialized_) return nullptr;
-    picking::PickRay ray = picking::BuildScreenPickRay(sx, sy, view, proj, screenW, screenH);
-    CDestructable *bestScreen = nullptr, *bestRay = nullptr;
-    float bestScreenScore = std::numeric_limits<float>::infinity(), bestRayT = std::numeric_limits<float>::infinity();
+    CDestructable *bestScreen = nullptr;
+    float bestScreenScore = std::numeric_limits<float>::infinity();
 
     for (auto* d : simulation_.GetDestructables()) {
         if (!d || d->IsDead()) continue;
@@ -4636,22 +5424,21 @@ CDestructable* GameController::PickSimulationDestructableAtScreenPoint(float sx,
             if (dt->isTree) { worldRadius = 72.0f; worldHeight = 180.0f; }
             else if (dt->isWall) { worldRadius = 64.0f; worldHeight = 96.0f; }
         }
-        Vec3 sc(d->GetX(), worldHeight * 0.5f, d->GetY());
-        float hitT;
-        if (picking::IntersectSphere(ray, sc, worldRadius, hitT) && hitT < bestRayT) { bestRayT = hitT; bestRay = d; }
+        float gh = texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(d->GetX(), d->GetY()) : 0.0f;
+        Vec3 sc(d->GetX(), gh + worldHeight * 0.5f, d->GetY());
         float cx, cy;
         if (!picking::WorldToScreen(sc, view, proj, screenW, screenH, cx, cy)) continue;
         float rpx = 0;
         auto upR = [&](const Vec3& p) { float sx, sy; if (picking::WorldToScreen(p, view, proj, screenW, screenH, sx, sy)) { float dx=sx-cx, dy=sy-cy; rpx=std::max(rpx,std::sqrt(dx*dx+dy*dy)); } };
-        upR(Vec3(d->GetX()+worldRadius, worldHeight*0.5f, d->GetY()));
-        upR(Vec3(d->GetX(), worldHeight*0.5f, d->GetY()+worldRadius));
+        upR(Vec3(d->GetX()+worldRadius, gh + worldHeight*0.5f, d->GetY()));
+        upR(Vec3(d->GetX(), gh + worldHeight*0.5f, d->GetY()+worldRadius));
         rpx = std::max(rpx, 20.0f);
         float dx = sx - cx, dy = sy - cy, distSq = dx*dx+dy*dy;
         if (distSq > rpx*rpx) continue;
         float score = distSq / std::max(1.0f, rpx*rpx);
         if (score < bestScreenScore) { bestScreenScore = score; bestScreen = d; }
     }
-    return bestScreen ? bestScreen : bestRay;
+    return bestScreen;
 }
 
 // --- Shutdown ---

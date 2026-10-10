@@ -25,6 +25,22 @@ public:
     void ClearScriptMarkers();
     void AddScriptMarker(float wx, float wy, uint32_t rgba, float sizePixels = 8.0f);
 
+    // Warsmash MeleeUIMinimap parity: fog overlay + per-unit dots.
+    // rgba format for dots matches markers (0xRRGGBBAA).
+    struct UnitDot {
+        float worldX = 0.0f;
+        float worldY = 0.0f;
+        uint32_t rgba = 0xFFFFFFFFu;
+        float sizePixels = 4.0f;
+    };
+    void SetUnitDots(const std::vector<UnitDot>& dots);
+    void ClearUnitDots();
+    // Fog overlay image (RGBA, row 0 = worldMinY to match Generate()).
+    // w/h <= 0 clears the overlay.
+    void SetFogOverlay(int w, int h, const std::vector<uint8_t>& rgba);
+    void ClearFogOverlay();
+    void GetWorldBounds(float& minX, float& minY, float& maxX, float& maxY) const;
+
     bool HitTest(float mouseX, float mouseY, int winW, int winH) const;
     void ScreenToWorld(float mx, float my, int winW, int winH, float* wx, float* wy) const;
     void WorldToScreen(float wx, float wy, int winW, int winH, float* sx, float* sy) const;
@@ -43,6 +59,9 @@ private:
 
     sg_image texture_ = {0};
     sg_view textureView_ = {0};
+    // Fog-of-war overlay (black mask / grey fog over the filled area).
+    sg_image fogTexture_ = {0};
+    sg_view fogView_ = {0};
     sg_shader shader_ = {0};
     sg_pipeline pipeline_ = {0};
     sg_buffer vbo_ = {0}, ibo_ = {0};
@@ -61,4 +80,5 @@ private:
     float texW_ = 0, texH_ = 0;
     std::vector<Marker> markers_;
     std::vector<Marker> scriptMarkers_;
+    std::vector<UnitDot> unitDots_;
 };

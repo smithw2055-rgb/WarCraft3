@@ -24,6 +24,10 @@ public:
     void Update(int w, int h);
     void Render();
     void ResolveTarget(const std::string& name);
+    // FDF-unit conversion (ref GameUI.convertX/convertY in warsmash_ref):
+    // FDF space is 0..0.8 x 0..0.6 with a bottom-left origin.
+    float ConvertX(float fdfX) const { return (fdfX / 0.8f) * (float)screenW; }
+    float ConvertY(float fdfY) const { return (fdfY / 0.6f) * (float)screenH; }
     // For simple name-based lookup (used by SetPoint resolution)
     std::unordered_map<std::string, UIFrame*> frameRegistry;
 };
@@ -58,6 +62,11 @@ public:
 
     void SetVisible(bool v) { visible_ = v; }
     bool IsVisible() const { return visible_; }
+    // FDF frames built without any SetPoint/anchor/size-stretch assignment
+    // default to their parent's top-left (ref Java, where position-less
+    // children stay at the parent origin instead of the viewport origin).
+    // Explicitly placed code frames never set this.
+    void SetDefaultToParent(bool v) { defaultToParent_ = v; }
 
     virtual UIFrame* HitTest(float sx, float sy);
     virtual UIFrame* OnMouseDown(float sx, float sy, int btn);
@@ -75,6 +84,7 @@ protected:
     std::string name_;
     UIFrame* parent_ = nullptr;
     bool visible_ = true;
+    bool defaultToParent_ = false;
     UiRect bounds_;
     float assignedW_ = 0, assignedH_ = 0;
     std::unordered_map<FramePoint, FramePointAssign> assignments_;

@@ -8,6 +8,16 @@ public:
     void SetTarget(float tx, float ty, float tz);
     void SetDistance(float dist) { distance_ = dist; targetDistance_ = dist; }
     void SetMaxDistance(float dist) { maxDistance_ = dist; }
+    // Playable camera bounds (ref w3i cameraBounds): clamps pan target in
+    // XZ. Margin expands the box so edge scrolling can reveal border tiles.
+    void SetBounds(float minX, float maxX, float minZ, float maxZ, float margin = 0.0f) {
+        boundsMinX_ = minX - margin; boundsMaxX_ = maxX + margin;
+        boundsMinZ_ = minZ - margin; boundsMaxZ_ = maxZ + margin;
+        hasBounds_ = true;
+        ClampTarget();
+    }
+    void ClearBounds() { hasBounds_ = false; }
+    bool HasBounds() const { return hasBounds_; }
     void SetAngles(float yaw, float pitch) { yaw_ = yaw; targetYaw_ = yaw; pitch_ = pitch; targetPitch_ = pitch; }
     void Orbit(float deltaYaw, float deltaPitch);
     void Zoom(float delta);
@@ -73,4 +83,10 @@ private:
     bool dragging_ = false;
     float dragYaw_ = 0.0f;
     float dragPitch_ = 0.0f;
+
+    // Optional world bounds for the pan target (unset = free camera).
+    bool hasBounds_ = false;
+    float boundsMinX_ = 0.0f, boundsMaxX_ = 0.0f;
+    float boundsMinZ_ = 0.0f, boundsMaxZ_ = 0.0f;
+    void ClampTarget();
 };

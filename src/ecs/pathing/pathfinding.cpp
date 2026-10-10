@@ -116,13 +116,7 @@ bool CPathfindingProcessor::IsWorldPointPathable(float worldX, float worldY, flo
     };
 
     if (collisionSize <= 0.0f) {
-        if (!isSampleWalkable(worldX, worldY)) {
-            return false;
-        }
-        if (worldCollision_ && UsesDynamicGroundCollision(movementType)) {
-            return !worldCollision_->CheckCollision(worldX, worldY, 8.0f, ignoreUnit);
-        }
-        return true;
+        return isSampleWalkable(worldX, worldY);
     }
 
     for (int iy = -1; iy <= 1; ++iy) {
@@ -131,9 +125,6 @@ bool CPathfindingProcessor::IsWorldPointPathable(float worldX, float worldY, flo
                 return false;
             }
         }
-    }
-    if (worldCollision_ && UsesDynamicGroundCollision(movementType)) {
-        return !worldCollision_->CheckCollision(worldX, worldY, collisionSize, ignoreUnit);
     }
     return true;
 }
@@ -541,7 +532,8 @@ bool CPathfindingProcessor::FindPathWorld(float startX, float startY,
         }
     }
 
-    if (!FindPathMapped(sx, sy, ex, ey, startX, startY, endX, endY,
+    if (!FindPathMapped(resolvedStartX, resolvedStartY, resolvedEndX, resolvedEndY,
+                        startX, startY, endX, endY,
                         mapping, collisionSize, movementType, ignoreUnit, cellPath)) {
         LogPathDebug(ignoreUnit, "search_failed", startX, startY, endX, endY,
                      "grid=" + std::string(GridMappingName(mapping))

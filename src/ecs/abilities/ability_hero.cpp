@@ -83,6 +83,14 @@ void CAbilityHero::SetHeroLevel(CSimulation& game, CUnit* unit, int level) {
     }
 }
 
+bool CAbilityHero::StripLevels(CSimulation& game, CUnit* unit, int levels) {
+    if (levels <= 0 || heroLevel_ <= 1) return false;
+    heroLevel_ = std::max(1, heroLevel_ - levels);
+    xp_ = GetXPForLevel(heroLevel_);
+    CalculateDerivedStats(game, unit);
+    return true;
+}
+
 void CAbilityHero::SetXP(CSimulation& game, CUnit* unit, int value) {
     // Ref semantics (CAbilityHero.setXp): only increases XP/level, never
     // decreases. Applies handicapXP rounding like the reference.
@@ -128,11 +136,17 @@ void CAbilityHero::LearnSkill(CSimulation& game, CUnit* unit, War3ID skillCode) 
         skillPoints_--;
         std::cout << "Hero leveled skill: " << skillCode.ToString()
                   << " to " << existingAbility->GetLevel() << std::endl;
+        if (const auto& cb = game.GetHeroSkillCallback()) {
+            cb(unit->GetHandleId(), skillCode.value, existingAbility->GetLevel());
+        }
     } else if (auto created = AbilityFactory::CreateAbility(game.AllocateHandleId(), skillCode)) {
         created->SetLevel(1);
         unit->AddAbility(game, std::move(created));
         skillPoints_--;
         std::cout << "Hero learned new skill: " << skillCode.ToString() << std::endl;
+        if (const auto& cb = game.GetHeroSkillCallback()) {
+            cb(unit->GetHandleId(), skillCode.value, 1);
+        }
     } else {
         // Unknown skill code (e.g. custom ability with no C++ class yet):
         // keep the point, like ref selectHeroSkill reporting failure.

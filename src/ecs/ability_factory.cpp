@@ -492,23 +492,26 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
 
 void AbilityFactory::AddDefaultAbilities(CSimulation& game, CUnit* unit,
                                           const std::vector<War3ID>& abilityList) {
-    // Add core abilities (attack, move)
-    int handleId = 0; // Will be assigned by CSimulation
-    (void)handleId;
-
-    // Add abilities from the unit type's ability list
+    if (!unit) return;
+    // Aatk/Amov are wired by CSimulation::createUnit paths; everything else
+    // from the unit type's ability list must be instantiated here (ref
+    // CSimulation.createUnit → abilityFactory.createAbility). Unknown codes
+    // return nullptr from CreateAbility and are skipped (logged once).
+    bool loggedUnknown = false;
     for (auto& code : abilityList) {
-        // Skip abilities that are added by default (attack, move)
         if (code == War3ID("Aatk") || code == War3ID("Amov")) continue;
-
-        // Check if unit already has this ability
         if (unit->GetAbility(code)) continue;
-
-        // Create the ability
-        // Note: handleId allocation is handled by CSimulation
-        // For now, we skip abilities that need handle IDs
-        // TODO: integrate with CSimulation's handle allocator
-        (void)game;
+        std::unique_ptr<CAbility> ability =
+            CreateAbility(game.AllocateHandleId(), code);
+        if (!ability) {
+            if (!loggedUnknown) {
+                std::cerr << "AbilityFactory: no implementation for " << code.ToString()
+                          << " (skipped)" << std::endl;
+                loggedUnknown = true;
+            }
+            continue;
+        }
+        unit->AddAbility(game, std::move(ability));
     }
 }
 

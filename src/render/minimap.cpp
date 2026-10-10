@@ -82,6 +82,8 @@ Minimap::~Minimap() {
     if (!Renderer::IsActive()) return;
     if (texture_.id) sg_destroy_image(texture_);
     if (textureView_.id) sg_destroy_view(textureView_);
+    if (fogTexture_.id) sg_destroy_image(fogTexture_);
+    if (fogView_.id) sg_destroy_view(fogView_);
     if (shader_.id) sg_destroy_shader(shader_);
     if (pipeline_.id) sg_destroy_pipeline(pipeline_);
     if (vbo_.id) sg_destroy_buffer(vbo_);
@@ -360,6 +362,45 @@ void Minimap::AddScriptMarker(float wx, float wy, uint32_t rgba, float sizePixel
     scriptMarkers_.push_back({wx, wy, rgba, std::max(2.0f, sizePixels)});
 }
 
+void Minimap::SetUnitDots(const std::vector<UnitDot>& dots) {
+    unitDots_.clear();
+    unitDots_.reserve(dots.size());
+    for (const auto& d : dots) {
+        UnitDot dot = d;
+        dot.sizePixels = std::max(2.0f, d.sizePixels);
+        unitDots_.push_back(dot);
+    }
+}
+
+void Minimap::ClearUnitDots() { unitDots_.clear(); }
+
+void Minimap::SetFogOverlay(int w, int h, const std::vector<uint8_t>& rgba) {
+    if (w <= 0 || h <= 0 || rgba.size() < (size_t)w * h * 4) {
+        ClearFogOverlay();
+        return;
+    }
+    UploadTexture(fogTexture_, fogView_, w, h, rgba);
+}
+
+void Minimap::ClearFogOverlay() {
+    if (!Renderer::IsActive()) {
+        fogTexture_ = {0};
+        fogView_ = {0};
+        return;
+    }
+    if (fogTexture_.id) sg_destroy_image(fogTexture_);
+    fogTexture_ = {0};
+    if (fogView_.id) sg_destroy_view(fogView_);
+    fogView_ = {0};
+}
+
+void Minimap::GetWorldBounds(float& minX, float& minY, float& maxX, float& maxY) const {
+    minX = worldMinX_;
+    minY = worldMinY_;
+    maxX = worldMaxX_;
+    maxY = worldMaxY_;
+}
+
 void Minimap::Render(int winW, int winH, float camX, float camZ,
                      float camYaw, float camPitch, float camDist, float fov, float aspect) {
     if (!texture_.id || !textureView_.id) return;
@@ -408,6 +449,25 @@ void Minimap::Render(int winW, int winH, float camX, float camZ,
     sg_apply_uniforms(1, SG_RANGE(fsUniforms));
     sg_draw(0, 6, 1);
 
+    // Fog overlay over the filled (world-mapped) area, matching
+    // MeleeUIMinimap: MASKED = opaque black, FOGGED = 50% black.
+    if (fogTexture_.id && fogView_.id && filledW_ > 0.0f && filledH_ > 0.0f) {
+        sg_bindings fogBind = {};
+        fogBind.vertex_buffers[0] = vbo_;
+        fogBind.index_buffer = ibo_;
+        fogBind.views[0] = fogView_;
+        fogBind.samplers[0] = sampler_;
+        sg_apply_bindings(&fogBind);
+        VSUniforms fogVs = vsUniforms;
+        fogVs.offset[0] = filledX_;
+        fogVs.offset[1] = filledY_;
+        fogVs.scale[0] = filledW_;
+        fogVs.scale[1] = filledH_;
+        sg_apply_uniforms(0, SG_RANGE(fogVs));
+        sg_apply_uniforms(1, SG_RANGE(fsUniforms));
+        sg_draw(0, 6, 1);
+    }
+
     auto drawMarker = [&](float screenX, float screenY, float sizePixels, uint32_t rgba) {
         VSUniforms markerVs = vsUniforms;
         markerVs.offset[0] = screenX - sizePixels * 0.5f;
@@ -427,6 +487,15 @@ void Minimap::Render(int winW, int winH, float camX, float camZ,
         sg_apply_uniforms(1, SG_RANGE(markerFs));
         sg_draw(0, 6, 1);
     };
+
+    // Unit dots under the camera/ping markers (warsmash draws units
+    // right after fog, pings on top).
+    for (const auto& dot : unitDots_) {
+        float sx = 0.0f;
+        float sy = 0.0f;
+        WorldToScreen(dot.worldX, dot.worldY, winW, winH, &sx, &sy);
+        drawMarker(sx, sy, dot.sizePixels, dot.rgba);
+    }
 
     float camSX = 0.0f;
     float camSY = 0.0f;

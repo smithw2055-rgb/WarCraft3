@@ -52,6 +52,9 @@ CBehavior* CAbilityUpgrade::BeginNoTarget(CSimulation& game, CUnit* caster, int 
     upgrading_ = true;
     caster->SetConstructing(true);
     caster->SetConstructionProgress(0.0f);
+    if (const auto& cb = game.GetQueueEventCallback()) {
+        cb(caster->GetHandleId(), (int)upgradeId.value, 2, true);
+    }
     return nullptr;
 }
 
@@ -66,4 +69,7 @@ void CAbilityUpgrade::OnTick(CSimulation& game, CUnit* unit) {
     CUnitData* data = game.GetUnitData();
     CUnitType* form = data ? data->GetUnitType(pendingId_) : nullptr;
     if (form) unit->MorphTo(form, pendingId_);
+    if (const auto& cb = game.GetQueueEventCallback()) {
+        cb(unit->GetHandleId(), (int)pendingId_.value, 2, false);
+    }
 }

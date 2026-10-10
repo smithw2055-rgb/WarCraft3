@@ -67,6 +67,10 @@ private:
     void DiscoverPlan();
     CUnit* FindTownHall() const;
     CUnit* FindIdleWorker() const;
+    // Builder acquisition: idle worker first, else pull the nearest worker
+    // off harvest (a builder is never yanked). Without this, a fully
+    // employed workforce never builds anything (harvest loops never idle).
+    CUnit* FindWorkerForBuild() const;
     CUnit* FindNearestGoldMine(float x, float y) const;
     class CDestructable* FindNearestTree(float x, float y) const;
     CUnit* FindIdleProduction(const War3ID& buildingType) const;
@@ -77,9 +81,14 @@ private:
     bool TryBuildSupply();
     bool TryBuildBarracks();
     bool TryTrainArmy();
+    // Research one affordable upgrade per think on an idle production
+    // building (ref gap: the AI never researched). Economy buffer scales
+    // with difficulty so research never starves the army.
+    bool TryResearchUpgrades();
     bool TryAttackWave(bool force);
     void AssignIdleWorkers();
-    bool FindBuildSpot(float nearX, float nearY, float& outX, float& outY) const;
+    bool FindBuildSpot(float nearX, float nearY, const War3ID& buildingType,
+                        float& outX, float& outY) const;
     bool FindAttackTarget(float& outX, float& outY) const;
     bool IsEnemyPlayer(int index) const;
     static bool IsWorkerType(const CUnitType* type);

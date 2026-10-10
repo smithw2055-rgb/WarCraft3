@@ -1,18 +1,50 @@
 #include "ButtonFrame.h"
 
 ButtonFrame::ButtonFrame(const std::string& name, UIFrame* parent)
-    : UIFrame(name, parent) {}
+    : SimpleFrame(name, parent) {}
 
 void ButtonFrame::Render(UiRenderer& r) {
     if (!visible_) return;
 
-    uint32_t bgColor;
-    if (!enabled_) bgColor = colorDisabled_;
-    else if (pressed_) bgColor = colorPressed_;
-    else if (hovered_) bgColor = colorHover_;
-    else bgColor = colorNormal_;
+    // Toggle control backdrops according to button state (ref Java GlueButtonFrame)
+    if (controlBackdrop_) {
+        bool showNormal = enabled_ && !pressed_;
+        bool showPushed = enabled_ && pressed_ && controlPushedBackdrop_;
+        bool showDisabled = !enabled_ && controlDisabledBackdrop_;
+        controlBackdrop_->SetVisible(showNormal || (!showPushed && !showDisabled));
+        if (controlPushedBackdrop_) controlPushedBackdrop_->SetVisible(showPushed);
+        if (controlDisabledBackdrop_) controlDisabledBackdrop_->SetVisible(showDisabled);
+        if (controlHighlight_) controlHighlight_->SetVisible(hovered_ && enabled_);
+    }
 
-    r.DrawQuad(bounds_.x, bounds_.y, bounds_.w, bounds_.h, bgColor);
+    // Textured states (retail SIMPLEBUTTON art) win over flat colors.
+    const StateArt* art = nullptr;
+    if (!enabled_ && disabled_.valid) art = &disabled_;
+    else if (pressed_ && pushed_.valid) art = &pushed_;
+    else if (normal_.valid) art = &normal_;
+    if (art) {
+        if (art->tex && art->tex->IsValid()) {
+            r.DrawTexturedQuad(bounds_.x, bounds_.y, bounds_.w, bounds_.h,
+                                art->tex->GetImage(), art->u0, art->v0, art->u1, art->v1);
+        }
+        if (hovered_ && enabled_ && highlight_.valid && highlight_.tex &&
+            highlight_.tex->IsValid()) {
+            r.DrawTexturedQuad(bounds_.x, bounds_.y, bounds_.w, bounds_.h,
+                                highlight_.tex->GetImage(), highlight_.u0, highlight_.v0,
+                                highlight_.u1, highlight_.v1);
+        }
+    } else if (!controlBackdrop_) {
+        uint32_t bgColor;
+        if (!enabled_) bgColor = colorDisabled_;
+        else if (pressed_) bgColor = colorPressed_;
+        else if (hovered_) bgColor = colorHover_;
+        else bgColor = colorNormal_;
+
+        r.DrawQuad(bounds_.x, bounds_.y, bounds_.w, bounds_.h, bgColor);
+    }
+
+    // FDF inner frames (ButtonText labels, backdrops) render.
+    SimpleFrame::Render(r);
 
     if (textRenderer_ && !text_.empty()) {
         uint32_t tc = enabled_ ? textColor_ : disabledTextColor_;
@@ -22,8 +54,8 @@ void ButtonFrame::Render(UiRenderer& r) {
         textRenderer_->RenderText(r, tx, ty, text_.c_str(), tc, fontSize_);
     }
 
-    // Bottom highlight when hovered
-    if (hovered_ && enabled_) {
+    // Bottom highlight when hovered (only if no textured highlight)
+    if (hovered_ && enabled_ && !controlHighlight_ && !highlight_.valid) {
         r.DrawQuad(bounds_.x, bounds_.y + bounds_.h - 2, bounds_.w, 2, 0x88FFFFFF);
     }
 }

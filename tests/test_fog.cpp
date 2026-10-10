@@ -334,3 +334,22 @@ bool TestTerrainDeformLowersHeight() {
     TEST_ASSERT(z < -30.0f);
     return true;
 }
+
+bool TestStealthVisibilityRules() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+    auto* spook = AdoptFogAt(sim, 3101, 1, 100, 0);
+    auto* friendEye = AdoptFogAt(sim, 3102, 1, 0, 0);
+    auto* foeEye = AdoptFogAt(sim, 3103, 0, 0, 0);
+    TEST_ASSERT(!spook->IsStealthed());
+    TEST_ASSERT(!spook->IsInvisibleTo(foeEye));
+    spook->SetInvisible(true);
+    TEST_ASSERT(spook->IsStealthed());
+    TEST_ASSERT(!spook->IsInvisibleTo(friendEye)); // owner side always sees
+    TEST_ASSERT(spook->IsInvisibleTo(foeEye)); // plain enemy has no detection
+    spook->SetInvisible(false);
+    TEST_ASSERT(!spook->IsStealthed());
+    TEST_ASSERT(!spook->IsInvisibleTo(foeEye));
+    return true;
+}
