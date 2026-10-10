@@ -125,6 +125,7 @@ bool TestMeleeAIDiscoversHumanPlan() {
     TEST_ASSERT(ai.GetPlan().armyUnit == War3ID("hfoo"));
     TEST_ASSERT(ai.GetPlan().altar == War3ID("haltar"));
     TEST_ASSERT(ai.GetPlan().hero == War3ID("Hamg"));
+    TEST_ASSERT(ai.GetPlan().tower.value != 0);
     return true;
 }
 
@@ -578,5 +579,56 @@ bool TestMeleeAIExpandsToSecondMine() {
         if (dx * dx + dy * dy < 1500.0f * 1500.0f) expoCrew++;
     }
     TEST_ASSERT(expoCrew >= 1);
+    return true;
+}
+
+bool TestMeleeAIBuildsTowers() {
+    if (!ResourcesPresent()) return true;
+    MpqManager mpq;
+    OpenGameData(mpq);
+    CGameplayConstants gc;
+    CUnitData unitData = CUnitData::LoadFromMpq(mpq, gc);
+    if (!HasMeleeIds(unitData)) return true;
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "AI", CMapControl::COMPUTER));
+    sim.GetPlayer(1)->SetRace(1);
+    sim.GetPlayer(1)->SetGold(3000);
+    sim.GetPlayer(1)->SetFoodCap(100);
+
+    sim.CreateUnit(War3ID("hhou"), 1, 0, 0, 0);
+    sim.CreateUnit(War3ID("hbar"), 1, 500, 0, 0);
+    for (int i = 0; i < 5; i++) {
+        sim.CreateUnit(War3ID("hpea"), 1, 200 + i * 40, 0, 0);
+    }
+
+    MeleeAIController ai(&sim, 1);
+    for (int i = 0; i < 25; i++) sim.Update(), ai.Update();
+    TEST_ASSERT(ai.HasPlan());
+    const War3ID tower = ai.GetPlan().tower;
+    TEST_ASSERT(tower.value != 0);
+    bool towerUp = false;
+    for (int i = 0; i < 6000 && !towerUp; i++) {
+        sim.Update();
+        ai.Update();
+        if (i % 100 != 0) continue;
+        for (CUnit* unit : sim.GetUnits()) {
+            if (unit && !unit->IsDead() && unit->GetPlayerIndex() == 1 &&
+                unit->GetTypeId() == tower) {
+                towerUp = true;
+            }
+        }
+    }
+    TEST_ASSERT(towerUp);
+    // The finished tower is armed (a real static defense, not a farm).
+    const CUnitType* towerType = unitData.GetUnitType(tower);
+    TEST_ASSERT(towerType != nullptr && towerType->IsBuilding());
+    bool armed = false;
+    for (const auto& attack : towerType->GetAttacks()) {
+        if (attack.attackType != CAttackType::NONE) armed = true;
+    }
+    TEST_ASSERT(armed);
     return true;
 }

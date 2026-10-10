@@ -36,6 +36,7 @@ struct AIRacePlan {
     War3ID armyUnit;
     War3ID altar;
     War3ID hero;
+    War3ID tower;
     bool valid = false;
 };
 
@@ -97,6 +98,11 @@ private:
     bool TryTrainArmy();
     bool TryTrainHero();
     bool TryReviveHeroes();
+    // Static defense: cheapest same-race armed building, ringed around the
+    // town hall up to the difficulty cap. Ranged towers outrange melee
+    // harass; melee-only battlements still body-block.
+    bool TryBuildTowers();
+    static bool IsTowerType(const CUnitType* type);
     // Expansion: when the main mine runs dry, plant the town hall at the
     // nearest rich unowned mine and walk harvesters over. One expo at a
     // time; new halls join worker training automatically (FindOwnedHalls).

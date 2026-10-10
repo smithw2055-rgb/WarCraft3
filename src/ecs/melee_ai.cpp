@@ -86,6 +86,16 @@ bool MeleeAIController::IsCombatType(const CUnitType* type) {
     return false;
 }
 
+bool MeleeAIController::IsTowerType(const CUnitType* type) {
+    if (!type || !type->IsBuilding()) return false;
+    // Armed buildings that train nothing: guard towers, not production.
+    if (!type->GetUnitsTrained().empty()) return false;
+    for (const auto& attack : type->GetAttacks()) {
+        if (attack.attackType != CAttackType::NONE) return true;
+    }
+    return false;
+}
+
 bool MeleeAIController::IsEnemyPlayer(int index) const {
     if (!sim_ || index == playerIndex_ || index < 0) return false;
     CPlayer* me = sim_->GetPlayer(playerIndex_);
@@ -193,6 +203,18 @@ void MeleeAIController::DiscoverPlan() {
             plan_.altar = id;
             plan_.hero = bestHero;
             break;
+        }
+    }
+    // Tower: cheapest armed same-race building that trains nothing (guard
+    // towers; orc burrows match too and double as farms, which is fine).
+    int bestTowerCost = INT32_MAX;
+    for (const auto& [id, type] : unitData->GetAllTypes()) {
+        if (!IsTowerType(type.get())) continue;
+        if (type->GetUnitRace().name != race) continue;
+        const int cost = type->GetGoldCost() + type->GetLumberCost();
+        if (cost < bestTowerCost) {
+            bestTowerCost = cost;
+            plan_.tower = id;
         }
     }
     plan_.valid = true;
@@ -597,6 +619,38 @@ bool MeleeAIController::TryBuildAltar() {
     return true;
 }
 
+bool MeleeAIController::TryBuildTowers() {
+    if (!sim_ || plan_.tower.value == 0) return false;
+    // Cap scales with difficulty; towers wait until the base exists
+    // (barracks up) so defense never starves the opening.
+    const int cap = difficulty_ == AIDifficulty::EASY ? 1
+        : difficulty_ == AIDifficulty::INSANE ? 4 : 2;
+    if (CountBuildings(plan_.tower) >= cap) return false;
+    if (plan_.barracks.value != 0 && CountBuildings(plan_.barracks) == 0) return false;
+    CPlayer* player = sim_->GetPlayer(playerIndex_);
+    if (!player) return false;
+    // One construction at a time (ref TryBuildSupply).
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        CBehavior* behavior = unit->GetCurrentBehavior();
+        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) return false;
+    }
+    const CUnitType* towerType = sim_->GetUnitData()->GetUnitType(plan_.tower);
+    if (!towerType) return false;
+    if (player->GetGold() < towerType->GetGoldCost() + 150) return false;
+    if (player->GetLumber() < towerType->GetLumberCost()) return false;
+    CUnit* hall = FindTownHall();
+    if (!hall) return false;
+    CUnit* worker = FindWorkerForBuild();
+    if (!worker) return false;
+    float x = 0.0f, y = 0.0f;
+    if (!FindBuildSpot(hall->GetX(), hall->GetY(), plan_.tower, x, y)) return false;
+    worker->ClearOrders();
+    IssueAiOrder(worker,
+        std::make_unique<COrderTargetPoint>(static_cast<int>(plan_.tower.value), x, y));
+    return true;
+}
+
 bool MeleeAIController::TryExpand() {
     if (!sim_ || plan_.townHall.value == 0) return false;
     CUnit* mainHall = FindTownHall();
@@ -822,6 +876,7 @@ void MeleeAIController::Think() {
     TryBuildSupply();
     TryBuildBarracks();
     TryBuildAltar();
+    TryBuildTowers();
     TryExpand();
     TryReviveHeroes();
     TryTrainHero();

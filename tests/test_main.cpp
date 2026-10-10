@@ -612,6 +612,7 @@ bool TestMeleeAIAttackWave();
 bool TestMeleeAITrainsHero();
 bool TestMeleeAIUpkeepThrottlesArmy();
 bool TestMeleeAIExpandsToSecondMine();
+bool TestMeleeAIBuildsTowers();
 bool TestMeleeAINativesWiring();
 bool TestMeleeAIOrdersEnterCommandLog();
 bool TestMeleeAIDifficultyPacing();
@@ -1264,6 +1265,7 @@ int main(int argc, char** argv) {
         {"Melee AI trains hero", TestMeleeAITrainsHero},
         {"Melee AI upkeep throttles army", TestMeleeAIUpkeepThrottlesArmy},
         {"Melee AI expands to second mine", TestMeleeAIExpandsToSecondMine},
+        {"Melee AI builds towers", TestMeleeAIBuildsTowers},
         {"Melee AI natives wiring", TestMeleeAINativesWiring},
         {"Melee AI orders enter command log", TestMeleeAIOrdersEnterCommandLog},
         {"Melee AI difficulty pacing", TestMeleeAIDifficultyPacing},
