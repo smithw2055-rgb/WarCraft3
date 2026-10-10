@@ -16,6 +16,11 @@ bool WpmData::IsWalkable(int x, int y) const {
     return (pathing[y * width + x] & UNWALKABLE) == 0;
 }
 
+bool WpmData::IsFlyable(int x, int y) const {
+    if (x < 0 || x >= width || y < 0 || y >= height) return false;
+    return (pathing[y * width + x] & UNFLYABLE) == 0;
+}
+
 bool WpmData::IsBuildable(int x, int y) const {
     if (x < 0 || x >= width || y < 0 || y >= height) return false;
     return (pathing[y * width + x] & UNBUILDABLE) == 0;

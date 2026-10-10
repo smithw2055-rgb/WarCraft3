@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -53,7 +54,9 @@ public:
     int GetFoodUsed() const { return foodUsed_; }
     void SetGold(int v) { gold_ = v; }
     void SetLumber(int v) { lumber_ = v; }
-    void SetFoodCap(int v) { foodCap_ = v; }
+    // Retail food cap ceiling (default 100, ref Techtree/FoodCapCeiling):
+    // farms cannot push the cap past the ceiling no matter how many stand.
+    void SetFoodCap(int v) { foodCap_ = std::min(v, (int)foodCapCeiling_); }
     void SetFoodUsed(int v) { foodUsed_ = v; }
     void AddGold(int v) { gold_ += v; }
     void AddLumber(int v) { lumber_ += v; }

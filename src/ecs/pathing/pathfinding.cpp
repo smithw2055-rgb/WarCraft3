@@ -59,7 +59,9 @@ bool UsesDynamicGroundCollision(PathingGridMovementType movementType) {
 
 bool CPathfindingProcessor::IsCellWalkable(int cellX, int cellY, bool allowFlying) const {
     if (!pathingMap_) return true;
-    if (allowFlying) return true;
+    // Ref PathingGrid.MovementType: FLY is blocked by UNFLYABLE (notably
+    // over doodad canopies/ceilings), every other ground type by UNWALKABLE.
+    if (allowFlying) return pathingMap_->IsFlyable(cellX, cellY);
     return pathingMap_->IsWalkable(cellX, cellY);
 }
 

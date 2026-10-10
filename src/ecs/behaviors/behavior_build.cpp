@@ -22,6 +22,8 @@ void CBehaviorBuild::SetBuildTarget(float x, float y, War3ID buildingTypeId, CBu
         case CBuildRace::ORC:       buildModel_ = CBuildModel::ORC; break;
         case CBuildRace::UNDEAD:    buildModel_ = CBuildModel::UNDEAD; break;
         case CBuildRace::NIGHT_ELF: buildModel_ = CBuildModel::NIGHT_ELF; break;
+        // Ref CAbilityNagaBuild reuses the orc build behavior.
+        case CBuildRace::NAGA:      buildModel_ = CBuildModel::ORC; break;
         default: buildModel_ = CBuildModel::HUMAN; break;
     }
 }

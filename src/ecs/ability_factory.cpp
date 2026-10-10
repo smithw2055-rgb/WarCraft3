@@ -65,6 +65,10 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("AObu")) return std::make_unique<CAbilityBuild>(handleId, code, CBuildRace::ORC);
     if (code == War3ID("AUbu")) return std::make_unique<CAbilityBuild>(handleId, code, CBuildRace::UNDEAD);
     if (code == War3ID("AEbu")) return std::make_unique<CAbilityBuild>(handleId, code, CBuildRace::NIGHT_ELF);
+    // Ref codes: Naga build is AGbu (CAbilityNagaBuild), neutral build is
+    // ANbu (CAbilityNeutralBuild). There is no Aabu in retail/ref data.
+    if (code == War3ID("AGbu")) return std::make_unique<CAbilityBuild>(handleId, code, CBuildRace::NAGA);
+    if (code == War3ID("ANbu")) return std::make_unique<CAbilityBuild>(handleId, code, CBuildRace::NEUTRAL);
 
     // Harvest / Return / Repair
     if (code == War3ID("Ahar")) return std::make_unique<CAbilityHarvest>(handleId);

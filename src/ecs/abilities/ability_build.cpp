@@ -19,6 +19,9 @@ int CAbilityBuild::GetBaseOrderId() const {
         case CBuildRace::ORC:       return OrderIds::ORC_BUILD;
         case CBuildRace::UNDEAD:    return OrderIds::UNDEAD_BUILD;
         case CBuildRace::NIGHT_ELF: return OrderIds::NIGHT_ELF_BUILD;
+        // Ref CAbilityNagaBuild builds orc-style; neutral has no dedicated
+        // order set (pollNextOrderBehavior), human default is closest.
+        case CBuildRace::NAGA:      return OrderIds::ORC_BUILD;
         default: return OrderIds::HUMAN_BUILD;
     }
 }

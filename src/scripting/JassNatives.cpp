@@ -7551,7 +7551,6 @@ void JassNatives::RegisterGameNatives() {
     vm_.RegisterNative("SetUnitTypeSlots", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("GetSaveBasicFilename", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Str(""); });
     vm_.RegisterNative("SaveGameExists", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
-    vm_.RegisterNative("Preloader", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("CommandAI", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !data) return JassValue::Null();
         const int playerId = ResolvePlayerId(data, args[0].intVal);
@@ -10968,7 +10967,6 @@ void JassNatives::RegisterCameraFlowNatives() {
     vm_.RegisterNative("PreloadGenEnd", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("PreloadRefresh", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("PreloadStart", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("Preloader", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
 }
 
 // ============================================================
@@ -12386,10 +12384,18 @@ void JassNatives::RegisterHashtableNatives() {
 // ============================================================
 namespace {
 
-// Campaign save dir: OS temp keeps the repo clean; files are named
-// warsmash_<sanitized campaignFile>.w3v so later maps reload them.
+// Campaign save dir: retail keeps progress under Save/ next to the game;
+// OS temp cleaners must not wipe it. Prefer <cwd>/Save (created on first
+// use), fall back to the old temp location when not writable. Files are
+// named warsmash_<sanitized campaignFile>.w3v so later maps reload them.
 std::string GameCacheSaveDir() {
     std::error_code ec;
+    fs::path local = fs::current_path(ec) / "Save";
+    if (!ec) {
+        std::error_code mk;
+        fs::create_directories(local, mk);
+        if (!mk && fs::is_directory(local, ec) && !ec) return local.string();
+    }
     fs::path dir = fs::temp_directory_path(ec) / "warsmash-save";
     if (!ec) fs::create_directories(dir, ec);
     return dir.string();
