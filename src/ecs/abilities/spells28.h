@@ -204,8 +204,16 @@ public:
     bool OnlyAllies() const { return onlyAllies_; }
 
 private:
-    bool CanSelect(CUnit* shop, CUnit* other) const;
+    bool CanSelect(const CSimulation& game, const CUnit* shop, const CUnit* other) const;
     void Rescan(CSimulation& game, CUnit* shop);
+    // Explicit shoppers (NEUTRALINTERACT orders only): buyer intent for
+    // tavern hire. Kept apart from selected_[], which Rescan fills with
+    // any nearby unit (shoppers and merchandise alike).
+    CUnit* shopper_[kPlayerSlots] = {};
+    // Tavern hero hire (retail awaken orders 852462-852465, targeted at the
+    // hero): buyer resolved from per-player selection, cost by awaken
+    // formula, ownership transfer. False when any gate fails (soft).
+    bool HireFromTavern(CSimulation& game, CUnit* tavern, CUnit* hero);
     bool onlyAllies_;
     float radius_ = 400.0f;
     float interval_ = 3.0f;

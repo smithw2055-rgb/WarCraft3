@@ -127,6 +127,12 @@ public:
     float GetHandicapXP() const { return handicapXP_; }
     void SetHandicapXP(float v) { handicapXP_ = v; }
 
+    // Hero tokens (retail PLAYER_STATE_RESOURCE_HERO_TOKENS): map-granted
+    // currency spent INSTEAD of gold/lumber when training heroes (ref
+    // queueTrainingUnit). Default 0; maps set it via SetPlayerState.
+    int GetHeroTokens() const { return heroTokens_; }
+    void SetHeroTokens(int v) { heroTokens_ = v < 0 ? 0 : v; }
+
     // Food
     float GetFoodCapMod() const { return foodCapCeiling_; }
     void SetFoodCapCeiling(float v) { foodCapCeiling_ = v; }
@@ -144,6 +150,7 @@ private:
     int lumber_ = 0;
     int foodCap_ = 0;
     int foodUsed_ = 0;
+    int heroTokens_ = 0;
     // Ref CPlayer default (101; retail increments clamp here). No MiscGame
     // key defines it; SetFoodCapCeiling overrides per map config.
     float foodCapCeiling_ = 101.0f;

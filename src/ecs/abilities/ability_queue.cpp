@@ -121,11 +121,13 @@ bool CAbilityQueue::QueueUnit(CSimulation& game, CUnit* building, War3ID unitTyp
     auto* trainType = unitData->GetUnitType(unitTypeId);
     if (!trainType) return false;
 
-    if (player->GetGold() < trainType->GetGoldCost()) {
+    // Ref queueTrainingUnit: hero tokens pay INSTEAD of gold/lumber.
+    const bool tokenHero = trainType->IsHero() && player->GetHeroTokens() > 0;
+    if (!tokenHero && player->GetGold() < trainType->GetGoldCost()) {
         std::cout << "Not enough gold to train!" << std::endl;
         return false;
     }
-    if (player->GetLumber() < trainType->GetLumberCost()) {
+    if (!tokenHero && player->GetLumber() < trainType->GetLumberCost()) {
         std::cout << "Not enough lumber to train!" << std::endl;
         return false;
     }
@@ -135,9 +137,14 @@ bool CAbilityQueue::QueueUnit(CSimulation& game, CUnit* building, War3ID unitTyp
         return false;
     }
 
-    // Deduct resources
-    player->AddGold(-trainType->GetGoldCost());
-    player->AddLumber(-trainType->GetLumberCost());
+    // Ref queueTrainingUnit: hero tokens pay INSTEAD of gold/lumber.
+    if (tokenHero) {
+        player->SetHeroTokens(player->GetHeroTokens() - 1);
+    } else {
+        // Deduct resources
+        player->AddGold(-trainType->GetGoldCost());
+        player->AddLumber(-trainType->GetLumberCost());
+    }
 
     // Add to queue
     queue_[slot] = unitTypeId;
@@ -238,8 +245,10 @@ bool CAbilityQueue::QueueReviveHero(CSimulation& game, CUnit* building, CUnit* h
     if (!heroType) return false;
 
     int heroLevel = hero->GetHeroLevel();
-    int reviveGold = (int)(heroType->GetGoldCost() * (0.5f + 0.1f * heroLevel));
-    int reviveLumber = (int)(heroType->GetLumberCost() * (0.5f + 0.1f * heroLevel));
+    // Ref CAbilityReviveHero cost fns (lumber keys off the GOLD cost).
+    const auto& gameplay = game.GetGameplayConstants();
+    int reviveGold = gameplay.GetHeroReviveGoldCost(heroType->GetGoldCost(), heroLevel);
+    int reviveLumber = gameplay.GetHeroReviveLumberCost(heroType->GetGoldCost(), heroLevel);
 
     if (player->GetGold() < reviveGold) {
         std::cout << "Not enough gold to revive hero!" << std::endl;

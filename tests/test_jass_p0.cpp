@@ -879,5 +879,12 @@ bool TestJassBonus() {
     TEST_ASSERT(CallNative(vm, "StringHash", {JassValue::Str("hello")}).intVal == 99162322);
     TEST_ASSERT(CallNative(vm, "StringHash", {JassValue::Str("Warcraft")}).intVal == 552832088);
     TEST_ASSERT(CallNative(vm, "StringHash", {JassValue::Str("TestString")}).intVal == -573753501);
+
+    // Hero tokens round-trip through player state 3 (retail
+    // PLAYER_STATE_RESOURCE_HERO_TOKENS); default zero.
+    const int p0 = CallNative(vm, "Player", {JassValue::Int(0)}).intVal;
+    TEST_ASSERT(CallNative(vm, "GetPlayerState", {JassValue::Int(p0), JassValue::Int(3)}).intVal == 0);
+    CallNative(vm, "SetPlayerState", {JassValue::Int(p0), JassValue::Int(3), JassValue::Int(2)});
+    TEST_ASSERT(CallNative(vm, "GetPlayerState", {JassValue::Int(p0), JassValue::Int(3)}).intVal == 2);
     return true;
 }

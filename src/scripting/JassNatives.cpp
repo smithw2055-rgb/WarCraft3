@@ -1643,6 +1643,7 @@ static double GetPlayerStateValue(CSimulation& sim, int playerId, int state) {
     switch (state) {
         case 1: return (double)p->GetGold();
         case 2: return (double)p->GetLumber();
+        case 3: return (double)p->GetHeroTokens();
         case 4: return (double)p->GetFoodCap();
         case 5: return (double)p->GetFoodUsed();
         case 8: return (double)p->GetFoodCapMod();
@@ -4327,6 +4328,7 @@ void JassNatives::RegisterPlayerNatives() {
         switch (args[1].intVal) {
             case 1: p->SetGold(args[2].intVal); break;
             case 2: p->SetLumber(args[2].intVal); break;
+            case 3: p->SetHeroTokens(args[2].intVal); break;
             case 4: p->SetFoodCap(args[2].intVal); break;
             case 13: p->SetGoldUpkeepRate(args[2].intVal); break;
             case 14: p->SetLumberUpkeepRate(args[2].intVal); break;

@@ -13,6 +13,7 @@
 #include "map/wpm.h"
 #include "ecs/abilities/ability_harvest.h"
 #include "ecs/abilities/ability_inventory.h"
+#include "ecs/abilities/ability_queue.h"
 #include "ecs/abilities/ability_upgrade.h"
 #include "ecs/abilities/spells25.h"
 #include "ecs/behaviors/behavior.h"
@@ -519,5 +520,136 @@ bool TestSpells28OrderIds() {
     TEST_ASSERT(SpellBaseOrderId(War3ID("Ahrl")) == 852022);
     TEST_ASSERT(SpellBaseOrderId(War3ID("Adri")) == 852049);
     TEST_ASSERT(SpellBaseOrderId(War3ID("Astd")) == 852113);
+    return true;
+}
+
+namespace {
+
+std::unique_ptr<CUnitType> MakeHeroType(const char* id, int gold, int lumber, int food) {
+    CUnitAttack atk;
+    atk.range = 100.0f;
+    atk.cooldown = 1.0f;
+    atk.damageBase = 10;
+    return std::make_unique<CUnitType>(
+        "Hero", "Hero", "icon", War3ID(id),
+        10000, 1.0f, 0.5f, CRegenType::ALWAYS,
+        100, 200, 200, 0, War3ID(),
+        std::vector<War3ID>{}, false, PathingGridMovementType::FOOT,
+        0.0f, 32.0f, std::vector<std::string>{},
+        std::unordered_set<CUnitClassification>{},
+        std::vector<CUnitAttack>{atk},
+        1, std::string(""), false, true, CDefenseType::NONE,
+        0.0f, 1.0f, std::unordered_set<CTargetType>{},
+        600.0f, 0.0f, std::vector<War3ID>{}, std::vector<War3ID>{},
+        std::vector<War3ID>{}, std::vector<War3ID>{},
+        std::unordered_map<CUpgradeClass, War3ID>{}, std::vector<War3ID>{},
+        std::vector<War3ID>{}, std::vector<War3ID>{}, CUnitRace{"Human", War3ID("H")},
+        gold, lumber, food, 0, 60, 0, 0, 0,
+        std::unordered_set<CBuildingPathingType>{},
+        std::unordered_set<CBuildingPathingType>{},
+        0.5f, 0.6f, std::vector<CUnitTypeRequirement>{},
+        std::vector<std::vector<CUnitTypeRequirement>>{},
+        1, true, 20, 2.0f, 15, 1.5f, 10, 1.0f,
+        CPrimaryAttribute::STRENGTH, std::vector<War3ID>{},
+        std::vector<std::string>{"Bob"}, 1, false, 1, false, 100,
+        0.3f, 0.3f, false, false, 1, 800, 600, false,
+        10, 1, 6, 5, 1, 3, false);
+}
+
+} // namespace
+
+bool TestTavernHiresHero() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::NEUTRAL));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::USER));
+    sim.GetPlayer(0)->SetAlliance(1, CAllianceType::ALLIED, true);
+    sim.GetPlayer(1)->SetAlliance(0, CAllianceType::ALLIED, true);
+    sim.GetPlayer(1)->SetGold(2000);
+    sim.GetPlayer(1)->SetLumber(500);
+    sim.GetPlayer(1)->SetFoodCap(100);
+    CUnitData data;
+    data.RegisterUnitType(War3ID("Hamg"), MakeHeroType("Hamg", 425, 100, 5));
+    sim.SetUnitData(&data);
+
+    auto* tavern = AdoptAt(sim, 2901, 0, 0, 0);
+    tavern->AddAbility(sim, std::make_unique<CAbilityNeutralBuilding>(2902, War3ID("Aall"), true));
+    auto* hero = sim.AdoptUnit(std::make_unique<CUnit>(2903, data.GetUnitType(War3ID("Hamg")),
+                                                       0, War3ID("Hamg"), 100, 0, 0));
+    auto* shopper = AdoptAt(sim, 2904, 1, 50, 0);
+    Settle(sim);
+    TEST_ASSERT(hero->IsHero());
+
+    auto* tavernAb = dynamic_cast<CAbilityNeutralBuilding*>(tavern->GetAbility(War3ID("Aall")));
+    TEST_ASSERT(tavernAb != nullptr);
+    // Shopper selects the tavern first (per-player selection = buyer).
+    tavernAb->Begin(sim, tavern, OrderIds::NEUTRALINTERACT, shopper);
+    TEST_ASSERT(tavernAb->GetSelectedUnit(1) == shopper);
+    // Awaken order targeted at the hero hires for player 1.
+    // Level-1 awaken: 425 * 0.8 = 340g, 100 * 0.8 = 80l.
+    tavernAb->Begin(sim, tavern, 852462, hero);
+    TEST_ASSERT(hero->GetPlayerIndex() == 1);
+    TEST_ASSERT(sim.GetPlayer(1)->GetGold() == 2000 - 340);
+    TEST_ASSERT(sim.GetPlayer(1)->GetLumber() == 500 - 80);
+    TEST_ASSERT(std::fabs(hero->GetLife() - hero->GetMaxLife() * 0.5f) < 1.0f);
+    // Musters beside the tavern (spawn unstick may have nudged it).
+    TEST_ASSERT(std::fabs(hero->GetX() - (tavern->GetX() + 128.0f)) < 1.0f);
+
+    // Broke buyer fails soft (no partial charge, no transfer).
+    auto* hero2 = sim.AdoptUnit(std::make_unique<CUnit>(2905, data.GetUnitType(War3ID("Hamg")),
+                                                        0, War3ID("Hamg"), 100, 50, 0));
+    sim.GetPlayer(1)->SetGold(10);
+    tavernAb->Begin(sim, tavern, 852463, hero2);
+    TEST_ASSERT(hero2->GetPlayerIndex() == 0);
+    TEST_ASSERT(sim.GetPlayer(1)->GetGold() == 10);
+
+    // Fourth live hero refused (retail 3-hero cap).
+    sim.GetPlayer(1)->SetGold(5000);
+    sim.AdoptUnit(std::make_unique<CUnit>(2906, data.GetUnitType(War3ID("Hamg")),
+                                          1, War3ID("Hamg"), 300, 0, 0));
+    sim.AdoptUnit(std::make_unique<CUnit>(2907, data.GetUnitType(War3ID("Hamg")),
+                                          1, War3ID("Hamg"), 350, 0, 0));
+    Settle(sim); // flush AdoptUnit staging into GetUnits()
+    auto* hero3 = sim.AdoptUnit(std::make_unique<CUnit>(2908, data.GetUnitType(War3ID("Hamg")),
+                                                        0, War3ID("Hamg"), 100, 100, 0));
+    Settle(sim);
+    tavernAb->Begin(sim, tavern, 852464, hero3);
+    TEST_ASSERT(hero3->GetPlayerIndex() == 0);
+    return true;
+}
+
+bool TestHeroTokensAndReviveFormula() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    CUnitData data;
+    data.RegisterUnitType(War3ID("Hamg"), MakeHeroType("Hamg", 425, 100, 5));
+    sim.SetUnitData(&data);
+    CPlayer* player = sim.GetPlayer(0);
+    TEST_ASSERT(player->GetHeroTokens() == 0);
+
+    // Token training: broke player with a token still trains the hero.
+    player->SetHeroTokens(2);
+    auto* hall = AdoptAt(sim, 2921, 0, 0, 0);
+    hall->AddAbility(sim, std::make_unique<CAbilityQueue>(2922));
+    auto* queue = dynamic_cast<CAbilityQueue*>(hall->GetAbility(War3ID("Aque")));
+    TEST_ASSERT(queue != nullptr);
+    queue->AddTrainedUnit(War3ID("Hamg"));
+    player->SetGold(0);
+    player->SetLumber(0);
+    player->SetFoodCap(100);
+    // QueueUnit reports order-queueing (always false: consumed), so assert
+    // side effects: token spent instead of gold, queue filled.
+    queue->QueueUnit(sim, hall, War3ID("Hamg"));
+    TEST_ASSERT(player->GetHeroTokens() == 1);
+    TEST_ASSERT(player->GetGold() == 0);
+    TEST_ASSERT(queue->GetQueueCount() == 1);
+
+    // Revive formula (ref, lumber off gold base): level-1 gold 425*0.4=170,
+    // lumber 425*0=0 (old code charged lumber too).
+    const auto& gc = sim.GetGameplayConstants();
+    TEST_ASSERT(gc.GetHeroReviveGoldCost(425, 1) == 170);
+    TEST_ASSERT(gc.GetHeroReviveLumberCost(425, 1) == 0);
+    TEST_ASSERT(gc.GetHeroReviveGoldCost(425, 3) == (int)(425 * 0.6f));
+    TEST_ASSERT(gc.GetHeroAwakenGoldCost(425, 1) == 340);
+    TEST_ASSERT(gc.GetHeroAwakenLumberCost(100, 1) == 80);
     return true;
 }

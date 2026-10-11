@@ -462,6 +462,8 @@ bool TestWispJumpsOntoTreeAndDetachesOnDeath();
 bool TestGoldMineCapacityMatchesRetail();
 bool TestCargoBurrowAndDrop();
 bool TestWaygateAndShops();
+bool TestTavernHiresHero();
+bool TestHeroTokensAndReviveFormula();
 bool TestSacrificeSummonsShade();
 bool TestSpells28FactoryCoverage();
 bool TestSpells28OrderIds();
@@ -1123,6 +1125,8 @@ int main(int argc, char** argv) {
         {"Gold mine capacity matches retail", TestGoldMineCapacityMatchesRetail},
         {"Cargo burrow and drop", TestCargoBurrowAndDrop},
         {"Waygate and shops", TestWaygateAndShops},
+        {"Tavern hires hero", TestTavernHiresHero},
+        {"Hero tokens and revive formula", TestHeroTokensAndReviveFormula},
         {"Sacrifice summons shade", TestSacrificeSummonsShade},
         {"Spells28 factory coverage", TestSpells28FactoryCoverage},
         {"Spells28 order ids", TestSpells28OrderIds},

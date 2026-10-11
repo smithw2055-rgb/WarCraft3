@@ -515,10 +515,20 @@ void CAbilityNeutralBuilding::OnTick(CSimulation& game, CUnit* unit) {
     Rescan(game, unit);
 }
 
-bool CAbilityNeutralBuilding::CanSelect(CUnit* shop, CUnit* other) const {
+bool CAbilityNeutralBuilding::CanSelect(const CSimulation& game, const CUnit* shop,
+                                         const CUnit* other) const {
     if (!shop || !other || other == shop || other->IsDead() || other->IsBuilding()) return false;
     if (other->IsLoadedAboard()) return false;
-    if (onlyAllies_ && other->GetPlayerIndex() != shop->GetPlayerIndex()) return false;
+    // Ref canSelectUnit: only-allies shops serve allies (not same-player
+    // only, which would lock every neutral tavern out of its customers).
+    if (onlyAllies_) {
+        const CPlayer* shopPlayer = game.GetPlayer(shop->GetPlayerIndex());
+        const CPlayer* otherPlayer = game.GetPlayer(other->GetPlayerIndex());
+        if (!shopPlayer || !otherPlayer ||
+            !shopPlayer->HasAlliance(*otherPlayer, CAllianceType::ALLIED)) {
+            return false;
+        }
+    }
     const float dx = other->GetX() - shop->GetX();
     const float dy = other->GetY() - shop->GetY();
     return dx * dx + dy * dy <= radius_ * radius_;
@@ -528,7 +538,7 @@ void CAbilityNeutralBuilding::Rescan(CSimulation& game, CUnit* shop) {
     if (!shop) return;
     bool search = false;
     for (int i = 0; i < kPlayerSlots; i++) {
-        if (!CanSelect(shop, selected_[i])) {
+        if (!CanSelect(game, shop, selected_[i])) {
             selected_[i] = nullptr;
             search = true;
         }
@@ -539,7 +549,7 @@ void CAbilityNeutralBuilding::Rescan(CSimulation& game, CUnit* shop) {
         const int player = other->GetPlayerIndex();
         if (player < 0 || player >= kPlayerSlots) continue;
         if (selected_[player] != nullptr) continue;
-        if (CanSelect(shop, other)) selected_[player] = other;
+        if (CanSelect(game, shop, other)) selected_[player] = other;
     }
 }
 
@@ -555,18 +565,85 @@ CUnit* CAbilityNeutralBuilding::GetSelectedUnit(int playerIndex) const {
     return selected_[playerIndex];
 }
 
-bool CAbilityNeutralBuilding::CheckCanTarget(CSimulation&, CUnit* unit, int orderId,
+bool CAbilityNeutralBuilding::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
                                              CWidget* target) const {
-    if (orderId != OrderIds::NEUTRALINTERACT) return false;
-    return CanSelect(unit, dynamic_cast<CUnit*>(target));
+    if (orderId != OrderIds::NEUTRALINTERACT) {
+        // Tavern awaken (retail Aawa, targeted at the hero): accepted when
+        // aimed at a live hero; buyer/cost gates run in Begin/HireFromTavern.
+        if (orderId < 852462 || orderId > 852465) return false;
+        auto* hero = dynamic_cast<CUnit*>(target);
+        return hero && !hero->IsDead() && hero->IsHero();
+    }
+    return CanSelect(game, unit, dynamic_cast<CUnit*>(target));
 }
 
-CBehavior* CAbilityNeutralBuilding::Begin(CSimulation&, CUnit* caster, int,
+CBehavior* CAbilityNeutralBuilding::Begin(CSimulation& game, CUnit* caster, int orderId,
                                           CWidget* target) {
     auto* unitTarget = dynamic_cast<CUnit*>(target);
-    if (unitTarget && CanSelect(caster, unitTarget)) {
+    if (orderId >= 852462 && orderId <= 852465 && unitTarget) {
+        HireFromTavern(game, caster, unitTarget);
+        return nullptr;
+    }
+    if (unitTarget && CanSelect(game, caster, unitTarget)) {
         const int player = unitTarget->GetPlayerIndex();
-        if (player >= 0 && player < kPlayerSlots) selected_[player] = unitTarget;
+        if (player >= 0 && player < kPlayerSlots) {
+            selected_[player] = unitTarget;
+            shopper_[player] = unitTarget;
+        }
     }
     return nullptr;
+}
+
+bool CAbilityNeutralBuilding::HireFromTavern(CSimulation& game, CUnit* tavern, CUnit* hero) {
+    if (!tavern || !hero || hero->IsDead() || !hero->IsHero()) return false;
+    // Buyer = the player explicitly shopping at this tavern (their unit
+    // selected via NEUTRALINTERACT). The order itself carries no buyer;
+    // ambiguous crowds fail soft. Rescan fills selected_[] with anything
+    // nearby, so it cannot serve as buyer intent (see shopper_[]).
+    int buyer = -1;
+    for (int i = 0; i < kPlayerSlots; i++) {
+        CUnit* shopper = shopper_[i];
+        if (!shopper || shopper->IsDead() || shopper->GetPlayerIndex() != i) continue;
+        if (!CanSelect(game, tavern, shopper)) continue;
+        if (buyer >= 0) return false;
+        buyer = i;
+    }
+    CPlayer* player = buyer >= 0 ? game.GetPlayer(buyer) : nullptr;
+    if (!player) return false;
+    // The hero must be on offer here (neutral, in radius) and not already
+    // the buyer's (re-hiring your own hero would just burn gold).
+    if (hero->GetPlayerIndex() == buyer) return false;
+    if (!CanSelect(game, tavern, hero)) return false;
+    // Retail gates: max 3 live heroes, food room, awaken cost by level.
+    int aliveHeroes = 0;
+    for (CUnit* unit : game.GetUnits()) {
+        if (unit && !unit->IsDead() && unit->GetPlayerIndex() == buyer &&
+            unit->IsHero()) {
+            aliveHeroes++;
+        }
+    }
+    if (aliveHeroes >= 3) return false;
+    const CUnitType* heroType =
+        game.GetUnitData() ? game.GetUnitData()->GetUnitType(hero->GetTypeId()) : nullptr;
+    if (!heroType) return false;
+    if (heroType->GetFoodUsed() > 0 &&
+        player->GetFoodUsed() + heroType->GetFoodUsed() > player->GetFoodCap()) {
+        return false;
+    }
+    const auto& gameplay = game.GetGameplayConstants();
+    const int level = hero->GetHeroLevel() > 0 ? hero->GetHeroLevel() : 1;
+    const int goldCost = gameplay.GetHeroAwakenGoldCost(heroType->GetGoldCost(), level);
+    const int lumberCost = gameplay.GetHeroAwakenLumberCost(heroType->GetLumberCost(), level);
+    if (player->GetGold() < goldCost || player->GetLumber() < lumberCost) return false;
+    player->AddGold(-goldCost);
+    player->AddLumber(-lumberCost);
+    // Ownership transfer (mirrors SetPlayerUnitsOwner bookkeeping).
+    if (CPlayer* from = game.GetPlayer(hero->GetPlayerIndex())) from->RemoveUnit(hero);
+    hero->SetPlayerIndex(buyer);
+    player->AddUnit(hero);
+    // Muster beside the tavern at partial strength (ref awaken factors).
+    hero->SetPosition(tavern->GetX() + 128.0f, tavern->GetY());
+    hero->SetLife(game, hero->GetMaxLife() * gameplay.heroAwakenLifeFactor);
+    hero->SetMana(hero->GetMaxMana() * gameplay.heroAwakenManaFactor);
+    return true;
 }

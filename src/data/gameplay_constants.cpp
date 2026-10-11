@@ -171,4 +171,45 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     magicImmuneResistsDamage = readMiscInt("MagicImmunesResistDamage", 1) != 0;
     magicImmuneResistsUltimates = readMiscInt("MagicImmunesResistUltimates", 1) != 0;
     pawnItemRate = readFloat("PawnItemRate", 0.5f);
+    reviveBaseFactor = readFloat("ReviveBaseFactor", 0.40f);
+    reviveLevelFactor = readFloat("ReviveLevelFactor", 0.10f);
+    reviveBaseLumberFactor = readFloat("ReviveBaseLumberFactor", 0.0f);
+    reviveLumberLevelFactor = readFloat("ReviveLumberLevelFactor", 0.0f);
+    reviveMaxFactor = readFloat("ReviveMaxFactor", 4.0f);
+    heroReviveLifeFactor = readFloat("HeroReviveLifeFactor", 1.0f);
+    heroReviveManaFactor = readFloat("HeroReviveManaFactor", 0.0f);
+    awakenBaseFactor = readFloat("AwakenBaseFactor", 0.80f);
+    awakenLevelFactor = readFloat("AwakenLevelFactor", 0.20f);
+    awakenBaseLumberFactor = readFloat("AwakenBaseLumberFactor", 0.80f);
+    awakenLumberLevelFactor = readFloat("AwakenLumberLevelFactor", 0.20f);
+    awakenMaxFactor = readFloat("AwakenMaxFactor", 8.0f);
+    heroAwakenLifeFactor = readFloat("HeroAwakenLifeFactor", 0.5f);
+    heroAwakenManaFactor = readFloat("HeroAwakenManaFactor", 0.0f);
+}
+
+int CGameplayConstants::GetHeroReviveGoldCost(int originalGoldCost, int level) const {
+    const int cost = (int)(originalGoldCost * (reviveBaseFactor + reviveLevelFactor * (level - 1)));
+    const int cap = (int)(originalGoldCost * reviveMaxFactor);
+    return cost < cap ? cost : cap;
+}
+
+int CGameplayConstants::GetHeroReviveLumberCost(int originalGoldCost, int level) const {
+    // Ref bug-compatible: lumber revives off the GOLD cost (factors are 0).
+    const int cost =
+        (int)(originalGoldCost * (reviveBaseLumberFactor + reviveLumberLevelFactor * (level - 1)));
+    const int cap = (int)(originalGoldCost * reviveMaxFactor);
+    return cost < cap ? cost : cap;
+}
+
+int CGameplayConstants::GetHeroAwakenGoldCost(int originalGoldCost, int level) const {
+    const int cost = (int)(originalGoldCost * (awakenBaseFactor + awakenLevelFactor * (level - 1)));
+    const int cap = (int)(originalGoldCost * awakenMaxFactor);
+    return cost < cap ? cost : cap;
+}
+
+int CGameplayConstants::GetHeroAwakenLumberCost(int originalLumberCost, int level) const {
+    const int cost =
+        (int)(originalLumberCost * (awakenBaseLumberFactor + awakenLumberLevelFactor * (level - 1)));
+    const int cap = (int)(originalLumberCost * awakenMaxFactor);
+    return cost < cap ? cost : cap;
 }
