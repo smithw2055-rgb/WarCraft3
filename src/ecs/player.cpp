@@ -14,6 +14,14 @@ void CPlayer::AddTechUnlocked(CSimulation& simulation, War3ID id) {
     (void)simulation;
 }
 
+void CPlayer::RemoveTechUnlocked(CSimulation& simulation, War3ID id) {
+    auto it = techtreeUnlocked_.find(id.value);
+    if (it == techtreeUnlocked_.end()) return;
+    if (it->second <= 1) techtreeUnlocked_.erase(it);
+    else it->second--;
+    (void)simulation;
+}
+
 int CPlayer::GetTechLevel(War3ID id) const {
     auto it = techtreeUnlocked_.find(id.value);
     return (it != techtreeUnlocked_.end()) ? it->second : 0;

@@ -76,6 +76,7 @@ add_executable(warsmash_tests
     test_ability_levels.cpp
     test_hero_carry.cpp
     test_midi.cpp
+    test_techtree.cpp
     test_vfs_overlay.cpp
     test_map_data.cpp
     test_jass_orders_terrain.cpp

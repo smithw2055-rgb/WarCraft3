@@ -91,6 +91,9 @@ public:
     // Tech tree
     bool IsTechUnlocked(War3ID id) const;
     void AddTechUnlocked(CSimulation& simulation, War3ID id);
+    // Ref removeTechtreeUnlocked: possession counter, decremented on death
+    // (non-heroes) and removal. Erased at zero so IsTechUnlocked flips.
+    void RemoveTechUnlocked(CSimulation& simulation, War3ID id);
     int GetTechLevel(War3ID id) const;
     void SetTechLevel(War3ID id, int level);
     int GetTechMaxAllowed(War3ID id) const;

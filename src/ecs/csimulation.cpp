@@ -705,6 +705,11 @@ void CSimulation::ProcessUnitRemovals() {
         if (wasActiveUnit) {
             if (CPlayer* player = GetPlayer(unit->GetPlayerIndex())) {
                 player->RemoveUnit(unit);
+                // Ref removal path: live removals drop the unlock (the dead
+                // already dropped it on death, heroes keep theirs).
+                if (!unit->IsDead()) {
+                    player->RemoveTechUnlocked(*this, unit->GetTypeId());
+                }
                 if (unit->GetFoodUsed() > 0) {
                     player->SetFoodUsed(std::max(0, player->GetFoodUsed() - unit->GetFoodUsed()));
                 }
@@ -726,6 +731,9 @@ void CSimulation::ProcessNewUnits() {
         CPlayer* player = GetPlayer(unit->GetPlayerIndex());
         if (player) {
             player->AddUnit(unit);
+            // Ref createUnit: every entering unit unlocks its type for
+            // techtree requirements (possession, not research history).
+            player->AddTechUnlocked(*this, unit->GetTypeId());
             if (unit->GetFoodUsed() > 0) {
                 player->SetFoodUsed(player->GetFoodUsed() + unit->GetFoodUsed());
             }

@@ -228,6 +228,9 @@ bool TestProjectileHitsAfterTravelTime();
 bool TestProjectileFizzlesOnDeadTarget();
 bool TestProjectileHitsWithoutAttacker();
 bool TestProjectileMaxTravelGuard();
+bool TestTechtreeUnlockLifecycle();
+bool TestTechtreeFlatRequirementsGate();
+bool TestHeroTierGatesSecondHero();
 bool TestLoadInRangeIsInstant();
 bool TestLoadOutOfRangeWalksThenLoads();
 bool TestLoadCapacityEnforced();
@@ -850,6 +853,9 @@ int main(int argc, char** argv) {
         {"MIDI parses notes", TestMidiParsesNotes},
         {"MIDI renders audible loop", TestMidiRendersAudibleLoop},
         {"MIDI retail ambient renders", TestMidiRetailAmbientRenders},
+        {"Techtree unlock lifecycle", TestTechtreeUnlockLifecycle},
+        {"Techtree flat requirements gate", TestTechtreeFlatRequirementsGate},
+        {"Hero tier gates second hero", TestHeroTierGatesSecondHero},
         {"GetItem behavior picks up", TestGetItemBehaviorPicksUp},
         {"DropItem behavior drops", TestDropItemBehaviorDrops},
         {"GiveItem behavior transfers", TestGiveItemBehaviorTransfers},

@@ -15,10 +15,12 @@ bool TechTree::MeetsRequirements(CSimulation& game, int playerIndex, War3ID unit
     auto* player = game.GetPlayer(playerIndex);
     if (!player) return false;
 
-    // Check requirements
+    // Check requirements (level-aware: possession counters and research
+    // levels share the map, ref techtreeUnlocked).
     auto& requirements = unitType->GetRequirements();
     for (auto& req : requirements) {
-        if (!HasTech(player, req.id)) {
+        const int have = player->GetTechLevel(req.id);
+        if (have < (req.level > 0 ? req.level : 1)) {
             return false;
         }
     }
@@ -47,7 +49,8 @@ std::vector<War3ID> TechTree::GetMissingRequirements(CSimulation& game, int play
 
     auto& requirements = unitType->GetRequirements();
     for (auto& req : requirements) {
-        if (!HasTech(player, req.id)) {
+        const int have = player->GetTechLevel(req.id);
+        if (have < (req.level > 0 ? req.level : 1)) {
             missing.push_back(req.id);
         }
     }

@@ -614,7 +614,8 @@ bool CAbilityNeutralBuilding::HireFromTavern(CSimulation& game, CUnit* tavern, C
     // the buyer's (re-hiring your own hero would just burn gold).
     if (hero->GetPlayerIndex() == buyer) return false;
     if (!CanSelect(game, tavern, hero)) return false;
-    // Retail gates: max 3 live heroes, food room, awaken cost by level.
+    // Retail gates: max 3 live heroes, techtree tier at the current hero
+    // count (ref hero training tiers), food room, awaken cost by level.
     int aliveHeroes = 0;
     for (CUnit* unit : game.GetUnits()) {
         if (unit && !unit->IsDead() && unit->GetPlayerIndex() == buyer &&
@@ -626,6 +627,11 @@ bool CAbilityNeutralBuilding::HireFromTavern(CSimulation& game, CUnit* tavern, C
     const CUnitType* heroType =
         game.GetUnitData() ? game.GetUnitData()->GetUnitType(hero->GetTypeId()) : nullptr;
     if (!heroType) return false;
+    for (const auto& req : heroType->GetRequirementsTier(aliveHeroes)) {
+        if (player->GetTechLevel(req.id) < (req.level > 0 ? req.level : 1)) {
+            return false;
+        }
+    }
     if (heroType->GetFoodUsed() > 0 &&
         player->GetFoodUsed() + heroType->GetFoodUsed() > player->GetFoodCap()) {
         return false;

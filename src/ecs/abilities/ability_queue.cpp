@@ -3,6 +3,7 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
+#include "ecs/tech_tree.h"
 #include "data/unitdata.h"
 #include "data/upgradedata.h"
 #include <iostream>
@@ -120,6 +121,27 @@ bool CAbilityQueue::QueueUnit(CSimulation& game, CUnit* building, War3ID unitTyp
 
     auto* trainType = unitData->GetUnitType(unitTypeId);
     if (!trainType) return false;
+
+    // Techtree gate (ref queue checks): flat requirements plus, for
+    // heroes, the tier list at the current hero count (tier = heroes
+    // owned, 1-based; e.g. Keep for the 2nd hero, Castle for the 3rd).
+    if (!TechTree::MeetsRequirements(game, building->GetPlayerIndex(), unitTypeId)) {
+        return false;
+    }
+    if (trainType->IsHero()) {
+        int heroCount = 0;
+        for (CUnit* unit : game.GetUnits()) {
+            if (unit && !unit->IsDead() &&
+                unit->GetPlayerIndex() == building->GetPlayerIndex() && unit->IsHero()) {
+                heroCount++;
+            }
+        }
+        for (const auto& req : trainType->GetRequirementsTier(heroCount)) {
+            if (player->GetTechLevel(req.id) < (req.level > 0 ? req.level : 1)) {
+                return false;
+            }
+        }
+    }
 
     // Ref queueTrainingUnit: hero tokens pay INSTEAD of gold/lumber.
     const bool tokenHero = trainType->IsHero() && player->GetHeroTokens() > 0;

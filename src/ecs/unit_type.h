@@ -174,6 +174,14 @@ public:
     float GetCastBackswingPoint() const { return castBackswingPoint_; }
     float GetCastPoint() const { return castPoint_; }
     const std::vector<CUnitTypeRequirement>& GetRequirements() const { return requirements_; }
+    // Hero tier lists, 1-based like ref getRequirementsTier (tier =
+    // current hero count). Out-of-range tiers are empty (no requirement).
+    const std::vector<CUnitTypeRequirement>& GetRequirementsTier(int tier) const {
+        static const std::vector<CUnitTypeRequirement> kEmpty;
+        const int index = tier - 1;
+        if (index < 0 || index >= (int)requirementTiers_.size()) return kEmpty;
+        return requirementTiers_[index];
+    }
     int GetLevel() const { return level_; }
     bool IsHero() const { return hero_; }
     int GetStartingStrength() const { return startingStrength_; }

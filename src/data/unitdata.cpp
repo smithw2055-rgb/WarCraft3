@@ -695,8 +695,44 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
         CUnitRace defaultRace;
         defaultRace.name = ToLowerCopy(rawRace);
         std::unordered_set<CBuildingPathingType> emptyPathTypes;
-        std::vector<CUnitTypeRequirement> emptyReqs;
-        std::vector<std::vector<CUnitTypeRequirement>> emptyTiers;
+        // Retail techtree requirements (profile TXTs, ref CUnitData):
+        // flat Requires (+Requiresamount levels, default 1) plus hero
+        // tier lists Requirescount/Requires1..N. FourCC ids only.
+        std::vector<CUnitTypeRequirement> reqs;
+        {
+            std::vector<std::string> reqTokens;
+            ParseStringList(GetMergedString(unitDataTxt, unitData, sid, "Requires"), reqTokens);
+            std::vector<std::string> amountTokens;
+            ParseStringList(GetMergedString(unitDataTxt, unitData, sid, "Requiresamount"),
+                            amountTokens);
+            for (size_t i = 0; i < reqTokens.size(); i++) {
+                const std::string id = TrimCopy(reqTokens[i]);
+                if (id.size() != 4) continue;
+                int level = 1;
+                if (i < amountTokens.size()) {
+                    const int parsed = std::atoi(TrimCopy(amountTokens[i]).c_str());
+                    if (parsed > 0) level = parsed;
+                }
+                reqs.push_back({War3ID::FromString(id), level});
+            }
+        }
+        std::vector<std::vector<CUnitTypeRequirement>> reqTiers;
+        {
+            const int tierCount = GetMergedInt(unitDataTxt, unitData, sid, "Requirescount", 0);
+            for (int t = 1; t <= tierCount && t <= 9; t++) {
+                std::vector<CUnitTypeRequirement> tier;
+                std::vector<std::string> tierTokens;
+                ParseStringList(
+                    GetMergedString(unitDataTxt, unitData, sid, "Requires" + std::to_string(t)),
+                    tierTokens);
+                for (auto& tok : tierTokens) {
+                    const std::string id = TrimCopy(tok);
+                    if (id.size() != 4) continue;
+                    tier.push_back({War3ID::FromString(id), 1});
+                }
+                reqTiers.push_back(std::move(tier));
+            }
+        }
 
         auto type = std::make_unique<CUnitType>(
             name, legacyName, iconPath, id, maxLife, lifeRegen, manaRegen, lifeRegenType,
@@ -713,7 +749,7 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
             goldCost, lumberCost, foodUsed, foodMade, buildTime,
             goldCost / 2, lumberCost / 2, buildTime / 2,
             emptyPathTypes, emptyPathTypes, propWindow, turnRate,
-            emptyReqs, emptyTiers, level, hero,
+            reqs, reqTiers, level, hero,
             strength, strengthPerLevel, agility, agilityPerLevel,
             intelligence, intPerLevel, primaryAttr,
             heroAbilityIDs, heroNames, properNameCount,

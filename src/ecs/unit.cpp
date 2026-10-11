@@ -929,6 +929,13 @@ bool CUnit::Update(CSimulation& simulation) {
             deathTurnTick_ = currentTick;
             corpse_ = false;
             boneCorpse_ = false;
+            // Ref death path: the fallen stop satisfying techtree
+            // requirements (heroes keep theirs while awaiting revive).
+            if (!IsHero()) {
+                if (CPlayer* player = simulation.GetPlayer(GetPlayerIndex())) {
+                    player->RemoveTechUnlocked(simulation, GetTypeId());
+                }
+            }
             // Cargo goes down with the transport (WC3 rule).
             for (auto* passenger : cargoUnits_) {
                 if (passenger && !passenger->IsDead()) {
