@@ -624,6 +624,8 @@ public:
     CBuffAuraStat(War3ID auraCode, std::vector<Bonus> bonuses,
                   int casterHandle = -1);
 
+    bool MergeByCaster() const override { return true; }
+
     void OnApply(CSimulation& game, CUnit* target) override;
     void OnRemove(CSimulation& game, CUnit* target) override;
     CBuff* Clone() const override;

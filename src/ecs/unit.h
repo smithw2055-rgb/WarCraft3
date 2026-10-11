@@ -106,8 +106,10 @@ public:
     // Non-stacking aura stat bonuses (ref NonStackingStatBonus): one entry
     // per source buff per (stat, percent) slot; only the strongest applies.
     // Implemented in unit.cpp; driven by CBuffAuraStat add/remove.
-    void AddAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId, float value);
-    void RemoveAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId);
+    void AddAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId, float value,
+                           int caster = -1);
+    void RemoveAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId,
+                             int caster = -1);
     void RecomputeAuraStat(CAuraEffectType type, bool percent);
     // Recompute every aura-stat slot (ref computeDerivedFields sweep;
     // backs the RecomputeStatBonusesOnUnit native).
@@ -148,6 +150,9 @@ public:
     // ===== Buff System =====
     void AddBuff(std::unique_ptr<CBuff> buff, CSimulation& game);
     void RemoveBuff(War3ID buffId, CSimulation& game);
+    // Aura-grade removal: erases the buff from one caster only (same-id
+    // buffs from other casters survive). No-op when absent.
+    void RemoveBuffByIdAndCaster(War3ID buffId, int caster, CSimulation& game);
     CBuff* GetBuff(War3ID buffId) const;
     bool HasBuff(War3ID buffId) const;
     const std::vector<std::unique_ptr<CBuff>>& GetBuffs() const { return buffs_; }
@@ -414,6 +419,7 @@ private:
     // (multiplicative stats) so recompute can undo precisely.
     struct AuraStatSource {
         War3ID buffId;
+        int caster = -1;
         float value = 0.0f;
     };
     std::map<std::pair<int, bool>, std::vector<AuraStatSource>> auraStats_;

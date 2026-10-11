@@ -126,6 +126,7 @@ bool TestAuraArmorDamageRegenAttackSpeedSymmetric();
 bool TestDivineShieldStackingKeepsInvulnerable();
 bool TestOverlappingAurasTakeStrongest();
 bool TestAuraDispelStripsBonus();
+bool TestSameCodeAurasMergePerCaster();
 bool TestRegionEnterLeaveFiresOnMigration();
 bool TestRegionEnterFilterBlocks();
 bool TestUpkeepGoldTaxLevels();
@@ -786,6 +787,7 @@ int main(int argc, char** argv) {
         {"Divine shield stacking keeps invulnerable", TestDivineShieldStackingKeepsInvulnerable},
         {"Overlapping auras take strongest", TestOverlappingAurasTakeStrongest},
         {"Aura dispel strips bonus", TestAuraDispelStripsBonus},
+        {"Same-code auras merge per caster", TestSameCodeAurasMergePerCaster},
         {"Region enter/leave fires on migration", TestRegionEnterLeaveFiresOnMigration},
         {"Region enter filter blocks", TestRegionEnterFilterBlocks},
         {"Upkeep gold tax levels", TestUpkeepGoldTaxLevels},

@@ -368,6 +368,14 @@ void CUnit::AddBuff(std::unique_ptr<CBuff> buff, CSimulation& game) {
     // Check if buff already exists (by ID)
     for (auto& existing : buffs_) {
         if (existing && existing->GetId() == buff->GetId()) {
+            // Aura buffs merge per caster (ref per-source aura buffs):
+            // a different caster's twin is skipped so the scan can still
+            // find (and refresh) our own; with no twin found the new
+            // source coexists and strongest-wins applies in the table.
+            if (existing->MergeByCaster() && buff->MergeByCaster() &&
+                existing->GetCasterHandleId() != buff->GetCasterHandleId()) {
+                continue;
+            }
             // Stack or refresh
             if (existing->GetStackType() == CBuffStackType::STACK) {
                 existing->AddStack();
@@ -386,6 +394,17 @@ void CUnit::AddBuff(std::unique_ptr<CBuff> buff, CSimulation& game) {
 void CUnit::RemoveBuff(War3ID buffId, CSimulation& game) {
     for (auto it = buffs_.begin(); it != buffs_.end(); ++it) {
         if (it->get() && it->get()->GetId() == buffId) {
+            it->get()->OnRemove(game, this);
+            buffs_.erase(it);
+            return;
+        }
+    }
+}
+
+void CUnit::RemoveBuffByIdAndCaster(War3ID buffId, int caster, CSimulation& game) {
+    for (auto it = buffs_.begin(); it != buffs_.end(); ++it) {
+        if (it->get() && it->get()->GetId() == buffId &&
+            it->get()->GetCasterHandleId() == caster) {
             it->get()->OnRemove(game, this);
             buffs_.erase(it);
             return;
@@ -508,27 +527,29 @@ bool CUnit::IsSummoned() const {
 }
 
 void CUnit::AddAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId,
-                             float value) {
+                             float value, int caster) {
     auto key = std::make_pair((int)type, percent);
     auto& sources = auraStats_[key];
     for (auto& s : sources) {
-        if (s.buffId == buffId) {
+        if (s.buffId == buffId && s.caster == caster) {
             s.value = value;
             RecomputeAuraStat(type, percent);
             return;
         }
     }
-    sources.push_back({buffId, value});
+    sources.push_back({buffId, caster, value});
     RecomputeAuraStat(type, percent);
 }
 
-void CUnit::RemoveAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId) {
+void CUnit::RemoveAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId, int caster) {
     auto key = std::make_pair((int)type, percent);
     auto it = auraStats_.find(key);
     if (it == auraStats_.end()) return;
     auto& sources = it->second;
     sources.erase(std::remove_if(sources.begin(), sources.end(),
-                                 [&](const AuraStatSource& s) { return s.buffId == buffId; }),
+                                 [&](const AuraStatSource& s) {
+                                     return s.buffId == buffId && s.caster == caster;
+                                 }),
                   sources.end());
     if (sources.empty()) {
         auraStats_.erase(it);

@@ -59,7 +59,8 @@ CAbilityThornsAura::CAbilityThornsAura(int handleId)
     // Thorns reflects damage - handled in combat system
 }
 
-void CAbilityThornsAura::ApplyAura(CSimulation& game, CUnit* target) {
+void CAbilityThornsAura::ApplyAura(CSimulation& game, CUnit* caster, CUnit* target) {
+    (void)caster; // flag auras are caster-agnostic (refresh semantics)
     if (!target) return;
     // Level-1 object data (DataA1=0.1): 10% melee reflect while in range.
     // The buff is refreshed every aura tick; RemoveAura takes it away.
@@ -70,7 +71,8 @@ void CAbilityThornsAura::ApplyAura(CSimulation& game, CUnit* target) {
     }
 }
 
-void CAbilityThornsAura::RemoveAura(CSimulation& game, CUnit* target) {
+void CAbilityThornsAura::RemoveAura(CSimulation& game, CUnit* caster, CUnit* target) {
+    (void)caster; // flag auras are caster-agnostic (refresh semantics)
     if (!target) return;
     target->RemoveBuff(War3ID("BEah"), game);
 }
@@ -109,7 +111,8 @@ CAbilityVampiricAura::CAbilityVampiricAura(int handleId)
     // Life steal - handled in combat system
 }
 
-void CAbilityVampiricAura::ApplyAura(CSimulation& game, CUnit* target) {
+void CAbilityVampiricAura::ApplyAura(CSimulation& game, CUnit* caster, CUnit* target) {
+    (void)caster; // flag auras are caster-agnostic (refresh semantics)
     if (!target) return;
     // Level-1 object data (DataA1=0.15): 15% life steal while in range.
     if (CBuff* existing = target->GetBuff(War3ID("BUav"))) {
@@ -119,7 +122,8 @@ void CAbilityVampiricAura::ApplyAura(CSimulation& game, CUnit* target) {
     }
 }
 
-void CAbilityVampiricAura::RemoveAura(CSimulation& game, CUnit* target) {
+void CAbilityVampiricAura::RemoveAura(CSimulation& game, CUnit* caster, CUnit* target) {
+    (void)caster; // flag auras are caster-agnostic (refresh semantics)
     if (!target) return;
     target->RemoveBuff(War3ID("BUav"), game);
 }
@@ -169,7 +173,8 @@ CAbilityDiseaseCloud::CAbilityDiseaseCloud(int handleId)
     SetAffectsSelf(false);
 }
 
-void CAbilityDiseaseCloud::ApplyAura(CSimulation& game, CUnit* target) {
+void CAbilityDiseaseCloud::ApplyAura(CSimulation& game, CUnit* caster, CUnit* target) {
+    (void)caster; // flag auras are caster-agnostic (refresh semantics)
     if (!target) return;
     // Level-1 object data (DataC 10 dps, ref) while in the cloud.
     if (CBuff* existing = target->GetBuff(War3ID("Bapl"))) {
@@ -179,7 +184,8 @@ void CAbilityDiseaseCloud::ApplyAura(CSimulation& game, CUnit* target) {
     }
 }
 
-void CAbilityDiseaseCloud::RemoveAura(CSimulation& game, CUnit* target) {
+void CAbilityDiseaseCloud::RemoveAura(CSimulation& game, CUnit* caster, CUnit* target) {
+    (void)caster; // flag auras are caster-agnostic (refresh semantics)
     if (!target) return;
     target->RemoveBuff(War3ID("Bapl"), game);
 }

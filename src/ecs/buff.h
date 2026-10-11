@@ -49,6 +49,10 @@ public:
     // Stacking
     CBuffStackType GetStackType() const { return stackType_; }
     void SetStackType(CBuffStackType v) { stackType_ = v; }
+    // Aura merge: same-id buffs from DIFFERENT casters coexist (strongest
+    // wins via the target's source table); same caster refreshes. Only
+    // aura buffs opt in (ref per-source aura buffs).
+    virtual bool MergeByCaster() const { return false; }
     int GetStackCount() const { return stackCount_; }
     int GetMaxStacks() const { return maxStacks_; }
     void SetMaxStacks(int v) { maxStacks_ = v; }

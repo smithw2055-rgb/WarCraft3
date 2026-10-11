@@ -296,6 +296,12 @@ private:
     // MIDI ambient re-evaluation throttle (day/night + env switches).
     float ambientCheckAcc_ = 0.0f;
     void UpdateMidiAmbient(float dt);
+    // Map-music bridge: JASS music state (PlayMusic/StopMusic/volume)
+    // drives AudioSystem. Change-gated so tracks never restart.
+    void SyncMusic();
+    std::string musicSyncedTrack_;
+    bool musicSyncedPlaying_ = false;
+    float musicSyncedVolume_ = -1.0f;
 
     WarsmashConfig config_;
 

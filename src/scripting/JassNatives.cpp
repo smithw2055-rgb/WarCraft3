@@ -8927,7 +8927,8 @@ void JassNatives::RegisterGameNatives() {
         } else if (harvest->GetCarriedResourceType() == CResourceType::LUMBER) {
             player->AddLumber(harvest->GetCarriedAmount());
         } else {
-            player->SetFoodCap(player->GetFoodCap() + harvest->GetCarriedAmount());
+            // Ref Jass2: min(cap + carried, ceiling).
+            player->AddFoodCap(harvest->GetCarriedAmount());
         }
         harvest->ClearCarried();
         return JassValue::Null();

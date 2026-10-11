@@ -280,7 +280,7 @@ void CBehaviorBuild::CompleteBuilding(CSimulation& simulation) {
         // Add food cap from building
         auto* player = simulation.GetPlayer(building->GetPlayerIndex());
         if (player && building->GetFoodMade() > 0) {
-            player->SetFoodCap(player->GetFoodCap() + building->GetFoodMade());
+            player->AddFoodCap(building->GetFoodMade());
         }
 
         std::cout << "Building completed: " << buildingTypeId_.ToString() << std::endl;

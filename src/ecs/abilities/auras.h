@@ -25,8 +25,8 @@ public:
     CAbilityThornsAura(int handleId);
 
 protected:
-    void ApplyAura(CSimulation& game, CUnit* target) override;
-    void RemoveAura(CSimulation& game, CUnit* target) override;
+    void ApplyAura(CSimulation& game, CUnit* caster, CUnit* target) override;
+    void RemoveAura(CSimulation& game, CUnit* caster, CUnit* target) override;
 };
 
 // ===== Brilliance Aura (Archmage) - mana regen =====
@@ -47,8 +47,8 @@ public:
     CAbilityVampiricAura(int handleId);
 
 protected:
-    void ApplyAura(CSimulation& game, CUnit* target) override;
-    void RemoveAura(CSimulation& game, CUnit* target) override;
+    void ApplyAura(CSimulation& game, CUnit* caster, CUnit* target) override;
+    void RemoveAura(CSimulation& game, CUnit* caster, CUnit* target) override;
 };
 
 // ===== Command Aura (Orc) - damage bonus =====
@@ -78,6 +78,6 @@ public:
     CAbilityDiseaseCloud(int handleId);
 
 protected:
-    void ApplyAura(CSimulation& game, CUnit* target) override;
-    void RemoveAura(CSimulation& game, CUnit* target) override;
+    void ApplyAura(CSimulation& game, CUnit* caster, CUnit* target) override;
+    void RemoveAura(CSimulation& game, CUnit* caster, CUnit* target) override;
 };

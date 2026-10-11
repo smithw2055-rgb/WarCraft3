@@ -2569,6 +2569,7 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
     dayNight_.Update(dt);
     if (texturedTerrain_.IsValid()) dayNight_.Apply(texturedTerrain_);
     UpdateMidiAmbient(dt);
+    SyncMusic();
     if (jassNatives_ && jassNatives_->GetData() && texturedTerrain_.IsValid()) {
         const auto& fog = jassNatives_->GetData()->globalUnitFog;
         if (fog.e > fog.d && fog.d >= 0.0f) {
@@ -4673,6 +4674,40 @@ void GameController::UpdateMidiAmbient(float dt) {
     }
     if (!audio_.IsMidiAmbientPlaying(chosen)) {
         audio_.PlayMidiAmbient(chosen, &mpq_, 0.45f);
+    }
+}
+
+void GameController::SyncMusic() {
+    // In-game map music only; the menu jingle is managed directly and has
+    // no sim or JASS state.
+    if (!audio_.IsValid() || !simulationInitialized_ || !jassNatives_) return;
+    auto data = jassNatives_->GetData();
+    if (!data) return;
+    const bool wantPlaying = data->music.playing && !data->music.current.empty();
+    const float wantVolume =
+        std::max(0.0f, std::min(1.0f, (float)data->music.volume / 127.0f));
+    if (wantPlaying &&
+        (!musicSyncedPlaying_ || musicSyncedTrack_ != data->music.current)) {
+        if (audio_.PlayMusic(data->music.current, &mpq_, wantVolume)) {
+            musicSyncedTrack_ = data->music.current;
+            musicSyncedPlaying_ = true;
+            musicSyncedVolume_ = wantVolume;
+        } else {
+            // Missing file: latch as synced-stopped so a broken map does
+            // not respam every frame; any state change retries.
+            musicSyncedTrack_ = data->music.current;
+            musicSyncedPlaying_ = false;
+        }
+        return;
+    }
+    if (!wantPlaying && musicSyncedPlaying_) {
+        audio_.StopMusic();
+        musicSyncedPlaying_ = false;
+        return;
+    }
+    if (wantPlaying && musicSyncedPlaying_ && wantVolume != musicSyncedVolume_) {
+        audio_.SetMusicVolume(wantVolume);
+        musicSyncedVolume_ = wantVolume;
     }
 }
 

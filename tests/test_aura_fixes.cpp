@@ -185,3 +185,55 @@ bool TestAuraDispelStripsBonus() {
     sim.GetUnits().clear();
     return true;
 }
+
+bool TestSameCodeAurasMergePerCaster() {
+    CSimulation sim;
+    CUnitType* type = MakeAuraTestType();
+    CUnit source(131, type, 0, War3ID("hfoo"), 0, 0, 0);
+    CUnit other(132, type, 0, War3ID("hfoo"), 50, 0, 0);
+    CUnit target(133, type, 0, War3ID("hfoo"), 100, 0, 0);
+    sim.GetUnits().push_back(&source);
+    sim.GetUnits().push_back(&other);
+    sim.GetUnits().push_back(&target);
+
+    // Same aura code from two casters (two Devotion Auras): per-source
+    // buffs, strongest wins, first leaver keeps the other's bonus.
+    CAbilityAura weak(230, War3ID("AHad"));
+    weak.SetRadius(1000.0f);
+    weak.SetEnemyOnly(true);
+    weak.SetAffectsAllies(false);
+    weak.SetAffectsSelf(false);
+    weak.AddBonus({CAuraEffectType::ARMOR, 2.0f, false});
+    CAbilityAura strong(231, War3ID("AHad"));
+    strong.SetRadius(1000.0f);
+    strong.SetEnemyOnly(true);
+    strong.SetAffectsAllies(false);
+    strong.SetAffectsSelf(false);
+    strong.AddBonus({CAuraEffectType::ARMOR, 5.0f, false});
+
+    auto countBuffs = [&]() {
+        int n = 0;
+        for (const auto& b : target.GetBuffs()) {
+            if (b && b->GetId() == War3ID("AHad")) n++;
+        }
+        return n;
+    };
+
+    const int armorBefore = target.GetBonusArmor();
+    weak.OnTick(sim, &source);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore + 2);
+    TEST_ASSERT(countBuffs() == 1);
+    strong.OnTick(sim, &other);
+    TEST_ASSERT(countBuffs() == 2);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore + 5);
+    // Strong caster leaves range: falls back to the weak source, not zero.
+    strong.OnRemove(sim, &other);
+    TEST_ASSERT(countBuffs() == 1);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore + 2);
+    weak.OnRemove(sim, &source);
+    TEST_ASSERT(countBuffs() == 0);
+    TEST_ASSERT(target.GetBonusArmor() == armorBefore);
+
+    sim.GetUnits().clear();
+    return true;
+}

@@ -54,9 +54,14 @@ public:
     int GetFoodUsed() const { return foodUsed_; }
     void SetGold(int v) { gold_ = v; }
     void SetLumber(int v) { lumber_ = v; }
-    // Retail food cap ceiling (default 100, ref Techtree/FoodCapCeiling):
-    // farms cannot push the cap past the ceiling no matter how many stand.
-    void SetFoodCap(int v) { foodCap_ = std::min(v, (int)foodCapCeiling_); }
+    // Plain setter (ref CPlayer.setFoodCap): JASS SetPlayerState and map
+    // setup bypass the ceiling. Gameplay increments use AddFoodCap below.
+    void SetFoodCap(int v) { foodCap_ = v; }
+    // Capped increment (ref Jass2 harvest-carry min with getFoodCapCeiling):
+    // farms and carried food never push the cap past the ceiling.
+    void AddFoodCap(int v) {
+        foodCap_ = std::min(foodCap_ + v, (int)foodCapCeiling_);
+    }
     void SetFoodUsed(int v) { foodUsed_ = v; }
     void AddGold(int v) { gold_ += v; }
     void AddLumber(int v) { lumber_ += v; }
@@ -139,7 +144,9 @@ private:
     int lumber_ = 0;
     int foodCap_ = 0;
     int foodUsed_ = 0;
-    float foodCapCeiling_ = 100.0f;
+    // Ref CPlayer default (101; retail increments clamp here). No MiscGame
+    // key defines it; SetFoodCapCeiling overrides per map config.
+    float foodCapCeiling_ = 101.0f;
     int goldUpkeepRate_ = 0;
     int lumberUpkeepRate_ = 0;
 

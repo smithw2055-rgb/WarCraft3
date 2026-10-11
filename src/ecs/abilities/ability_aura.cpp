@@ -35,7 +35,7 @@ void CAbilityAura::OnRemove(CSimulation& game, CUnit* unit) {
     // Remove aura from all affected units
     for (int handle : affectedUnitHandles_) {
         if (CUnit* target = FindAuraUnit(game, handle)) {
-            RemoveAura(game, target);
+            RemoveAura(game, unit, target);
         }
     }
     affectedUnitHandles_.clear();
@@ -82,7 +82,7 @@ void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
                                 other->GetHandleId());
             if (it == affectedUnitHandles_.end()) {
                 // Newly in range - apply aura
-                ApplyAura(game, other);
+                ApplyAura(game, unit, other);
             }
         }
     }
@@ -93,7 +93,7 @@ void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
         if (inRange == currentInRange.end()) {
             // Unit left range
             if (CUnit* target = FindAuraUnit(game, *it)) {
-                RemoveAura(game, target);
+                RemoveAura(game, unit, target);
             }
             it = affectedUnitHandles_.erase(it);
         } else {
@@ -110,23 +110,26 @@ void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
     }
 }
 
-void CAbilityAura::ApplyAura(CSimulation& game, CUnit* target) {
+void CAbilityAura::ApplyAura(CSimulation& game, CUnit* caster, CUnit* target) {
     if (!target) return;
-    // Buff-based application (ref BuffAuraBase): one aura buff carrying
-    // all bonuses, keyed by this aura's code, so overlapping auras take
-    // the strongest bonus per slot and dispels can strip them. The unit's
-    // non-stacking table does the math; single-aura results match the old
-    // direct-mutation path exactly.
+    // Buff-based application (ref BuffAuraBase): one aura buff per caster
+    // carrying all bonuses, so overlapping auras take the strongest bonus
+    // per slot and dispels can strip them. The unit's non-stacking table
+    // does the math; single-aura results match the old direct-mutation
+    // path exactly.
     std::vector<CBuffAuraStat::Bonus> bonuses;
     for (const auto& bonus : bonuses_) {
         bonuses.push_back({bonus.type, bonus.value, bonus.isPercent});
     }
-    target->AddBuff(std::make_unique<CBuffAuraStat>(GetCode(), std::move(bonuses)), game);
+    const int casterHandle = caster ? caster->GetHandleId() : -1;
+    target->AddBuff(std::make_unique<CBuffAuraStat>(GetCode(), std::move(bonuses), casterHandle),
+                    game);
 }
 
-void CAbilityAura::RemoveAura(CSimulation& game, CUnit* target) {
+void CAbilityAura::RemoveAura(CSimulation& game, CUnit* caster, CUnit* target) {
     if (!target) return;
-    // Removing the aura buff unregisters its bonuses and recomputes what
-    // overlapping auras still grant.
-    target->RemoveBuff(GetCode(), game);
+    // Removing this caster's aura buff unregisters its bonuses and
+    // recomputes what overlapping auras still grant.
+    const int casterHandle = caster ? caster->GetHandleId() : -1;
+    target->RemoveBuffByIdAndCaster(GetCode(), casterHandle, game);
 }

@@ -1086,7 +1086,8 @@ void CBuffAuraStat::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
     for (const auto& bonus : bonuses_) {
-        target->AddAuraStatBonus(bonus.type, bonus.percent, GetId(), bonus.value);
+        target->AddAuraStatBonus(bonus.type, bonus.percent, GetId(), bonus.value,
+                                 GetCasterHandleId());
     }
 }
 
@@ -1094,7 +1095,8 @@ void CBuffAuraStat::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
     for (const auto& bonus : bonuses_) {
-        target->RemoveAuraStatBonus(bonus.type, bonus.percent, GetId());
+        target->RemoveAuraStatBonus(bonus.type, bonus.percent, GetId(),
+                                    GetCasterHandleId());
     }
 }
 
