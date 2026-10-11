@@ -2568,6 +2568,7 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
     // Day/night
     dayNight_.Update(dt);
     if (texturedTerrain_.IsValid()) dayNight_.Apply(texturedTerrain_);
+    UpdateMidiAmbient(dt);
     if (jassNatives_ && jassNatives_->GetData() && texturedTerrain_.IsValid()) {
         const auto& fog = jassNatives_->GetData()->globalUnitFog;
         if (fog.e > fog.d && fog.d >= 0.0f) {
@@ -4630,6 +4631,49 @@ void GameController::SpawnCarriedHeroes() {
     if (spawned > 0) simulation_.Update();
     std::cout << "ChangeLevel: respawned " << spawned << "/" << carried.size()
               << " carried heroes" << std::endl;
+}
+
+void GameController::UpdateMidiAmbient(float dt) {
+    if (!audio_.IsValid() || !simulationInitialized_) return;
+    ambientCheckAcc_ += dt;
+    if (ambientCheckAcc_ < 3.0f) return; // re-evaluate a few times a second
+    ambientCheckAcc_ = 0.0f;
+
+    // JASS SetSoundEnvironment wins; otherwise the map's w3i ambience.
+    std::string env;
+    if (jassNatives_ && jassNatives_->GetData() &&
+        !jassNatives_->GetData()->music.soundEnvironment.empty()) {
+        env = jassNatives_->GetData()->music.soundEnvironment;
+    } else if (!w3i_.soundEnvironment.empty()) {
+        env = w3i_.soundEnvironment;
+    }
+    if (env.empty()) {
+        audio_.StopMidiAmbient();
+        return;
+    }
+    // Retail layout Sound\Ambient\<env>\<file>.mid; file casing varies
+    // (Wetlandsday.mid vs WetlandsNight.mid), so match case-insensitively.
+    // ListAllFiles returns full archive paths for the pattern.
+    const bool day = simulation_.IsDaytime();
+    std::string dir = "Sound\\Ambient\\" + env + "\\";
+    std::string want = day ? "day" : "night";
+    std::string chosen;
+    for (const std::string& name : mpq_.ListAllFiles(dir + "*.mid")) {
+        std::string lower = name;
+        for (char& c : lower) c = (char)std::tolower((unsigned char)c);
+        if (lower.size() >= 4 && lower.compare(lower.size() - 4, 4, ".mid") == 0 &&
+            lower.find(want) != std::string::npos) {
+            chosen = name;
+            break;
+        }
+    }
+    if (chosen.empty()) {
+        audio_.StopMidiAmbient();
+        return;
+    }
+    if (!audio_.IsMidiAmbientPlaying(chosen)) {
+        audio_.PlayMidiAmbient(chosen, &mpq_, 0.45f);
+    }
 }
 
 void GameController::MaybeLogAIStatus() {

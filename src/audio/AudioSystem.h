@@ -55,6 +55,13 @@ public:
     void SetMusicVolume(float vol);
     bool IsMusicPlaying() const;
 
+    // MIDI ambient loop (retail Sound\Ambient day/night tracks): parsed and
+    // rendered by the built-in ambient-grade synth (see MidiSynth), looped
+    // from a cached PCM buffer. No-op when the same path already plays.
+    bool PlayMidiAmbient(const std::string& mpqPath, MpqManager* mpq, float volume = 0.5f);
+    void StopMidiAmbient();
+    bool IsMidiAmbientPlaying(const std::string& mpqPath) const;
+
     void SetMasterVolume(float vol);
     float GetMasterVolume() const { return masterVolume_; }
 
@@ -77,6 +84,16 @@ private:
     ma_decoder* musicDecoder_ = nullptr;
     int musicSoundId_ = -1;
     std::vector<uint8_t> musicData_;
+    // MIDI ambient loop state: rendered PCM wrapped as WAV bytes and
+    // played through the proven decoder pipeline (carries the true sample
+    // rate, unlike ma_audio_buffer_ref). Cache keyed by MPQ path.
+    ma_decoder* ambientDecoder_ = nullptr;
+    ma_sound* ambientSound_ = nullptr;
+    int ambientSoundId_ = -1;
+    std::string ambientPath_;
+    float ambientVolume_ = 0.5f;
+    std::vector<uint8_t> ambientWav_;
+    std::unordered_map<std::string, std::vector<uint8_t>> midiCache_;
     MpqManager* mpq_ = nullptr;
     bool initialized_ = false;
 

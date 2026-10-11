@@ -75,6 +75,7 @@ add_executable(warsmash_tests
     test_fdf.cpp
     test_ability_levels.cpp
     test_hero_carry.cpp
+    test_midi.cpp
     test_vfs_overlay.cpp
     test_map_data.cpp
     test_jass_orders_terrain.cpp
@@ -155,6 +156,8 @@ add_executable(warsmash_tests
     ../src/audio/AudioSystem.cpp
     ../src/audio/UnitSoundset.cpp
     ../src/audio/AckSoundBank.cpp
+    ../src/audio/MidiFile.cpp
+    ../src/audio/MidiSynth.cpp
     ../src/data/combat_types.cpp
     ../src/data/gameplay_constants.cpp
     ../src/data/unitdata.cpp

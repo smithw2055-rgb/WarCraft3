@@ -216,6 +216,9 @@ bool TestNonHeroFallbackStacksWithItemAndUpgrade();
 bool TestMiscDataTableAndArmorParsed();
 bool TestSpellsRowFallsBackToMagic();
 bool TestMalformedRowKeepsDefaults();
+bool TestMidiParsesNotes();
+bool TestMidiRendersAudibleLoop();
+bool TestMidiRetailAmbientRenders();
 bool TestConfiguredTableDrivesDamage();
 bool TestConfiguredDefenseArmorDrivesReduction();
 bool TestUnitClassificationKeys();
@@ -840,6 +843,9 @@ int main(int argc, char** argv) {
         {"ReplayLog round trip", TestReplayLogRoundTrip},
         {"Hero carry round trip", TestHeroCarryRoundTrip},
         {"Hero carry filters", TestHeroCarryFilters},
+        {"MIDI parses notes", TestMidiParsesNotes},
+        {"MIDI renders audible loop", TestMidiRendersAudibleLoop},
+        {"MIDI retail ambient renders", TestMidiRetailAmbientRenders},
         {"GetItem behavior picks up", TestGetItemBehaviorPicksUp},
         {"DropItem behavior drops", TestDropItemBehaviorDrops},
         {"GiveItem behavior transfers", TestGiveItemBehaviorTransfers},

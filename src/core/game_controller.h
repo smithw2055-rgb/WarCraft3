@@ -293,6 +293,9 @@ private:
     bool arrivedViaChangeLevel_ = false;
     float simulationAccumulator_ = 0.0f;
     float lastTime_ = 0.0f;
+    // MIDI ambient re-evaluation throttle (day/night + env switches).
+    float ambientCheckAcc_ = 0.0f;
+    void UpdateMidiAmbient(float dt);
 
     WarsmashConfig config_;
 
