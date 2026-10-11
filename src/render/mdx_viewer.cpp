@@ -6,6 +6,7 @@
 #include "mdx_collision.h"
 #include "asset/BLP.h"
 #include "asset/DDS.h"
+#include "asset/MipChain.h"
 #include "asset/stb_image.h"
 #include <algorithm>
 #include <iostream>
@@ -1355,17 +1356,25 @@ bool MdxViewer::IntersectRayWithCollision(const picking::PickRay& ray,
     return MdxIntersectCollisionShapes(*modelSource_, animator_, ray, modelMatrix, outT);
 }
 
-static sg_image CreateSGImage(int w, int h, const uint8_t* pixels) {
-    sg_image_desc d = {};
-    d.type = SG_IMAGETYPE_2D;
-    d.width = w; d.height = h;
-    d.pixel_format = SG_PIXELFORMAT_RGBA8;
-    d.num_mipmaps = 0;
-    d.data.mip_levels[0].ptr = pixels;
-    d.data.mip_levels[0].size = (size_t)(w * h * 4);
-    sg_image img = sg_make_image(&d);
-    if (sg_query_image_state(img) != SG_RESOURCESTATE_VALID) img = {0};
-    return img;
+static sg_image CreateSGImage(int w, int h, const uint8_t* pixels,
+                              std::vector<MipLevel> embedded = {}) {
+    // Full mip chain: model samplers are mipmapped; a bare level 0 is an
+    // incomplete texture (black on strict drivers).
+    MipChain chain = BuildMipChain(w, h, pixels, std::move(embedded));
+    return MakeChainedImage(chain);
+}
+
+template <typename Decoded>
+static std::vector<MipLevel> ToMipLevels(Decoded& decoded) {
+    std::vector<MipLevel> levels;
+    for (size_t i = 1; i < decoded.size(); ++i) {
+        MipLevel level;
+        level.width = decoded[i].width;
+        level.height = decoded[i].height;
+        level.pixels = decoded[i].pixels;
+        levels.push_back(std::move(level));
+    }
+    return levels;
 }
 
 static sg_image LoadTextureFromMpq(MpqManager* mpq, const std::string& path) {
@@ -1373,12 +1382,14 @@ static sg_image LoadTextureFromMpq(MpqManager* mpq, const std::string& path) {
     auto tryLoad = [&](const std::string& p) -> sg_image {
         std::vector<uint8_t> data;
         if (!mpq->ReadFile(p, data)) return {0};
-        BLPImage img;
-        if (DecodeBLP(data.data(), data.size(), img))
-            return CreateSGImage(img.width, img.height, img.pixels.data());
-        DdsImage dds;
-        if (DecodeDDS(data.data(), data.size(), dds))
-            return CreateSGImage(dds.width, dds.height, dds.pixels.data());
+        std::vector<BLPImage> blpLevels;
+        if (DecodeBLPLevels(data.data(), data.size(), blpLevels) && !blpLevels.empty())
+            return CreateSGImage(blpLevels[0].width, blpLevels[0].height,
+                                 blpLevels[0].pixels.data(), ToMipLevels(blpLevels));
+        std::vector<DdsImage> ddsLevels;
+        if (DecodeDDSLevels(data.data(), data.size(), ddsLevels) && !ddsLevels.empty())
+            return CreateSGImage(ddsLevels[0].width, ddsLevels[0].height,
+                                 ddsLevels[0].pixels.data(), ToMipLevels(ddsLevels));
         int w, h, ch;
         stbi_uc* pixels = stbi_load_from_memory(data.data(), (int)data.size(), &w, &h, &ch, STBI_rgb_alpha);
         if (!pixels) return {0};

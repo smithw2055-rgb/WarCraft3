@@ -1,5 +1,6 @@
 #include "Texture.h"
 #include "BLP.h"
+#include "MipChain.h"
 #include "../render/renderer.h"
 #include "stb_image.h"
 #include <cstring>
@@ -58,12 +59,42 @@ bool Texture::LoadFromMemory(const uint8_t* data, size_t size) {
     if (size < 4) return false;
 
     if (std::memcmp(data, "BLP1", 4) == 0 || std::memcmp(data, "BLP2", 4) == 0) {
-        BLPImage img;
-        if (!DecodeBLP(data, size, img)) {
+        // Embedded mips first (retail quality); generated tail fills gaps.
+        std::vector<BLPImage> fileLevels;
+        if (!DecodeBLPLevels(data, size, fileLevels) || fileLevels.empty()) {
             std::cerr << "Texture: BLP decode failed" << std::endl;
             return false;
         }
-        return CreateFromImage(img.width, img.height, 4, img.pixels.data());
+        std::vector<MipLevel> embedded;
+        embedded.reserve(fileLevels.size() > 0 ? fileLevels.size() - 1 : 0);
+        for (size_t i = 1; i < fileLevels.size(); ++i) {
+            MipLevel level;
+            level.width = fileLevels[i].width;
+            level.height = fileLevels[i].height;
+            level.pixels = std::move(fileLevels[i].pixels);
+            embedded.push_back(std::move(level));
+        }
+        MipChain chain = BuildMipChain(fileLevels[0].width, fileLevels[0].height,
+                                       fileLevels[0].pixels.data(), std::move(embedded));
+        sg_image chained = MakeChainedImage(chain);
+        if (sg_query_image_state(chained) != SG_RESOURCESTATE_VALID) {
+            std::cerr << "Texture: chained BLP upload failed ("
+                      << chain.levels.size() << " levels)" << std::endl;
+            return false;
+        }
+        Release();
+        image_ = chained;
+        width_ = chain.levels[0].width;
+        height_ = chain.levels[0].height;
+
+        sg_sampler_desc smp_desc = {};
+        smp_desc.min_filter = SG_FILTER_LINEAR;
+        smp_desc.mag_filter = SG_FILTER_LINEAR;
+        smp_desc.mipmap_filter = SG_FILTER_LINEAR;
+        smp_desc.wrap_u = SG_WRAP_REPEAT;
+        smp_desc.wrap_v = SG_WRAP_REPEAT;
+        sampler_ = sg_make_sampler(&smp_desc);
+        return true;
     }
 
     int w, h, channels;
@@ -85,15 +116,10 @@ bool Texture::CreateFromImage(int width, int height, int channels, const uint8_t
 bool Texture::Create(int width, int height, const uint8_t* pixels) {
     Release();
 
-    sg_image_desc desc = {};
-    desc.type = SG_IMAGETYPE_2D;
-    desc.width = width;
-    desc.height = height;
-    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    desc.num_mipmaps = 1;
-    desc.data.mip_levels[0].ptr = pixels;
-    desc.data.mip_levels[0].size = (size_t)(width * height * 4);
-    image_ = sg_make_image(&desc);
+    // Full generated chain: the sampler is mipmapped, so a bare level 0
+    // would leave the texture incomplete (black on strict drivers).
+    MipChain chain = BuildMipChain(width, height, pixels);
+    image_ = MakeChainedImage(chain);
 
     if (sg_query_image_state(image_) != SG_RESOURCESTATE_VALID) {
         std::cerr << "Texture: sg_make_image failed (" << width << "x" << height << ")" << std::endl;

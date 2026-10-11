@@ -290,12 +290,27 @@ bool DecodeBLP(const uint8_t* data, size_t size, BLPImage& out, int mipLevel) {
 
         const uint8_t* palette = data + 0x9C;
 
-        // Pixel indices start after the palette, followed by optional packed alpha data
+        // Pixel indices start after the palette, followed by optional packed alpha data.
+        // Per-level data lives at the mipOffset table (like DXT); the old
+        // code always read level 0, so every paletted mip decoded as the
+        // base image. Level 0 keeps the legacy direct layout when its table
+        // entry is absent; deeper levels require a valid entry.
         const size_t pixelCount = (size_t)mipW * mipH;
         const uint8_t* pixelData = data + 0x9C + 1024;
-        const uint8_t* alphaData = pixelData + pixelCount;
         const uint8_t* fileEnd = data + size;
-        if (pixelData + pixelCount > fileEnd) return false;
+        const uint8_t* levelEnd = fileEnd;
+        {
+            uint32_t tOff = *(const uint32_t*)(data + 28 + mipLevel * 4);
+            uint32_t tSz = *(const uint32_t*)(data + 0x5C + mipLevel * 4);
+            if (tOff == 0 || tSz == 0 || (size_t)tOff + tSz > size) {
+                if (mipLevel > 0) return false;
+            } else {
+                pixelData = data + tOff;
+                levelEnd = data + tOff + tSz;
+            }
+        }
+        const uint8_t* alphaData = pixelData + pixelCount;
+        if (pixelData + pixelCount > levelEnd) return false;
 
         out.pixels.resize(pixelCount * 4);
         for (size_t i = 0; i < pixelCount; ++i) {
@@ -308,17 +323,17 @@ bool DecodeBLP(const uint8_t* data, size_t size, BLPImage& out, int mipLevel) {
 
             uint8_t alpha = 255;
             if (alphaBits == 8) {
-                if (alphaData + pixelCount <= fileEnd) {
+                if (alphaData + pixelCount <= levelEnd) {
                     alpha = alphaData[i];
                 }
             } else if (alphaBits == 4) {
-                if (alphaData + ((pixelCount + 1) / 2) <= fileEnd) {
+                if (alphaData + ((pixelCount + 1) / 2) <= levelEnd) {
                     uint8_t packed = alphaData[i >> 1];
                     uint8_t nibble = (i & 1) ? (packed >> 4) : (packed & 0x0F);
                     alpha = uint8_t(nibble * 17);
                 }
             } else if (alphaBits == 1) {
-                if (alphaData + ((pixelCount + 7) / 8) <= fileEnd) {
+                if (alphaData + ((pixelCount + 7) / 8) <= levelEnd) {
                     uint8_t packed = alphaData[i >> 3];
                     alpha = (packed & (1u << (i & 7))) ? 255 : 0;
                 }
@@ -382,15 +397,31 @@ bool DecodeBLP(const uint8_t* data, size_t size, BLPImage& out, int mipLevel) {
                         }
                 }
             }
-        } else {
-            // Default: try DXT1
-            DecodeDXT1(pixData, mipW, mipH, out.pixels.data());
-        }
-        return true;
-    }
+         } else {
+             // Default: try DXT1
+             DecodeDXT1(pixData, mipW, mipH, out.pixels.data());
+         }
+         return true;
+     }
 
-    return false;
-}
+     return false;
+ }
+
+ bool DecodeBLPLevels(const uint8_t* data, size_t size, std::vector<BLPImage>& out) {
+     out.clear();
+     if (!data || size < 32) return false;
+     for (int level = 0; level < 16; ++level) {
+         BLPImage img;
+         if (!DecodeBLP(data, size, img, level)) break;
+         if (img.width <= 0 || img.height <= 0 ||
+             img.pixels.size() != (size_t)img.width * img.height * 4) {
+             break; // malformed level: keep the good prefix
+         }
+         out.push_back(std::move(img));
+         if (out.back().width <= 1 && out.back().height <= 1) break;
+     }
+     return !out.empty();
+ }
 /* rebuild */
 /* rebuild2 */
 /* rebuild3 */

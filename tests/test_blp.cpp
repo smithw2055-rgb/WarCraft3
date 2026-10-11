@@ -1,4 +1,6 @@
 #include "asset/BLP.h"
+#include "asset/DDS.h"
+#include "asset/MipChain.h"
 #include "asset/stb_image.h"
 
 #include <cstdint>
@@ -110,5 +112,168 @@ bool TestTgaDecodesViaStb() {
     }
     TEST_ASSERT(foundRed);
     stbi_image_free(px);
+    return true;
+}
+
+bool TestMipChainCountsAndDims() {
+    TEST_ASSERT(FullMipCount(0, 4) == 0);
+    TEST_ASSERT(FullMipCount(1, 1) == 1);
+    TEST_ASSERT(FullMipCount(2, 2) == 2);
+    TEST_ASSERT(FullMipCount(256, 256) == 9);
+    TEST_ASSERT(FullMipCount(256, 128) == 9);
+    TEST_ASSERT(FullMipCount(3, 5) == 3); // 3x5 -> 1x2 -> 1x1
+    auto [w2, h2] = MipLevelDims(256, 128, 2);
+    TEST_ASSERT(w2 == 64 && h2 == 32);
+    auto [w3, h3] = MipLevelDims(3, 5, 2);
+    TEST_ASSERT(w3 == 1 && h3 == 1);
+    // 2x2 box average -> 1x1 (all channels).
+    const uint8_t src[16] = {0, 0, 0, 0,  100, 0, 0, 255,
+                             0, 100, 0, 255,  0, 0, 100, 255};
+    uint8_t dst[4] = {};
+    BoxDownsampleRGBA(src, 2, 2, dst);
+    TEST_ASSERT(dst[0] == 25 && dst[1] == 25 && dst[2] == 25);
+    TEST_ASSERT(dst[3] == (uint8_t)((0 + 255 + 255 + 255) / 4));
+    // Odd dims clamp the edge texel instead of over-reading (row 0 used
+    // twice when sh == 1: (10+50+10+50)/4).
+    const uint8_t odd[3 * 4] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120};
+    uint8_t oddDst[4] = {};
+    BoxDownsampleRGBA(odd, 3, 1, oddDst); // -> 1x1
+    TEST_ASSERT(oddDst[0] == 30);
+    return true;
+}
+
+bool TestMipChainEmbeddedFallback() {
+    // 4x4 base: embedded level with WRONG dims is skipped, generator fills.
+    std::vector<uint8_t> base(4 * 4 * 4, 128);
+    MipLevel wrong;
+    wrong.width = 3;
+    wrong.height = 3;
+    wrong.pixels.assign(3 * 3 * 4, 200);
+    std::vector<MipLevel> embedded;
+    embedded.push_back(std::move(wrong));
+    MipChain chain = BuildMipChain(4, 4, base.data(), std::move(embedded));
+    TEST_ASSERT(chain.levels.size() == 3); // 4x4 -> 2x2 -> 1x1
+    TEST_ASSERT(chain.levels[1].width == 2 && chain.levels[1].height == 2);
+    TEST_ASSERT(chain.levels[1].pixels[0] == 128); // generated, not 200
+    TEST_ASSERT(chain.levels[2].width == 1 && chain.levels[2].height == 1);
+    // Exact embedded level is taken as-is.
+    MipLevel exact;
+    exact.width = 2;
+    exact.height = 2;
+    exact.pixels.assign(2 * 2 * 4, 77);
+    std::vector<MipLevel> embedded2;
+    embedded2.push_back(std::move(exact));
+    MipChain chain2 = BuildMipChain(4, 4, base.data(), std::move(embedded2));
+    TEST_ASSERT(chain2.levels[1].pixels[0] == 77);
+    // Invalid base -> empty chain (uploaders must check).
+    MipChain empty = BuildMipChain(0, 4, base.data());
+    TEST_ASSERT(empty.levels.empty());
+    MipChain nullBase = BuildMipChain(4, 4, nullptr);
+    TEST_ASSERT(nullBase.levels.empty());
+    return true;
+}
+
+bool TestBLPLevelsWalkPalettedMips() {
+    // Two-level paletted BLP: 2x2 base + 1x1 mip, 8-bit alpha.
+    std::vector<uint8_t> data;
+    MakeBLPHeader(data, 1, 8, 2, 2, 1);
+    const uint32_t headerSize = 0x9C;
+    const uint32_t paletteSize = 256 * 4;
+    const uint32_t l0off = headerSize + paletteSize; // 1180
+    const uint32_t l0size = 4 + 4;                   // 2x2 indices + alpha
+    const uint32_t l1off = l0off + l0size;
+    const uint32_t l1size = 1 + 1;
+    auto poke32 = [&](size_t at, uint32_t v) {
+        data[at] = v & 0xFF;
+        data[at + 1] = (v >> 8) & 0xFF;
+        data[at + 2] = (v >> 16) & 0xFF;
+        data[at + 3] = (v >> 24) & 0xFF;
+    };
+    poke32(28, l0off);
+    poke32(32, l1off);
+    poke32(92, l0size);
+    poke32(96, l1size);
+    std::vector<uint8_t> palette(paletteSize, 0);
+    palette[2 * 4 + 0] = 11;
+    palette[2 * 4 + 1] = 22;
+    palette[2 * 4 + 2] = 33;
+    data.insert(data.end(), palette.begin(), palette.end());
+    for (int i = 0; i < 4; i++) data.push_back(2);   // base indices
+    for (int i = 0; i < 4; i++) data.push_back(44);  // base alpha
+    data.push_back(2);                                // mip index
+    data.push_back(55);                               // mip alpha
+
+    std::vector<BLPImage> levels;
+    TEST_ASSERT(DecodeBLPLevels(data.data(), data.size(), levels));
+    TEST_ASSERT(levels.size() == 2);
+    TEST_ASSERT(levels[0].width == 2 && levels[0].height == 2);
+    TEST_ASSERT(levels[0].pixels[0] == 11 && levels[0].pixels[3] == 44);
+    TEST_ASSERT(levels[1].width == 1 && levels[1].height == 1);
+    TEST_ASSERT(levels[1].pixels[0] == 11 && levels[1].pixels[3] == 55);
+    // Truncated tail keeps the good prefix instead of failing all.
+    std::vector<BLPImage> partial;
+    TEST_ASSERT(DecodeBLPLevels(data.data(), l1off, partial));
+    TEST_ASSERT(partial.size() == 1);
+    // Garbage decodes to nothing.
+    std::vector<BLPImage> none;
+    TEST_ASSERT(!DecodeBLPLevels((const uint8_t*)"NOPE", 4, none));
+    TEST_ASSERT(none.empty());
+    return true;
+}
+
+static void PushDdsHeader(std::vector<uint8_t>& out, int w, int h, uint32_t mipCount) {
+    out.insert(out.end(), {'D', 'D', 'S', ' '});
+    auto le32 = [&](uint32_t v) {
+        out.push_back(v & 0xFF);
+        out.push_back((v >> 8) & 0xFF);
+        out.push_back((v >> 16) & 0xFF);
+        out.push_back((v >> 24) & 0xFF);
+    };
+    le32(124);          // size
+    le32(0x20007);      // flags: caps+height+width+mipmapcount
+    le32((uint32_t)h);  // height
+    le32((uint32_t)w);  // width
+    le32(0);            // pitch
+    le32(0);            // depth
+    le32(mipCount);     // mipMapCount
+    for (int i = 0; i < 11; i++) le32(0); // reserved1
+    le32(32);           // pf size
+    le32(0x04);         // pf flags: FOURCC
+    out.insert(out.end(), {'D', 'X', 'T', '1'});
+    le32(0);            // rgbBitCount
+    le32(0); le32(0); le32(0); le32(0); // masks
+    le32(0x1000);       // caps: texture
+    le32(0x400000);     // caps2: mipmap
+    le32(0); le32(0);   // caps3/4
+    le32(0);            // reserved2
+}
+
+bool TestDDSLevelsWalkAndTruncate() {
+    // 8x8 DXT1 base (4 blocks = 32B) + 4x4 mip (1 block = 8B).
+    std::vector<uint8_t> data;
+    PushDdsHeader(data, 8, 8, 2);
+    // One white DXT1 block (c0=white, c1=black, all indices 0).
+    const uint8_t white[8] = {0xFF, 0xFF, 0x00, 0x00, 0, 0, 0, 0};
+    for (int i = 0; i < 4; i++) data.insert(data.end(), white, white + 8);
+    data.insert(data.end(), white, white + 8); // mip block
+    TEST_ASSERT(data.size() == 128 + 32 + 8);
+
+    std::vector<DdsImage> levels;
+    TEST_ASSERT(DecodeDDSLevels(data.data(), data.size(), levels));
+    TEST_ASSERT(levels.size() == 2);
+    TEST_ASSERT(levels[0].width == 8 && levels[0].height == 8);
+    TEST_ASSERT(levels[1].width == 4 && levels[1].height == 4);
+    TEST_ASSERT(levels[0].pixels[0] == 255 && levels[0].pixels[3] == 255);
+    // Truncated mip keeps the base (old code would over-read here).
+    std::vector<DdsImage> partial;
+    TEST_ASSERT(DecodeDDSLevels(data.data(), 128 + 32, partial));
+    TEST_ASSERT(partial.size() == 1);
+    // Garbage and uncompressed layouts fail clean.
+    std::vector<DdsImage> none;
+    TEST_ASSERT(!DecodeDDSLevels((const uint8_t*)"NOPE....", 8, none));
+    std::vector<uint8_t> bad = data;
+    bad[84] = 'X'; // break FOURCC
+    std::vector<DdsImage> badOut;
+    TEST_ASSERT(!DecodeDDSLevels(bad.data(), bad.size(), badOut));
     return true;
 }

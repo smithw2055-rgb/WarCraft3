@@ -5,6 +5,7 @@
 #include "renderer.h"
 #include "asset/BLP.h"
 #include "asset/DDS.h"
+#include "asset/MipChain.h"
 #include "asset/stb_image.h"
 #include "replaceable_ids.h"
 #include <iostream>
@@ -23,30 +24,39 @@ static sg_image LoadTex(MpqManager* mpq, const std::string& path) {
     std::vector<uint8_t> data;
     if (!mpq->ReadFile(path, data)) return {0};
 
-    auto makeImg = [](int w, int h, const void* pixels, size_t size) -> sg_image {
-        sg_image_desc d = {};
-        d.type = SG_IMAGETYPE_2D; d.width = w; d.height = h;
-        d.pixel_format = SG_PIXELFORMAT_RGBA8;
-        d.num_mipmaps = 0;
-        d.data.mip_levels[0].ptr = pixels;
-        d.data.mip_levels[0].size = size;
-        sg_image tex = sg_make_image(&d);
-        if (sg_query_image_state(tex) != SG_RESOURCESTATE_VALID) tex = {0};
-        return tex;
+    // Full mip chain: particle samplers are mipmapped; a bare level 0 is
+    // an incomplete texture (black on strict drivers).
+    auto makeChained = [](int w, int h, const void* pixels,
+                          std::vector<MipLevel> embedded = {}) -> sg_image {
+        MipChain chain = BuildMipChain(w, h, (const uint8_t*)pixels, std::move(embedded));
+        return MakeChainedImage(chain);
+    };
+    auto toLevels = [](auto& decoded) {
+        std::vector<MipLevel> levels;
+        for (size_t i = 1; i < decoded.size(); ++i) {
+            MipLevel level;
+            level.width = decoded[i].width;
+            level.height = decoded[i].height;
+            level.pixels = decoded[i].pixels;
+            levels.push_back(std::move(level));
+        }
+        return levels;
     };
 
-    BLPImage img;
-    if (DecodeBLP(data.data(), data.size(), img))
-        return makeImg(img.width, img.height, img.pixels.data(), img.pixels.size());
+    std::vector<BLPImage> blpLevels;
+    if (DecodeBLPLevels(data.data(), data.size(), blpLevels) && !blpLevels.empty())
+        return makeChained(blpLevels[0].width, blpLevels[0].height,
+                           blpLevels[0].pixels.data(), toLevels(blpLevels));
 
-    DdsImage dds;
-    if (DecodeDDS(data.data(), data.size(), dds))
-        return makeImg(dds.width, dds.height, dds.pixels.data(), (size_t)dds.width * dds.height * 4);
+    std::vector<DdsImage> ddsLevels;
+    if (DecodeDDSLevels(data.data(), data.size(), ddsLevels) && !ddsLevels.empty())
+        return makeChained(ddsLevels[0].width, ddsLevels[0].height,
+                           ddsLevels[0].pixels.data(), toLevels(ddsLevels));
 
     int w, h, ch;
     stbi_uc* pixels = stbi_load_from_memory(data.data(), (int)data.size(), &w, &h, &ch, STBI_rgb_alpha);
     if (!pixels) return {0};
-    sg_image tex = makeImg(w, h, pixels, (size_t)(w * h * 4));
+    sg_image tex = makeChained(w, h, pixels);
     stbi_image_free(pixels);
     return tex;
 }

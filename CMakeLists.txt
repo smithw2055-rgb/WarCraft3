@@ -161,6 +161,7 @@ set(SOURCES
     src/asset/Texture.cpp
     src/asset/BLP.cpp
     src/asset/DDS.cpp
+    src/asset/MipChain.cpp
     src/asset/TileSet.cpp
     src/map/w3e.cpp
     src/map/w3x_storm.cpp

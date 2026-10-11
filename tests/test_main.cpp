@@ -20,6 +20,10 @@ bool TestW3ELoadRejectsBadMagic();
 bool TestDecodeBLPRejectsBadMagic();
 bool TestDecodeBLPDecodesMinimalPaletted();
 bool TestTgaDecodesViaStb();
+bool TestMipChainCountsAndDims();
+bool TestMipChainEmbeddedFallback();
+bool TestBLPLevelsWalkPalettedMips();
+bool TestDDSLevelsWalkAndTruncate();
 bool TestMdlFixtureParses();
 bool TestMdlRejectsGarbage();
 bool TestMdxTimelineSamplesLinearValues();
@@ -673,6 +677,10 @@ int main(int argc, char** argv) {
         {"BLP rejects invalid magic", TestDecodeBLPRejectsBadMagic},
         {"BLP decodes minimal paletted texture", TestDecodeBLPDecodesMinimalPaletted},
         {"TGA decodes via stb_image", TestTgaDecodesViaStb},
+        {"Mip chain counts and dims", TestMipChainCountsAndDims},
+        {"Mip chain embedded fallback", TestMipChainEmbeddedFallback},
+        {"BLP levels walk paletted mips", TestBLPLevelsWalkPalettedMips},
+        {"DDS levels walk and truncate", TestDDSLevelsWalkAndTruncate},
         {"MDL fixture parses", TestMdlFixtureParses},
         {"MDL rejects garbage", TestMdlRejectsGarbage},
         {"MDX timeline samples linear values", TestMdxTimelineSamplesLinearValues},

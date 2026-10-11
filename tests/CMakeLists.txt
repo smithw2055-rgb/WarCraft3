@@ -110,6 +110,7 @@ add_executable(warsmash_tests
     ../src/map/wts.cpp
     ../src/asset/BLP.cpp
     ../src/asset/DDS.cpp
+    ../src/asset/MipChain.cpp
     ../src/asset/Texture.cpp
     ../src/asset/stb_image.cpp
     ../src/core/map_path_resolver.cpp

@@ -21,3 +21,8 @@ struct BLPImage {
 };
 
 bool DecodeBLP(const uint8_t* data, size_t size, BLPImage& out, int mipLevel = 0);
+
+// Decodes every available level (0 = base) until the first failure, 1x1,
+// or 16 levels. Never throws; empty when even the base fails. Levels that
+// decode with unexpected dims are KEPT (callers validate per level).
+bool DecodeBLPLevels(const uint8_t* data, size_t size, std::vector<BLPImage>& out);

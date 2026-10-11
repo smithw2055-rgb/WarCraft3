@@ -6,6 +6,7 @@
 #include "mdx_viewer.h"
 #include "shapes.h"
 #include "asset/BLP.h"
+#include "asset/MipChain.h"
 #include "model/mdx.h"
 #include <map>
 #include <cmath>
@@ -23,27 +24,23 @@ static float RandomRange(float a, float b) {
     return a + (float(std::rand()) / float(RAND_MAX)) * (b - a);
 }
 
-static sg_image CreateSGImage(int w, int h, const uint8_t* pixels) {
-    sg_image_desc d = {};
-    d.type = SG_IMAGETYPE_2D;
-    d.width = w;
-    d.height = h;
-    d.pixel_format = SG_PIXELFORMAT_RGBA8;
-    d.num_mipmaps = 0;
-    d.data.mip_levels[0].ptr = pixels;
-    d.data.mip_levels[0].size = (size_t)(w * h * 4);
-    sg_image img = sg_make_image(&d);
-    if (sg_query_image_state(img) != SG_RESOURCESTATE_VALID) img = {0};
-    return img;
-}
-
 static sg_image LoadBLPTexture(MpqManager* mpq, const std::string& path) {
     if (path.empty()) return {0};
     std::vector<uint8_t> data;
     if (!mpq->ReadFile(path, data)) return {0};
-    BLPImage img;
-    if (!DecodeBLP(data.data(), data.size(), img)) return {0};
-    return CreateSGImage(img.width, img.height, img.pixels.data());
+    std::vector<BLPImage> levels;
+    if (!DecodeBLPLevels(data.data(), data.size(), levels) || levels.empty()) return {0};
+    std::vector<MipLevel> embedded;
+    for (size_t i = 1; i < levels.size(); ++i) {
+        MipLevel level;
+        level.width = levels[i].width;
+        level.height = levels[i].height;
+        level.pixels = levels[i].pixels;
+        embedded.push_back(std::move(level));
+    }
+    MipChain chain = BuildMipChain(levels[0].width, levels[0].height,
+                                   levels[0].pixels.data(), std::move(embedded));
+    return MakeChainedImage(chain);
 }
 
 sg_buffer WaveBuilder::particleVBO_ = {0};

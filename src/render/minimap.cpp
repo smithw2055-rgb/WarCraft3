@@ -3,6 +3,7 @@
 #include "textured_terrain.h"
 #include "asset/TileSet.h"
 #include "asset/BLP.h"
+#include "asset/MipChain.h"
 #include "asset/stb_image.h"
 #include "map/w3e.h"
 #include "map/w3i.h"
@@ -60,14 +61,20 @@ static bool UploadTexture(sg_image& texture, sg_view& textureView, int width, in
         textureView = {0};
     }
 
+    // Full generated chain: the minimap sampler is mipmapped (zoomed-out
+    // overviews minify aggressively); a bare level 0 is incomplete.
+    MipChain chain = BuildMipChain(width, height, pixels.data());
+    if (chain.levels.empty()) return false;
     sg_image_desc imgd = {};
     imgd.type = SG_IMAGETYPE_2D;
     imgd.width = width;
     imgd.height = height;
     imgd.pixel_format = SG_PIXELFORMAT_RGBA8;
-    imgd.num_mipmaps = 1;
-    imgd.data.mip_levels[0].ptr = pixels.data();
-    imgd.data.mip_levels[0].size = pixels.size();
+    imgd.num_mipmaps = (int)chain.levels.size();
+    for (size_t i = 0; i < chain.levels.size() && i < SG_MAX_MIPMAPS; ++i) {
+        imgd.data.mip_levels[i].ptr = chain.levels[i].pixels.data();
+        imgd.data.mip_levels[i].size = chain.levels[i].pixels.size();
+    }
     texture = sg_make_image(&imgd);
     if (!texture.id) return false;
 

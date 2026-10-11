@@ -85,29 +85,29 @@ static void DownsampleMip(const uint8_t* src, int sw, int sh, uint8_t* dst, int 
     }
 }
 
-static sg_image CreateTextureArray(int tileSize, int numTiles, const std::vector<uint8_t>& allTileData) {
+static sg_image CreateTextureArray(int tileW, int tileH, int numTiles, const std::vector<uint8_t>& allTileData) {
     if (allTileData.empty()) return {0};
 
     // Compute mip levels
     int numMips = 1;
-    int mw = tileSize, mh = tileSize;
+    int mw = tileW, mh = tileH;
     while (mw > 1 || mh > 1) { mw = std::max(mw / 2, 1); mh = std::max(mh / 2, 1); numMips++; }
 
     // Build all mip levels
     std::vector<std::vector<uint8_t>> mipData(numMips);
     mipData[0] = allTileData;
-    mw = tileSize; mh = tileSize;
+    mw = tileW; mh = tileH;
     for (int m = 1; m < numMips; ++m) {
         int pw = std::max(mw / 2, 1), ph = std::max(mh / 2, 1);
-        mipData[m].resize(pw * ph * 4 * numTiles);
+        mipData[m].resize((size_t)pw * ph * 4 * numTiles);
         DownsampleMip(mipData[m-1].data(), mw, mh, mipData[m].data(), pw, ph, numTiles);
         mw = pw; mh = ph;
     }
 
     sg_image_desc desc = {};
     desc.type = SG_IMAGETYPE_ARRAY;
-    desc.width = tileSize;
-    desc.height = tileSize;
+    desc.width = tileW;
+    desc.height = tileH;
     desc.num_slices = numTiles;
     desc.pixel_format = SG_PIXELFORMAT_RGBA8;
     desc.num_mipmaps = numMips;
@@ -158,7 +158,7 @@ static void CreateGroundTextureArray(GroundTextureTile& gt, const DecodedTerrain
         }
     }
 
-    gt.glTexture = CreateTextureArray(tileSize, numTiles, tileData);
+    gt.glTexture = CreateTextureArray(tileSize, tileSize, numTiles, tileData);
     // Save first layer pixel data for combined texture
     gt.firstLayerData.resize(tileSize * tileSize * 4);
     memcpy(gt.firstLayerData.data(), tileData.data(), tileSize * tileSize * 4);
@@ -215,7 +215,7 @@ static bool LoadCliffTextureArray(CliffTextureInfo& cliff, const MpqManager& mpq
         std::vector<uint8_t> tileData(tileSize * tileSize * 4);
         std::memcpy(tileData.data(), img.pixels.data(), tileSize * tileSize * 4);
 
-        cliff.glTexture = CreateTextureArray(tileSize, 1, tileData);
+        cliff.glTexture = CreateTextureArray(tileSize, tileSize, 1, tileData);
         cliff.sourceFormat = img.sourceFormat;
         cliff.needsSRGBFix = img.needsSRGBFix;
         return true;
@@ -328,7 +328,7 @@ bool TileSet::LoadFromWorldEditData(const MpqManager& mpq, char tileset, int pal
     gt.tileSize = 64;
     gt.tileCount = 1;
     std::vector<uint8_t> data(64 * 64 * 4, 128);
-    gt.glTexture = CreateTextureArray(64, 1, data);
+    gt.glTexture = CreateTextureArray(64, 64, 1, data);
     tiles_.push_back(gt);
     paletteToTex_.push_back(0);
     std::cout << "TileSet: worldedit fallback, 1 tile" << std::endl;
@@ -462,7 +462,7 @@ bool TileSet::LoadCliffTextures(const MpqManager& mpq, const W3EMap& w3e) {
             }
         }
 
-        cliffTextureArray_ = CreateTextureArray(arraySize, maxPalette, arrayData);
+        cliffTextureArray_ = CreateTextureArray(arraySize, arraySize, maxPalette, arrayData);
         if (sg_query_image_state(cliffTextureArray_) == SG_RESOURCESTATE_VALID) {
             sg_view_desc vd = {};
             vd.texture.image = cliffTextureArray_;
@@ -634,13 +634,9 @@ bool TileSet::LoadWaterTextures(const MpqManager& mpq) {
         }
     }
 
-    sg_image_desc desc = {};
-    desc.type = SG_IMAGETYPE_ARRAY;
-    desc.width = tw; desc.height = th; desc.num_slices = numFrames;
-    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    desc.data.mip_levels[0].ptr = allPixels.data();
-    desc.data.mip_levels[0].size = allPixels.size();
-    waterTextureArray_ = sg_make_image(&desc);
+    // Full chained upload (was a bare level 0: incomplete under a
+    // mipmapped sampler). Frames share tw/th (checked above per frame).
+    waterTextureArray_ = CreateTextureArray(tw, th, numFrames, allPixels);
     waterTextureCount_ = numFrames;
 
     if (sg_query_image_state(waterTextureArray_) != SG_RESOURCESTATE_VALID) {

@@ -1,4 +1,5 @@
 #include "DDS.h"
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 
@@ -114,15 +115,20 @@ static void DecodeDXT(const uint8_t* data, int w, int h, uint8_t* out, bool dxt5
 }
 
 bool DecodeDDS(const uint8_t* data, size_t size, DdsImage& out) {
-    if (size < 128 || *(uint32_t*)data != DDS_MAGIC) return false;
+    std::vector<DdsImage> levels;
+    if (!DecodeDDSLevels(data, size, levels) || levels.empty()) return false;
+    out = std::move(levels[0]);
+    return true;
+}
+
+bool DecodeDDSLevels(const uint8_t* data, size_t size, std::vector<DdsImage>& out) {
+    out.clear();
+    if (!data || size < 128 || *(const uint32_t*)data != DDS_MAGIC) return false;
 
     const DDSHeader* hdr = (const DDSHeader*)(data + 4);
-    out.width = (int)hdr->width;
-    out.height = (int)hdr->height;
-    out.pixels.resize((size_t)out.width * out.height * 4);
-
-    const uint8_t* pixelData = data + sizeof(uint32_t) + sizeof(DDSHeader);
-    size_t pixelSize = size - sizeof(uint32_t) - sizeof(DDSHeader);
+    int width = (int)hdr->width;
+    int height = (int)hdr->height;
+    if (width <= 0 || height <= 0 || width > 4096 || height > 4096) return false;
 
     // Check FourCC for DXT format
     bool dxt1 = false, dxt3 = false, dxt5 = false;
@@ -133,11 +139,28 @@ bool DecodeDDS(const uint8_t* data, size_t size, DdsImage& out) {
         dxt3 = (strcmp(cc, "DXT3") == 0);
         dxt5 = (strcmp(cc, "DXT5") == 0);
     }
+    if (!dxt1 && !dxt3 && !dxt5) return false;
 
-    if (dxt1 || dxt3 || dxt5)
-        DecodeDXT(pixelData, out.width, out.height, out.pixels.data(), dxt5, dxt3);
-    else
-        return false;
+    uint32_t mipCount = hdr->mipMapCount;
+    if (mipCount == 0) mipCount = 1;
+    if (mipCount > 16) mipCount = 16;
 
-    return true;
+    const int blockSize = (dxt5 || dxt3) ? 16 : 8;
+    size_t offset = sizeof(uint32_t) + sizeof(DDSHeader);
+    int w = width, h = height;
+    for (uint32_t level = 0; level < mipCount; ++level) {
+        const size_t levelBytes = (size_t)((w + 3) / 4) * ((h + 3) / 4) * blockSize;
+        if (offset + levelBytes > size) break; // truncated: keep good prefix
+        DdsImage img;
+        img.width = w;
+        img.height = h;
+        img.pixels.resize((size_t)w * h * 4);
+        DecodeDXT(data + offset, w, h, img.pixels.data(), dxt5, dxt3);
+        out.push_back(std::move(img));
+        if (w <= 1 && h <= 1) break;
+        offset += levelBytes;
+        w = std::max(w / 2, 1);
+        h = std::max(h / 2, 1);
+    }
+    return !out.empty();
 }
