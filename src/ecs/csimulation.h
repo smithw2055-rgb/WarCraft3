@@ -332,6 +332,11 @@ public:
         heroRevivedCallback_ = std::move(cb);
     }
     const std::function<void(int, int)>& GetHeroRevivedCallback() const { return heroRevivedCallback_; }
+    // Spell lifecycle (caster handle, stage 0=channel 1=cast 2=effect 3=finish 4=endcast).
+    void SetSpellEventCallback(std::function<void(int casterHandle, int stage)> cb) {
+        spellEventCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int)>& GetSpellEventCallback() const { return spellEventCallback_; }
 
 private:
     void ProcessUnitRemovals();
@@ -421,4 +426,5 @@ private:
     std::function<void(int, int)> unitSummonedCallback_;
     std::function<void(int, int)> researchFinishedCallback_;
     std::function<void(int, int)> heroRevivedCallback_;
+    std::function<void(int, int)> spellEventCallback_;
 };

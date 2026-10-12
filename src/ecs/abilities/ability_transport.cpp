@@ -2,6 +2,7 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/behaviors/behavior_board_transport.h"
+#include "data/abilitydata.h"
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -67,14 +68,16 @@ bool CAbilityUnload::CheckCanTargetPoint(CSimulation& game, CUnit* unit, int ord
 }
 
 CBehavior* CAbilityUnload::Begin(CSimulation& game, CUnit* caster, int orderId, float x, float y) {
-    (void)game; (void)orderId;
-    // Unload all units around the point on a small ring so they don't stack.
-    std::vector<CUnit*> cargo = caster->GetCargoUnits();
-    const float step = 2.0f * 3.14159265f / (float)std::max<size_t>(1, cargo.size());
-    for (size_t i = 0; i < cargo.size(); i++) {
-        const float a = step * (float)i;
-        caster->UnloadUnitAt(cargo[i], x + 48.0f * std::cos(a), y + 48.0f * std::sin(a));
+    (void)orderId;
+    if (caster->GetCargoUnits().empty()) return nullptr;
+    // Timed unload, one passenger per duration interval (ref
+    // CBehaviorDrop). Duration from ability data, 0.5s fallback.
+    float duration = 0.5f;
+    if (CAbilityData* data = game.GetAbilityData()) {
+        if (const CAbilityDefFull* def = data->GetAbility(GetAlias())) {
+            duration = def->DurationAt(1);
+            if (duration <= 0) duration = 0.5f;
+        }
     }
-    std::cout << "Unloaded " << cargo.size() << " units at (" << x << ", " << y << ")" << std::endl;
-    return nullptr; // instant action
+    return new CBehaviorDrop(x, y, duration);
 }

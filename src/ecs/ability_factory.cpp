@@ -14,6 +14,7 @@
 #include "ecs/abilities/ability_sell_items.h"
 #include "ecs/abilities/ability_repair.h"
 #include "ecs/abilities/ability_transport.h"
+#include "ecs/abilities/ability_generic.h"
 #include "ecs/abilities/ability_root.h"
 #include "ecs/abilities/spells.h"
 #include "ecs/abilities/spells2.h"
@@ -490,8 +491,10 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
     if (code == War3ID("AEah")) return std::make_unique<CAbilityThornsAura>(handleId);
     if (code == War3ID("AEar")) return std::make_unique<CAbilityTrueshotAura>(handleId);
 
-    // Unknown ability
-    return nullptr;
+    // Unknown ability: generic do-nothing placeholder (ref
+    // CAbilityGenericDoNothing) so the rawcode stays on the unit instead
+    // of being silently dropped. Rejects all orders.
+    return std::make_unique<CAbilityGenericDoNothing>(handleId, code);
 }
 
 void AbilityFactory::AddDefaultAbilities(CSimulation& game, CUnit* unit,
@@ -500,21 +503,13 @@ void AbilityFactory::AddDefaultAbilities(CSimulation& game, CUnit* unit,
     // Aatk/Amov are wired by CSimulation::createUnit paths; everything else
     // from the unit type's ability list must be instantiated here (ref
     // CSimulation.createUnit → abilityFactory.createAbility). Unknown codes
-    // return nullptr from CreateAbility and are skipped (logged once).
-    bool loggedUnknown = false;
+    // get a CAbilityGenericDoNothing placeholder (never nullptr).
     for (auto& code : abilityList) {
         if (code == War3ID("Aatk") || code == War3ID("Amov")) continue;
         if (unit->GetAbility(code)) continue;
         std::unique_ptr<CAbility> ability =
             CreateAbility(game.AllocateHandleId(), code);
-        if (!ability) {
-            if (!loggedUnknown) {
-                std::cerr << "AbilityFactory: no implementation for " << code.ToString()
-                          << " (skipped)" << std::endl;
-                loggedUnknown = true;
-            }
-            continue;
-        }
+        if (!ability) continue;
         unit->AddAbility(game, std::move(ability));
     }
 }

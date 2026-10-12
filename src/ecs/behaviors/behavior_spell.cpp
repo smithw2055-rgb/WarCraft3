@@ -169,6 +169,10 @@ bool CBehaviorSpell::Update(CSimulation& simulation) {
             castTimer_ = 0;
             spellAnimationStartTick_ = simulation.GetGameTurnTick();
             spellAnimationDuration_ = std::max(0.05f, castPoint_ + backswingDuration_);
+            if (auto& cb = simulation.GetSpellEventCallback()) {
+                cb(unit_->GetHandleId(), 0); // channel
+                cb(unit_->GetHandleId(), 1); // cast
+            }
             return false;
         }
 
@@ -194,6 +198,9 @@ bool CBehaviorSpell::Update(CSimulation& simulation) {
                     } else {
                         spellAbility_->DoEffect(simulation, unit_);
                     }
+                    if (auto& cb = simulation.GetSpellEventCallback()) {
+                        cb(unit_->GetHandleId(), 2); // effect
+                    }
                 }
                 state_ = CastState::BACKSWING;
                 backswingTimer_ = 0;
@@ -206,6 +213,10 @@ bool CBehaviorSpell::Update(CSimulation& simulation) {
             backswingTimer_ += dt;
             if (backswingTimer_ >= backswingDuration_) {
                 state_ = CastState::DONE;
+                if (auto& cb = simulation.GetSpellEventCallback()) {
+                    cb(unit_->GetHandleId(), 3); // finish
+                    cb(unit_->GetHandleId(), 4); // endcast
+                }
                 return true;
             }
             return false;

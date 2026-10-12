@@ -310,6 +310,7 @@ set(SOURCES
     src/audio/AudioSystem.cpp
     src/audio/UnitSoundset.cpp
     src/audio/AckSoundBank.cpp
+    src/audio/KeyedSounds.cpp
     src/audio/MidiFile.cpp
     src/audio/MidiSynth.cpp
     # ===== UI (retail FDF stack; no proprietary SDK) =====

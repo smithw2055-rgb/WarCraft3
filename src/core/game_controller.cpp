@@ -2418,6 +2418,14 @@ void GameController::WireJassCallbacks() {
             }
         }
     );
+
+    simulation_.SetSpellEventCallback(
+        [this](int casterHandle, int stage) {
+            if (jassNatives_) {
+                jassNatives_->FireSpellEvent(casterHandle, stage);
+            }
+        }
+    );
 }
 
 // --- Update ---

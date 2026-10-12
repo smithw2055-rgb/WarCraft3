@@ -316,4 +316,10 @@ void JassCommonEnv::WireCallbacks(CSimulation& sim) {
                 natives_->FireReviveEvent(reviverHandle, revivedHandle);
         }
     );
+    sim.SetSpellEventCallback(
+        [this](int casterHandle, int stage) {
+            if (natives_)
+                natives_->FireSpellEvent(casterHandle, stage);
+        }
+    );
 }

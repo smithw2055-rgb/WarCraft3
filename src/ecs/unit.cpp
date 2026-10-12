@@ -2,6 +2,8 @@
 #include "csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/abilities/ability_spell_base.h"
+#include "ecs/abilities/ability_transport.h"
+#include "ecs/abilities/spells28.h"
 #include "data/abilitydata.h"
 #include "ecs/abilities/spells4.h"
 #include "ecs/abilities/spells5.h"
@@ -307,6 +309,28 @@ void CUnit::AddAbility(CSimulation& game, std::unique_ptr<CAbility> ability) {
         if (CAbilityData* data = game.GetAbilityData()) {
             if (const CAbilityDefFull* def = data->GetAbility(spell->GetAlias())) {
                 spell->ApplyData(*def);
+            }
+        }
+    }
+    // Cargo capacity from data (ref CAbilityTypeDefinitionCargoHold:
+    // DATA_A = capacity). Load range mirrors the ability Range.
+    if (CAbilityData* data = game.GetAbilityData()) {
+        if (const CAbilityDefFull* def = data->GetAbility(rawPtr->GetAlias())) {
+            if (auto* cargo = dynamic_cast<CAbilityCargoHold*>(rawPtr)) {
+                const int cap = def->DataIntAt(1, 0, cargo->GetCapacity());
+                cargo->SetCapacity(cap);
+            }
+            if (auto* load = dynamic_cast<CAbilityLoad*>(rawPtr)) {
+                const float range = def->RangeAt(1);
+                if (range > 0) load->SetLoadRange(range);
+                // Mirror the holder's CargoHold capacity so Load gating
+                // matches the data-driven hold (default 8 covers ships
+                // when data is absent).
+                if (auto* hold = GetAbility(War3ID("Acar"))) {
+                    if (auto* h = dynamic_cast<CAbilityCargoHold*>(hold)) {
+                        load->SetCargoCapacity(h->GetCapacity());
+                    }
+                }
             }
         }
     }

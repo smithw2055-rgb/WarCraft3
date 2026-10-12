@@ -6,6 +6,7 @@
 #include "ecs/behaviors/behavior_patrol.h"
 #include "ecs/behaviors/behavior_hold_position.h"
 #include "ecs/behaviors/behavior_stop.h"
+#include "ecs/behaviors/behavior_board_transport.h"
 
 CAbilityMove::CAbilityMove(int handleId)
     : CAbility(handleId, War3ID("Amov"), CAbilityCategory::MOVEMENT) {
@@ -70,8 +71,24 @@ bool CAbilityMove::CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int or
 }
 
 CBehavior* CAbilityMove::Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) {
-    (void)game; (void)orderId;
+    (void)game;
     if (!target) return nullptr;
+
+    // SMART right-click boarding: passenger walks to a friendly transport
+    // with cargo space (ref CBehaviorLoad passenger perspective).
+    if (orderId == OrderIds::SMART) {
+        if (auto* transport = dynamic_cast<CUnit*>(target)) {
+            if (transport != caster && !transport->IsDead() && !caster->IsBuilding() &&
+                !caster->IsLoadedAboard() &&
+                transport->GetPlayerIndex() == caster->GetPlayerIndex() &&
+                (transport->GetAbility(War3ID("Aloa")) || transport->GetAbility(War3ID("Acar")) ||
+                 transport->GetAbility(War3ID("Abun")) || transport->GetAbility(War3ID("Aenc")))) {
+                auto* load = new CBehaviorLoad(256.0f);
+                load->SetTarget(transport);
+                return load;
+            }
+        }
+    }
 
     // Follow the target widget
     auto* followBehavior = caster->GetFollowBehavior();

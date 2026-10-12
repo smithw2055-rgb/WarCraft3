@@ -1319,6 +1319,24 @@ void JassNatives::FireReviveEvent(int reviverSimHandle, int revivedSimHandle) {
     data_->eventRevivingUnitHandle = -1;
 }
 
+void JassNatives::FireSpellEvent(int casterSimHandle, int stage) {
+    if (casterSimHandle < 0) return;
+    // stage: 0=channel 1=cast 2=effect 3=finish 4=endcast (ref
+    // EVENT_UNIT_SPELL_* 289-293 + player counterparts 272-276).
+    static const int kUnit[5] = {
+        JASS_EVENT_UNIT_SPELL_CHANNEL, JASS_EVENT_UNIT_SPELL_CAST,
+        JASS_EVENT_UNIT_SPELL_EFFECT, JASS_EVENT_UNIT_SPELL_FINISH,
+        JASS_EVENT_UNIT_SPELL_ENDCAST,
+    };
+    static const int kPlayer[5] = {
+        JASS_EVENT_PLAYER_UNIT_SPELL_CHANNEL, JASS_EVENT_PLAYER_UNIT_SPELL_CAST,
+        JASS_EVENT_PLAYER_UNIT_SPELL_EFFECT, JASS_EVENT_PLAYER_UNIT_SPELL_FINISH,
+        JASS_EVENT_PLAYER_UNIT_SPELL_ENDCAST,
+    };
+    if (stage < 0 || stage > 4) return;
+    FireUnitEvent(casterSimHandle, kUnit[stage], kPlayer[stage]);
+}
+
 int JassNatives::UpdateTimers(float dt) {
     int firedCount = 0;
     const size_t sleepingCount = sleepingThreads_.size();

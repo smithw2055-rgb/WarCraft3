@@ -144,6 +144,7 @@ public:
     bool TryLoad(CUnit* holder, CUnit* passenger);
     void UnloadAll(CUnit* holder);
     int GetCapacity() const { return capacity_; }
+    void SetCapacity(int v) { if (v > 0) capacity_ = v; }
     bool IsBurrow() const { return burrow_; }
 
 private:
