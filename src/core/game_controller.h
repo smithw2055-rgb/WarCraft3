@@ -29,6 +29,7 @@
 #include "../data/gameplay_constants.h"
 #include "../ui/MainUI.h"
 #include "../audio/AudioSystem.h"
+#include "../audio/KeyedSounds.h"
 #include "../scripting/JassVM.h"
 #include "../scripting/JassNatives.h"
 #include "../scripting/jass_config_env.h"
@@ -411,6 +412,10 @@ private:
 
     // Audio
     AudioSystem audio_;
+    KeyedSounds uiSounds_;
+    // Play a keyed UI sound (UISounds.slk) with fallback to the preloaded
+    // ui_click/ui_error samples when the table is missing.
+    int PlayUiSound(const std::string& key, float volume = 0.5f);
 
     // UI
     MainUI ui_;

@@ -1401,6 +1401,7 @@ bool GameController::Initialize() {
         audio_.SetMpqManager(&mpq_);
         audio_.LoadSound("ui_click", "UI\\Mouse\\HumanClick1.wav", &mpq_);
         audio_.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &mpq_);
+        uiSounds_.LoadFromMpq(mpq_);
     }
 
     if (!hideHud_) {
@@ -1550,6 +1551,7 @@ bool GameController::StartPendingGlueMapLaunch(int screenW, int screenH) {
         audio_.SetMpqManager(&mpq_);
         audio_.LoadSound("ui_click", "UI\\Mouse\\HumanClick1.wav", &mpq_);
         audio_.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &mpq_);
+        uiSounds_.LoadFromMpq(mpq_);
     }
 
     hideHud_ = false;
@@ -3998,7 +4000,7 @@ CUnit* GameController::PickUnitNearWorldPoint(float worldX, float worldY, float 
 void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
         const int multiSelectHandle = ui_.HitMultiSelection(ev->mouse_x, ev->mouse_y);
         if (multiSelectHandle >= 0 && selectedUnitHandlesSet_.find(multiSelectHandle) != selectedUnitHandlesSet_.end()) {
-            if (audio_.IsValid() && frameCount_ > 10) audio_.Play2D("ui_click", 0.5f);
+            PlayUiSound("Click", 0.5f);
             SetSelectedUnits(GetSelectedSimulationUnits(), multiSelectHandle, true);
             std::cout << "MultiSelectIcon: primary handle=" << multiSelectHandle
                       << " count=" << selectedUnitHandles_.size() << std::endl;
@@ -4261,7 +4263,7 @@ void GameController::OnMouseUp(const sapp_event* ev) {
                 CUnit* bestUnit = PickSimulationUnitAtScreenPoint(ev->mouse_x, ev->mouse_y,
                     view, proj, winW, winH, -1, false, true);
                 if (bestUnit) {
-                    if (audio_.IsValid() && frameCount_ > 10) audio_.Play2D("ui_click", 0.5f);
+                    PlayUiSound("Click", 0.5f);
                     SelectSingleUnit(bestUnit, additive);
                     std::cout << "SelectedUnit: "
                               << unit_text_utils::DescribeUnitType(bestUnit->GetTypeId(), unitData_)
@@ -4760,6 +4762,15 @@ void GameController::SyncMusic() {
         audio_.SetMusicVolume(wantVolume);
         musicSyncedVolume_ = wantVolume;
     }
+}
+
+int GameController::PlayUiSound(const std::string& key, float volume) {
+    if (!audio_.IsValid() || frameCount_ <= 10) return -1;
+    const int id = uiSounds_.Play(&audio_, &mpq_, key, volume);
+    if (id >= 0) return id;
+    // Fallback to the preloaded generic click/error samples.
+    if (key == "Error") return audio_.Play2D("ui_error", volume);
+    return audio_.Play2D("ui_click", volume);
 }
 
 void GameController::MaybeLogAIStatus() {
