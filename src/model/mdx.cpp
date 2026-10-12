@@ -68,6 +68,13 @@ static constexpr uint32_t TAG_KP2V = MAKE_TAG('K','P','2','V');
 static constexpr uint32_t TAG_KCTR = MAKE_TAG('K','C','T','R');
 static constexpr uint32_t TAG_KTTR = MAKE_TAG('K','T','T','R');
 static constexpr uint32_t TAG_KCRL = MAKE_TAG('K','C','R','L');
+static constexpr uint32_t TAG_KLAS = MAKE_TAG('K','L','A','S');
+static constexpr uint32_t TAG_KLAE = MAKE_TAG('K','L','A','E');
+static constexpr uint32_t TAG_KLAC = MAKE_TAG('K','L','A','C');
+static constexpr uint32_t TAG_KLAI = MAKE_TAG('K','L','A','I');
+static constexpr uint32_t TAG_KLBI = MAKE_TAG('K','L','B','I');
+static constexpr uint32_t TAG_KLBC = MAKE_TAG('K','L','B','C');
+static constexpr uint32_t TAG_KLAV = MAKE_TAG('K','L','A','V');
 
 struct MdxReader {
     const uint8_t* d;
@@ -1417,6 +1424,81 @@ bool MdxSampleCamera(const MdxCamera& camera,
             if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, &sampled, 1,
                                           0.0f, sequenceIndex)) {
                 out.roll = sampled;
+                sampledAny = true;
+            }
+        }
+    }
+    return sampledAny;
+}
+
+bool MdxSampleLight(const MdxLight& light,
+                    const MdxModel* model,
+                    uint32_t frame,
+                    float elapsedMs,
+                    MdxLightSample& out,
+                    int sequenceIndex) {
+    out.attenuationStart = light.attenuationStart;
+    out.attenuationEnd = light.attenuationEnd;
+    out.color[0] = light.color[0];
+    out.color[1] = light.color[1];
+    out.color[2] = light.color[2];
+    out.intensity = light.intensity;
+    out.ambientIntensity = light.ambientIntensity;
+    out.ambientColor[0] = light.ambientColor[0];
+    out.ambientColor[1] = light.ambientColor[1];
+    out.ambientColor[2] = light.ambientColor[2];
+    out.visibility = 1.0f;
+
+    bool sampledAny = false;
+    for (const MdxTimeline& timeline : light.timelines) {
+        const uint32_t tag = timeline.tag;
+        if (tag == TAG_KLAS) {
+            float v = out.attenuationStart;
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, &v, 1,
+                                          out.attenuationStart, sequenceIndex)) {
+                out.attenuationStart = v;
+                sampledAny = true;
+            }
+        } else if (tag == TAG_KLAE) {
+            float v = out.attenuationEnd;
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, &v, 1,
+                                          out.attenuationEnd, sequenceIndex)) {
+                out.attenuationEnd = v;
+                sampledAny = true;
+            }
+        } else if (tag == TAG_KLAC) {
+            float bgr[3] = {out.color[2], out.color[1], out.color[0]};
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, bgr, 3,
+                                          0.0f, sequenceIndex)) {
+                MdxConvertAnimatedColorBgrToRgb(bgr, out.color);
+                sampledAny = true;
+            }
+        } else if (tag == TAG_KLAI) {
+            float v = out.intensity;
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, &v, 1,
+                                          out.intensity, sequenceIndex)) {
+                out.intensity = v;
+                sampledAny = true;
+            }
+        } else if (tag == TAG_KLBI) {
+            float v = out.ambientIntensity;
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, &v, 1,
+                                          out.ambientIntensity, sequenceIndex)) {
+                out.ambientIntensity = v;
+                sampledAny = true;
+            }
+        } else if (tag == TAG_KLBC) {
+            float bgr[3] = {out.ambientColor[2], out.ambientColor[1], out.ambientColor[0]};
+            if (MdxSampleTimelineForModel(timeline, model, frame, elapsedMs, bgr, 3,
+                                          0.0f, sequenceIndex)) {
+                MdxConvertAnimatedColorBgrToRgb(bgr, out.ambientColor);
+                sampledAny = true;
+            }
+        } else if (tag == TAG_KLAV) {
+            float v = out.visibility;
+            if (MdxSampleSteppedScalarTimelineForModel(timeline, model, frame, elapsedMs,
+                                                       v, 1.0f, sequenceIndex)) {
+                out.visibility = v;
                 sampledAny = true;
             }
         }

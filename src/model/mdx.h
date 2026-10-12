@@ -378,6 +378,25 @@ bool MdxSampleCamera(const MdxCamera& camera,
                      MdxCameraSample& out,
                      int sequenceIndex = -1);
 
+struct MdxLightSample {
+    float attenuationStart = 0.0f;
+    float attenuationEnd = 0.0f;
+    float color[3] = {1, 1, 1};
+    float intensity = 1.0f;
+    float ambientIntensity = 0.0f;
+    float ambientColor[3] = {0, 0, 0};
+    float visibility = 1.0f;
+};
+
+// Animated light timelines (KLAS/KLAE/KLAC/KLAI/KLBI/KLBC/KLAV).
+// Ref Java handlers/mdx/LightInstance.bind per-frame sampling.
+bool MdxSampleLight(const MdxLight& light,
+                    const MdxModel* model,
+                    uint32_t frame,
+                    float elapsedMs,
+                    MdxLightSample& out,
+                    int sequenceIndex = -1);
+
 // Geoset animation color timelines (KGAC) are stored as BGR; convert them for
 // renderer-facing RGB color uniforms.
 void MdxConvertAnimatedColorBgrToRgb(const float bgr[3], float rgb[3]);
