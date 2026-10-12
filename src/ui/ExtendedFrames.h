@@ -9,6 +9,8 @@
 // layout/render paths keep working while parity improves.
 #include "SimpleFrame.h"
 #include "ButtonFrame.h"
+#include <algorithm>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -53,14 +55,38 @@ public:
     const std::string& GetText() const { return text_; }
     void SetText(const std::string& t) { text_ = t; cursor_ = (int)text_.size(); }
     int GetCursor() const { return cursor_; }
-    void SetCursor(int c) { cursor_ = c; }
+    void SetCursor(int c) { cursor_ = std::clamp(c, 0, (int)text_.size()); }
     int GetMaxLength() const { return maxLength_; }
     void SetMaxLength(int n) { maxLength_ = n; }
+    bool IsFocused() const { return focused_; }
+    // Keyboard input API (ref EditBoxFrame): filters control chars,
+    // respects max length, Backspace via AppendChar('\b').
+    bool AppendChar(char c) {
+        if (c == '\b') {
+            if (cursor_ > 0 && !text_.empty()) {
+                text_.erase((size_t)(cursor_ - 1), 1);
+                cursor_--;
+            }
+            return true;
+        }
+        if (c < 32 || c > 126) return false;
+        if ((int)text_.size() >= maxLength_) return false;
+        text_.insert((size_t)cursor_, 1, c);
+        cursor_++;
+        return true;
+    }
+    void MoveCursor(int delta) { SetCursor(cursor_ + delta); }
+
+    UIFrame* OnMouseDown(float sx, float sy, int btn) override {
+        if (btn == 0) focused_ = true;
+        return SimpleFrame::OnMouseDown(sx, sy, btn);
+    }
 
 private:
     std::string text_;
     int cursor_ = 0;
     int maxLength_ = 256;
+    bool focused_ = false;
 };
 
 class ListBoxFrame : public SimpleFrame {
@@ -68,15 +94,35 @@ public:
     ListBoxFrame(const std::string& name, UIFrame* parent = nullptr)
         : SimpleFrame(name, parent) {}
     void AddItem(const std::string& s) { items_.push_back(s); }
-    void ClearItems() { items_.clear(); selected_ = -1; }
+    void ClearItems() { items_.clear(); selected_ = -1; scrollOffset_ = 0; }
     int GetSelected() const { return selected_; }
     void SetSelected(int i) { selected_ = i; }
     size_t GetCount() const { return items_.size(); }
     const std::string& GetItem(size_t i) const { return items_.at(i); }
+    void SetItemHeight(float h) { itemHeight_ = h; }
+    int GetScrollOffset() const { return scrollOffset_; }
+    void SetScrollOffset(int off) {
+        scrollOffset_ = std::max(0, std::min(off, (int)items_.size() - 1));
+    }
+
+    UIFrame* OnMouseDown(float sx, float sy, int btn) override {
+        if (btn == 0) {
+            // Click selects the row under the cursor (ref ListBoxFrame).
+            const float relY = sy - GetFrameY(FramePoint::TOPLEFT);
+            const int row = itemHeight_ > 0 ? (int)(relY / itemHeight_) : -1;
+            if (row >= 0) {
+                const int idx = scrollOffset_ + row;
+                if (idx >= 0 && idx < (int)items_.size()) selected_ = idx;
+            }
+        }
+        return SimpleFrame::OnMouseDown(sx, sy, btn);
+    }
 
 private:
     std::vector<std::string> items_;
     int selected_ = -1;
+    int scrollOffset_ = 0;
+    float itemHeight_ = 16.0f;
 };
 
 class ScrollBarFrame : public SimpleFrame {
@@ -84,15 +130,45 @@ public:
     ScrollBarFrame(const std::string& name, UIFrame* parent = nullptr)
         : SimpleFrame(name, parent) {}
     float GetValue() const { return value_; }
-    void SetValue(float v) { value_ = v; }
+    void SetValue(float v) {
+        value_ = std::clamp(v, min_, max_);
+        if (callback_) callback_(value_);
+    }
     float GetMin() const { return min_; }
     float GetMax() const { return max_; }
     void SetRange(float lo, float hi) { min_ = lo; max_ = hi; }
+    using ValueCallback = std::function<void(float)>;
+    void SetCallback(ValueCallback cb) { callback_ = std::move(cb); }
+    // Bidirectional ListBox binding (ref ListBox+ScrollBar linkage).
+    void BindListBox(ListBoxFrame* list) { boundList_ = list; }
+
+    UIFrame* OnMouseDown(float sx, float sy, int btn) override {
+        if (btn == 0 && max_ > min_) {
+            dragging_ = true;
+            DragTo(sy);
+        }
+        return SimpleFrame::OnMouseDown(sx, sy, btn);
+    }
+    UIFrame* OnMouseUp(float sx, float sy, int btn) override {
+        dragging_ = false;
+        return SimpleFrame::OnMouseUp(sx, sy, btn);
+    }
 
 private:
+    void DragTo(float sy) {
+        const float top = GetFrameY(FramePoint::TOPLEFT);
+        const float h = GetHeight();
+        const float t = h > 0 ? std::clamp((sy - top) / h, 0.0f, 1.0f) : 0.0f;
+        SetValue(min_ + t * (max_ - min_));
+        if (boundList_) boundList_->SetScrollOffset((int)value_);
+    }
+
     float value_ = 0.0f;
     float min_ = 0.0f;
     float max_ = 1.0f;
+    bool dragging_ = false;
+    ValueCallback callback_;
+    ListBoxFrame* boundList_ = nullptr;
 };
 
 class PopupMenuFrame : public ButtonFrame {
@@ -106,9 +182,17 @@ public:
     size_t GetCount() const { return items_.size(); }
     const std::string& GetItem(size_t i) const { return items_.at(i); }
     bool IsOpen() const { return open_; }
-    void SetOpen(bool v) { open_ = v; }
-    void SetPopupMenu(UIFrame* menu) { popupMenu_ = menu; if (menu) menu->SetVisible(false); }
+    void SetOpen(bool v) {
+        open_ = v;
+        if (popupMenu_) popupMenu_->SetVisible(v);
+    }
+    void SetPopupMenu(UIFrame* menu) { popupMenu_ = menu; if (menu) menu->SetVisible(open_); }
     UIFrame* GetPopupMenu() const { return popupMenu_; }
+
+    UIFrame* OnMouseUp(float sx, float sy, int btn) override {
+        if (btn == 0 && enabled_) SetOpen(!open_);
+        return ButtonFrame::OnMouseUp(sx, sy, btn);
+    }
 
 private:
     std::vector<std::string> items_;
