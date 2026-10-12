@@ -1278,6 +1278,58 @@ void MainUI::RenderOverlays(UiRenderer& r) {
             cy += rowH;
         }
     }
+
+    // Multiboard panel (ref multiboard API): top-left text grid of the
+    // currently displayed board; minimized boards show the title only.
+    if (multiboard_.visible && textRenderer_.IsValid() &&
+        (!multiboard_.title.empty() || multiboard_.rows > 0)) {
+        const float titleSize = 13.0f;
+        const float cellSize = 12.0f;
+        const float rowH = 16.0f;
+        const float padX = 8.0f;
+        const int rows = std::min(multiboard_.rows, 12);
+        const int cols = std::min(multiboard_.cols, 8);
+        std::vector<float> colW((size_t)std::max(cols, 1), 0.0f);
+        for (int rr = 0; rr < rows; ++rr) {
+            for (int cc = 0; cc < cols; ++cc) {
+                const std::string& cell =
+                    multiboard_.cells[(size_t)rr * (size_t)multiboard_.cols + (size_t)cc];
+                if (cell.empty()) continue;
+                colW[(size_t)cc] = std::max(colW[(size_t)cc],
+                    textRenderer_.MeasureText(cell.c_str(), cellSize));
+            }
+        }
+        float gridW = 0.0f;
+        for (float w : colW) gridW += w + 12.0f;
+        float titleW = multiboard_.title.empty() ? 0.0f
+            : textRenderer_.MeasureText(multiboard_.title.c_str(), titleSize);
+        const float panelW = std::max(gridW, titleW) + padX * 2.0f;
+        const float panelH = (multiboard_.title.empty() ? 0.0f : rowH + 4.0f) +
+                             (multiboard_.minimized ? 0.0f : (float)rows * rowH) + 8.0f;
+        const float panelX = 8.0f;
+        const float panelY = 40.0f;
+        r.DrawQuad(panelX, panelY, panelW, panelH, 0xAA111122);
+        float cy = panelY + 4.0f;
+        if (!multiboard_.title.empty()) {
+            textRenderer_.RenderText(r, panelX + padX, cy,
+                                     multiboard_.title.c_str(), 0xFFFFCC66, titleSize);
+            cy += rowH + 4.0f;
+        }
+        if (!multiboard_.minimized) {
+            for (int rr = 0; rr < rows; ++rr) {
+                float cx = panelX + padX;
+                for (int cc = 0; cc < cols; ++cc) {
+                    const std::string& cell =
+                        multiboard_.cells[(size_t)rr * (size_t)multiboard_.cols + (size_t)cc];
+                    if (!cell.empty()) {
+                        textRenderer_.RenderText(r, cx, cy, cell.c_str(), 0xFFFFFFFF, cellSize);
+                    }
+                    cx += colW[(size_t)cc] + 12.0f;
+                }
+                cy += rowH;
+            }
+        }
+    }
 }
 
 void MainUI::UpdateInfoPanel(War3ID unitTypeId, const std::string& name, int level,

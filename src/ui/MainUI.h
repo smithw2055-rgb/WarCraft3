@@ -60,6 +60,16 @@ struct HudLeaderboard {
     bool visible = false;
 };
 
+// Multiboard snapshot (JASS board grid, synced by GameController)
+struct HudMultiboard {
+    std::string title;
+    int rows = 0;
+    int cols = 0;
+    std::vector<std::string> cells; // row-major, empty = hidden cell
+    bool visible = false;
+    bool minimized = false;
+};
+
 struct ScreenRect {
     float x = 0;
     float y = 0;
@@ -219,6 +229,7 @@ public:
     void SetOverlayData(const std::vector<UnitOverlayInfo>& data) { overlayData_ = &data; }
     void SetTextTagData(const std::vector<TextTagOverlayInfo>& data) { textTagData_ = &data; }
     void SetLeaderboard(const HudLeaderboard& board) { leaderboard_ = board; }
+    void SetMultiboard(const HudMultiboard& board) { multiboard_ = board; }
     void SetMultiSelection(const std::vector<MultiSelectUnitInfo>& units);
     void SetSelectionBox(const ScreenRect& rect);
     void ClearSelectionBox();
@@ -343,6 +354,7 @@ private:
     const std::vector<UnitOverlayInfo>* overlayData_ = nullptr;
     const std::vector<TextTagOverlayInfo>* textTagData_ = nullptr;
     HudLeaderboard leaderboard_;
+    HudMultiboard multiboard_;
     MultiSelectionPanel multiSelectionPanel_;
     std::vector<MultiSelectUnitInfo> multiSelectionUnits_;
     bool selectionBoxVisible_ = false;

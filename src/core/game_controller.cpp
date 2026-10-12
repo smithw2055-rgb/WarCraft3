@@ -3501,6 +3501,44 @@ void GameController::SyncLeaderboard() {
     ui_.SetLeaderboard(board);
 }
 
+void GameController::SyncMultiboard() {
+    HudMultiboard board;
+    if (jassNatives_ && jassNatives_->GetData()) {
+        const auto& data = *jassNatives_->GetData();
+        const JassNativesData::JassMultiboard* picked = nullptr;
+        for (const auto& [id, b] : data.multiboards) {
+            (void)id;
+            if (b && b->displayed && !b->suppressDisplay) {
+                picked = b.get();
+                break;
+            }
+        }
+        if (picked) {
+            board.visible = true;
+            board.minimized = picked->minimized;
+            board.title = picked->title;
+            board.rows = picked->rows;
+            board.cols = picked->cols;
+            board.cells.assign((size_t)std::max(0, board.rows) *
+                               (size_t)std::max(0, board.cols),
+                               std::string());
+            for (const auto& [pos, itemSimId] : picked->items) {
+                if (pos.first < 0 || pos.first >= board.rows ||
+                    pos.second < 0 || pos.second >= board.cols) {
+                    continue;
+                }
+                auto iit = data.multiboardItems.find(itemSimId);
+                if (iit == data.multiboardItems.end() || !iit->second) continue;
+                const auto& item = *iit->second;
+                if (!item.showValue || item.value.empty()) continue;
+                board.cells[(size_t)pos.first * (size_t)board.cols + (size_t)pos.second] =
+                    item.value;
+            }
+        }
+    }
+    ui_.SetMultiboard(board);
+}
+
 // --- Render ---
 
 void GameController::Render(int screenW, int screenH) {
@@ -3675,6 +3713,7 @@ void GameController::Render(int screenW, int screenH) {
         CollectUnitOverlays(screenW, screenH);
         CollectTextTagOverlays(screenW, screenH);
         SyncLeaderboard();
+        SyncMultiboard();
         sg_reset_state_cache();
         sg_apply_viewport(0, 0, screenW, screenH, true);
         sg_apply_scissor_rect(0, 0, screenW, screenH, true);

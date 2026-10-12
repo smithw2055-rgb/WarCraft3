@@ -184,6 +184,7 @@ private:
     void CollectUnitOverlays(int screenW, int screenH);
     void CollectTextTagOverlays(int screenW, int screenH);
     void SyncLeaderboard();
+    void SyncMultiboard();
     void RefreshRuntimeUnitSplats();
     void AddActiveEventSplatsToTerrain();
     void CaptureScreenshotIfNeeded(int screenW, int screenH);
