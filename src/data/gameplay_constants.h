@@ -60,11 +60,16 @@ struct CGameplayConstants {
     float awakenMaxFactor = 8.0f;
     float heroAwakenLifeFactor = 0.5f;
     float heroAwakenManaFactor = 0.0f;
+    float reviveTimeFactor = 0.5f;
+    float reviveMaxTimeFactor = 1e9f;
 
     int GetHeroReviveGoldCost(int originalGoldCost, int level) const;
     int GetHeroReviveLumberCost(int originalGoldCost, int level) const;
     int GetHeroAwakenGoldCost(int originalGoldCost, int level) const;
     int GetHeroAwakenLumberCost(int originalLumberCost, int level) const;
+    // Revive train time (ref getHeroReviveTime): buildTime * level *
+    // reviveTimeFactor, capped at buildTime * reviveMaxTimeFactor.
+    int GetHeroReviveTime(int originalTime, int level) const;
 
     // Hero XP (Units\MiscGame.txt NeedHeroXP table + formulas, ref
     // CGameplayConstants.parseTable). Cumulative thresholds indexed by

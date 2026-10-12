@@ -167,9 +167,13 @@ void JassCommonEnv::WireCallbacks(CSimulation& sim) {
 
     // Unit death events → JASS trigger system
     sim.SetUnitDeathCallback(
-        [this](int unitHandle, int killerHandle, int) {
-            if (natives_)
+        [this, &sim](int unitHandle, int killerHandle, int) {
+            if (natives_) {
                 natives_->FireDeathEvent(unitHandle, killerHandle, JASS_EVENT_UNIT_DEATH);
+                if (CUnit* dead = sim.GetUnit(unitHandle)) {
+                    if (dead->IsHero()) natives_->FireRevivableEvent(unitHandle);
+                }
+            }
         }
     );
 
@@ -245,7 +249,8 @@ void JassCommonEnv::WireCallbacks(CSimulation& sim) {
         }
     );
 
-    // Queue lifecycle (kind 0 = train, 1 = research, 2 = upgrade morph).
+    // Queue lifecycle (kind 0 = train, 1 = research, 2 = upgrade morph,
+    // 3 = hero revive).
     sim.SetQueueEventCallback(
         [this](int buildingHandle, int typeId, int kind, bool started) {
             if (!natives_) return;
@@ -260,6 +265,14 @@ void JassCommonEnv::WireCallbacks(CSimulation& sim) {
                     natives_->FireResearchStartEvent(buildingHandle, typeId);
                 } else {
                     natives_->FireResearchCancelEvent(buildingHandle, typeId);
+                }
+            } else if (kind == 3) {
+                // typeId carries the hero sim handle for revives (not a
+                // rawcode like train/research).
+                if (started) {
+                    natives_->FireReviveStartEvent(buildingHandle, typeId);
+                } else {
+                    natives_->FireReviveCancelEvent(buildingHandle, typeId);
                 }
             } else {
                 if (started) {

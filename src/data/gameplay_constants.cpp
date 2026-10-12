@@ -245,6 +245,8 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     strHitPointBonus = readFloat("StrHitPointBonus", 25.0f);
     intManaBonus = readFloat("IntManaBonus", 15.0f);
     agiDefenseBonus = readFloat("AgiDefenseBonus", 0.33f);
+    reviveTimeFactor = readFloat("ReviveTimeFactor", 0.5f);
+    reviveMaxTimeFactor = readFloat("ReviveMaxTimeFactor", 1e9f);
 }
 
 int CGameplayConstants::GetHeroReviveGoldCost(int originalGoldCost, int level) const {
@@ -272,4 +274,10 @@ int CGameplayConstants::GetHeroAwakenLumberCost(int originalLumberCost, int leve
         (int)(originalLumberCost * (awakenBaseLumberFactor + awakenLumberLevelFactor * (level - 1)));
     const int cap = (int)(originalLumberCost * awakenMaxFactor);
     return cost < cap ? cost : cap;
+}
+
+int CGameplayConstants::GetHeroReviveTime(int originalTime, int level) const {
+    const int t = (int)(originalTime * level * reviveTimeFactor);
+    const int cap = (int)(originalTime * reviveMaxTimeFactor);
+    return t < cap ? t : cap;
 }

@@ -291,11 +291,14 @@ bool CAbilityQueue::QueueReviveHero(CSimulation& game, CUnit* building, CUnit* h
 
     if (slot == 0) {
         progress_ = 0;
-        buildTime_ = (float)heroType->GetBuildTime() * heroLevel * 0.5f;
+        buildTime_ = (float)gameplay.GetHeroReviveTime(heroType->GetBuildTime(), heroLevel);
         if (buildTime_ < 5.0f) buildTime_ = 5.0f;
     }
 
     std::cout << "Queued hero revive: " << heroType->GetName() << std::endl;
+    if (const auto& cb = game.GetQueueEventCallback()) {
+        cb(building->GetHandleId(), hero->GetHandleId(), 3, true);
+    }
     return false;
 }
 
@@ -332,9 +335,12 @@ void CAbilityQueue::CancelQueueItem(CSimulation& game, CUnit* building, int slot
         if (queueTypes_[slot] == CQueueItemType::HERO_REVIVE) {
             if (CUnit* hero = game.GetUnit((int)typeId.value)) {
                 if (auto* heroType = unitData->GetUnitType(hero->GetTypeId())) {
-                    int heroLevel = hero->GetHeroLevel();
-                    player->AddGold((int)(heroType->GetGoldCost() * (0.5f + 0.1f * heroLevel)));
-                    player->AddLumber((int)(heroType->GetLumberCost() * (0.5f + 0.1f * heroLevel)));
+                    const auto& gameplay = game.GetGameplayConstants();
+                    const int heroLevel = hero->GetHeroLevel();
+                    player->AddGold(gameplay.GetHeroReviveGoldCost(
+                        heroType->GetGoldCost(), heroLevel));
+                    player->AddLumber(gameplay.GetHeroReviveLumberCost(
+                        heroType->GetGoldCost(), heroLevel));
                 }
             }
         }
@@ -358,12 +364,14 @@ void CAbilityQueue::CancelQueueItem(CSimulation& game, CUnit* building, int slot
         }
     }
 
-    // Train/research cancellations observe the removed entry (hero-revive
-    // cancels have no retail event).
-    if (removedKind == CQueueItemType::UNIT || removedKind == CQueueItemType::RESEARCH) {
+    // Train/research/revive cancellations observe the removed entry.
+    if (removedKind == CQueueItemType::UNIT || removedKind == CQueueItemType::RESEARCH ||
+        removedKind == CQueueItemType::HERO_REVIVE) {
         if (const auto& cb = game.GetQueueEventCallback()) {
-            cb(building->GetHandleId(), (int)removedId.value,
-               removedKind == CQueueItemType::UNIT ? 0 : 1, false);
+            int kind = 0;
+            if (removedKind == CQueueItemType::RESEARCH) kind = 1;
+            else if (removedKind == CQueueItemType::HERO_REVIVE) kind = 3;
+            cb(building->GetHandleId(), (int)removedId.value, kind, false);
         }
     }
 }
@@ -507,7 +515,8 @@ float CAbilityQueue::CalculateBuildTime(CSimulation& game, CUnit* building, War3
         if (auto* hero = game.GetUnit(heroHandle)) {
             if (auto* unitData = game.GetUnitData()) {
                 if (auto* heroType = unitData->GetUnitType(hero->GetTypeId())) {
-                    float reviveTime = (float)heroType->GetBuildTime() * hero->GetHeroLevel() * 0.5f;
+                    const float reviveTime = (float)game.GetGameplayConstants().GetHeroReviveTime(
+                        heroType->GetBuildTime(), hero->GetHeroLevel());
                     return std::max(5.0f, reviveTime);
                 }
             }

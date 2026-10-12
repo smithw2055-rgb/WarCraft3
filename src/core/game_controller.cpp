@@ -2260,6 +2260,9 @@ void GameController::WireJassCallbacks() {
         [this](int unitHandle, int killerHandle, int) {
             if (jassNatives_) {
                 jassNatives_->FireDeathEvent(unitHandle, killerHandle, JASS_EVENT_UNIT_DEATH);
+                if (CUnit* dead = simulation_.GetUnit(unitHandle)) {
+                    if (dead->IsHero()) jassNatives_->FireRevivableEvent(unitHandle);
+                }
             }
         }
     );
@@ -2336,8 +2339,9 @@ void GameController::WireJassCallbacks() {
         }
     );
 
-    // Queue lifecycle (kind 0 = train, 1 = research, 2 = upgrade morph;
-    // upgrades have no cancel path: started=false means finished).
+    // Queue lifecycle (kind 0 = train, 1 = research, 2 = upgrade morph,
+    // 3 = hero revive; upgrades have no cancel path: started=false means
+    // finished).
     simulation_.SetQueueEventCallback(
         [this](int buildingHandle, int typeId, int kind, bool started) {
             if (!jassNatives_) return;
@@ -2352,6 +2356,12 @@ void GameController::WireJassCallbacks() {
                     jassNatives_->FireResearchStartEvent(buildingHandle, typeId);
                 } else {
                     jassNatives_->FireResearchCancelEvent(buildingHandle, typeId);
+                }
+            } else if (kind == 3) {
+                if (started) {
+                    jassNatives_->FireReviveStartEvent(buildingHandle, typeId);
+                } else {
+                    jassNatives_->FireReviveCancelEvent(buildingHandle, typeId);
                 }
             } else {
                 if (started) {

@@ -1253,6 +1253,9 @@ public:
     void FireSummonEvent(int summonerSimHandle, int summonedSimHandle);
     void FireResearchEvent(int unitSimHandle, int upgradeId);
     void FireReviveEvent(int reviverSimHandle, int revivedSimHandle);
+    void FireRevivableEvent(int heroSimHandle);
+    void FireReviveStartEvent(int buildingSimHandle, int heroSimHandle);
+    void FireReviveCancelEvent(int buildingSimHandle, int heroSimHandle);
     void FireSpellEvent(int casterSimHandle, int stage);
     void FireTrackableEvent(int trackableHandle, int eventCode);
     void NotifyTrackableClick(float x, float y);

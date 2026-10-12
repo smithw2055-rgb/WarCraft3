@@ -1319,6 +1319,31 @@ void JassNatives::FireReviveEvent(int reviverSimHandle, int revivedSimHandle) {
     data_->eventRevivingUnitHandle = -1;
 }
 
+void JassNatives::FireRevivableEvent(int heroSimHandle) {
+    if (heroSimHandle < 0) return;
+    // Trigger unit is the fallen hero (ref onHeroDeath revivable scope).
+    FireUnitEvent(heroSimHandle, JASS_EVENT_UNIT_HERO_REVIVABLE,
+                  JASS_EVENT_PLAYER_HERO_REVIVABLE);
+}
+
+void JassNatives::FireReviveStartEvent(int buildingSimHandle, int heroSimHandle) {
+    if (buildingSimHandle < 0 || heroSimHandle < 0) return;
+    data_->eventRevivingUnitHandle =
+        data_->AllocHandle(JassHandleInfo::UNIT, heroSimHandle);
+    FireUnitEvent(buildingSimHandle, JASS_EVENT_UNIT_HERO_REVIVE_START,
+                  JASS_EVENT_PLAYER_HERO_REVIVE_START);
+    data_->eventRevivingUnitHandle = -1;
+}
+
+void JassNatives::FireReviveCancelEvent(int buildingSimHandle, int heroSimHandle) {
+    if (buildingSimHandle < 0 || heroSimHandle < 0) return;
+    data_->eventRevivingUnitHandle =
+        data_->AllocHandle(JassHandleInfo::UNIT, heroSimHandle);
+    FireUnitEvent(buildingSimHandle, JASS_EVENT_UNIT_HERO_REVIVE_CANCEL,
+                  JASS_EVENT_PLAYER_HERO_REVIVE_CANCEL);
+    data_->eventRevivingUnitHandle = -1;
+}
+
 void JassNatives::FireSpellEvent(int casterSimHandle, int stage) {
     if (casterSimHandle < 0) return;
     // stage: 0=channel 1=cast 2=effect 3=finish 4=endcast (ref
