@@ -3408,6 +3408,47 @@ void GameController::CollectUnitOverlays(int screenW, int screenH) {
     ui_.SetOverlayData(overlays);
 }
 
+void GameController::CollectTextTagOverlays(int screenW, int screenH) {
+    std::vector<TextTagOverlayInfo>& tags = textTagCache_;
+    tags.clear();
+    if (!jassNatives_ || !jassNatives_->GetData()) {
+        ui_.SetTextTagData(tags);
+        return;
+    }
+    float aspect = (screenH > 0) ? (float)screenW / screenH : 1.0f;
+    Mat4 view = camera_.GetViewMatrix();
+    Mat4 proj = camera_.GetProjectionMatrix(aspect);
+    for (const auto& [id, tag] : jassNatives_->GetData()->textTags) {
+        (void)id;
+        if (!tag || !tag->visible || tag->text.empty()) continue;
+        const float gndH = texturedTerrain_.IsValid()
+            ? texturedTerrain_.GetGroundHeight(tag->x, tag->y) : 0.0f;
+        Vec3 worldPos(tag->x, gndH + tag->z + 10.0f, tag->y);
+        float sx = 0, sy = 0;
+        if (!picking::WorldToScreen(worldPos, view, proj, screenW, screenH, sx, sy)) continue;
+        // Fade out past the fadepoint (ref TextTag.update alpha ramp).
+        uint32_t color = (uint32_t)tag->color;
+        if (!tag->permanent && tag->lifespan > 0 && tag->fadepoint >= 0) {
+            const float remaining = tag->lifespan - tag->age;
+            const float fadeSpan = tag->lifespan - tag->fadepoint;
+            if (fadeSpan > 0 && remaining < fadeSpan) {
+                const float t = std::clamp(remaining / fadeSpan, 0.0f, 1.0f);
+                const uint32_t a = (uint32_t)(((color >> 24) & 0xFF) * t);
+                color = (color & 0x00FFFFFF) | (a << 24);
+            }
+        }
+        TextTagOverlayInfo info;
+        info.screenX = sx;
+        info.screenY = sy;
+        info.text = tag->text;
+        info.color = color;
+        info.fontSize = tag->fontSize > 0 ? tag->fontSize : 12.0f;
+        info.centered = tag->centered;
+        tags.push_back(std::move(info));
+    }
+    ui_.SetTextTagData(tags);
+}
+
 // --- Render ---
 
 void GameController::Render(int screenW, int screenH) {
@@ -3580,6 +3621,7 @@ void GameController::Render(int screenW, int screenH) {
 
     if (!hideHud_) {
         CollectUnitOverlays(screenW, screenH);
+        CollectTextTagOverlays(screenW, screenH);
         sg_reset_state_cache();
         sg_apply_viewport(0, 0, screenW, screenH, true);
         sg_apply_scissor_rect(0, 0, screenW, screenH, true);

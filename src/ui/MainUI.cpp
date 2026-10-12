@@ -1212,6 +1212,20 @@ void MainUI::RenderOverlays(UiRenderer& r) {
             textRenderer_.RenderText(r, nameX, nameY, info.name.c_str(), 0xFFCCCCCC, nameSize);
         }
     }
+
+    // Floating combat/text-tag layer (ref TextTag update/fade): screen-space
+    // text with per-tag color/alpha, centered or left-anchored.
+    if (textTagData_ && textRenderer_.IsValid()) {
+        for (const auto& tag : *textTagData_) {
+            if (tag.text.empty()) continue;
+            const float size = std::clamp(tag.fontSize, 8.0f, 32.0f);
+            float x = tag.screenX;
+            if (tag.centered) {
+                x -= textRenderer_.MeasureText(tag.text.c_str(), size) * 0.5f;
+            }
+            textRenderer_.RenderText(r, x, tag.screenY, tag.text.c_str(), tag.color, size);
+        }
+    }
 }
 
 void MainUI::UpdateInfoPanel(War3ID unitTypeId, const std::string& name, int level,

@@ -38,6 +38,15 @@ struct UnitOverlayInfo {
     uint32_t playerColor = 0xFF4488FF;
 };
 
+// World-space floating text (JASS texttag, projected by GameController)
+struct TextTagOverlayInfo {
+    float screenX = 0, screenY = 0;
+    std::string text;
+    uint32_t color = 0xFFFFFFFF;
+    float fontSize = 12.0f;
+    bool centered = false;
+};
+
 struct ScreenRect {
     float x = 0;
     float y = 0;
@@ -195,6 +204,7 @@ public:
 
     // In-world unit overlays (health bars, selection indicators, names)
     void SetOverlayData(const std::vector<UnitOverlayInfo>& data) { overlayData_ = &data; }
+    void SetTextTagData(const std::vector<TextTagOverlayInfo>& data) { textTagData_ = &data; }
     void SetMultiSelection(const std::vector<MultiSelectUnitInfo>& units);
     void SetSelectionBox(const ScreenRect& rect);
     void ClearSelectionBox();
@@ -317,6 +327,7 @@ private:
     std::vector<War3ID> GetUnitAbilities(War3ID unitTypeId);
 
     const std::vector<UnitOverlayInfo>* overlayData_ = nullptr;
+    const std::vector<TextTagOverlayInfo>* textTagData_ = nullptr;
     MultiSelectionPanel multiSelectionPanel_;
     std::vector<MultiSelectUnitInfo> multiSelectionUnits_;
     bool selectionBoxVisible_ = false;

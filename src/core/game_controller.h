@@ -181,6 +181,7 @@ private:
     void SyncScriptDecor();
     void SyncWeather(float dt);
     void CollectUnitOverlays(int screenW, int screenH);
+    void CollectTextTagOverlays(int screenW, int screenH);
     void RefreshRuntimeUnitSplats();
     void AddActiveEventSplatsToTerrain();
     void CaptureScreenshotIfNeeded(int screenW, int screenH);
@@ -416,6 +417,7 @@ private:
     // Owned per-frame overlay cache (MainUI keeps a pointer to it; must
     // outlive the frame — previously a dangling local).
     std::vector<UnitOverlayInfo> overlayCache_;
+    std::vector<TextTagOverlayInfo> textTagCache_;
 
     // JASS
     JassVM jass_;

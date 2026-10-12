@@ -303,7 +303,9 @@ struct JassTextTag {
     std::string text;
     float x = 0, y = 0;
     float vx = 0, vy = 0; // drift from SetTextTagVelocity
-    float height = 0;
+    float height = 0; // legacy shared field (kept in sync with z/fontSize)
+    float z = 0; // world height offset (SetTextTagPos/PosUnit height arg)
+    float fontSize = 12.0f; // text size (SetTextTagText height arg)
     float age = 0;
     float lifespan = 0;
     float fadepoint = 0;

@@ -6303,13 +6303,13 @@ void JassNatives::RegisterTextTagNatives() {
     vm_.RegisterNative("SetTextTagText", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3) return JassValue::Null();
         int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::TEXT_TAG);
-        if (id >= 0) { auto it = data->textTags.find(id); if (it != data->textTags.end()) { it->second->text = args[1].strVal; it->second->height = args[2].realVal; } }
+        if (id >= 0) { auto it = data->textTags.find(id); if (it != data->textTags.end()) { it->second->text = args[1].strVal; it->second->fontSize = args[2].realVal > 0 ? args[2].realVal : 12.0f; it->second->height = it->second->fontSize; } }
         return JassValue::Null();
     });
     vm_.RegisterNative("SetTextTagPos", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4) return JassValue::Null();
         int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::TEXT_TAG);
-        if (id >= 0) { auto it = data->textTags.find(id); if (it != data->textTags.end()) { it->second->x = args[1].realVal; it->second->y = args[2].realVal; } }
+        if (id >= 0) { auto it = data->textTags.find(id); if (it != data->textTags.end()) { it->second->x = args[1].realVal; it->second->y = args[2].realVal; it->second->z = args[3].realVal; } }
         return JassValue::Null();
     });
     vm_.RegisterNative("SetTextTagPosUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
@@ -6325,6 +6325,7 @@ void JassNatives::RegisterTextTagNatives() {
         // with the renderer's world-anchored text pass).
         it->second->x = unit->GetX();
         it->second->y = unit->GetY();
+        it->second->z = args[2].realVal;
         it->second->height = args[2].realVal;
         return JassValue::Null();
     });
@@ -6376,7 +6377,9 @@ void JassNatives::RegisterTextTagNatives() {
         tag->text = intValue ? std::to_string(args[2].intVal) : args[2].strVal;
         tag->x = unit->GetX();
         tag->y = unit->GetY();
+        tag->z = 60.0f;
         tag->height = 60.0f;
+        tag->fontSize = 12.0f;
         tag->vy = 40.0f;
         tag->lifespan = 2.0f;
         tag->fadepoint = 1.5f;
