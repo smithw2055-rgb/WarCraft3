@@ -911,13 +911,21 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
         }
 
         case T_FAFX:
-        case T_BPOS:
+        case T_BPOS: {
             // Face effects and Reforged bind pose carry no renderer state in
-            // this port; skipped like unknown chunks (ref MdlxUnknownChunk).
-            // Explicit cases (not default) so a future facial-animation or
-            // bind-pose skinning pass has a hook.
+            // this port; counted (not silently dropped) so Reforged models
+            // are visible in the load log. Full facial-animation / bind-pose
+            // skinning remains a documented follow-up (ref MdlxFaceEffect).
+            const uint32_t size = chunkEnd > r.off ? (uint32_t)(chunkEnd - r.off) : 0;
+            if (tag == T_FAFX) out.faceEffectCount++;
+            else out.bindPoseCount++;
+            if (size > 0) {
+                std::cerr << "MDX: skipping " << (tag == T_FAFX ? "FAFX" : "BPOS")
+                          << " chunk (" << size << " bytes)" << std::endl;
+            }
             r.off = chunkEnd;
             break;
+        }
 
         default:
             r.off = chunkEnd;
@@ -931,8 +939,12 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
               << ", bones=" << out.bones.size()
               << ", geosets=" << out.geosets.size()
               << ", textures=" << out.textures.size()
-              << ", pre2=" << out.particleEmitters2.size()
-              << ")" << std::endl;
+              << ", pre2=" << out.particleEmitters2.size();
+    if (out.faceEffectCount > 0 || out.bindPoseCount > 0) {
+        std::cout << ", fafx=" << out.faceEffectCount
+                  << ", bpos=" << out.bindPoseCount;
+    }
+    std::cout << ")" << std::endl;
 
     return true;
 }

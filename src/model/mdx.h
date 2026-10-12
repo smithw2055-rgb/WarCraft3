@@ -345,6 +345,12 @@ struct MdxModel {
     // Collision shapes (CLID)
     std::vector<MdxCollisionShape> collisionShapes;
 
+    // Reforged-only chunks (parsed as counts; no renderer state yet).
+    // FAFX = face effects, BPOS = bind pose. Counts surface in the load
+    // log so Reforged models are visible instead of silently degraded.
+    int faceEffectCount = 0;
+    int bindPoseCount = 0;
+
     // Bounds
     float boundsMin[3] = {};
     float boundsMax[3] = {};
