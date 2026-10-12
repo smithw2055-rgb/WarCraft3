@@ -19,6 +19,7 @@
 #include "behaviors/behavior_follow.h"
 #include "behaviors/behavior_patrol.h"
 #include "behaviors/behavior_attack_move.h"
+#include "ecs/orders/order.h"
 #include "debug/move_debug.h"
 #include "pathing/world_collision.h"
 #include <cmath>
@@ -1085,6 +1086,9 @@ bool CUnit::Update(CSimulation& simulation) {
 }
 
 void CUnit::PerformDefaultBehavior(CSimulation& simulation) {
+    // Idle autocast first (ref autoAcquireAutocastTargets): wounded-ally
+    // heals and nearest-enemy debuffs fire while standing idle.
+    if (TryAutocast(simulation)) return;
     // Use default behavior (usually stop/idle)
     if (defaultBehavior_) {
         ownedCurrentBehavior_.reset();
@@ -1092,6 +1096,94 @@ void CUnit::PerformDefaultBehavior(CSimulation& simulation) {
         currentBehavior_->SetUnit(this);
         currentBehavior_->Begin(simulation);
     }
+}
+
+// Autocast target acquisition (ref CUnit.autoAcquireAutocastTargets +
+// AutocastTargetFinderEnum). Only idle units with an enabled autocast
+// ability, mana, and cooldown ready participate.
+bool CUnit::TryAutocast(CSimulation& simulation) {
+    if (IsDead() || IsBuilding() || IsPaused()) return false;
+    if (!orderQueue_.empty() || currentBehavior_) return false;
+    if (IsSilenced() || IsHexed() || IsAsleep()) return false;
+
+    static const War3ID kLowestHp[] = {
+        War3ID("Ahea"), War3ID("AHhb"), War3ID("AOhw"),
+        War3ID("Arej"), War3ID("ANhs"), War3ID("AIdc"),
+    };
+    static const War3ID kNearestEnemy[] = {
+        War3ID("Aslo"), War3ID("Afae"), War3ID("Aply"), War3ID("AOhx"),
+    };
+    auto kindOf = [](War3ID code) -> int {
+        for (const auto& id : kLowestHp) if (id == code) return 1;
+        for (const auto& id : kNearestEnemy) if (id == code) return 2;
+        return 0;
+    };
+
+    CPlayer* self = simulation.GetPlayer(GetPlayerIndex());
+    const War3ID defaultAuto =
+        unitType_ ? unitType_->GetDefaultAutocastAbility() : War3ID(0u);
+
+    for (auto* ab : abilities_) {
+        auto* spell = dynamic_cast<CAbilitySpellBase*>(ab);
+        if (!spell || spell->IsDisabled() || spell->IsOnCooldown()) continue;
+        const int kind = kindOf(spell->GetAlias());
+        if (kind == 0) kindOf(spell->GetCode());
+        if (kindOf(spell->GetAlias()) == 0 && kindOf(spell->GetCode()) == 0) continue;
+        const int useKind = kindOf(spell->GetAlias()) != 0
+            ? kindOf(spell->GetAlias()) : kindOf(spell->GetCode());
+        if (!spell->IsAutocastActive() && defaultAuto != spell->GetAlias() &&
+            defaultAuto != spell->GetCode()) continue;
+        if ((int)GetMana() < spell->GetManaCost()) continue;
+        const int orderId = spell->GetBaseOrderId();
+        if (orderId <= 0) continue;
+        if (!spell->CheckCanUse(simulation, this, orderId)) continue;
+
+        const float range = spell->GetCastRange() + 400.0f;
+        const float rangeSq = range * range;
+        CUnit* best = nullptr;
+        if (useKind == 1) {
+            float bestFrac = 1.0f;
+            for (CUnit* other : simulation.GetUnits()) {
+                if (!other || other->IsDead() || other->IsHidden() ||
+                    other->IsLoadedAboard() || other->IsBuilding()) continue;
+                CPlayer* foe = simulation.GetPlayer(other->GetPlayerIndex());
+                const bool ally = (other == this) ||
+                    (self && foe && self->HasAlliance(*foe, CAllianceType::PASSIVE));
+                if (!ally) continue;
+                if (other->GetLife() >= other->GetMaxLife()) continue;
+                const float dx = other->GetX() - GetX();
+                const float dy = other->GetY() - GetY();
+                if (dx * dx + dy * dy > rangeSq) continue;
+                if (!spell->CheckCanTarget(simulation, this, orderId, other)) continue;
+                const float frac = other->GetLife() / other->GetMaxLife();
+                if (!best || frac < bestFrac) {
+                    best = other;
+                    bestFrac = frac;
+                }
+            }
+        } else {
+            float bestDist = rangeSq;
+            for (CUnit* other : simulation.GetUnits()) {
+                if (!other || other->IsDead() || other->IsHidden() ||
+                    other->IsLoadedAboard() || other == this) continue;
+                CPlayer* foe = simulation.GetPlayer(other->GetPlayerIndex());
+                if (self && foe && self->HasAlliance(*foe, CAllianceType::PASSIVE)) continue;
+                const float dx = other->GetX() - GetX();
+                const float dy = other->GetY() - GetY();
+                const float d2 = dx * dx + dy * dy;
+                if (d2 > rangeSq || (best && d2 >= bestDist)) continue;
+                if (!spell->CheckCanTarget(simulation, this, orderId, other)) continue;
+                best = other;
+                bestDist = d2;
+            }
+        }
+        if (best) {
+            IssueOrder(std::make_unique<COrderTargetWidget>(orderId, best));
+            PollNextOrderBehavior(simulation);
+            return currentBehavior_ != nullptr;
+        }
+    }
+    return false;
 }
 
 float CUnit::Damage(CSimulation& simulation, CUnit* source,

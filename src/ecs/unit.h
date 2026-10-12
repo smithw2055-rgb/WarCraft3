@@ -386,6 +386,7 @@ public:
 
 private:
     void PerformDefaultBehavior(CSimulation& simulation);
+    bool TryAutocast(CSimulation& simulation);
     void ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrder> order);
     void RefreshMaxLifeTotal();
     void RefreshMaxManaTotal();
