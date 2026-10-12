@@ -88,6 +88,18 @@ CGameplayConstants::CGameplayConstants()
       decayTime(8.0f), boneDecayTime(8.0f),
       dissipateTime(2.0f), structureDecayTime(8.0f) {
     LoadTftDefaults(damageBonus);
+    // TFT retail cumulative XP thresholds (levels 1..10).
+    needHeroXpSum = {0, 0, 200, 500, 900, 1400, 2000, 2700, 3500, 4400, 5400};
+}
+
+int CGameplayConstants::GetXPForLevel(int level) const {
+    if (level < 1) level = 1;
+    if (!needHeroXpSum.empty() && level < (int)needHeroXpSum.size()) {
+        return needHeroXpSum[(size_t)level];
+    }
+    if (level > 10) level = 10;
+    static const int kDefault[] = {0, 0, 200, 500, 900, 1400, 2000, 2700, 3500, 4400, 5400};
+    return kDefault[level];
 }
 
 CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
@@ -185,6 +197,54 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     awakenMaxFactor = readFloat("AwakenMaxFactor", 8.0f);
     heroAwakenLifeFactor = readFloat("HeroAwakenLifeFactor", 0.5f);
     heroAwakenManaFactor = readFloat("HeroAwakenManaFactor", 0.0f);
+
+    // Hero XP table (ref parseTable): explicit NeedHeroXP prefix wins,
+    // the tail extends by formulaA*prev + formulaB*i + formulaC.
+    maxHeroLevel = readMiscInt("MaxHeroLevel", 10);
+    if (maxHeroLevel < 1) maxHeroLevel = 1;
+    if (maxHeroLevel > 100) maxHeroLevel = 100;
+    {
+        const std::string tableText = readMiscStr("NeedHeroXP");
+        const int formulaA = readMiscInt("NeedHeroXPFormulaA", 0);
+        const int formulaB = readMiscInt("NeedHeroXPFormulaB", 0);
+        const int formulaC = readMiscInt("NeedHeroXPFormulaC", 0);
+        std::vector<int> perLevel((size_t)maxHeroLevel + 1, 0);
+        std::vector<std::string> parts;
+        if (!tableText.empty()) {
+            size_t pos = 0;
+            while (true) {
+                size_t comma = tableText.find(',', pos);
+                parts.push_back(comma == std::string::npos
+                    ? tableText.substr(pos)
+                    : tableText.substr(pos, comma - pos));
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+        }
+        // parts[0] feeds level 2 (level 1 needs 0); extra entries ignored.
+        for (int lvl = 2; lvl <= maxHeroLevel; ++lvl) {
+            const int pi = lvl - 2;
+            if (pi < (int)parts.size() && !parts[(size_t)pi].empty()) {
+                perLevel[(size_t)lvl] = std::atoi(parts[(size_t)pi].c_str());
+            } else if (lvl - 1 >= 2) {
+                perLevel[(size_t)lvl] =
+                    formulaA * perLevel[(size_t)lvl - 1] + formulaB * (lvl - 1) + formulaC;
+            } else {
+                perLevel[(size_t)lvl] = formulaB + formulaC;
+            }
+        }
+        needHeroXpSum.assign((size_t)maxHeroLevel + 1, 0);
+        int acc = 0;
+        needHeroXpSum[0] = 0;
+        if (maxHeroLevel >= 1) needHeroXpSum[1] = 0;
+        for (int lvl = 2; lvl <= maxHeroLevel; ++lvl) {
+            acc += perLevel[(size_t)lvl];
+            needHeroXpSum[(size_t)lvl] = acc;
+        }
+    }
+    strHitPointBonus = readFloat("StrHitPointBonus", 25.0f);
+    intManaBonus = readFloat("IntManaBonus", 15.0f);
+    agiDefenseBonus = readFloat("AgiDefenseBonus", 0.33f);
 }
 
 int CGameplayConstants::GetHeroReviveGoldCost(int originalGoldCost, int level) const {

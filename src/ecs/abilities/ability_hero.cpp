@@ -55,8 +55,9 @@ bool CAbilityHero::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, in
 }
 
 void CAbilityHero::AddXP(CSimulation& game, CUnit* unit, int amount) {
+    const int maxLevel = game.GetGameplayConstants().GetMaxHeroLevel();
+    if (heroLevel_ >= maxLevel) return; // max level
     if (game.IsHeroXPSuspended()) return;
-    if (heroLevel_ >= 10) return; // max level
 
     // Apply player XP handicap (ref CAbilityHero.addXp uses getHandicapXP)
     auto* player = game.GetPlayer(unit->GetPlayerIndex());
@@ -64,8 +65,8 @@ void CAbilityHero::AddXP(CSimulation& game, CUnit* unit, int amount) {
     xp_ += (int)(amount * handicap);
 
     // Check for level ups
-    while (heroLevel_ < 10) {
-        int needed = GetXPForLevel(heroLevel_ + 1);
+    while (heroLevel_ < maxLevel) {
+        int needed = game.GetGameplayConstants().GetXPForLevel(heroLevel_ + 1);
         if (xp_ < needed) break;
         heroLevel_++;
         skillPoints_++;
@@ -76,8 +77,9 @@ void CAbilityHero::AddXP(CSimulation& game, CUnit* unit, int amount) {
 }
 
 void CAbilityHero::SetHeroLevel(CSimulation& game, CUnit* unit, int level) {
-    level = std::clamp(level, 1, 10);
-    int totalXP = GetXPForLevel(level);
+    const int maxLevel = game.GetGameplayConstants().GetMaxHeroLevel();
+    level = std::clamp(level, 1, maxLevel);
+    int totalXP = game.GetGameplayConstants().GetXPForLevel(level);
     if (totalXP > xp_) {
         AddXP(game, unit, totalXP - xp_);
     }
@@ -86,7 +88,7 @@ void CAbilityHero::SetHeroLevel(CSimulation& game, CUnit* unit, int level) {
 bool CAbilityHero::StripLevels(CSimulation& game, CUnit* unit, int levels) {
     if (levels <= 0 || heroLevel_ <= 1) return false;
     heroLevel_ = std::max(1, heroLevel_ - levels);
-    xp_ = GetXPForLevel(heroLevel_);
+    xp_ = game.GetGameplayConstants().GetXPForLevel(heroLevel_);
     CalculateDerivedStats(game, unit);
     return true;
 }
@@ -155,23 +157,23 @@ void CAbilityHero::LearnSkill(CSimulation& game, CUnit* unit, War3ID skillCode) 
 }
 
 void CAbilityHero::CalculateDerivedStats(CSimulation& game, CUnit* unit) {
-    (void)game;
     if (!unit || !unit->GetUnitType()) return;
+    const auto& gc = game.GetGameplayConstants();
     int str = strength_.GetCurrent(heroLevel_);
     int agi = agility_.GetCurrent(heroLevel_);
     int intel = intelligence_.GetCurrent(heroLevel_);
 
     // STR: +HP, +HP regen. Stored as the hero layer so item/upgrade
     // max-life bonuses survive level-ups and stat changes.
-    float strHPBonus = str * 25.0f; // standard WC3: 25 HP per STR
+    float strHPBonus = str * gc.strHitPointBonus;
     unit->SetHeroBonusLife(strHPBonus);
 
     // AGI: +armor, +attack speed
-    int agiArmorBonus = (int)(agi * 0.33f); // standard WC3: ~0.33 armor per AGI
+    int agiArmorBonus = (int)(agi * gc.agiDefenseBonus);
     unit->SetDefense(unit->GetUnitType()->GetDefense() + agiArmorBonus);
 
     // INT: +MP, +MP regen (hero layer, see above)
-    float intMPBonus = intel * 15.0f; // standard WC3: 15 MP per INT
+    float intMPBonus = intel * gc.intManaBonus;
     unit->SetHeroBonusMana((int)intMPBonus);
 
     // Primary attribute damage bonus
@@ -201,7 +203,12 @@ void CAbilityHero::AddIntelligenceBonus(CSimulation& game, CUnit* unit, int v) {
 }
 
 int CAbilityHero::GetXPForLevel(int level) const {
-    // Standard WC3 XP table
+    // Data-driven table lives on CGameplayConstants, but hero abilities
+    // predate the sim in some construction paths (no game handle). Fall
+    // back to TFT retail when the table is empty.
+    // Note: static fallback only; live path queries gameplay constants
+    // via the sim. This const method has no game handle, so callers pass
+    // thresholds in. Kept for StripLevels/SetHeroLevel compat.
     static const int xpTable[] = {
         0, 0, 200, 500, 900, 1400, 2000, 2700, 3500, 4400, 5400
     };

@@ -1,6 +1,7 @@
 #pragma once
 #include "data/combat_types.h"
 #include <string>
+#include <vector>
 
 class TxtTable;
 
@@ -64,6 +65,20 @@ struct CGameplayConstants {
     int GetHeroReviveLumberCost(int originalGoldCost, int level) const;
     int GetHeroAwakenGoldCost(int originalGoldCost, int level) const;
     int GetHeroAwakenLumberCost(int originalLumberCost, int level) const;
+
+    // Hero XP (Units\MiscGame.txt NeedHeroXP table + formulas, ref
+    // CGameplayConstants.parseTable). Cumulative thresholds indexed by
+    // level (level 1 = 0). Defaults match TFT retail.
+    int maxHeroLevel = 10;
+    std::vector<int> needHeroXpSum;
+    int GetXPForLevel(int level) const;
+    int GetMaxHeroLevel() const { return maxHeroLevel; }
+
+    // Primary-attribute bonuses (ref strHitPointBonus/intManaBonus/
+    // agiDefenseBonus). Defaults match the previous hardcoded values.
+    float strHitPointBonus = 25.0f;
+    float intManaBonus = 15.0f;
+    float agiDefenseBonus = 0.33f;
 
     CGameplayConstants();
     explicit CGameplayConstants(const TxtTable& miscData);
