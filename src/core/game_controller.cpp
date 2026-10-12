@@ -3462,6 +3462,45 @@ void GameController::CollectTextTagOverlays(int screenW, int screenH) {
     ui_.SetTextTagData(tags);
 }
 
+void GameController::SyncLeaderboard() {
+    HudLeaderboard board;
+    if (jassNatives_ && jassNatives_->GetData()) {
+        const auto& data = *jassNatives_->GetData();
+        // Prefer the local player's board (ref PlayerSetLeaderboard),
+        // fall back to the first displayed board.
+        const JassNativesData::JassLeaderboard* picked = nullptr;
+        auto pit = data.playerLeaderboards.find(data.localPlayerIndex);
+        if (pit != data.playerLeaderboards.end()) {
+            auto bit = data.leaderboards.find(pit->second);
+            if (bit != data.leaderboards.end() && bit->second && bit->second->displayed) {
+                picked = bit->second.get();
+            }
+        }
+        if (!picked) {
+            for (const auto& [id, b] : data.leaderboards) {
+                (void)id;
+                if (b && b->displayed) {
+                    picked = b.get();
+                    break;
+                }
+            }
+        }
+        if (picked && picked->displayed) {
+            board.visible = true;
+            board.label = picked->label;
+            for (const auto& item : picked->items) {
+                HudLeaderboardItem row;
+                row.label = picked->showLabel && item.showLabel ? item.label : std::string();
+                row.value = item.value;
+                row.showLabel = picked->showLabel && item.showLabel;
+                row.showValue = picked->showValues && item.showValue;
+                board.items.push_back(std::move(row));
+            }
+        }
+    }
+    ui_.SetLeaderboard(board);
+}
+
 // --- Render ---
 
 void GameController::Render(int screenW, int screenH) {
@@ -3635,6 +3674,7 @@ void GameController::Render(int screenW, int screenH) {
     if (!hideHud_) {
         CollectUnitOverlays(screenW, screenH);
         CollectTextTagOverlays(screenW, screenH);
+        SyncLeaderboard();
         sg_reset_state_cache();
         sg_apply_viewport(0, 0, screenW, screenH, true);
         sg_apply_scissor_rect(0, 0, screenW, screenH, true);

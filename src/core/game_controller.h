@@ -183,6 +183,7 @@ private:
     void SyncWeather(float dt);
     void CollectUnitOverlays(int screenW, int screenH);
     void CollectTextTagOverlays(int screenW, int screenH);
+    void SyncLeaderboard();
     void RefreshRuntimeUnitSplats();
     void AddActiveEventSplatsToTerrain();
     void CaptureScreenshotIfNeeded(int screenW, int screenH);

@@ -47,6 +47,19 @@ struct TextTagOverlayInfo {
     bool centered = false;
 };
 
+// Leaderboard snapshot (JASS board data, synced by GameController)
+struct HudLeaderboardItem {
+    std::string label;
+    int value = 0;
+    bool showLabel = true;
+    bool showValue = true;
+};
+struct HudLeaderboard {
+    std::string label;
+    std::vector<HudLeaderboardItem> items;
+    bool visible = false;
+};
+
 struct ScreenRect {
     float x = 0;
     float y = 0;
@@ -205,6 +218,7 @@ public:
     // In-world unit overlays (health bars, selection indicators, names)
     void SetOverlayData(const std::vector<UnitOverlayInfo>& data) { overlayData_ = &data; }
     void SetTextTagData(const std::vector<TextTagOverlayInfo>& data) { textTagData_ = &data; }
+    void SetLeaderboard(const HudLeaderboard& board) { leaderboard_ = board; }
     void SetMultiSelection(const std::vector<MultiSelectUnitInfo>& units);
     void SetSelectionBox(const ScreenRect& rect);
     void ClearSelectionBox();
@@ -328,6 +342,7 @@ private:
 
     const std::vector<UnitOverlayInfo>* overlayData_ = nullptr;
     const std::vector<TextTagOverlayInfo>* textTagData_ = nullptr;
+    HudLeaderboard leaderboard_;
     MultiSelectionPanel multiSelectionPanel_;
     std::vector<MultiSelectUnitInfo> multiSelectionUnits_;
     bool selectionBoxVisible_ = false;

@@ -1226,6 +1226,58 @@ void MainUI::RenderOverlays(UiRenderer& r) {
             textRenderer_.RenderText(r, x, tag.screenY, tag.text.c_str(), tag.color, size);
         }
     }
+
+    // Leaderboard panel (ref CLeaderboard): top-right table of the
+    // currently displayed board, title plus label/value rows.
+    if (leaderboard_.visible && textRenderer_.IsValid() &&
+        (!leaderboard_.label.empty() || !leaderboard_.items.empty())) {
+        const float titleSize = 13.0f;
+        const float rowSize = 12.0f;
+        const float rowH = 16.0f;
+        const float padX = 8.0f;
+        const size_t maxRows = std::min(leaderboard_.items.size(), size_t(16));
+        float panelW = 0.0f;
+        if (!leaderboard_.label.empty()) {
+            panelW = std::max(panelW, textRenderer_.MeasureText(leaderboard_.label.c_str(), titleSize));
+        }
+        for (size_t i = 0; i < maxRows; ++i) {
+            const auto& item = leaderboard_.items[i];
+            float w = 0.0f;
+            if (item.showLabel && !item.label.empty()) {
+                w += textRenderer_.MeasureText(item.label.c_str(), rowSize);
+            }
+            if (item.showValue) {
+                const std::string val = std::to_string(item.value);
+                w += textRenderer_.MeasureText(val.c_str(), rowSize) + 24.0f;
+            }
+            panelW = std::max(panelW, w);
+        }
+        panelW += padX * 2.0f;
+        const float panelH = (leaderboard_.label.empty() ? 0.0f : rowH + 4.0f) +
+                             (float)maxRows * rowH + 8.0f;
+        const float panelX = (float)gameUI_.screenW - panelW - 8.0f;
+        const float panelY = 8.0f;
+        r.DrawQuad(panelX, panelY, panelW, panelH, 0xAA111122);
+        float cy = panelY + 4.0f;
+        if (!leaderboard_.label.empty()) {
+            textRenderer_.RenderText(r, panelX + padX, cy,
+                                     leaderboard_.label.c_str(), 0xFFFFCC66, titleSize);
+            cy += rowH + 4.0f;
+        }
+        for (size_t i = 0; i < maxRows; ++i) {
+            const auto& item = leaderboard_.items[i];
+            float cx = panelX + padX;
+            if (item.showLabel && !item.label.empty()) {
+                textRenderer_.RenderText(r, cx, cy, item.label.c_str(), 0xFFFFFFFF, rowSize);
+                cx += textRenderer_.MeasureText(item.label.c_str(), rowSize) + 12.0f;
+            }
+            if (item.showValue) {
+                textRenderer_.RenderText(r, cx, cy, std::to_string(item.value).c_str(),
+                                         0xFFFFE090, rowSize);
+            }
+            cy += rowH;
+        }
+    }
 }
 
 void MainUI::UpdateInfoPanel(War3ID unitTypeId, const std::string& name, int level,
