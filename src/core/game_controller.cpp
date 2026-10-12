@@ -1646,6 +1646,7 @@ void GameController::InitMapConfig() {
         dayNight_.SetMapFog(true,
             w3i_.fogColor[0] / 255.0f, w3i_.fogColor[1] / 255.0f,
             w3i_.fogColor[2] / 255.0f, w3i_.fogDensity);
+        dayNight_.SetMapFogRange(w3i_.fogHeight[0], w3i_.fogHeight[1]);
     } else {
         dayNight_.SetMapFog(false, 0.5f, 0.5f, 0.5f, 0.0f);
     }

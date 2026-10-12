@@ -26,6 +26,7 @@ public:
     // enabled, the map's fog color replaces the computed sky fog and the
     // density shortens the fog range. Disabled by default (day-night sky).
     void SetMapFog(bool enabled, float r, float g, float b, float density);
+    void SetMapFogRange(float start, float end);
 
     // Get current sky/fog color
     const float* GetFogColor() const { return fogColor_; }
@@ -47,6 +48,8 @@ private:
     bool mapFogEnabled_ = false;
     float mapFogColor_[3] = {0.5f, 0.5f, 0.5f};
     float mapFogDensity_ = 0.0f;
+    float mapFogStart_ = 4000.0f;
+    float mapFogEnd_ = 12000.0f;
 
     // Computed values
     float sunDirX_ = 0, sunDirY_ = 1, sunDirZ_ = 0;

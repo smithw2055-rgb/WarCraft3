@@ -24,6 +24,11 @@ void DayNightCycle::SetMapFog(bool enabled, float r, float g, float b, float den
     mapFogDensity_ = density < 0.0f ? 0.0f : density;
 }
 
+void DayNightCycle::SetMapFogRange(float start, float end) {
+    if (start > 0) mapFogStart_ = start;
+    if (end > start) mapFogEnd_ = end;
+}
+
 void DayNightCycle::Compute(float time) {
     // Convention (daynight.h): 0.0 = midnight, 0.25 = dawn, 0.5 = noon,
     // 0.75 = dusk. Elevation peaks at 0.5, so use -cos (was cos, which put
@@ -157,8 +162,8 @@ void DayNightCycle::Apply(TexturedTerrain& terrain) {
 
     // Update terrain fog: map terrain-fog overrides the sky fog when set.
     if (mapFogEnabled_) {
-        const float far = 12000.0f / (1.0f + mapFogDensity_);
-        terrain.SetFog(mapFogColor_, 4000.0f, far);
+        const float far = mapFogEnd_ / (1.0f + mapFogDensity_);
+        terrain.SetFog(mapFogColor_, mapFogStart_, far);
     } else {
         terrain.SetFog(fogColor_, 4000.0f, 12000.0f);
     }
