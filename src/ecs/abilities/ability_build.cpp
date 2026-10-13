@@ -53,13 +53,17 @@ bool CAbilityBuild::CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int o
 
 CBehavior* CAbilityBuild::Begin(CSimulation& game, CUnit* caster, int orderId, float x, float y) {
     (void)orderId;
-    // Snap to grid
-    RoundBuildPosition(x, y);
-
     // The orderId encodes which building to build
     // For now, we use the orderId directly as the building type
     // In a full implementation, the UI would pass the building type
     War3ID buildingTypeId(static_cast<uint32_t>(orderId));
+
+    // Snap to grid (footprint-aware when the type has a pathTex)
+    if (auto* unitData = game.GetUnitData()) {
+        RoundBuildPositionForType(unitData->GetUnitType(buildingTypeId), x, y);
+    } else {
+        RoundBuildPosition(x, y);
+    }
 
     // Validate placement
     if (IsBuildLocationObstructed(game, x, y, caster->GetPlayerIndex(), buildingTypeId)) {
@@ -102,6 +106,15 @@ void CAbilityBuild::RoundBuildPosition(float& x, float& y) {
     y = std::round(y / 64.0f) * 64.0f;
 }
 
+void CAbilityBuild::RoundBuildPositionForType(const CUnitType* type, float& x, float& y) {
+    RoundBuildPosition(x, y);
+    auto img = type ? type->GetPathTexImage() : nullptr;
+    if (img && img->valid) {
+        if (((img->w / 2) % 2) == 1) x += 32.0f;
+        if (((img->h / 2) % 2) == 1) y += 32.0f;
+    }
+}
+
 bool CAbilityBuild::IsBuildLocationObstructed(CSimulation& game, float x, float y,
                                                int playerIndex, War3ID buildingTypeId) {
     (void)playerIndex;
@@ -117,17 +130,34 @@ bool CAbilityBuild::IsBuildLocationObstructed(CSimulation& game, float x, float 
 
     // Footprint vs the pathing grid. An empty prevented set still blocks
     // UNBUILDABLE cells (retail ground buildings). Required types must
-    // cover every cell of the footprint (blight for haunted ground).
+    // cover every cell of the footprint (blight for haunted ground). The
+    // rect comes from the type's pathTex footprint when decoded (ref
+    // checkPathingTexture: the texture only shapes the rect; the map's
+    // flags are tested), else the legacy collision-size square.
     auto* pathfinding = game.GetPathfinding();
     if (pathfinding && pathfinding->HasPathingMap()) {
         const WpmData* wpm = pathfinding->GetPathingMap();
         auto prevented = buildType->GetPreventedPathingTypes();
         if (prevented.empty()) prevented.insert(CBuildingPathingType::UNBUILDABLE);
         const auto& required = buildType->GetRequiredPathingTypes();
-        const int x0 = pathfinding->WorldToCellX(x - collisionSize);
-        const int x1 = pathfinding->WorldToCellX(x + collisionSize);
-        const int y0 = pathfinding->WorldToCellY(y - collisionSize);
-        const int y1 = pathfinding->WorldToCellY(y + collisionSize);
+        int x0, x1, y0, y1;
+        auto pathTex = buildType->GetPathTexImage();
+        if (pathTex && pathTex->valid) {
+            const int rot = (int)game.GetGameplayConstants().buildingAngle;
+            int rx, ry, rw, rh;
+            PathTexRotate(0, 0, pathTex->w, pathTex->h, rot, rx, ry, rw, rh);
+            const int baseCx = pathfinding->WorldToCellX(x);
+            const int baseCy = pathfinding->WorldToCellY(y);
+            x0 = baseCx - rw / 2;
+            x1 = x0 + rw - 1;
+            y0 = baseCy - rh / 2;
+            y1 = y0 + rh - 1;
+        } else {
+            x0 = pathfinding->WorldToCellX(x - collisionSize);
+            x1 = pathfinding->WorldToCellX(x + collisionSize);
+            y0 = pathfinding->WorldToCellY(y - collisionSize);
+            y1 = pathfinding->WorldToCellY(y + collisionSize);
+        }
         auto flagOf = [](CBuildingPathingType type) -> uint8_t {
             switch (type) {
                 case CBuildingPathingType::UNWALKABLE: return WpmData::UNWALKABLE;

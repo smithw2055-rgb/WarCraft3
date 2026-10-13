@@ -1,11 +1,13 @@
 #pragma once
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include <unordered_set>
 #include "resource/slk.h"
 #include "data/combat_types.h"
 #include "ecs/unit_attack.h"
+#include "map/path_tex.h"
 
 enum class PathingGridMovementType : uint8_t {
     FOOT, FLY, HOVER, FLOAT, AMPHIBIOUS, DISABLED, FOOT_NO_COLLISION, HORSE
@@ -211,6 +213,13 @@ public:
     // by audio/UnitSoundset (ref UnitSoundset).
     const std::string& GetUnitSound() const { return unitSound_; }
     void SetUnitSound(const std::string& s) { unitSound_ = s; }
+    // Pathing footprint texture (unit `pathTex`, e.g.
+    // "PathTextures\8x8Default.tga"): decoded on demand for build
+    // placement checks (ref buildingPathingPixelMap).
+    const std::string& GetPathTex() const { return pathTex_; }
+    void SetPathTex(const std::string& s) { pathTex_ = s; }
+    std::shared_ptr<const PathTexImage> GetPathTexImage() const { return pathTexImage_; }
+    void SetPathTexImage(std::shared_ptr<const PathTexImage> img) { pathTexImage_ = std::move(img); }
 
 private:
     std::string name_;
@@ -299,4 +308,6 @@ private:
     int lumberBountyAwardedSides_;
     bool neutralBuildingShowMinimapIcon_;
     std::string unitSound_;
+    std::string pathTex_;
+    std::shared_ptr<const PathTexImage> pathTexImage_;
 };

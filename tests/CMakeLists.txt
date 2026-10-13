@@ -110,6 +110,7 @@ add_executable(warsmash_tests
     ../src/map/object_mods.cpp
     ../src/map/unitsdoo.cpp
     ../src/map/wts.cpp
+    ../src/map/path_tex.cpp
     ../src/asset/BLP.cpp
     ../src/asset/DDS.cpp
     ../src/asset/MipChain.cpp

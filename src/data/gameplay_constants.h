@@ -99,6 +99,9 @@ struct CGameplayConstants {
     bool globalExperience = false;
     bool buildingKillsGiveExp = false;
 
+    // Placement footprint rotation in degrees (ref BuildingAngle).
+    float buildingAngle = 0.0f;
+
     CGameplayConstants();
     explicit CGameplayConstants(const TxtTable& miscData);
 };

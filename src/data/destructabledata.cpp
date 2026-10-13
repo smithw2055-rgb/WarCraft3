@@ -83,6 +83,10 @@ CDestructableData CDestructableData::LoadFromMpq(const MpqManager& mpq,
         d->deathEffect = GetMergedString(slk, row, deathEffectColumn, skinTbl, sid, "deathEffect", "");
         d->deathSound = GetMergedString(slk, row, deathSoundColumn, skinTbl, sid, "deathSnd", "");
         d->deathModel = GetMergedString(slk, row, deathModelColumn, skinTbl, sid, "deathModel", "");
+        const int pathTexColumn = FindFirstColumn(slk, {"pathTex"});
+        d->pathTex = GetMergedString(slk, row, pathTexColumn, skinTbl, sid, "pathTex", "");
+        const int pathTexDeathColumn = FindFirstColumn(slk, {"pathTexDeath"});
+        d->pathTexDeath = GetMergedString(slk, row, pathTexDeathColumn, skinTbl, sid, "pathTexDeath", "");
 
         data.destructables_[id] = std::move(d);
     }

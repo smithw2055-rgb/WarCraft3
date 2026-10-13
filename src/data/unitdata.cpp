@@ -761,6 +761,11 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
             false);
 
         type->SetUnitSound(unitSound);
+        // Building footprint texture name (ref buildingPathingPixelMap):
+        // unit data first, UnitUI art tables as fallback. Decoded once in
+        // LoadFromMpq (this ctor has no archive handle).
+        type->SetPathTex(GetMergedString(unitDataTxt, unitData, sid, "pathTex",
+            GetMergedString(unitUITxt, unitUI, sid, "pathTex")));
         types_[id] = std::move(type);
 
     }
@@ -839,12 +844,21 @@ CUnitData CUnitData::LoadFromMpq(const MpqManager& mpq,
                            unitDataTxt, unitAbilitiesTxt, unitBalanceTxt,
                            unitWeaponsTxt, unitUITxt);
 
-    return CUnitData(gameplayConstants,
-                     unitDataSlk, unitDataTxt,
-                     unitAbilitiesSlk, unitAbilitiesTxt,
-                     unitBalanceSlk, unitBalanceTxt,
-                     unitWeaponsSlk, unitWeaponsTxt,
-                     unitUISlk, unitUITxt);
+    CUnitData data(gameplayConstants,
+                   unitDataSlk, unitDataTxt,
+                   unitAbilitiesSlk, unitAbilitiesTxt,
+                   unitBalanceSlk, unitBalanceTxt,
+                   unitWeaponsSlk, unitWeaponsTxt,
+                   unitUISlk, unitUITxt);
+    // Decode footprint textures once (ref buildingPathingPixelMap) so
+    // placement checks never touch the MPQ at runtime.
+    for (const auto& [id, type] : data.GetAllTypes()) {
+        (void)id;
+        if (type && !type->GetPathTex().empty()) {
+            type->SetPathTexImage(LoadPathTex(mpq, type->GetPathTex()));
+        }
+    }
+    return data;
 }
 
 void CUnitData::RegisterUnitType(War3ID typeId, std::unique_ptr<CUnitType> type) {

@@ -246,7 +246,9 @@ bool MeleeAIController::FindBuildSpot(float nearX, float nearY, const War3ID& bu
             const float angle = step * 3.14159265f / 6.0f;
             float x = nearX + std::cos(angle) * radius;
             float y = nearY + std::sin(angle) * radius;
-            CAbilityBuild::RoundBuildPosition(x, y);
+            const CUnitType* buildType =
+                (sim_ && sim_->GetUnitData()) ? sim_->GetUnitData()->GetUnitType(buildingType) : nullptr;
+            CAbilityBuild::RoundBuildPositionForType(buildType, x, y);
             if (sim_->GetPathfinding() && sim_->GetPathfinding()->HasPathingMap()) {
                 if (!sim_->GetPathfinding()->IsWorldPointPathableForUnit(
                         x, y, 0.0f, PathingGridMovementType::FOOT, nullptr)) {

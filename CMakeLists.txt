@@ -172,6 +172,7 @@ set(SOURCES
     src/map/object_mods.cpp
     src/map/w3d.cpp
     src/map/unitsdoo.cpp
+    src/map/path_tex.cpp
     src/model/mdx.cpp
     src/model/mdl.cpp
     src/render/mdx_viewer.cpp

@@ -305,6 +305,7 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     heroExpRange = readMiscInt("HeroExpRange", 1000);
     globalExperience = readMiscInt("GlobalExperience", 0) != 0;
     buildingKillsGiveExp = readMiscInt("BuildingKillsGiveExp", 0) != 0;
+    buildingAngle = readFloat("BuildingAngle", 0.0f);
 }
 
 int CGameplayConstants::GetHeroReviveGoldCost(int originalGoldCost, int level) const {

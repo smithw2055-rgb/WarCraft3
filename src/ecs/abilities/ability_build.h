@@ -40,6 +40,9 @@ public:
 
     // Static: snap build position to grid
     static void RoundBuildPosition(float& x, float& y);
+    // Footprint-aware snap (ref roundTargetPoint): odd footprints shift
+    // half a cell so the texture stays centered on the grid.
+    static void RoundBuildPositionForType(const CUnitType* type, float& x, float& y);
 
 private:
     CBuildRace race_;

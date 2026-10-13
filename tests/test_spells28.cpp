@@ -10,6 +10,7 @@
 #include "ecs/abilities/ability_build.h"
 #include "ecs/abilities/ability_gold_mine.h"
 #include "ecs/item_bonuses.h"
+#include "map/path_tex.h"
 #include "map/wpm.h"
 #include "ecs/abilities/ability_harvest.h"
 #include "ecs/abilities/ability_inventory.h"
@@ -224,6 +225,51 @@ bool TestItemPickupAppliesBonuses() {
     TEST_ASSERT(bearer->GetBonusDamage() == before + 7);
     TEST_ASSERT(inventory.DropItem(sim, bearer, 0));
     TEST_ASSERT(bearer->GetBonusDamage() == before);
+    return true;
+}
+
+bool TestBuildFootprintUsesPathTex() {
+    // 4x2 texture at angle 0 rotates to a 2x4 rect (ref PathingGrid:
+    // rotation (0+450)%360 = 90). Center cell (8,8) then covers x 7..8,
+    // y 6..9; an unrotated rect would cover x 6..9, y 7..8 instead.
+    CSimulation sim;
+    CUnitData data;
+    data.RegisterUnitType(War3ID("hbar"), MakeType("hbar"));
+    sim.SetUnitData(&data);
+    WpmData wpm;
+    wpm.width = 16;
+    wpm.height = 16;
+    wpm.pathing.assign(256, 0);
+    sim.SetPathingMap(&wpm, 0.0f, 0.0f);
+    auto img = std::make_shared<PathTexImage>();
+    img->w = 4;
+    img->h = 2;
+    img->rgb.assign(24, 0);
+    img->valid = true;
+    data.GetUnitType(War3ID("hbar"))->SetPathTexImage(img);
+    // Rotation helper sanity: 4x2 at 0 degrees -> 2x4.
+    int rx, ry, rw, rh;
+    PathTexRotate(0, 0, 4, 2, 0, rx, ry, rw, rh);
+    TEST_ASSERT(rw == 2 && rh == 4);
+    PathTexRotate(0, 0, 4, 2, 90, rx, ry, rw, rh); // (90+450)%360 = 180
+    TEST_ASSERT(rw == 4 && rh == 2);
+    // Pixel flag mapping: B -> build, G -> fly, R -> walk+swim.
+    PathTexImage one;
+    one.w = 1;
+    one.h = 1;
+    one.rgb = {200, 0, 0};
+    one.valid = true;
+    TEST_ASSERT(PathTexPixelFlags(one, 0, 0, false) == (WpmData::UNWALKABLE | WpmData::UNSWIMABLE));
+    one.rgb = {0, 200, 0};
+    TEST_ASSERT(PathTexPixelFlags(one, 0, 0, false) == WpmData::UNFLYABLE);
+    one.rgb = {0, 0, 200};
+    TEST_ASSERT(PathTexPixelFlags(one, 0, 0, false) == WpmData::UNBUILDABLE);
+    // Cell (7,6) is inside the rotated rect, (9,6) is outside it.
+    wpm.pathing[7 + 6 * 16] = WpmData::UNBUILDABLE;
+    TEST_ASSERT(CAbilityBuild::IsBuildLocationObstructed(sim, 272.0f, 272.0f, 0, War3ID("hbar")));
+    wpm.pathing[7 + 6 * 16] = 0;
+    wpm.pathing[9 + 6 * 16] = WpmData::UNBUILDABLE;
+    TEST_ASSERT(!CAbilityBuild::IsBuildLocationObstructed(sim, 272.0f, 272.0f, 0, War3ID("hbar")));
     return true;
 }
 

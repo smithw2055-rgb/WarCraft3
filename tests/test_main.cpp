@@ -463,6 +463,7 @@ bool TestMilitiaReturnsCargoAndExpires();
 bool TestUpgradeAndPowerup();
 bool TestItemPickupAppliesBonuses();
 bool TestBuildRejectsUnbuildableCell();
+bool TestBuildFootprintUsesPathTex();
 bool TestBlightAndHauntedMine();
 bool TestWispAndLumberHarvest();
 bool TestAcolyteBindingPersistsAndReleasesOnDeath();
@@ -1134,6 +1135,7 @@ int main(int argc, char** argv) {
         {"Upgrade and powerup", TestUpgradeAndPowerup},
         {"Item pickup applies bonuses", TestItemPickupAppliesBonuses},
         {"Build rejects unbuildable cell", TestBuildRejectsUnbuildableCell},
+        {"Build footprint uses pathTex", TestBuildFootprintUsesPathTex},
         {"Blight and haunted mine", TestBlightAndHauntedMine},
         {"Wisp and lumber harvest", TestWispAndLumberHarvest},
         {"Acolyte binding persists, releases on death", TestAcolyteBindingPersistsAndReleasesOnDeath},

@@ -4608,7 +4608,9 @@ static bool FindGameplaySmokeBuildSite(CSimulation& sim, const CUnit* anchor, Wa
     for (const auto& offset : offsets) {
         float x = anchor->GetX() + offset[0];
         float y = anchor->GetY() + offset[1];
-        CAbilityBuild::RoundBuildPosition(x, y);
+        const CUnitType* buildType =
+            sim.GetUnitData() ? sim.GetUnitData()->GetUnitType(buildingTypeId) : nullptr;
+        CAbilityBuild::RoundBuildPositionForType(buildType, x, y);
         if (!CAbilityBuild::IsBuildLocationObstructed(sim, x, y, anchor->GetPlayerIndex(), buildingTypeId)) {
             outX = x;
             outY = y;

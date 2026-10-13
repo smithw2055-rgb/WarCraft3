@@ -19,7 +19,7 @@
 
 ## P1：数据/地图正确性（错起来隐蔽）
 
-- [ ] 11. 建筑/装饰占位像素图未生效：`pathTex` 存了从不解码，只查 W3M 单格（对位 `PathingGrid.loadPathingTexture`）。
+- [x] 11. 占位像素图（Gap-33 前半：pathTex 解码/缓存、`pathTex` 字段、放置校验改足迹矩形、`BuildingAngle`、吸附偏移；后半 WPM 静态 stamp/死亡切换仍待办）。
 - [ ] 12. w3i 开局科技/升级可用性解析了不用（`w3i.h` → `map_loader` 不消费）。
 - [ ] 13. w3i 全局随机单位/物品表未接入（`PlaceRandomUnit/Item` 只用自带表）。
 - [ ] 14. 通行/高度/水面三套定义打架：缺 BOUNDARY 旗、`FLOAT/AMPH` 映射；`DecodeGroundHeight` 忽略崖层高+水位偏移；WPM 与 W3E 水面定义不一致。

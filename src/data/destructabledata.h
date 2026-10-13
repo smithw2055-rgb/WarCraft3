@@ -22,6 +22,10 @@ struct CDestructableType {
     std::string deathEffect;
     std::string deathSound;
     std::string deathModel;
+    // Pathing footprint textures (ref pathTex/pathTexDeath): decoded on
+    // demand for blight checks and (next pass) static WPM stamps.
+    std::string pathTex;
+    std::string pathTexDeath;
 };
 
 class CDestructableData {
