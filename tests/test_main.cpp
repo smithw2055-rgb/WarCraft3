@@ -204,6 +204,9 @@ bool TestAckBankPlaySafeWithoutAudio();
 bool TestThornsReflectsOnceWithoutPingPong();
 bool TestStunParksAndClearsBehavior();
 bool TestAttackDefenseTableMatchesOfficialChart();
+bool TestDamagedUnitReturnsFire();
+bool TestDamagedPeonFlees();
+bool TestBusyUnitIgnoresReturnFire();
 bool TestUnitDamageAppliesArmorTypeMultiplier();
 bool TestNonNormalDamageTypeIgnoresArmorValue();
 bool TestNegativeArmorAmplifiesDamage();
@@ -876,6 +879,9 @@ int main(int argc, char** argv) {
         {"Thorns reflects once without ping-pong", TestThornsReflectsOnceWithoutPingPong},
         {"Stun parks and clears behavior", TestStunParksAndClearsBehavior},
         {"Attack/defense table matches official chart", TestAttackDefenseTableMatchesOfficialChart},
+        {"Damaged unit returns fire", TestDamagedUnitReturnsFire},
+        {"Damaged peon flees", TestDamagedPeonFlees},
+        {"Busy unit ignores return fire", TestBusyUnitIgnoresReturnFire},
         {"Unit damage applies armor-type multiplier", TestUnitDamageAppliesArmorTypeMultiplier},
         {"Non-normal damage ignores armor value", TestNonNormalDamageTypeIgnoresArmorValue},
         {"Negative armor amplifies damage", TestNegativeArmorAmplifiesDamage},

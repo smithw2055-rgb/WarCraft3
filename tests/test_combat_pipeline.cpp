@@ -4,8 +4,12 @@
 #include <vector>
 
 #include "data/combat_types.h"
+#include "ecs/behaviors/behavior_attack.h"
+#include "ecs/behaviors/behavior_hold_position.h"
+#include "ecs/behaviors/behavior_move.h"
 #include "ecs/combat/combat_system.h"
 #include "ecs/csimulation.h"
+#include "ecs/player.h"
 #include "ecs/unit.h"
 #include "ecs/unit_type.h"
 
@@ -121,5 +125,86 @@ bool TestCombatSystemBlockedMathConsistent() {
     TEST_NEAR(r.damageBlocked, 100.0f * red, 0.01f);
     TEST_NEAR(r.damageDealt, 100.0f * (1.0f - red), 0.01f);
     TEST_NEAR(r.damageBlocked + r.damageDealt, 100.0f, 0.01f);
+    return true;
+}
+
+namespace {
+
+CUnitType* MakePeonType() {
+    static std::vector<std::unique_ptr<CUnitType>> keep;
+    keep.push_back(std::make_unique<CUnitType>(
+        "Peon", "Peon", "icon", War3ID("opeo"),
+        10000, 1.0f, 0.5f, CRegenType::ALWAYS,
+        100, 200, 200, 0, War3ID(),
+        std::vector<War3ID>{}, false, PathingGridMovementType::FOOT,
+        0.0f, 32.0f, std::vector<std::string>{},
+        std::unordered_set<CUnitClassification>{CUnitClassification::PEON},
+        std::vector<CUnitAttack>{},
+        0, std::string(""), false, true, CDefenseType::NONE,
+        0.0f, 1.0f, std::unordered_set<CTargetType>{},
+        600.0f, 0.0f, std::vector<War3ID>{}, std::vector<War3ID>{},
+        std::vector<War3ID>{}, std::vector<War3ID>{},
+        std::unordered_map<CUpgradeClass, War3ID>{}, std::vector<War3ID>{},
+        std::vector<War3ID>{}, std::vector<War3ID>{}, CUnitRace{"Orc", War3ID("O")},
+        100, 50, 1, 0, 30, 0, 0, 0,
+        std::unordered_set<CBuildingPathingType>{},
+        std::unordered_set<CBuildingPathingType>{},
+        0.5f, 0.6f, std::vector<CUnitTypeRequirement>{},
+        std::vector<std::vector<CUnitTypeRequirement>>{},
+        1, false, 20, 2.0f, 15, 1.5f, 10, 1.0f,
+        CPrimaryAttribute::STRENGTH, std::vector<War3ID>{},
+        std::vector<std::string>{"Bob"}, 1, true, 1, false, 100,
+        0.3f, 0.3f, false, false, 1, 800, 600, false,
+        10, 1, 6, 5, 1, 3, false));
+    return keep.back().get();
+}
+
+void AddTwoPlayers(CSimulation& sim) {
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+}
+
+} // namespace
+
+bool TestDamagedUnitReturnsFire() {
+    CSimulation sim;
+    AddTwoPlayers(sim);
+    CUnit victim(11, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 0, 0, 0);
+    CUnit attacker(12, MakeCombatType(CDefenseType::NONE, 0), 1, War3ID("hfoo"), 300, 0, 0);
+    victim.SetAttackBehavior(std::make_unique<CBehaviorAttack>());
+    victim.SetMoveBehavior(std::make_unique<CBehaviorMove>());
+    victim.Damage(sim, &attacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 10.0f, 0);
+    TEST_ASSERT(victim.GetCurrentBehavior() == victim.GetAttackBehavior());
+    TEST_ASSERT(victim.GetAttackBehavior()->GetTarget() == &attacker);
+    return true;
+}
+
+bool TestDamagedPeonFlees() {
+    CSimulation sim;
+    AddTwoPlayers(sim);
+    CUnit victim(13, MakePeonType(), 0, War3ID("opeo"), 0, 0, 0);
+    CUnit attacker(14, MakeCombatType(CDefenseType::NONE, 0), 1, War3ID("hfoo"), 300, 0, 0);
+    victim.SetMoveBehavior(std::make_unique<CBehaviorMove>());
+    victim.Damage(sim, &attacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 10.0f, 0);
+    // No attacks and PEON: return fire skipped, move behavior adopted.
+    TEST_ASSERT(victim.GetCurrentBehavior() == victim.GetMoveBehavior());
+    TEST_ASSERT(victim.GetCurrentBehavior()->GetCategory() == CBehaviorCategory::MOVE);
+    return true;
+}
+
+bool TestBusyUnitIgnoresReturnFire() {
+    CSimulation sim;
+    AddTwoPlayers(sim);
+    CUnit victim(15, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 0, 0, 0);
+    CUnit attacker(16, MakeCombatType(CDefenseType::NONE, 0), 1, War3ID("hfoo"), 300, 0, 0);
+    victim.SetAttackBehavior(std::make_unique<CBehaviorAttack>());
+    victim.SetMoveBehavior(std::make_unique<CBehaviorMove>());
+    // A non-default active behavior blocks return fire/flee.
+    victim.SetCurrentBehavior(std::make_unique<CBehaviorHoldPosition>());
+    CBehavior* busy = victim.GetCurrentBehavior();
+    TEST_ASSERT(busy != nullptr);
+    victim.Damage(sim, &attacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 10.0f, 0);
+    TEST_ASSERT(victim.GetCurrentBehavior() == busy);
+    TEST_ASSERT(victim.GetAttackBehavior()->GetTarget() == nullptr);
     return true;
 }

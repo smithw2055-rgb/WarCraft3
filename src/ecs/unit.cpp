@@ -1428,6 +1428,8 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         auto& deathCb = simulation.GetUnitDeathCallback();
         int srcHandle = source ? source->GetHandleId() : -1;
         if (deathCb) deathCb(handleId_, srcHandle, playerIndex_);
+    } else if (life_ > 0) {
+        MaybeReturnFire(simulation, source);
     }
 
     return oldLife - life_;
@@ -1496,6 +1498,63 @@ void CUnit::AwardBountyAndXP(CSimulation& simulation, CUnit* source) {
         const int share = (int)(availableXp * (1.0f / (float)receivers.size()) *
                                 gc.GetHeroFactorXp(hero->GetHeroLevel()));
         if (share > 0) heroAbility->AddXP(simulation, hero, share);
+    }
+}
+
+void CUnit::MaybeReturnFire(CSimulation& simulation, CUnit* source) {
+    if (!source || source == this || !unitType_) return;
+    // Idle or default-behavior units only (ref currentBehavior gate).
+    if (currentBehavior_ && currentBehavior_ != defaultBehavior_.get()) return;
+    if (IsDead() || IsPaused()) return;
+
+    auto adoptBehavior = [&](CBehavior* behavior) {
+        if (!behavior || currentBehavior_ == behavior) return;
+        if (currentBehavior_) {
+            currentBehavior_->End(simulation);
+            if (currentBehavior_ == ownedCurrentBehavior_.get()) {
+                ownedCurrentBehavior_.reset();
+            }
+            currentBehavior_ = nullptr;
+        }
+        behavior->SetUnit(this);
+        behavior->Begin(simulation);
+        currentBehavior_ = behavior;
+    };
+
+    CPlayer* self = simulation.GetPlayer(GetPlayerIndex());
+    CPlayer* foe = simulation.GetPlayer(source->GetPlayerIndex());
+    const bool hostile = self && foe && !self->HasAlliance(*foe, CAllianceType::PASSIVE);
+
+    bool isPeon = false;
+    if (unitType_) {
+        const auto& classes = unitType_->GetClassifications();
+        isPeon = classes.find(CUnitClassification::PEON) != classes.end();
+    }
+
+    // Return fire: first attack that can target the attacker.
+    if (hostile && !isPeon && !unitType_->GetAttacks().empty()) {
+        if (source->CanBeTargetedBy(simulation, this, {}) && !source->IsDead()) {
+            if (CBehaviorAttack* attack = GetAttackBehavior()) {
+                attack->SetTarget(source);
+                adoptBehavior(attack);
+                return;
+            }
+        }
+    }
+
+    // Flee: workers run one speed-step away from the attacker.
+    if (unitType_->CanFlee() && !IsRooted() && GetPlayerIndex() != source->GetPlayerIndex()) {
+        if (CBehaviorMove* move = GetMoveBehavior()) {
+            const float dx = GetX() - source->GetX();
+            const float dy = GetY() - source->GetY();
+            if (dx * dx + dy * dy > 0.01f) {
+                const float ang = std::atan2(dy, dx);
+                const float step = (float)GetSpeed();
+                move->SetTarget(GetX() + step * std::cos(ang),
+                                GetY() + step * std::sin(ang));
+                adoptBehavior(move);
+            }
+        }
     }
 }
 

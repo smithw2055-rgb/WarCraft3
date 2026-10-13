@@ -390,6 +390,10 @@ private:
     // Kill rewards (bounty dice + hero XP split) fired once at the
     // killing blow. Source may be nullptr (degeneration/decay).
     void AwardBountyAndXP(CSimulation& simulation, CUnit* source);
+    // Return fire / flee when damaged while idle (ref damage() else
+    // branch). No-op while busy; P0-2 refines the gate with
+    // interruptable().
+    void MaybeReturnFire(CSimulation& simulation, CUnit* source);
     void ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrder> order);
     void RefreshMaxLifeTotal();
     void RefreshMaxManaTotal();

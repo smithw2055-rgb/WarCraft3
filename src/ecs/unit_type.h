@@ -195,6 +195,8 @@ public:
     int GetSightRadiusDay() const { return sightRadiusDay_; }
     int GetSightRadiusNight() const { return sightRadiusNight_; }
     bool HasExtendedLineOfSight() const { return extendedLineOfSight_; }
+    // Workers flee when attacked instead of returning fire (ref canFlee).
+    bool CanFlee() const { return canFlee_; }
     int GetGoldBountyAwardedBase() const { return goldBountyAwardedBase_; }
     int GetGoldBountyAwardedDice() const { return goldBountyAwardedDice_; }
     int GetGoldBountyAwardedSides() const { return goldBountyAwardedSides_; }
