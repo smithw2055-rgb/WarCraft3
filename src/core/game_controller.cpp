@@ -4098,7 +4098,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
         if (multiSelectHandle >= 0 && selectedUnitHandlesSet_.find(multiSelectHandle) != selectedUnitHandlesSet_.end()) {
             PlayUiSound("Click", 0.5f);
             SetSelectedUnits(GetSelectedSimulationUnits(), multiSelectHandle, true);
-            PlayUnitResponse(simulation_.GetUnit(multiSelectHandle), "What");
+            PlaySelectResponse(simulation_.GetUnit(multiSelectHandle));
             std::cout << "MultiSelectIcon: primary handle=" << multiSelectHandle
                       << " count=" << selectedUnitHandles_.size() << std::endl;
             return;
@@ -4378,13 +4378,15 @@ void GameController::OnMouseUp(const sapp_event* ev) {
                 if (bestUnit) {
                     PlayUiSound("Click", 0.5f);
                     SelectSingleUnit(bestUnit, additive);
-                    PlayUnitResponse(bestUnit, "What");
+                    PlaySelectResponse(bestUnit);
                     std::cout << "SelectedUnit: "
                               << unit_text_utils::DescribeUnitType(bestUnit->GetTypeId(), unitData_)
                               << " handle=" << bestUnit->GetHandleId()
                               << " count=" << selectedUnitHandles_.size() << std::endl;
                 } else if (!additive) {
                     SetSelectedUnits({}, -1);
+                    lastResponseHandle_ = -1;
+                    responseCount_ = 0;
                 }
             }
         }
@@ -4891,6 +4893,21 @@ void GameController::PlayUnitResponse(CUnit* unit, const char* kind) {
     if (!unit || !kind || !audio_.IsValid() || frameCount_ <= 10) return;
     if (!simulationInitialized_) return;
     ackBank_.PlayResponse(simulation_, unit, kind);
+}
+
+void GameController::PlaySelectResponse(CUnit* unit) {
+    if (!unit) return;
+    const int handle = unit->GetHandleId();
+    if (handle == lastResponseHandle_) {
+        responseCount_++;
+    } else {
+        lastResponseHandle_ = handle;
+        responseCount_ = 1;
+    }
+    // Every 4th consecutive selection annoys the unit (retail Pissed
+    // rotation); the counter keeps climbing so repeats stay irritated.
+    const bool annoyed = responseCount_ >= 4 && (responseCount_ % 3 == 1);
+    PlayUnitResponse(unit, annoyed ? "Pissed" : "What");
 }
 
 void GameController::MaybeLogAIStatus() {

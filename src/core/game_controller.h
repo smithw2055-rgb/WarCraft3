@@ -423,6 +423,9 @@ private:
     // Unit voice response (What/Yes/YesAttack) at the unit's position.
     // No-op when the bank, set, or backend is missing.
     void PlayUnitResponse(CUnit* unit, const char* kind);
+    // Selection voice with Pissed escalation (ref UnitSound Pissed rows):
+    // consecutive selections of the same unit rotate to the annoyed set.
+    void PlaySelectResponse(CUnit* unit);
 
     // UI
     MainUI ui_;
@@ -445,6 +448,9 @@ private:
     std::vector<int> selectedUnitHandles_;
     std::unordered_set<int> selectedUnitHandlesSet_;
     int selectedUnitHandle_ = -1;
+    // Consecutive-selection counter for Pissed escalation.
+    int lastResponseHandle_ = -1;
+    int responseCount_ = 0;
     War3ID selectedUnitTypeId_;
     bool selectionPressActive_ = false;
     bool selectionDragVisible_ = false;
