@@ -3521,7 +3521,7 @@ void GameController::SyncMultiboard() {
             board.cols = picked->cols;
             board.cells.assign((size_t)std::max(0, board.rows) *
                                (size_t)std::max(0, board.cols),
-                               std::string());
+                               HudMultiboardCell{});
             for (const auto& [pos, itemSimId] : picked->items) {
                 if (pos.first < 0 || pos.first >= board.rows ||
                     pos.second < 0 || pos.second >= board.cols) {
@@ -3531,8 +3531,13 @@ void GameController::SyncMultiboard() {
                 if (iit == data.multiboardItems.end() || !iit->second) continue;
                 const auto& item = *iit->second;
                 if (!item.showValue || item.value.empty()) continue;
-                board.cells[(size_t)pos.first * (size_t)board.cols + (size_t)pos.second] =
-                    item.value;
+                HudMultiboardCell& cell =
+                    board.cells[(size_t)pos.first * (size_t)board.cols + (size_t)pos.second];
+                cell.value = item.value;
+                if (item.showIcon && !item.icon.empty()) {
+                    cell.icon = item.icon;
+                    cell.showIcon = true;
+                }
             }
         }
     }

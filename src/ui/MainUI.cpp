@@ -1323,11 +1323,13 @@ void MainUI::RenderOverlays(UiRenderer& r) {
         std::vector<float> colW((size_t)std::max(cols, 1), 0.0f);
         for (int rr = 0; rr < rows; ++rr) {
             for (int cc = 0; cc < cols; ++cc) {
-                const std::string& cell =
+                const HudMultiboardCell& cell =
                     multiboard_.cells[(size_t)rr * (size_t)multiboard_.cols + (size_t)cc];
-                if (cell.empty()) continue;
-                colW[(size_t)cc] = std::max(colW[(size_t)cc],
-                    textRenderer_.MeasureText(cell.c_str(), cellSize));
+                if (cell.value.empty() && !cell.showIcon) continue;
+                float w = cell.value.empty() ? 0.0f
+                    : textRenderer_.MeasureText(cell.value.c_str(), cellSize);
+                if (cell.showIcon && !cell.icon.empty()) w += 16.0f;
+                colW[(size_t)cc] = std::max(colW[(size_t)cc], w);
             }
         }
         float gridW = 0.0f;
@@ -1350,10 +1352,20 @@ void MainUI::RenderOverlays(UiRenderer& r) {
             for (int rr = 0; rr < rows; ++rr) {
                 float cx = panelX + padX;
                 for (int cc = 0; cc < cols; ++cc) {
-                    const std::string& cell =
+                    const HudMultiboardCell& cell =
                         multiboard_.cells[(size_t)rr * (size_t)multiboard_.cols + (size_t)cc];
-                    if (!cell.empty()) {
-                        textRenderer_.RenderText(r, cx, cy, cell.c_str(), 0xFFFFFFFF, cellSize);
+                    if (cell.showIcon && !cell.icon.empty()) {
+                        if (auto icon = LoadTextureFromMpq(cell.icon)) {
+                            if (icon->IsValid()) {
+                                r.DrawTexturedQuad(cx, cy + 1.0f, 14.0f, 14.0f,
+                                                   icon->GetImage());
+                                cx += 16.0f;
+                            }
+                        }
+                    }
+                    if (!cell.value.empty()) {
+                        textRenderer_.RenderText(r, cx, cy, cell.value.c_str(),
+                                                 0xFFFFFFFF, cellSize);
                     }
                     cx += colW[(size_t)cc] + 12.0f;
                 }

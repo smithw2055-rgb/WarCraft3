@@ -61,11 +61,16 @@ struct HudLeaderboard {
 };
 
 // Multiboard snapshot (JASS board grid, synced by GameController)
+struct HudMultiboardCell {
+    std::string value;
+    std::string icon;
+    bool showIcon = false;
+};
 struct HudMultiboard {
     std::string title;
     int rows = 0;
     int cols = 0;
-    std::vector<std::string> cells; // row-major, empty = hidden cell
+    std::vector<HudMultiboardCell> cells; // row-major, empty value = hidden cell
     bool visible = false;
     bool minimized = false;
 };
