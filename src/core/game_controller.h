@@ -30,6 +30,7 @@
 #include "../ui/MainUI.h"
 #include "../audio/AudioSystem.h"
 #include "../audio/KeyedSounds.h"
+#include "../audio/AckSoundBank.h"
 #include "../scripting/JassVM.h"
 #include "../scripting/JassNatives.h"
 #include "../scripting/jass_config_env.h"
@@ -415,9 +416,13 @@ private:
     // Audio
     AudioSystem audio_;
     KeyedSounds uiSounds_;
+    AckSoundBank ackBank_;
     // Play a keyed UI sound (UISounds.slk) with fallback to the preloaded
     // ui_click/ui_error samples when the table is missing.
     int PlayUiSound(const std::string& key, float volume = 0.5f);
+    // Unit voice response (What/Yes/YesAttack) at the unit's position.
+    // No-op when the bank, set, or backend is missing.
+    void PlayUnitResponse(CUnit* unit, const char* kind);
 
     // UI
     MainUI ui_;

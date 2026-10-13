@@ -1402,6 +1402,7 @@ bool GameController::Initialize() {
         audio_.LoadSound("ui_click", "UI\\Mouse\\HumanClick1.wav", &mpq_);
         audio_.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &mpq_);
         uiSounds_.LoadFromMpq(mpq_);
+        ackBank_.LoadFromMpq(mpq_);
     }
 
     if (!hideHud_) {
@@ -1552,6 +1553,7 @@ bool GameController::StartPendingGlueMapLaunch(int screenW, int screenH) {
         audio_.LoadSound("ui_click", "UI\\Mouse\\HumanClick1.wav", &mpq_);
         audio_.LoadSound("ui_error", "UI\\Mouse\\HumanClickError.wav", &mpq_);
         uiSounds_.LoadFromMpq(mpq_);
+        ackBank_.LoadFromMpq(mpq_);
     }
 
     hideHud_ = false;
@@ -4096,6 +4098,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
         if (multiSelectHandle >= 0 && selectedUnitHandlesSet_.find(multiSelectHandle) != selectedUnitHandlesSet_.end()) {
             PlayUiSound("Click", 0.5f);
             SetSelectedUnits(GetSelectedSimulationUnits(), multiSelectHandle, true);
+            PlayUnitResponse(simulation_.GetUnit(multiSelectHandle), "What");
             std::cout << "MultiSelectIcon: primary handle=" << multiSelectHandle
                       << " count=" << selectedUnitHandles_.size() << std::endl;
             return;
@@ -4124,6 +4127,9 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
             float gh = texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(wx, wy) : 0.0f;
             camera_.SetTarget(wx, gh + 100.0f, wy);
         } else if (ui_.GetPendingCommand() >= 0 && IssuePendingCommandAtScreenPoint(ev->mouse_x, ev->mouse_y)) {
+            if (auto selected = GetSelectedSimulationUnits(); !selected.empty() && selected.front()) {
+                PlayUnitResponse(selected.front(), "Yes");
+            }
             return;
         } else {
             if (jassNatives_ && simulationInitialized_) {
@@ -4153,6 +4159,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                 float mmX = 0.0f, mmY = 0.0f;
                 if (MinimapWorldFromScreen(ev->mouse_x, ev->mouse_y, &mmX, &mmY)) {
                     CUnit* nearUnit = PickUnitNearWorldPoint(mmX, mmY, 128.0f);
+                    bool mmAttack = false;
                     for (auto* su : selUnits) {
                         if (!su) continue;
                         if (nearUnit && nearUnit != su) {
@@ -4162,6 +4169,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                                 if (attackAbility->CheckCanTarget(simulation_, su, OrderIds::SMART, nearUnit)) {
                                     su->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::SMART, nearUnit));
                                     targeted = true;
+                                    mmAttack = true;
                                 }
                             }
                             if (!targeted) {
@@ -4170,6 +4178,9 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                         } else {
                             su->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, mmX, mmY));
                         }
+                    }
+                    if (!selUnits.empty() && selUnits.front()) {
+                        PlayUnitResponse(selUnits.front(), mmAttack ? "YesAttack" : "Yes");
                     }
                     issuedOrder = true;
                 }
@@ -4189,6 +4200,9 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                 int pendingCmd = ui_.GetPendingCommand();
                 if (pendingCmd >= 0) {
                     issuedOrder = IssuePendingCommandAtScreenPoint(ev->mouse_x, ev->mouse_y);
+                    if (issuedOrder && !selUnits.empty() && selUnits.front()) {
+                        PlayUnitResponse(selUnits.front(), "Yes");
+                    }
                 } else {
                     auto terrainH = [&](float x, float z) {
                         return texturedTerrain_.IsValid() ? texturedTerrain_.GetGroundHeight(x, z) : 0.0f;
@@ -4196,6 +4210,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                     Vec3 wPos = picking::ScreenToWorld(ev->mouse_x, ev->mouse_y, view, proj, winW, winH,
                                                        texturedTerrain_.IsValid(), texturedTerrain_.GetRadius(), terrainH);
 
+                    bool worldAttack = false;
                     for (auto* su : selUnits) {
                         if (!su) continue;
                         int orderId = OrderIds::SMART;
@@ -4224,6 +4239,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                                     if (attackAbility->CheckCanTarget(simulation_, su, OrderIds::SMART, targetWidget)) {
                                         orderId = OrderIds::SMART;
                                         canTargetWidget = true;
+                                        if (targetUnit) worldAttack = true;
                                     }
                                 }
                             }
@@ -4242,6 +4258,9 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                         } else {
                             su->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, wPos.x, wPos.z));
                         }
+                    }
+                    if (!selUnits.empty() && selUnits.front()) {
+                        PlayUnitResponse(selUnits.front(), worldAttack ? "YesAttack" : "Yes");
                     }
                     issuedOrder = true;
                 }
@@ -4359,6 +4378,7 @@ void GameController::OnMouseUp(const sapp_event* ev) {
                 if (bestUnit) {
                     PlayUiSound("Click", 0.5f);
                     SelectSingleUnit(bestUnit, additive);
+                    PlayUnitResponse(bestUnit, "What");
                     std::cout << "SelectedUnit: "
                               << unit_text_utils::DescribeUnitType(bestUnit->GetTypeId(), unitData_)
                               << " handle=" << bestUnit->GetHandleId()
@@ -4865,6 +4885,12 @@ int GameController::PlayUiSound(const std::string& key, float volume) {
     // Fallback to the preloaded generic click/error samples.
     if (key == "Error") return audio_.Play2D("ui_error", volume);
     return audio_.Play2D("ui_click", volume);
+}
+
+void GameController::PlayUnitResponse(CUnit* unit, const char* kind) {
+    if (!unit || !kind || !audio_.IsValid() || frameCount_ <= 10) return;
+    if (!simulationInitialized_) return;
+    ackBank_.PlayResponse(simulation_, unit, kind);
 }
 
 void GameController::MaybeLogAIStatus() {
