@@ -2407,6 +2407,7 @@ void GameController::WireJassCallbacks() {
             if (jassNatives_) {
                 jassNatives_->FireTrainedEvent(buildingHandle, trainedHandle);
             }
+            PlayUnitResponse(simulation_.GetUnit(trainedHandle), "Ready");
         }
     );
 
