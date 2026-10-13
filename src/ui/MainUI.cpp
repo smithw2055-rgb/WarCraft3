@@ -765,6 +765,16 @@ void MainUI::UpdateBuffState() {
 bool MainUI::HandleEvent(const sapp_event* ev) {
     if (!ev) return false;
 
+    // Retail right-click on an autocastable command button toggles autocast
+    // (ref CAutocastAbility setAutoCastOn/Off). Consumed here so the click
+    // never falls through to a world SMART order.
+    if (ev->type == SAPP_EVENTTYPE_MOUSE_DOWN && ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT && hudHost_) {
+        int commandIndex = hudHost_->HitCommandButton(ev->mouse_x, ev->mouse_y);
+        if (commandIndex >= 0 && ToggleAutocast(commandIndex)) {
+            return true;
+        }
+    }
+
     if (ev->type == SAPP_EVENTTYPE_MOUSE_DOWN && ev->mouse_button == SAPP_MOUSEBUTTON_LEFT && hudHost_) {
         if (hudHost_->IsGlueMenuActive()) {
             int glueAction = hudHost_->HitGlueMenuButton(ev->mouse_x, ev->mouse_y);
@@ -1029,6 +1039,27 @@ void MainUI::OnKeyDown(int key) {
 }
 
 void MainUI::WireCommandCardCallbacks() {}
+
+bool MainUI::ToggleAutocast(int index) {
+    if (index < 0 || index >= kCommandCount || !simulation_) return false;
+    const CommandSlot& slot = commandSlots_[index];
+    if (!slot.visible || slot.orderId < 0) return false;
+
+    auto* unit = simulation_->GetUnit(selectedUnitHandle_);
+    if (!unit) return false;
+
+    for (auto* ability : unit->GetAbilities()) {
+        auto* spell = dynamic_cast<CAbilitySpellBase*>(ability);
+        if (!spell || spell->GetBaseOrderId() != slot.orderId) continue;
+        CAutocastKind kind = GetAutocastKind(spell->GetAlias());
+        if (kind == CAutocastKind::NONE) kind = GetAutocastKind(spell->GetCode());
+        if (kind == CAutocastKind::NONE) return false;
+        spell->SetAutocastActive(!spell->IsAutocastActive());
+        PopulateCommandCardForUnit(unit);
+        return true;
+    }
+    return false;
+}
 
 void MainUI::HandleCommandButtonClick(int index) {
     if (index < 0 || index >= kCommandCount) return;

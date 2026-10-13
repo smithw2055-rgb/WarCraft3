@@ -301,6 +301,10 @@ private:
 
     void ClearCommandSlots();
     void HandleCommandButtonClick(int index);
+    // Right-click autocast toggle for the slot's ability (ref
+    // CAutocastAbility). True when a toggle happened and the card was
+    // refreshed; false leaves the click for world-order routing.
+    bool ToggleAutocast(int index);
     void SetCommandSlotAt(int row, int col,
                           int orderId,
                           CommandClickMode clickMode,

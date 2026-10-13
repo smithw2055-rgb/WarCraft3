@@ -17,6 +17,34 @@ enum class CAbilityCategory : uint8_t {
     GOLD_MINE, SELL_ITEMS, ROOT, MOON_WELL, BLIGHT, SPELL
 };
 
+// Autocast acquisition kind (ref AutocastType + autoAcquireAutocastTargets).
+// Central table so the sim (idle acquisition) and the UI (right-click
+// toggle) agree on which rawcodes participate.
+enum class CAutocastKind : uint8_t {
+    NONE = 0,
+    LOWEST_HP_ALLY = 1, // heals: lowest-hp wounded ally in range
+    NEAREST_ENEMY = 2,  // debuffs: nearest visible enemy in range
+};
+
+inline CAutocastKind GetAutocastKind(War3ID code) {
+    switch (code.value) {
+        case 0x41686561u: // Ahea
+        case 0x41486862u: // AHhb
+        case 0x414f6877u: // AOhw
+        case 0x4172656au: // Arej
+        case 0x414e6873u: // ANhs
+        case 0x41496463u: // AIdc
+            return CAutocastKind::LOWEST_HP_ALLY;
+        case 0x41736c6fu: // Aslo
+        case 0x41666165u: // Afae
+        case 0x41706c79u: // Aply
+        case 0x414f6878u: // AOhx
+            return CAutocastKind::NEAREST_ENEMY;
+        default:
+            return CAutocastKind::NONE;
+    }
+}
+
 // Disable type bitmask
 enum class CAbilityDisableType : uint8_t {
     NONE = 0,

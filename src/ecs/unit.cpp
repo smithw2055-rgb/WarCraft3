@@ -1106,19 +1106,6 @@ bool CUnit::TryAutocast(CSimulation& simulation) {
     if (!orderQueue_.empty() || currentBehavior_) return false;
     if (IsSilenced() || IsHexed() || IsAsleep()) return false;
 
-    static const War3ID kLowestHp[] = {
-        War3ID("Ahea"), War3ID("AHhb"), War3ID("AOhw"),
-        War3ID("Arej"), War3ID("ANhs"), War3ID("AIdc"),
-    };
-    static const War3ID kNearestEnemy[] = {
-        War3ID("Aslo"), War3ID("Afae"), War3ID("Aply"), War3ID("AOhx"),
-    };
-    auto kindOf = [](War3ID code) -> int {
-        for (const auto& id : kLowestHp) if (id == code) return 1;
-        for (const auto& id : kNearestEnemy) if (id == code) return 2;
-        return 0;
-    };
-
     CPlayer* self = simulation.GetPlayer(GetPlayerIndex());
     const War3ID defaultAuto =
         unitType_ ? unitType_->GetDefaultAutocastAbility() : War3ID(0u);
@@ -1126,11 +1113,9 @@ bool CUnit::TryAutocast(CSimulation& simulation) {
     for (auto* ab : abilities_) {
         auto* spell = dynamic_cast<CAbilitySpellBase*>(ab);
         if (!spell || spell->IsDisabled() || spell->IsOnCooldown()) continue;
-        const int kind = kindOf(spell->GetAlias());
-        if (kind == 0) kindOf(spell->GetCode());
-        if (kindOf(spell->GetAlias()) == 0 && kindOf(spell->GetCode()) == 0) continue;
-        const int useKind = kindOf(spell->GetAlias()) != 0
-            ? kindOf(spell->GetAlias()) : kindOf(spell->GetCode());
+        CAutocastKind kind = GetAutocastKind(spell->GetAlias());
+        if (kind == CAutocastKind::NONE) kind = GetAutocastKind(spell->GetCode());
+        if (kind == CAutocastKind::NONE) continue;
         if (!spell->IsAutocastActive() && defaultAuto != spell->GetAlias() &&
             defaultAuto != spell->GetCode()) continue;
         if ((int)GetMana() < spell->GetManaCost()) continue;
@@ -1141,7 +1126,7 @@ bool CUnit::TryAutocast(CSimulation& simulation) {
         const float range = spell->GetCastRange() + 400.0f;
         const float rangeSq = range * range;
         CUnit* best = nullptr;
-        if (useKind == 1) {
+        if (kind == CAutocastKind::LOWEST_HP_ALLY) {
             float bestFrac = 1.0f;
             for (CUnit* other : simulation.GetUnits()) {
                 if (!other || other->IsDead() || other->IsHidden() ||
