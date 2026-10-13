@@ -198,6 +198,9 @@ public:
     int GetGoldBountyAwardedBase() const { return goldBountyAwardedBase_; }
     int GetGoldBountyAwardedDice() const { return goldBountyAwardedDice_; }
     int GetGoldBountyAwardedSides() const { return goldBountyAwardedSides_; }
+    int GetLumberBountyAwardedBase() const { return lumberBountyAwardedBase_; }
+    int GetLumberBountyAwardedDice() const { return lumberBountyAwardedDice_; }
+    int GetLumberBountyAwardedSides() const { return lumberBountyAwardedSides_; }
     // Warsmash MeleeUIMinimap: neutral buildings with this flag draw the
     // special minimap icon instead of a plain team-color dot.
     bool IsNeutralBuildingShowMinimapIcon() const { return neutralBuildingShowMinimapIcon_; }

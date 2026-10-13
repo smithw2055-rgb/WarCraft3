@@ -2,6 +2,7 @@
 #include "csimulation.h"
 #include "ecs/buffs.h"
 #include "ecs/abilities/ability_spell_base.h"
+#include "ecs/abilities/ability_hero.h"
 #include "ecs/abilities/ability_transport.h"
 #include "ecs/abilities/spells28.h"
 #include "data/abilitydata.h"
@@ -1423,12 +1424,79 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
     (void)weaponSoundType;
 
     if (oldLife > 0 && life_ <= 0) {
+        AwardBountyAndXP(simulation, source);
         auto& deathCb = simulation.GetUnitDeathCallback();
         int srcHandle = source ? source->GetHandleId() : -1;
         if (deathCb) deathCb(handleId_, srcHandle, playerIndex_);
     }
 
     return oldLife - life_;
+}
+
+// Kill rewards (ref CUnit.killUnit bounty/XP block): creep bounties pay
+// the killer's player, and nearby allied heroes split the kill's XP.
+void CUnit::AwardBountyAndXP(CSimulation& simulation, CUnit* source) {
+    if (!source || !unitType_) return;
+    CPlayer* victimOwner = simulation.GetPlayer(GetPlayerIndex());
+    CPlayer* sourcePlayer = simulation.GetPlayer(source->GetPlayerIndex());
+    if (!sourcePlayer) return;
+    if (victimOwner && sourcePlayer->HasAlliance(*victimOwner, CAllianceType::PASSIVE)) return;
+
+    // Gold/lumber bounty dice (ref base + dice d sides, seeded sim RNG).
+    if (victimOwner && victimOwner->GetGivesBounty()) {
+        int gold = unitType_->GetGoldBountyAwardedBase();
+        const int goldDice = unitType_->GetGoldBountyAwardedDice();
+        const int goldSides = unitType_->GetGoldBountyAwardedSides();
+        for (int i = 0; i < goldDice; ++i) {
+            gold += goldSides <= 0 ? 0 : (int)(simulation.SimRand01() * goldSides) + 1;
+        }
+        if (gold > 0) sourcePlayer->AddGold(gold);
+        int lumber = unitType_->GetLumberBountyAwardedBase();
+        const int lumberDice = unitType_->GetLumberBountyAwardedDice();
+        const int lumberSides = unitType_->GetLumberBountyAwardedSides();
+        for (int i = 0; i < lumberDice; ++i) {
+            lumber += lumberSides <= 0 ? 0 : (int)(simulation.SimRand01() * lumberSides) + 1;
+        }
+        if (lumber > 0) sourcePlayer->AddLumber(lumber);
+    }
+
+    // Hero XP split (ref grant tables + heroExpRange + global fallback).
+    const auto& gc = simulation.GetGameplayConstants();
+    if (!gc.buildingKillsGiveExp && source->IsBuilding()) return;
+    const int availableXp = IsHero()
+        ? gc.GetGrantHeroXP(GetHeroLevel() > 0 ? GetHeroLevel() : 1)
+        : gc.GetGrantNormalXP(unitType_->GetLevel());
+    if (availableXp <= 0) return;
+
+    std::vector<CUnit*> receivers;
+    const float range = (float)gc.heroExpRange;
+    const float rangeSq = range * range;
+    for (CUnit* other : simulation.GetUnits()) {
+        if (!other || other->IsDead() || !other->IsHero()) continue;
+        CPlayer* ally = simulation.GetPlayer(other->GetPlayerIndex());
+        if (!ally || !sourcePlayer->HasAlliance(*ally, CAllianceType::SHARED_XP)) continue;
+        const float dx = other->GetX() - GetX();
+        const float dy = other->GetY() - GetY();
+        if (dx * dx + dy * dy > rangeSq) continue;
+        receivers.push_back(other);
+    }
+    if (receivers.empty() && gc.globalExperience) {
+        for (int pi = 0; pi < simulation.GetPlayerCount(); ++pi) {
+            CPlayer* ally = simulation.GetPlayer(pi);
+            if (!ally || !sourcePlayer->HasAlliance(*ally, CAllianceType::SHARED_XP)) continue;
+            for (CUnit* hero : ally->GetHeroes()) {
+                if (hero && !hero->IsDead()) receivers.push_back(hero);
+            }
+        }
+    }
+    if (receivers.empty()) return;
+    for (CUnit* hero : receivers) {
+        auto* heroAbility = dynamic_cast<CAbilityHero*>(hero->GetAbility(War3ID("AHer")));
+        if (!heroAbility) continue;
+        const int share = (int)(availableXp * (1.0f / (float)receivers.size()) *
+                                gc.GetHeroFactorXp(hero->GetHeroLevel()));
+        if (share > 0) heroAbility->AddXP(simulation, hero, share);
+    }
 }
 
 void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrder> order) {

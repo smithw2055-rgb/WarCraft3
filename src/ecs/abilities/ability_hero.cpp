@@ -2,6 +2,7 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/ability_factory.h"
+#include "ecs/abilities/ability_generic.h"
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -142,12 +143,19 @@ void CAbilityHero::LearnSkill(CSimulation& game, CUnit* unit, War3ID skillCode) 
             cb(unit->GetHandleId(), skillCode.value, existingAbility->GetLevel());
         }
     } else if (auto created = AbilityFactory::CreateAbility(game.AllocateHandleId(), skillCode)) {
-        created->SetLevel(1);
-        unit->AddAbility(game, std::move(created));
-        skillPoints_--;
-        std::cout << "Hero learned new skill: " << skillCode.ToString() << std::endl;
-        if (const auto& cb = game.GetHeroSkillCallback()) {
-            cb(unit->GetHandleId(), skillCode.value, 1);
+        // Placeholder fallback (ref GenericDoNothing) is not learnable:
+        // like ref learnSkill with no ability type, keep the point and
+        // report failure instead of spending it on a dead icon.
+        if (dynamic_cast<CAbilityGenericDoNothing*>(created.get())) {
+            std::cout << "Hero cannot learn unimplemented skill: " << skillCode.ToString() << std::endl;
+        } else {
+            created->SetLevel(1);
+            unit->AddAbility(game, std::move(created));
+            skillPoints_--;
+            std::cout << "Hero learned new skill: " << skillCode.ToString() << std::endl;
+            if (const auto& cb = game.GetHeroSkillCallback()) {
+                cb(unit->GetHandleId(), skillCode.value, 1);
+            }
         }
     } else {
         // Unknown skill code (e.g. custom ability with no C++ class yet):

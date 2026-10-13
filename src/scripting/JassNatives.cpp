@@ -1689,6 +1689,7 @@ static double GetPlayerStateValue(CSimulation& sim, int playerId, int state) {
         case 3: return (double)p->GetHeroTokens();
         case 4: return (double)p->GetFoodCap();
         case 5: return (double)p->GetFoodUsed();
+        case 7: return p->GetGivesBounty() ? 1.0 : 0.0;
         case 8: return (double)p->GetFoodCapMod();
         case 13: return (double)p->GetGoldUpkeepRate();
         case 14: return (double)p->GetLumberUpkeepRate();
@@ -4373,6 +4374,7 @@ void JassNatives::RegisterPlayerNatives() {
             case 2: p->SetLumber(args[2].intVal); break;
             case 3: p->SetHeroTokens(args[2].intVal); break;
             case 4: p->SetFoodCap(args[2].intVal); break;
+            case 7: p->SetGivesBounty(args[2].intVal != 0); break;
             case 13: p->SetGoldUpkeepRate(args[2].intVal); break;
             case 14: p->SetLumberUpkeepRate(args[2].intVal); break;
         }

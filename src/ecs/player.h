@@ -129,6 +129,10 @@ public:
     void SetHandicap(float v) { handicap_ = v; }
     float GetHandicapXP() const { return handicapXP_; }
     void SetHandicapXP(float v) { handicapXP_ = v; }
+    // Bounty flag (ref CPlayerState.GIVES_BOUNTY): only creep/neutral
+    // aggressive players carry it; their kills pay gold/lumber bounties.
+    bool GetGivesBounty() const { return givesBounty_; }
+    void SetGivesBounty(bool v) { givesBounty_ = v; }
 
     // Hero tokens (retail PLAYER_STATE_RESOURCE_HERO_TOKENS): map-granted
     // currency spent INSTEAD of gold/lumber when training heroes (ref
@@ -171,6 +175,7 @@ private:
     std::unordered_set<War3ID> disabledAbilities_;
     float handicap_ = 1.0f;
     float handicapXP_ = 1.0f;
+    bool givesBounty_ = false;
     int race_ = 0;
     int color_ = 0;
     bool observer_ = false;

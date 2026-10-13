@@ -247,6 +247,64 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     agiDefenseBonus = readFloat("AgiDefenseBonus", 0.33f);
     reviveTimeFactor = readFloat("ReviveTimeFactor", 0.5f);
     reviveMaxTimeFactor = readFloat("ReviveMaxTimeFactor", 1e9f);
+
+    // Kill-reward tables (ref parseTable: explicit prefix wins, tail extends
+    // by formulaA*prev + formulaB*i + formulaC with 0-based i).
+    maxUnitLevel = readMiscInt("MaxUnitLevel", 10);
+    if (maxUnitLevel < 1) maxUnitLevel = 1;
+    if (maxUnitLevel > 100) maxUnitLevel = 100;
+    auto parseRewardTable = [&](const char* tableKey, const char* aKey,
+                                const char* bKey, const char* cKey, int size) {
+        std::vector<int> result((size_t)size, 0);
+        const std::string text = readMiscStr(tableKey);
+        std::vector<std::string> parts;
+        if (!text.empty()) {
+            size_t pos = 0;
+            while (true) {
+                size_t comma = text.find(',', pos);
+                parts.push_back(comma == std::string::npos
+                    ? text.substr(pos) : text.substr(pos, comma - pos));
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+        }
+        const int formulaA = readMiscInt(aKey, 0);
+        const int formulaB = readMiscInt(bKey, 0);
+        const int formulaC = readMiscInt(cKey, 0);
+        for (int i = 0; i < size; ++i) {
+            if (i < (int)parts.size() && !parts[(size_t)i].empty()) {
+                result[(size_t)i] = std::atoi(parts[(size_t)i].c_str());
+            } else if (i > 0) {
+                result[(size_t)i] = formulaA * result[(size_t)i - 1] + formulaB * i + formulaC;
+            } else {
+                result[(size_t)i] = formulaB * 0 + formulaC;
+            }
+        }
+        return result;
+    };
+    grantHeroXp = parseRewardTable("GrantHeroXP", "GrantHeroXPFormulaA",
+                                   "GrantHeroXPFormulaB", "GrantHeroXPFormulaC", maxHeroLevel);
+    grantNormalXp = parseRewardTable("GrantNormalXP", "GrantNormalXPFormulaA",
+                                     "GrantNormalXPFormulaB", "GrantNormalXPFormulaC", maxUnitLevel);
+    {
+        const std::string text = readMiscStr("HeroFactorXP");
+        if (!text.empty()) {
+            heroFactorXp.clear();
+            size_t pos = 0;
+            while (true) {
+                size_t comma = text.find(',', pos);
+                const std::string part = comma == std::string::npos
+                    ? text.substr(pos) : text.substr(pos, comma - pos);
+                if (!part.empty()) heroFactorXp.push_back(std::atoi(part.c_str()));
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+            if (heroFactorXp.empty()) heroFactorXp = {100};
+        }
+    }
+    heroExpRange = readMiscInt("HeroExpRange", 1000);
+    globalExperience = readMiscInt("GlobalExperience", 0) != 0;
+    buildingKillsGiveExp = readMiscInt("BuildingKillsGiveExp", 0) != 0;
 }
 
 int CGameplayConstants::GetHeroReviveGoldCost(int originalGoldCost, int level) const {
@@ -280,4 +338,20 @@ int CGameplayConstants::GetHeroReviveTime(int originalTime, int level) const {
     const int t = (int)(originalTime * level * reviveTimeFactor);
     const int cap = (int)(originalTime * reviveMaxTimeFactor);
     return t < cap ? t : cap;
+}
+
+namespace {
+
+int TableValue(const std::vector<int>& table, int level) {
+    if (level <= 0 || table.empty()) return 0;
+    if (level > (int)table.size()) level = (int)table.size();
+    return table[(size_t)level - 1];
+}
+
+} // namespace
+
+int CGameplayConstants::GetGrantHeroXP(int level) const { return TableValue(grantHeroXp, level); }
+int CGameplayConstants::GetGrantNormalXP(int level) const { return TableValue(grantNormalXp, level); }
+float CGameplayConstants::GetHeroFactorXp(int level) const {
+    return (float)TableValue(heroFactorXp, level) / 100.0f;
 }

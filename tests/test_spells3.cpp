@@ -9,6 +9,7 @@
 #include "data/combat_types.h"
 #include "data/gameplay_constants.h"
 #include "data/unitdata.h"
+#include "ecs/abilities/ability_generic.h"
 #include "ecs/abilities/ability_hero.h"
 #include "ecs/ability_factory.h"
 #include "ecs/abilities/spells3.h"
@@ -323,6 +324,11 @@ bool TestSpells3FactoryCoverage() {
         auto ability = AbilityFactory::CreateAbility(4000, War3ID(code));
         TEST_ASSERT(ability != nullptr);
     }
-    TEST_ASSERT(AbilityFactory::CreateAbility(4000, War3ID("ZZZ9")) == nullptr);
+    // Unknown rawcodes fall back to a do-nothing placeholder (never
+    // nullptr) so the code stays on the unit instead of being dropped.
+    auto unknown = AbilityFactory::CreateAbility(4000, War3ID("ZZZ9"));
+    TEST_ASSERT(unknown != nullptr);
+    TEST_ASSERT(dynamic_cast<CAbilityGenericDoNothing*>(unknown.get()) != nullptr);
+    TEST_ASSERT(unknown->GetCode() == War3ID("ZZZ9"));
     return true;
 }

@@ -247,6 +247,11 @@ void MapLoader::CreateSimulation(int localPlayerIndex) {
         player->SetGold(500);
         player->SetLumber(200);
         player->SetFoodCap(10);
+        // Creep bounties (ref neutralAggressive GIVES_BOUNTY): kills of
+        // neutral/creep-owned units pay their gold/lumber bounty tables.
+        if (controller == CMapControl::NEUTRAL || controller == CMapControl::CREEP) {
+            player->SetGivesBounty(true);
+        }
         if (configData_) {
             const int cfgColor = configData_->playerMapConfig[i].color;
             if (cfgColor >= 0) player->SetColor(cfgColor);

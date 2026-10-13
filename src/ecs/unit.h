@@ -387,6 +387,9 @@ public:
 private:
     void PerformDefaultBehavior(CSimulation& simulation);
     bool TryAutocast(CSimulation& simulation);
+    // Kill rewards (bounty dice + hero XP split) fired once at the
+    // killing blow. Source may be nullptr (degeneration/decay).
+    void AwardBountyAndXP(CSimulation& simulation, CUnit* source);
     void ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrder> order);
     void RefreshMaxLifeTotal();
     void RefreshMaxManaTotal();

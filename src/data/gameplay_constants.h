@@ -85,6 +85,20 @@ struct CGameplayConstants {
     float intManaBonus = 15.0f;
     float agiDefenseBonus = 0.33f;
 
+    // Kill rewards (Units\MiscGame.txt, ref parseTable/getTableValue).
+    // Tables are 0-indexed by level-1; out-of-range levels clamp.
+    int maxUnitLevel = 10;
+    std::vector<int> grantHeroXp;
+    std::vector<int> grantNormalXp;
+    std::vector<int> heroFactorXp = {100};
+    int GetGrantHeroXP(int level) const;
+    int GetGrantNormalXP(int level) const;
+    // Percent-hundredths table (ref getHeroFactorXp: value/100).
+    float GetHeroFactorXp(int level) const;
+    int heroExpRange = 1000;
+    bool globalExperience = false;
+    bool buildingKillsGiveExp = false;
+
     CGameplayConstants();
     explicit CGameplayConstants(const TxtTable& miscData);
 };

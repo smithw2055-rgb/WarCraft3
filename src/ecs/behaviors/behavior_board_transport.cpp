@@ -119,10 +119,10 @@ bool CBehaviorDrop::Update(CSimulation& simulation) {
     if (accum_ < durationSec_) return false;
     accum_ = 0.0f;
     std::vector<CUnit*> cargo = unit_->GetCargoUnits();
-    if (dropIndex_ < 0) dropIndex_ = 0;
-    if (dropIndex_ >= (int)cargo.size()) return true;
-    CUnit* passenger = cargo[(size_t)dropIndex_];
-    // Ring around the drop point so unloaded units don't stack.
+    if (cargo.empty()) return true;
+    // FIFO like ref dropUnitByIndex(0); the ring slot advances so
+    // successive passengers spread around the drop point.
+    CUnit* passenger = cargo[0];
     const int total = (int)cargo.size();
     const float step = 2.0f * 3.14159265f / (float)(total > 0 ? total : 1);
     const float a = step * (float)dropIndex_;

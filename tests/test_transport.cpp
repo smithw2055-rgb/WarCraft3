@@ -121,7 +121,15 @@ bool TestUnloadRestoresUnits() {
     TEST_ASSERT(load.Begin(sim, ship, 0, b) == nullptr);
     CAbilityUnload unload(54);
     TEST_ASSERT(unload.CheckCanTargetPoint(sim, ship, 0, 500, 500));
-    TEST_ASSERT(unload.Begin(sim, ship, 0, 500, 500) == nullptr);
+    // Timed unload (ref CBehaviorDrop): one passenger per duration tick.
+    CBehavior* drop = unload.Begin(sim, ship, 0, 500, 500);
+    TEST_ASSERT(drop != nullptr);
+    drop->SetUnit(ship);
+    drop->Begin(sim);
+    bool unloaded = false;
+    for (int i = 0; i < 500 && !unloaded; i++) unloaded = drop->Update(sim);
+    TEST_ASSERT(unloaded);
+    delete drop;
     TEST_ASSERT(ship->GetCargoUnits().empty());
     for (auto* u : {a, b}) {
         TEST_ASSERT(!u->IsLoadedAboard());
