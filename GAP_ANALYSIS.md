@@ -7,7 +7,7 @@
 ## P0：战斗模拟正确性（影响对局）
 
 - [x] 1. 受击反击/逃跑（Gap-31：`MaybeReturnFire`，idle/default 门控 + 敌对 + 非 PEON + 攻击行为/逃跑；`interruptable` 精化见第 2 项）。
-- [ ] 2. 打断框架：`behavior.h` 无 `interruptable` 虚函数，引导/施法可被任意订单打断；stun 不保存恢复 `interruptedBehavior`。
+- [x] 2. 打断框架（Gap-32：`IsInterruptable` 虚函数默认 true、Stun false；新订单当 tick 抢占可打断行为，眩晕期队列坍缩为最新一条；反击门控同步精化）。
 - [ ] 3. 高地 miss：`combat_system.cpp` 只有闪避 roll，无地形高差 + `ChanceToMiss`（`CUnitDefaultAccuracyCheckListener`）。
 - [ ] 4. MLINE 穿刺线 / ARTILLERY 对地：迫击炮溅射变单体，无地面点攻击路径（`behavior_attack.cpp` 只分叉 SPLASH/BOUNCE）。
 - [ ] 5. 伤害替换框架：`unit_attack.h` 无 `attackReplacement` 字段，Orb/灼热之箭只能硬编码。

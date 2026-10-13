@@ -15,6 +15,10 @@ public:
     virtual bool Update(CSimulation& simulation) = 0;
     virtual void Begin(CSimulation& simulation) { (void)simulation; }
     virtual void End(CSimulation& simulation) { (void)simulation; }
+    // New orders preempt the current behavior when true (ref
+    // CBehavior.interruptable; only stun returns false). Deferred orders
+    // wait in the queue instead.
+    virtual bool IsInterruptable() const { return true; }
     CUnit* GetUnit() const { return unit_; }
     void SetUnit(CUnit* u) { unit_ = u; }
 protected:

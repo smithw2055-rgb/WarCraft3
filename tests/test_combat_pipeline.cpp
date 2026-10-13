@@ -7,6 +7,7 @@
 #include "ecs/behaviors/behavior_attack.h"
 #include "ecs/behaviors/behavior_hold_position.h"
 #include "ecs/behaviors/behavior_move.h"
+#include "ecs/behaviors/behavior_stun.h"
 #include "ecs/combat/combat_system.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
@@ -206,5 +207,44 @@ bool TestBusyUnitIgnoresReturnFire() {
     victim.Damage(sim, &attacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 10.0f, 0);
     TEST_ASSERT(victim.GetCurrentBehavior() == busy);
     TEST_ASSERT(victim.GetAttackBehavior()->GetTarget() == nullptr);
+    return true;
+}
+
+bool TestNewOrderPreemptsMove() {
+    CSimulation sim;
+    AddTwoPlayers(sim);
+    CUnit unit(21, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 0, 0, 0);
+    auto move = std::make_unique<CBehaviorMove>();
+    move->SetTarget(5000.0f, 0.0f);
+    unit.SetCurrentBehavior(std::move(move));
+    TEST_ASSERT(unit.GetCurrentBehavior() != nullptr);
+    // No abilities: the preempted order falls back to stop, but the move
+    // must be gone and the queue consumed immediately (no waiting).
+    unit.IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, 100.0f, 100.0f));
+    unit.Update(sim);
+    TEST_ASSERT(!unit.HasQueuedOrders());
+    TEST_ASSERT(unit.GetCurrentBehavior() != nullptr);
+    TEST_ASSERT(unit.GetCurrentBehavior()->GetCategory() == CBehaviorCategory::STOP);
+    return true;
+}
+
+bool TestStunDefersOrdersUntilExpiry() {
+    CSimulation sim;
+    AddTwoPlayers(sim);
+    CUnit unit(22, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 0, 0, 0);
+    auto stun = std::make_unique<CBehaviorStun>();
+    stun->SetDuration(0.2f);
+    unit.SetCurrentBehavior(std::move(stun));
+    unit.GetCurrentBehavior()->Begin(sim);
+    // Two orders during stun collapse to the latest and wait.
+    unit.IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, 100.0f, 0.0f));
+    unit.IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, 200.0f, 0.0f));
+    unit.Update(sim);
+    TEST_ASSERT(unit.GetCurrentBehavior() != nullptr);
+    TEST_ASSERT(unit.GetCurrentBehavior()->GetCategory() == CBehaviorCategory::STUN);
+    TEST_ASSERT(unit.HasQueuedOrders());
+    // After expiry the deferred order runs and the queue drains.
+    for (int i = 0; i < 50 && unit.HasQueuedOrders(); i++) unit.Update(sim);
+    TEST_ASSERT(!unit.HasQueuedOrders());
     return true;
 }

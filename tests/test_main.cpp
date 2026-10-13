@@ -207,6 +207,8 @@ bool TestAttackDefenseTableMatchesOfficialChart();
 bool TestDamagedUnitReturnsFire();
 bool TestDamagedPeonFlees();
 bool TestBusyUnitIgnoresReturnFire();
+bool TestNewOrderPreemptsMove();
+bool TestStunDefersOrdersUntilExpiry();
 bool TestUnitDamageAppliesArmorTypeMultiplier();
 bool TestNonNormalDamageTypeIgnoresArmorValue();
 bool TestNegativeArmorAmplifiesDamage();
@@ -882,6 +884,8 @@ int main(int argc, char** argv) {
         {"Damaged unit returns fire", TestDamagedUnitReturnsFire},
         {"Damaged peon flees", TestDamagedPeonFlees},
         {"Busy unit ignores return fire", TestBusyUnitIgnoresReturnFire},
+        {"New order preempts move", TestNewOrderPreemptsMove},
+        {"Stun defers orders until expiry", TestStunDefersOrdersUntilExpiry},
         {"Unit damage applies armor-type multiplier", TestUnitDamageAppliesArmorTypeMultiplier},
         {"Non-normal damage ignores armor value", TestNonNormalDamageTypeIgnoresArmorValue},
         {"Negative armor amplifies damage", TestNegativeArmorAmplifiesDamage},

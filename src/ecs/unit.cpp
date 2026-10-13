@@ -1050,7 +1050,19 @@ bool CUnit::Update(CSimulation& simulation) {
         }
     }
 
-    // Process behavior
+    // Process behavior. New orders preempt an interruptable behavior
+    // immediately (ref order()); while stunned they collapse to the
+    // latest single order and run when the stun expires.
+    if (currentBehavior_ && !orderQueue_.empty() && currentBehavior_->IsInterruptable()) {
+        currentBehavior_->End(simulation);
+        if (currentBehavior_ == ownedCurrentBehavior_.get()) {
+            ownedCurrentBehavior_.reset();
+        }
+        currentBehavior_ = nullptr;
+    }
+    if (currentBehavior_ && !currentBehavior_->IsInterruptable()) {
+        while (orderQueue_.size() > 1) orderQueue_.pop();
+    }
     if (currentBehavior_) {
         bool done = currentBehavior_->Update(simulation);
         if (done) {
@@ -1503,8 +1515,12 @@ void CUnit::AwardBountyAndXP(CSimulation& simulation, CUnit* source) {
 
 void CUnit::MaybeReturnFire(CSimulation& simulation, CUnit* source) {
     if (!source || source == this || !unitType_) return;
-    // Idle or default-behavior units only (ref currentBehavior gate).
-    if (currentBehavior_ && currentBehavior_ != defaultBehavior_.get()) return;
+    // Idle or interruptable-default units only (ref damage() else branch:
+    // null, or default behavior that is itself interruptable).
+    if (currentBehavior_ &&
+        (currentBehavior_ != defaultBehavior_.get() || !currentBehavior_->IsInterruptable())) {
+        return;
+    }
     if (IsDead() || IsPaused()) return;
 
     auto adoptBehavior = [&](CBehavior* behavior) {

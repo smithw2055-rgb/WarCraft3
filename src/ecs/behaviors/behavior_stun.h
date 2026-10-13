@@ -6,6 +6,9 @@ class CBehaviorStun : public CBehavior {
 public:
     CBehaviorStun();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::STUN; }
+    // Stun cannot be interrupted: new orders defer until it expires
+    // (ref CBehaviorStun.interruptable false).
+    bool IsInterruptable() const override { return false; }
 
     void SetDuration(float duration) { duration_ = duration; }
     float GetRemaining() const { return remaining_; }
