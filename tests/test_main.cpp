@@ -259,7 +259,10 @@ bool TestLoadCapacityEnforced();
 bool TestUnloadRestoresUnits();
 bool TestCargoFollowsTransport();
 bool TestTransportDeathKillsCargo();
-bool TestLoadFiresUnitLoadedCallback();
+bool TestDeathRefundsFoodAtDeath();
+bool TestDeathPopsOutWorker();
+bool TestDeathVisionRevealsOwnerAndKiller();
+bool TestConstructingDeathFiresExplode();bool TestLoadFiresUnitLoadedCallback();
 bool TestLoadedTriggerEvent();
 bool TestDecayFiresUnitDecayCallback();
 bool TestDecayTriggerEvent();
@@ -953,6 +956,10 @@ int main(int argc, char** argv) {
         {"Unload restores units", TestUnloadRestoresUnits},
         {"Cargo follows transport", TestCargoFollowsTransport},
         {"Transport death kills cargo", TestTransportDeathKillsCargo},
+        {"Death refunds food at death", TestDeathRefundsFoodAtDeath},
+        {"Death pops out worker", TestDeathPopsOutWorker},
+        {"Death vision reveals owner and killer", TestDeathVisionRevealsOwnerAndKiller},
+        {"Constructing death fires explode", TestConstructingDeathFiresExplode},
         {"Load fires unit loaded callback", TestLoadFiresUnitLoadedCallback},
         {"Loaded trigger event", TestLoadedTriggerEvent},
         {"Decay fires unit decay callback", TestDecayFiresUnitDecayCallback},

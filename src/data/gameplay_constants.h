@@ -112,6 +112,12 @@ struct CGameplayConstants {
     // (Units\MiscData.txt ChanceToMiss, TFT retail 0.25).
     float chanceToMiss = 0.25f;
 
+    // Death reveal (Units\MiscData.txt FogFlashTime/DyingRevealRadius, TFT
+    // retail 3s/500; ref CFogModifier statics + CUnitDeathVisionFogModifier):
+    // a dying unit briefly reveals around itself to its owner and its killer.
+    float fogFlashTime = 3.0f;
+    float dyingRevealRadius = 500.0f;
+
     CGameplayConstants();
     explicit CGameplayConstants(const TxtTable& miscData);
 };

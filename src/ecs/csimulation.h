@@ -329,6 +329,19 @@ public:
     const std::function<void(int, bool)>& GetConstructEventCallback() const {
         return constructEventCallback_;
     }
+    // Mid-construction death explosion (ref createDeathExplodeEffect: pure
+    // presentation, fired when a unit dies while IsConstructing). The sim
+    // only reports (unit handle + explode buff id); the renderer spawns the
+    // art. Fires with a zero buff id when none was set via JASS.
+    void SetDeathExplodeCallback(std::function<void(int unitHandle, War3ID buffId)> cb) {
+        deathExplodeCallback_ = std::move(cb);
+    }
+    const std::function<void(int, War3ID)>& GetDeathExplodeCallback() const {
+        return deathExplodeCallback_;
+    }
+    void FireDeathExplode(int unitHandle, War3ID buffId) {
+        if (deathExplodeCallback_) deathExplodeCallback_(unitHandle, buffId);
+    }
     // Sim-side ownership changes (charm/possession transfers): unit handle
     // plus previous owner player index. JASS SetUnitOwner fires directly.
     void SetOwnerChangedCallback(std::function<void(int unitHandle, int prevOwnerIndex)> cb) {
@@ -445,6 +458,7 @@ private:
     std::function<void(int, int, int)> heroSkillCallback_;
     std::function<void(int, int, CombatTextKind, float)> combatTextCallback_;
     std::function<void(int, bool)> constructEventCallback_;
+    std::function<void(int, War3ID)> deathExplodeCallback_;
     std::function<void(int, int, int, bool)> queueEventCallback_;
     std::function<void(int, int)> ownerChangedCallback_;
     std::function<void(int)> itemRemovedCallback_;

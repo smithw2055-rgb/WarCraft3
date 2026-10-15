@@ -309,6 +309,8 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     buildingKillsGiveExp = readMiscInt("BuildingKillsGiveExp", 0) != 0;
     buildingAngle = readFloat("BuildingAngle", 0.0f);
     chanceToMiss = readFloat("ChanceToMiss", 0.25f);
+    fogFlashTime = readFloat("FogFlashTime", 3.0f);
+    dyingRevealRadius = readFloat("DyingRevealRadius", 500.0f);
 }
 
 int CGameplayConstants::GetHeroReviveGoldCost(int originalGoldCost, int level) const {

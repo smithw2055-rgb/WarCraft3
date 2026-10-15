@@ -41,6 +41,7 @@ add_executable(warsmash_tests
     test_gameplay_data.cpp
     test_projectiles.cpp
     test_transport.cpp
+    test_death_sequence.cpp
     test_ability_builder.cpp
     test_spells3.cpp
     test_spells4.cpp

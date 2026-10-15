@@ -331,6 +331,33 @@ public:
     void SetDeathTurnTick(int t) { deathTurnTick_ = t; }
     bool IsCorpse() const { return corpse_; }
     bool IsBoneCorpse() const { return boneCorpse_; }
+    // Killer at the fatal blow (player index, -1 = none/environment; ref
+    // kill(simulation, source)): feeds the killer-side death-vision reveal.
+    // Recorded in Damage on the killing hit, consumed on the death tick.
+    int GetDeathKillerPlayer() const { return deathKillerPlayer_; }
+    void SetDeathKillerPlayer(int v) { deathKillerPlayer_ = v; }
+    // Construction worker link (ref CUnit.worker/workerInside): orc/ne
+    // builders hide inside the foundation; death pops them back out
+    // (PopoutWorker), completion/cancel clears the link.
+    void SetWorker(int workerHandleId, bool inside) {
+        workerHandleId_ = workerHandleId;
+        workerInside_ = inside;
+    }
+    void ClearWorker() {
+        workerHandleId_ = -1;
+        workerInside_ = false;
+        constructionConsumesWorker_ = false;
+    }
+    int GetWorkerHandle() const { return workerHandleId_; }
+    bool IsWorkerInside() const { return workerInside_; }
+    // Night-elf consume (ref constructionConsumesWorker, set only for
+    // ancients; wisp food is zeroed at build start and restored on popout).
+    void SetConstructionConsumesWorker(bool v) { constructionConsumesWorker_ = v; }
+    bool IsConstructionConsumesWorker() const { return constructionConsumesWorker_; }
+    // Emerge the hidden construction worker, if any (ref popoutWorker):
+    // unhide/unpause/uninvulnerable, nudge beside the ruin, restore
+    // consumed-worker food. Always clears the link.
+    void PopoutWorker(CSimulation& simulation);
     // Decay suspend (UnitSuspendDecay): frozen corpses never advance.
     bool IsDecaySuspended() const { return decaySuspended_; }
     void SetDecaySuspended(bool v) { decaySuspended_ = v; }
@@ -512,6 +539,11 @@ private:
     bool corpse_ = false;
     bool boneCorpse_ = false;
     bool decaySuspended_ = false;
+    int deathKillerPlayer_ = -1;
+    // Construction worker link (ref CUnit.worker/workerInside).
+    int workerHandleId_ = -1;
+    bool workerInside_ = false;
+    bool constructionConsumesWorker_ = false;
     int foodUsed_ = 0;
     int foodMade_ = 0;
     bool useFood_ = true;

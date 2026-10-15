@@ -6,6 +6,7 @@
 #include "ecs/abilities/ability_transport.h"
 #include "ecs/abilities/spells28.h"
 #include "data/abilitydata.h"
+#include "data/unitdata.h"
 #include "ecs/abilities/spells4.h"
 #include "ecs/abilities/spells5.h"
 #include "ecs/abilities/spells9.h"
@@ -153,6 +154,40 @@ void CUnit::KillPathingInstance(CSimulation& game) {
         if (pf->HasPathingMap()) pf->GetPathingMap()->UnstampFootprint(pathingStampId_);
     }
     pathingStampId_ = -1;
+}
+
+void CUnit::PopoutWorker(CSimulation& game) {
+    const int workerHandle = workerHandleId_;
+    const bool inside = workerInside_;
+    workerHandleId_ = -1;
+    workerInside_ = false;
+    // Undead/human builders stay outside (inside=false); nothing to pop.
+    if (workerHandle < 0 || !inside) return;
+    CUnit* worker = game.GetUnit(workerHandle);
+    if (!worker || worker->IsDead()) return;
+    worker->SetInvulnerable(false);
+    worker->SetHidden(false);
+    worker->SetPaused(false);
+    // Step out beside the ruin (ref nudgeAround -> setPointAndCheckUnstuck).
+    worker->SetPositionAndCheckUnstuck(GetX(), GetY(), game);
+    if (constructionConsumesWorker_) {
+        // Night-elf wisps were zeroed at build start (see
+        // CBehaviorBuild::CreateBuilding); give their food back (ref
+        // popoutWorker restores worker type foodUsed to its player).
+        int restore = 0;
+        if (auto* data = game.GetUnitData()) {
+            if (auto* type = data->GetUnitType(worker->GetTypeId())) {
+                restore = type->GetFoodUsed();
+            }
+        }
+        if (restore > 0) {
+            worker->SetFoodUsed(restore);
+            if (CPlayer* player = game.GetPlayer(worker->GetPlayerIndex())) {
+                player->SetFoodUsed(player->GetFoodUsed() + restore);
+            }
+        }
+    }
+    constructionConsumesWorker_ = false;
 }
 
 void CUnit::RefreshMaxLifeTotal() {
@@ -1096,11 +1131,60 @@ bool CUnit::Update(CSimulation& simulation) {
             boneCorpse_ = false;
             // Retail death clears the building footprint (ref killPathingInstance).
             KillPathingInstance(simulation);
+            // The fallen drop their orders with their behavior (ref kill:
+            // beginBehavior(null) + orderQueue.clear()).
+            if (currentBehavior_) {
+                currentBehavior_->End(simulation);
+                currentBehavior_ = nullptr;
+                ownedCurrentBehavior_.reset();
+            }
+            while (!orderQueue_.empty()) orderQueue_.pop();
+            // Hidden construction workers emerge from the ruin (ref
+            // popoutWorker; no-op without a worker link).
+            PopoutWorker(simulation);
             // Ref death path: the fallen stop satisfying techtree
             // requirements (heroes keep theirs while awaiting revive).
             if (!IsHero()) {
                 if (CPlayer* player = simulation.GetPlayer(GetPlayerIndex())) {
                     player->RemoveTechUnlocked(simulation, GetTypeId());
+                }
+            }
+            // Death reveal (ref CUnitDeathVisionFogModifier for owner +
+            // killer): a short timed VISIBLE circle on the fog grid.
+            {
+                const auto& gc = simulation.GetGameplayConstants();
+                if (gc.dyingRevealRadius > 0.0f && gc.fogFlashTime > 0.0f) {
+                    if (CFogSystem* fog = simulation.GetFogSystem()) {
+                        const CFogArea area =
+                            CFogArea::Circle(GetX(), GetY(), gc.dyingRevealRadius);
+                        fog->AddTimedModifier(GetPlayerIndex(), area,
+                                              CFogState::VISIBLE, gc.fogFlashTime);
+                        if (deathKillerPlayer_ >= 0 &&
+                            deathKillerPlayer_ != GetPlayerIndex()) {
+                            fog->AddTimedModifier(deathKillerPlayer_, area,
+                                                  CFogState::VISIBLE, gc.fogFlashTime);
+                        }
+                    }
+                }
+            }
+            // Foundations killed mid-build explode instead of leaving a
+            // corpse animation (ref kill constructing branch ->
+            // createDeathExplodeEffect; presentation-only, sim keeps the
+            // normal decay bookkeeping below).
+            if (IsConstructing()) {
+                simulation.FireDeathExplode(handleId_, explodeBuffId_);
+            }
+            // Food refund at death, not at removal (ref kill zeroes both:
+            // player.setUnitFoodMade/Used(this, 0)).
+            if (CPlayer* player = simulation.GetPlayer(GetPlayerIndex())) {
+                if (foodMade_ != 0) {
+                    player->SetFoodCap(std::max(0, player->GetFoodCap() - foodMade_));
+                    foodMade_ = 0;
+                }
+                const int used = GetFoodUsed();
+                if (used != 0) {
+                    player->SetFoodUsed(std::max(0, player->GetFoodUsed() - used));
+                    foodUsed_ = 0;
                 }
             }
             // Cargo goes down with the transport (WC3 rule).
@@ -1615,6 +1699,9 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
     (void)weaponSoundType;
 
     if (oldLife > 0 && life_ <= 0) {
+        // Killer side-channel for the death tick (ref kill(source): killer
+        // gets its own death-vision reveal next to the owner's).
+        deathKillerPlayer_ = source ? source->GetPlayerIndex() : -1;
         AwardBountyAndXP(simulation, source);
         auto& deathCb = simulation.GetUnitDeathCallback();
         int srcHandle = source ? source->GetHandleId() : -1;

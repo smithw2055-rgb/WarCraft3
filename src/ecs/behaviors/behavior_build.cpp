@@ -6,6 +6,7 @@
 #include "ecs/pathing/pathfinding.h"
 #include "ecs/pathing/world_collision.h"
 #include "data/unitdata.h"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -241,25 +242,43 @@ void CBehaviorBuild::CreateBuilding(CSimulation& simulation) {
                 // Human: worker stays outside, building is NOT paused
                 // Worker will "repair" the building (construction progresses)
                 building->SetConstructionPaused(false);
+                building->SetWorker(unit_->GetHandleId(), false);
                 break;
 
             case CBuildModel::ORC:
                 // Orc: worker hides inside, building auto-constructs
+                // (ref CBehaviorOrcBuild: setWorker(unit, true)).
                 unit_->SetHidden(true);
                 building->SetConstructionPaused(false);
+                building->SetWorker(unit_->GetHandleId(), true);
                 break;
 
             case CBuildModel::UNDEAD:
                 // Undead: worker stays outside at build site
                 // Worker plays work animation, building auto-constructs
                 building->SetConstructionPaused(false);
+                building->SetWorker(unit_->GetHandleId(), false);
                 break;
 
             case CBuildModel::NIGHT_ELF:
                 // Night Elf: wisp hides inside during construction and is
-                // consumed on completion (see CompleteBuilding).
+                // consumed on completion (see CompleteBuilding). The wisp
+                // stops costing food while building (ref
+                // CBehaviorNightElfBuild zeroes worker food for ancients;
+                // here for every wisp build, matching the consume below);
+                // death pops it back out with the food restored.
                 unit_->SetHidden(true);
                 building->SetConstructionPaused(false);
+                building->SetWorker(unit_->GetHandleId(), true);
+                building->SetConstructionConsumesWorker(true);
+                if (player) {
+                    const int wispFood = unit_->GetFoodUsed();
+                    if (wispFood > 0) {
+                        player->SetFoodUsed(
+                            std::max(0, player->GetFoodUsed() - wispFood));
+                        unit_->SetFoodUsed(0);
+                    }
+                }
                 break;
         }
 
@@ -299,6 +318,7 @@ void CBehaviorBuild::CompleteBuilding(CSimulation& simulation) {
             // Orc: unhide peon and reposition outside
             unit_->SetHidden(false);
             if (building) {
+                building->ClearWorker();
                 float offset = building->GetCollisionSize() + unit_->GetCollisionSize() + 32.0f;
                 unit_->SetPosition(building->GetX() + offset, building->GetY());
             }
@@ -306,7 +326,10 @@ void CBehaviorBuild::CompleteBuilding(CSimulation& simulation) {
 
         case CBuildModel::NIGHT_ELF:
             // Night Elf: the wisp sacrifices itself (ref CBehaviorNightElfBuild).
-            // It stays hidden and is removed instead of emerging.
+            // It stays hidden and is removed instead of emerging. Clear the
+            // worker link first so a later death of the building cannot pop
+            // a removed handle.
+            if (building) building->ClearWorker();
             simulation.RemoveUnit(unit_);
             break;
 
@@ -339,6 +362,23 @@ void CBehaviorBuild::CancelConstruction(CSimulation& simulation) {
         unit_->SetHidden(false);
     }
     if (building_ && building) {
+        // Drop the worker link (death must not pop an emerged worker) and
+        // give back the wisp food zeroed at build start.
+        if (buildModel_ == CBuildModel::NIGHT_ELF) {
+            int restore = 0;
+            if (auto* data = simulation.GetUnitData()) {
+                if (auto* workerType = data->GetUnitType(unit_->GetTypeId())) {
+                    restore = workerType->GetFoodUsed();
+                }
+            }
+            if (restore > 0) {
+                unit_->SetFoodUsed(restore);
+                if (auto* player = simulation.GetPlayer(unit_->GetPlayerIndex())) {
+                    player->SetFoodUsed(player->GetFoodUsed() + restore);
+                }
+            }
+        }
+        building->ClearWorker();
         // Fire before removal so trigger matching still sees the structure.
         if (const auto& cb = simulation.GetConstructEventCallback()) {
             cb(building->GetHandleId(), false);
