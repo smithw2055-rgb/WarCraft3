@@ -98,6 +98,11 @@ public:
     void SetTechLevel(War3ID id, int level);
     int GetTechMaxAllowed(War3ID id) const;
     void SetTechMaxAllowed(War3ID id, int level);
+    // Availability cap (ref CPlayer.isTechtreeAllowedByMax): banned or
+    // capped tech (w3i lists, SetPlayerTechMaxAllowed) gates training and
+    // research alongside the flat requirements. Counts live possession
+    // (queued-but-unbuilt items are not counted yet).
+    bool IsTechtreeAllowedByMax(War3ID id) const;
     int GetTechCount() const { return (int)techtreeUnlocked_.size(); }
 
     // Alliances

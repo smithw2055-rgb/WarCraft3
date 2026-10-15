@@ -103,3 +103,11 @@ struct W3iInfo {
 bool W3ILoad(const uint8_t* data, size_t size, W3iInfo& out);
 bool W3ILoadFromMpq(const std::string& mapPath, W3iInfo& out);
 void W3IPrint(const W3iInfo& info);
+
+// Applies the w3i techtree-availability lists to fresh players (ref engine
+// load step; the map script runs later and keeps final say via
+// SetPlayerTechMaxAllowed). Tech entries ban the id (max 0); upgrade
+// entries map 0=unavailable->ban, 1=available->unlimited,
+// 2=researched->unlimited plus researched at levelAffected+1 (0-based).
+class CSimulation;
+void ApplyW3iTechtreeAvailability(CSimulation& sim, const W3iInfo& w3i);

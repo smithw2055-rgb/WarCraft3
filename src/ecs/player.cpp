@@ -40,6 +40,14 @@ void CPlayer::SetTechMaxAllowed(War3ID id, int level) {
     techtreeMaxAllowed_[id.value] = level;
 }
 
+bool CPlayer::IsTechtreeAllowedByMax(War3ID id) const {
+    const int maxAllowed = GetTechMaxAllowed(id);
+    if (maxAllowed < 0) return true;
+    auto it = techtreeUnlocked_.find(id.value);
+    const int have = (it != techtreeUnlocked_.end()) ? it->second : 0;
+    return have < maxAllowed;
+}
+
 bool CPlayer::HasAlliance(const CPlayer& other, CAllianceType type) const {
     if (id_ == other.GetId()) {
         return true;

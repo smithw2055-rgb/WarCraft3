@@ -2,7 +2,7 @@
 
 > 对照原版 Warsmash Java（`warsmash_ref/`）与 C++ 版（`src/`）。
 > 联机（Battle.net/UDP）明确排除。
-> 已完成 Gap-fill 1–42（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础、占位像素图+静态 stamp、高地 miss、穿刺线/炮击、伤害替换框架、闪避暴击叠加、荆棘吸血语义、死亡序列、非叠加攻击属性、溅射 miss/负伤/无敌监听等）。
+> 已完成 Gap-fill 1–43（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础、占位像素图+静态 stamp、高地 miss、穿刺线/炮击、伤害替换框架、闪避暴击叠加、荆棘吸血语义、死亡序列、非叠加攻击属性、溅射 miss/负伤/无敌监听、w3i 开局科技等）。
 
 ## P0：战斗模拟正确性（影响对局）
 
@@ -20,7 +20,8 @@
 ## P1：数据/地图正确性（错起来隐蔽）
 
 - [x] 11. 占位像素图（Gap-33：pathTex 解码/缓存、`pathTex` 字段、放置校验改足迹矩形、`BuildingAngle`、吸附偏移；Gap-34：WPM 静态 stamp/死亡切换——建筑创建吸附+blit、死亡/移除 unstamp、Root/Uproot 切换，可破坏物 pathTex/pathTexDeath 双足迹+occH 视野块、复活换回）。
-- [ ] 12. w3i 开局科技/升级可用性解析了不用（`w3i.h` → `map_loader` 不消费）。
+ - [x] 12. w3i 开局科技/升级可用性（Gap-43：`ApplyW3iTechtreeAvailability`（w3i.cpp，可单测）随 `CreateSimulation` 建完玩家即应用——tech 表 ban（max 0）、upgrade 表 0=ban/1=显式可用/2=已研究到 levelAffected+1（0-based，WE 格式经 WC3MapSpecification 交叉确认）；新增 `CPlayer::IsTechtreeAllowedByMax`（ref `isTechtreeAllowedByMax`， possession 计数），`QueueUnit`/`QueueResearch` 在扣费前设门；脚本后跑仍可覆盖。残留：排队中未造完的不计入 cap（原版算在内）；abilitybuilder 主动/被动技能无 maxAllowed 门；w3i 联盟/force/起始资源仍不消费）。
+ - [ ] 13. w3i 全局随机单位/物品表未接入（`PlaceRandomUnit/Item` 只用自带表）。
 - [ ] 13. w3i 全局随机单位/物品表未接入（`PlaceRandomUnit/Item` 只用自带表）。
 - [ ] 14. 通行/高度/水面三套定义打架：缺 BOUNDARY 旗、`FLOAT/AMPH` 映射；`DecodeGroundHeight` 忽略崖层高+水位偏移；WPM 与 W3E 水面定义不一致。
 - [ ] 15. 可破坏物/装饰物：缺 `targetedAs/occlusionHeight/pathingPixelMap/selectionScale`，桥/浅滩不分类，`w3d.doo` 随机掉落套丢弃。
@@ -49,4 +50,4 @@
 
 ## 实施顺序
 
-1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图+静态 stamp（P1-11，Gap-33/34）→ 4. 高地 miss（P0-3，Gap-35）→ 5. 穿刺线/炮击（P0-4，Gap-36）→ 6. 伤害替换框架（P0-5，Gap-37）→ 7. 闪避暴击叠加（P0-6，Gap-38）→ 8. 荆棘吸血语义（P0-7，Gap-39）→ 9. 死亡序列（P0-8，Gap-40）→ 10. 非叠加攻击属性（P0-9，Gap-41）→ 11. P0-10 小项（Gap-42）→ …
+1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图+静态 stamp（P1-11，Gap-33/34）→ 4. 高地 miss（P0-3，Gap-35）→ 5. 穿刺线/炮击（P0-4，Gap-36）→ 6. 伤害替换框架（P0-5，Gap-37）→ 7. 闪避暴击叠加（P0-6，Gap-38）→ 8. 荆棘吸血语义（P0-7，Gap-39）→ 9. 死亡序列（P0-8，Gap-40）→ 10. 非叠加攻击属性（P0-9，Gap-41）→ 11. P0-10 小项（Gap-42）→ 12. w3i 开局科技（P1-12，Gap-43）→ …

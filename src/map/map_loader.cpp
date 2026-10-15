@@ -282,6 +282,9 @@ void MapLoader::CreateSimulation(int localPlayerIndex) {
         }
         sim_.AddPlayer(std::move(player));
     }
+    // w3i techtree availability baseline (tech bans, upgrade
+    // unavailable/available/researched); map script may override later.
+    ApplyW3iTechtreeAvailability(sim_, w3i_);
     std::cout << "  Simulation: 12 players created" << std::endl;
 }
 

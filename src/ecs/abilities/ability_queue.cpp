@@ -128,6 +128,11 @@ bool CAbilityQueue::QueueUnit(CSimulation& game, CUnit* building, War3ID unitTyp
     if (!TechTree::MeetsRequirements(game, building->GetPlayerIndex(), unitTypeId)) {
         return false;
     }
+    // Availability cap (ref isTechtreeAllowedByMax first): w3i bans and
+    // SetPlayerTechMaxAllowed caps refuse training like requirements do.
+    if (!player->IsTechtreeAllowedByMax(unitTypeId)) {
+        return false;
+    }
     if (trainType->IsHero()) {
         int heroCount = 0;
         for (CUnit* unit : game.GetUnits()) {
@@ -210,6 +215,13 @@ bool CAbilityQueue::QueueResearch(CSimulation& game, CUnit* building, War3ID upg
 
     const CUpgradeType* upgrade = upgradeData->GetUpgrade(upgradeId);
     if (!upgrade) return false;
+
+    // Availability cap (ref isTechtreeAllowedByMax first): w3i bans and
+    // SetPlayerTechMaxAllowed caps refuse research before costs are taken.
+    if (!player->IsTechtreeAllowedByMax(upgradeId)) {
+        std::cout << "Research blocked by tech cap: " << upgradeId.ToString() << std::endl;
+        return false;
+    }
 
     const int currentLevel = player->GetTechLevel(upgradeId);
     if (currentLevel >= upgrade->maxLevel) {

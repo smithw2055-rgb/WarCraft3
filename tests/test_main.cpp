@@ -268,6 +268,10 @@ bool TestNegativeDamageHealsCapped();
 bool TestNegativeDamageViaApplyDamage();
 bool TestInvulnerableRunsTakenListeners();
 bool TestInvulnerableStillShowsCritText();
+bool TestTechCapCountsPossession();
+bool TestTechBanBlocksTraining();
+bool TestTechBanBlocksResearch();
+bool TestApplyW3iAvailability();
 bool TestSameAuraTwoCastersTakesMax();
 bool TestDifferentAurasSum();
 bool TestHasteAddsAcrossKeys();
@@ -975,6 +979,10 @@ int main(int argc, char** argv) {
         {"Negative damage via ApplyDamage", TestNegativeDamageViaApplyDamage},
         {"Invulnerable runs taken listeners", TestInvulnerableRunsTakenListeners},
         {"Invulnerable still shows crit text", TestInvulnerableStillShowsCritText},
+        {"Tech cap counts possession", TestTechCapCountsPossession},
+        {"Tech ban blocks training", TestTechBanBlocksTraining},
+        {"Tech ban blocks research", TestTechBanBlocksResearch},
+        {"Apply w3i availability", TestApplyW3iAvailability},
         {"Same aura two casters takes max", TestSameAuraTwoCastersTakesMax},
         {"Different auras sum", TestDifferentAurasSum},
         {"Haste adds across keys", TestHasteAddsAcrossKeys},

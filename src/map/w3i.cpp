@@ -1,4 +1,6 @@
 #include "w3i.h"
+#include "ecs/csimulation.h"
+#include "ecs/player.h"
 #include <cstring>
 #include <cstdio>
 #include <iostream>
@@ -266,4 +268,37 @@ void W3IPrint(const W3iInfo& info) {
     std::cout << "Camera: "
               << info.cameraBounds[0] << "," << info.cameraBounds[1] << " - "
               << info.cameraBounds[2] << "," << info.cameraBounds[3] << std::endl;
+}
+
+void ApplyW3iTechtreeAvailability(CSimulation& sim, const W3iInfo& w3i) {
+    // Player-flag bits address slots 0..23 (WE format); sim.GetPlayer is
+    // null-safe, so flags beyond the created players are ignored.
+    for (const auto& tech : w3i.techAvailability) {
+        const War3ID id(tech.id);
+        for (int p = 0; p < 24; ++p) {
+            if ((tech.playerFlags & (1u << (unsigned)p)) == 0) continue;
+            if (CPlayer* player = sim.GetPlayer(p)) {
+                player->SetTechMaxAllowed(id, 0);
+            }
+        }
+    }
+    for (const auto& up : w3i.upgradeAvailability) {
+        const War3ID id(up.id);
+        for (int p = 0; p < 24; ++p) {
+            if ((up.playerFlags & (1u << (unsigned)p)) == 0) continue;
+            CPlayer* player = sim.GetPlayer(p);
+            if (!player) continue;
+            if (up.availability == 0) {
+                player->SetTechMaxAllowed(id, 0);
+            } else if (up.availability == 1) {
+                player->SetTechMaxAllowed(id, -1);
+            } else if (up.availability == 2) {
+                player->SetTechMaxAllowed(id, -1);
+                const int level = up.levelAffected + 1; // 0-based -> researched level
+                if (level > 0 && player->GetTechLevel(id) < level) {
+                    player->SetTechLevel(id, level);
+                }
+            }
+        }
+    }
 }
