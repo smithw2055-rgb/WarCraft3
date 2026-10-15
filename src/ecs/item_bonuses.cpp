@@ -45,12 +45,11 @@ void ApplyOne(CSimulation& game, CUnit* unit, const CItemBonus& bonus, int sign)
             unit->AddBonusArmor(v);
             break;
         case CItemBonusType::ATTACK_SPEED:
-            // value is a percentage: +15 means 15% faster attacks
-            if (v >= 0) {
-                unit->MultiplyAttackSpeed(1.0f + v / 100.0f);
-            } else {
-                unit->DivideAttackSpeed(1.0f - v / 100.0f);
-            }
+            // value is a percentage: +15 means 15% faster attacks. Items
+            // are the stacking speed class (ref attackSpeedBonus, plain
+            // sum with everything); buffs/aura never touch this.
+            // v already carries the apply/remove sign.
+            unit->AddStackingAttackSpeed(v / 100.0f);
             break;
         case CItemBonusType::MAX_LIFE:
             unit->AddBonusMaxLife((float)v);

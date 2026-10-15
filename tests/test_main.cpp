@@ -260,7 +260,11 @@ bool TestUnloadRestoresUnits();
 bool TestCargoFollowsTransport();
 bool TestTransportDeathKillsCargo();
 bool TestDeathRefundsFoodAtDeath();
-bool TestDeathPopsOutWorker();
+bool TestRoarAndInnerFireSum();
+bool TestSameAuraTwoCastersTakesMax();
+bool TestDifferentAurasSum();
+bool TestHasteAddsAcrossKeys();
+bool TestItemHasteStacksWithBuffHaste();bool TestDeathPopsOutWorker();
 bool TestDeathVisionRevealsOwnerAndKiller();
 bool TestConstructingDeathFiresExplode();bool TestLoadFiresUnitLoadedCallback();
 bool TestLoadedTriggerEvent();
@@ -956,6 +960,11 @@ int main(int argc, char** argv) {
         {"Unload restores units", TestUnloadRestoresUnits},
         {"Cargo follows transport", TestCargoFollowsTransport},
         {"Transport death kills cargo", TestTransportDeathKillsCargo},
+        {"Roar and Inner Fire sum", TestRoarAndInnerFireSum},
+        {"Same aura two casters takes max", TestSameAuraTwoCastersTakesMax},
+        {"Different auras sum", TestDifferentAurasSum},
+        {"Haste adds across keys", TestHasteAddsAcrossKeys},
+        {"Item haste stacks with buff haste", TestItemHasteStacksWithBuffHaste},
         {"Death refunds food at death", TestDeathRefundsFoodAtDeath},
         {"Death pops out worker", TestDeathPopsOutWorker},
         {"Death vision reveals owner and killer", TestDeathVisionRevealsOwnerAndKiller},

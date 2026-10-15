@@ -64,7 +64,9 @@ void CBuffBloodlust::OnApply(CSimulation& game, CUnit* target) {
     if (!target) return;
     appliedSpeedBonus_ = (int)(target->GetSpeed() * speedBonus_);
     target->SetSpeed(target->GetSpeed() + appliedSpeedBonus_);
-    target->MultiplyAttackSpeed(1.0f + attackSpeedBonus_);
+    // Non-stacking haste (ref ATKSPD max-within-key, here key Bblo):
+    // Bloodlust no longer multiplies with Endurance/Frenzy, it adds.
+    target->SetNonStackingAttackSpeed(GetId(), attackSpeedBonus_);
 }
 
 void CBuffBloodlust::OnRemove(CSimulation& game, CUnit* target) {
@@ -72,7 +74,7 @@ void CBuffBloodlust::OnRemove(CSimulation& game, CUnit* target) {
     if (!target) return;
     target->SetSpeed(target->GetSpeed() - appliedSpeedBonus_);
     appliedSpeedBonus_ = 0;
-    target->DivideAttackSpeed(1.0f + attackSpeedBonus_);
+    target->ClearNonStackingAttackSpeed(GetId());
 }
 
 CBuff* CBuffBloodlust::Clone() const {
@@ -449,26 +451,30 @@ CBuff* CBuffPolymorph::Clone() const {
 }
 
 // ===== CBuffInnerFire =====
-CBuffInnerFire::CBuffInnerFire(float duration, int bonusDamage, int bonusArmor)
-    : CBuff(War3ID("Binf"), duration, true)
-    , bonusDamage_(bonusDamage), bonusArmor_(bonusArmor) {}
+CBuffInnerFire::CBuffInnerFire(float duration, int bonusDamage, int bonusArmor,
+                               War3ID buffId)
+    : CBuff(buffId, duration, true)
+    , bonusDamage_(bonusDamage), bonusArmor_(bonusArmor), buffId_(buffId) {}
 
 void CBuffInnerFire::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
-    target->AddBonusDamage(bonusDamage_);
+    // Non-stacking damage (ref MELEEATK/ALLATK max-within-key): a second
+    // same-id cast refreshes via AddBuff dedupe, so the single entry is
+    // exact; different ids (Roar vs Inner Fire) sum.
+    target->SetNonStackingDamageBonus(buffId_, bonusDamage_);
     target->AddBonusArmor(bonusArmor_);
 }
 
 void CBuffInnerFire::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
-    target->AddBonusDamage(-bonusDamage_);
+    target->ClearNonStackingDamageBonus(buffId_);
     target->AddBonusArmor(-bonusArmor_);
 }
 
 CBuff* CBuffInnerFire::Clone() const {
-    auto* copy = new CBuffInnerFire(duration_, bonusDamage_, bonusArmor_);
+    auto* copy = new CBuffInnerFire(duration_, bonusDamage_, bonusArmor_, buffId_);
     copy->remaining_ = remaining_;
     return copy;
 }
@@ -568,12 +574,14 @@ CBuffBerserk::CBuffBerserk(float duration, float attackSpeedMul, float damageTak
 
 void CBuffBerserk::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
-    if (target) target->MultiplyAttackSpeed(attackSpeedMul_);
+    // Stored as a factor (1.4); the table takes the additive bonus, so a
+    // lone Berserk still reads exactly 1.4x while stacking additively.
+    if (target) target->SetNonStackingAttackSpeed(GetId(), attackSpeedMul_ - 1.0f);
 }
 
 void CBuffBerserk::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    if (target) target->DivideAttackSpeed(attackSpeedMul_);
+    if (target) target->ClearNonStackingAttackSpeed(GetId());
 }
 
 CBuff* CBuffBerserk::Clone() const {
@@ -637,7 +645,9 @@ CBuffAvatar::CBuffAvatar(float duration, int bonusDamage, int bonusLife)
 
 void CBuffAvatar::OnApply(CSimulation& game, CUnit* target) {
     if (!target) return;
-    target->AddBonusDamage(bonusDamage_);
+    // Non-stacking damage (ref ALLATK key BHav): sums with Roar/Inner
+    // Fire per retail (different keys); two Avatars dedupe by buff id.
+    target->SetNonStackingDamageBonus(GetId(), bonusDamage_);
     target->AddBonusMaxLife((float)bonusLife_);
     float life = target->GetLife() + (float)bonusLife_;
     if (life > target->GetMaxLife()) life = target->GetMaxLife();
@@ -647,7 +657,7 @@ void CBuffAvatar::OnApply(CSimulation& game, CUnit* target) {
 void CBuffAvatar::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
-    target->AddBonusDamage(-bonusDamage_);
+    target->ClearNonStackingDamageBonus(GetId());
     target->AddBonusMaxLife(-(float)bonusLife_);
 }
 

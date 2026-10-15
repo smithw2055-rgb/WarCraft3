@@ -694,6 +694,62 @@ void CUnit::RecomputeAllAuraStats() {
     }
 }
 
+void CUnit::SetNonStackingDamageBonus(War3ID key, int flatValue) {
+    if (flatValue == 0) {
+        nsDamageFlat_.erase(key);
+        return;
+    }
+    nsDamageFlat_[key] = flatValue;
+}
+
+void CUnit::SetNonStackingDamagePctBonus(War3ID key, int flatValue) {
+    if (flatValue == 0) {
+        nsDamagePct_.erase(key);
+        return;
+    }
+    nsDamagePct_[key] = flatValue;
+}
+
+void CUnit::ClearNonStackingDamageBonus(War3ID key) {
+    nsDamageFlat_.erase(key);
+    nsDamagePct_.erase(key);
+}
+
+int CUnit::GetNonStackingDamageTotal() const {
+    int total = 0;
+    for (const auto& [key, value] : nsDamageFlat_) total += value;
+    for (const auto& [key, value] : nsDamagePct_) total += value;
+    return total;
+}
+
+void CUnit::SetNonStackingAttackSpeed(War3ID key, float bonus) {
+    if (bonus == 0.0f) {
+        nsAtkSpeed_.erase(key);
+        return;
+    }
+    nsAtkSpeed_[key] = bonus;
+}
+
+void CUnit::ClearNonStackingAttackSpeed(War3ID key) {
+    nsAtkSpeed_.erase(key);
+}
+
+float CUnit::GetNonStackingAttackSpeedTotal() const {
+    float total = 0.0f;
+    for (const auto& [key, value] : nsAtkSpeed_) total += value;
+    return total;
+}
+
+float CUnit::GetAttackSpeedMultiplier() const {
+    // Retail attack math (ref CUnitAttack.computeDerivedFields): all
+    // stacking and non-stacking speed bonuses add, then clamp to
+    // [-0.9, +4.0] so the multiplier lands in [0.1, 5.0]. The legacy
+    // multiplicative chain (Burrow cargo steps) still rides on top.
+    const float bonus = attackSpeedStackBonus_ + GetNonStackingAttackSpeedTotal();
+    const float clamped = std::max(-0.9f, std::min(4.0f, bonus));
+    return (1.0f + clamped) * attackSpeedMul_;
+}
+
 void CUnit::AddEvasionSource(War3ID id, float chance) {
     for (auto& src : evasionSources_) {
         if (src.id == id) {
@@ -821,21 +877,40 @@ void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {    auto key 
             break;
         }
         case CAuraEffectType::ATTACK_SPEED: {
-            const float oldFactor = 1.0f + applied;
-            const float newFactor = have ? (1.0f + best) : 1.0f;
-            if (oldFactor != 0.0f && oldFactor != 1.0f) DivideAttackSpeed(oldFactor);
-            if (newFactor != 1.0f) {
-                MultiplyAttackSpeed(newFactor);
-                auraApplied_[key] = best;
-            } else {
-                auraApplied_.erase(key);
+            // Per-buff best into the shared non-stacking speed table (ref
+            // ATKSPD: max within a key, sum across keys). Stale aura-owned
+            // keys are cleared so a lapsed aura stops contributing, while
+            // timed-buff entries sharing the maps are left alone.
+            std::unordered_map<War3ID, float> bestById;
+            if (sit != auraStats_.end()) {
+                for (const auto& s : sit->second) {
+                    auto it = bestById.find(s.buffId);
+                    if (it == bestById.end() || s.value > it->second) {
+                        bestById[s.buffId] = s.value;
+                    }
+                }
+            }
+            for (auto it = auraSpeedKeys_.begin(); it != auraSpeedKeys_.end();) {
+                if (bestById.find(*it) == bestById.end()) {
+                    ClearNonStackingAttackSpeed(*it);
+                    it = auraSpeedKeys_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (const auto& [id, value] : bestById) {
+                SetNonStackingAttackSpeed(id, value);
+                auraSpeedKeys_.insert(id);
             }
             break;
         }
         case CAuraEffectType::DAMAGE: {
-            int oldFlat = 0, newFlat = 0;
+            // Same shape as ATTACK_SPEED, split across the flat/pct damage
+            // maps (ref MELEEATK vs MELEEATKPCT both applying). The pct slot
+            // converts against the primary-attack base exactly like the old
+            // direct-mutation path, so single-aura results are bit-identical.
+            float base = 0.0f;
             if (percent) {
-                float base = 0.0f;
                 if (auto* unitType = GetUnitType()) {
                     const auto& attacks = unitType->GetAttacks();
                     if (!attacks.empty()) {
@@ -846,16 +921,35 @@ void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {    auto key 
                         }
                     }
                 }
-                oldFlat = (int)std::lround(base * applied);
-                newFlat = have ? (int)std::lround(base * best) : 0;
-            } else {
-                oldFlat = (int)std::lround(applied);
-                newFlat = have ? (int)std::lround(best) : 0;
             }
-            if (oldFlat != 0) AddBonusDamage(-oldFlat);
-            if (newFlat != 0) AddBonusDamage(newFlat);
-            if (have) auraApplied_[key] = best;
-            else auraApplied_.erase(key);
+            std::unordered_map<War3ID, float> bestById;
+            if (sit != auraStats_.end()) {
+                for (const auto& s : sit->second) {
+                    auto it = bestById.find(s.buffId);
+                    if (it == bestById.end() || s.value > it->second) {
+                        bestById[s.buffId] = s.value;
+                    }
+                }
+            }
+            auto& owned = percent ? auraDamagePctKeys_ : auraDamageFlatKeys_;
+            for (auto it = owned.begin(); it != owned.end();) {
+                if (bestById.find(*it) == bestById.end()) {
+                    // Map-specific erase (Clear would also drop the sibling
+                    // map's entry for an aura carrying both flat and pct).
+                    if (percent) SetNonStackingDamagePctBonus(*it, 0);
+                    else SetNonStackingDamageBonus(*it, 0);
+                    it = owned.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (const auto& [id, value] : bestById) {
+                const int flat = percent ? (int)std::lround(base * value)
+                                         : (int)std::lround(value);
+                if (percent) SetNonStackingDamagePctBonus(id, flat);
+                else SetNonStackingDamageBonus(id, flat);
+                owned.insert(id);
+            }
             break;
         }
         case CAuraEffectType::LIFE_REGEN: {

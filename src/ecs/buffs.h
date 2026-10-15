@@ -237,7 +237,13 @@ public:
 // Roar reuses this with zero armor).
 class CBuffInnerFire : public CBuff {
 public:
-    CBuffInnerFire(float duration, int bonusDamage, int bonusArmor);
+    // Shared by the Inner Fire family; each spell passes its own buff id so
+    // the unit's non-stacking table keys them separately (ref stackingKey =
+    // buffId): Inner Fire keeps Binf, Roar uses Broa and sums with it.
+    // Battle Roar / Scroll of the Beast have no confirmed stock buff ids,
+    // so they stay on Binf (max with Inner Fire) rather than inventing ids.
+    CBuffInnerFire(float duration, int bonusDamage, int bonusArmor,
+                   War3ID buffId = War3ID("Binf"));
 
     void OnApply(CSimulation& game, CUnit* target) override;
     void OnRemove(CSimulation& game, CUnit* target) override;
@@ -246,6 +252,7 @@ public:
 private:
     int bonusDamage_;
     int bonusArmor_;
+    War3ID buffId_;
 };
 
 // Defend - marker buff; weapon-attack damage is halved in CUnit::Damage.

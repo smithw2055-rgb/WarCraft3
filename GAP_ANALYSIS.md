@@ -2,7 +2,7 @@
 
 > 对照原版 Warsmash Java（`warsmash_ref/`）与 C++ 版（`src/`）。
 > 联机（Battle.net/UDP）明确排除。
-> 已完成 Gap-fill 1–40（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础、占位像素图+静态 stamp、高地 miss、穿刺线/炮击、伤害替换框架、闪避暴击叠加、荆棘吸血语义、死亡序列等）。
+> 已完成 Gap-fill 1–41（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础、占位像素图+静态 stamp、高地 miss、穿刺线/炮击、伤害替换框架、闪避暴击叠加、荆棘吸血语义、死亡序列、非叠加攻击属性等）。
 
 ## P0：战斗模拟正确性（影响对局）
 
@@ -14,8 +14,8 @@
 - [x] 6. 闪避/暴击多源叠加（Gap-38：`CUnit` 闪避/暴击改按源列表（同 id 替换、按 id 清除），闪避各源独立掷骰、暴击取最强倍率；`CSimulation::CombatTextKind` MISS/CRIT/BASH 回调供表现层挂浮字；酒仙闪避不再清零 DH 闪避）。
 - [x] 7. 荆棘/吸血语义（Gap-39：荆棘改按入射基础伤害（战前快照，含 bonus，抵御前），补 NORMAL 类型门+敌对阵营门+ResistsThorns 门；吸血补 PASSIVE 联盟门+ResistsLeech 门；双边多源取最强；另修魔法免疫 `||`→`&&` 使 UNIVERSAL/门关法术穿透与原版一致）。
  - [x] 8. 死亡序列（Gap-40：死亡 tick 清订单+终结行为；popout 工人——兽族/暗夜 SetWorker 链接、死亡弹出+复位，未亡/人族 outside 不弹，NE 开建扣粮/弹出补粮、完成/取消清链接；食物返还——死亡 tick 即扣 foodUsed/foodMade，移除不再重复扣；死亡视野雾——owner+killer 双 timed VISIBLE 修饰（FogFlashTime 3s/DyingRevealRadius 500，可配）；建造中死亡——FireDeathExplode（unit+explodeBuffId）表现回调，sim 保持正常 decay 记账。注：爆炸质地（buff effect art）数据未到，渲染层订阅回调即可挂载）。
- - [ ] 9. 非叠加攻击属性：咆哮/内火等多源应取最大，当前线性叠加（`unit_attack.h` 无表）。
-- [ ] 10. 小项：溅射 miss 应减伤而非归零、负伤害钳制、无敌仍跑受击监听。
+ - [x] 9. 非叠加攻击属性（Gap-41：`CUnit` 新增 key=buffId 的非叠加表——伤害 flat/pct 双表、攻速表，同 key 取最大、跨 key 求和；aura DAMAGE/ATTACK_SPEED 改按 buffId 逐项同步（同 buff 多端取最大、Trueshot+Command 等跨 buff 求和）；InnerFire/Avatar/Bloodlust/Berserk/Amdf 迁出线性 `+=`/`*=`，Roar 改用自有 Broa 与 Inner Fire 求和（BattleRoar/兽卷暂守 Binf 无自创 id）；物品攻速改 stacking 累加、物品/升级/英雄伤害保持 stacking；攻速改零售 `1+clamp(sum,-0.9,4)` 加法模型（Burrow 按乘客 `*2` 遗留乘链叠乘）。残留：护甲类（DEF）仍线性叠加、近战/远程分表（MELEE/RNGD）未做——C++ 行为只打主武器，影响小）。
+ - [ ] 10. 小项：溅射 miss 应减伤而非归零、负伤害钳制、无敌仍跑受击监听。
 
 ## P1：数据/地图正确性（错起来隐蔽）
 
@@ -49,4 +49,4 @@
 
 ## 实施顺序
 
-1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图+静态 stamp（P1-11，Gap-33/34）→ 4. 高地 miss（P0-3，Gap-35）→ 5. 穿刺线/炮击（P0-4，Gap-36）→ 6. 伤害替换框架（P0-5，Gap-37）→ 7. 闪避暴击叠加（P0-6，Gap-38）→ 8. 荆棘吸血语义（P0-7，Gap-39）→ 9. 死亡序列（P0-8，Gap-40）→ …
+1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图+静态 stamp（P1-11，Gap-33/34）→ 4. 高地 miss（P0-3，Gap-35）→ 5. 穿刺线/炮击（P0-4，Gap-36）→ 6. 伤害替换框架（P0-5，Gap-37）→ 7. 闪避暴击叠加（P0-6，Gap-38）→ 8. 荆棘吸血语义（P0-7，Gap-39）→ 9. 死亡序列（P0-8，Gap-40）→ 10. 非叠加攻击属性（P0-9，Gap-41）→ …

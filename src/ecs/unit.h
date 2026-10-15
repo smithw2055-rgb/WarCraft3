@@ -95,7 +95,7 @@ public:
 
     // Instance bonus stats (items, upgrades, buffs). These stack on top of
     // the static CUnitType data and must never mutate the shared unit type.
-    int GetBonusDamage() const { return bonusDamage_ + heroBonusDamage_; }
+    float GetBonusDamage() const { return bonusDamage_ + heroBonusDamage_ + GetNonStackingDamageTotal(); }
     void AddBonusDamage(int v) { bonusDamage_ += v; }
     void SetHeroBonusDamage(int v) { heroBonusDamage_ = v; }
     int GetBonusArmor() const { return bonusArmor_; }
@@ -146,9 +146,27 @@ public:
     // Legacy single-value shim (tests): clears all sources, installs one
     // anonymous source.
     void SetCriticalStrike(float chance, float multiplier);
-    float GetAttackSpeedMultiplier() const { return attackSpeedMul_; }
+    float GetAttackSpeedMultiplier() const;
+    // Legacy multiplicative chain (only Burrow cargo steps still use it;
+    // everything else rides the additive bonus/table below).
     void MultiplyAttackSpeed(float m) { attackSpeedMul_ *= m; }
     void DivideAttackSpeed(float m) { if (m != 0.0f) attackSpeedMul_ /= m; }
+    // Stacking attack-speed bonus (retail attackSpeedBonus: items; plain
+    // sum, e.g. +0.15 for Gloves of Haste). Buffs/aura go in the
+    // non-stacking table below, never here.
+    void AddStackingAttackSpeed(float bonus) { attackSpeedStackBonus_ += bonus; }
+    // Non-stacking attack bonuses (ref NonStackingStatBuff: same key takes
+    // max, different keys sum; key = buff/ability id, e.g. Binf/Broa/BHav
+    // for damage, Bblo/Babr/Bmdf/aura ids for speed). Flat and pct damage
+    // ride separate maps (ref MELEEATK vs MELEEATKPCT both applying); the
+    // pct map stores caller-converted flat values. Zero/empty writes erase.
+    void SetNonStackingDamageBonus(War3ID key, int flatValue);
+    void SetNonStackingDamagePctBonus(War3ID key, int flatValue);
+    void ClearNonStackingDamageBonus(War3ID key);
+    int GetNonStackingDamageTotal() const;
+    void SetNonStackingAttackSpeed(War3ID key, float bonus);
+    void ClearNonStackingAttackSpeed(War3ID key);
+    float GetNonStackingAttackSpeedTotal() const;
     // Per-attack-index range bonus (index 0 = primary attack)
     float GetAttackRange(int index) const;
     void AddAttackRangeBonus(int index, float v);
@@ -502,6 +520,18 @@ private:
     std::map<std::pair<int, bool>, float> auraApplied_;
     std::vector<EvasionSource> evasionSources_;
     std::vector<CritSource> critSources_;
+    // Non-stacking attack tables (ref NonStackingStatBuff maps keyed by
+    // buff id; aura slots sync per-id bests, see RecomputeAuraStat).
+    std::unordered_map<War3ID, int> nsDamageFlat_;
+    std::unordered_map<War3ID, int> nsDamagePct_;
+    std::unordered_map<War3ID, float> nsAtkSpeed_;
+    // Aura-owned keys per table (so recompute can clear stale per-id bests
+    // without touching timed-buff entries sharing the maps).
+    std::unordered_set<War3ID> auraDamageFlatKeys_;
+    std::unordered_set<War3ID> auraDamagePctKeys_;
+    std::unordered_set<War3ID> auraSpeedKeys_;
+    // Stacking attack-speed sum (retail attackSpeedBonus).
+    float attackSpeedStackBonus_ = 0.0f;
     std::vector<float> attackRangeBonus_;
     float turnRate_;
     PathingGridMovementType movementType_;

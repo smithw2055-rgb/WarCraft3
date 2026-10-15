@@ -209,6 +209,7 @@ bool TestRoarRalliesAllies() {
     const int foeBefore = foe->GetBonusDamage();
     CAbilityRoar spell(7601);
     spell.DoEffect(sim, caster);
+    TEST_ASSERT(near->GetBuff(War3ID("Broa")) != nullptr); // own buff id: sums with Inner Fire
     TEST_ASSERT(near->GetBonusDamage() == nearBefore + 5);
     TEST_ASSERT(far->GetBonusDamage() == farBefore); // outside the 50 radius
     TEST_ASSERT(foe->GetBonusDamage() == foeBefore);

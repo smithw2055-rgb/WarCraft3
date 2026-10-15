@@ -141,11 +141,13 @@ CAbilityRoar::CAbilityRoar(int handleId)
 void CAbilityRoar::DoEffect(CSimulation& game, CUnit* caster) {
     // Migrated onto an AbilityBuilder iteration: same-player units around
     // the caster gain bonus damage (no armor, unlike Inner Fire proper).
+    // Own buff id (Broa, ref stackingKey = buffId) so Roar sums with Inner
+    // Fire but re-casts refresh instead of stacking.
     if (!caster) return;
     ABEffectChain perUnit;
     perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
         [duration = duration_, damage = bonusDamage_]() {
-            return std::make_unique<CBuffInnerFire>(duration, damage, 0);
+            return std::make_unique<CBuffInnerFire>(duration, damage, 0, War3ID("Broa"));
         }));
     ABActionForEachInRange roar(radius_, std::move(perUnit));
     roar.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);

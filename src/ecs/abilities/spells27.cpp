@@ -148,7 +148,7 @@ CAbilityMagicDefense::CAbilityMagicDefense(int handleId)
 void CAbilityMagicDefense::TurnOff(CSimulation& game, CUnit* unit) {
     if (!unit || !active_) return;
     unit->RemoveBuff(War3ID("Bmdf"), game);
-    unit->DivideAttackSpeed(appliedFactor_);
+    unit->ClearNonStackingAttackSpeed(War3ID("Bmdf"));
     active_ = false;
     appliedFactor_ = 1.0f;
 }
@@ -161,7 +161,9 @@ void CAbilityMagicDefense::DoEffect(CSimulation& game, CUnit* caster) {
     }
     caster->AddBuff(std::make_unique<CBuffMagicImmune>(1.0e9f, War3ID("Bmdf")), game);
     appliedFactor_ = ClampedFactor(speedPenalty_);
-    caster->MultiplyAttackSpeed(appliedFactor_);
+    // Speed penalty as a non-stacking table entry (key = its buff id), so
+    // it adds with Bloodlust/Frenzy instead of multiplying them.
+    caster->SetNonStackingAttackSpeed(War3ID("Bmdf"), appliedFactor_ - 1.0f);
     active_ = true;
 }
 
