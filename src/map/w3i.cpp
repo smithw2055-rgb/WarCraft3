@@ -302,3 +302,53 @@ void ApplyW3iTechtreeAvailability(CSimulation& sim, const W3iInfo& w3i) {
         }
     }
 }
+
+bool ResolveRandomGroupUnit(const W3iInfo& w3i, uint32_t group, uint32_t position,
+                            float roll01, War3ID& outUnit) {
+    // Table by id match (WE group number), else the table at that vector
+    // index (both conventions seen in the wild; id wins on conflict).
+    const W3iRandomUnitTable* table = nullptr;
+    for (const auto& candidate : w3i.randomUnitTables) {
+        if ((uint32_t)candidate.id == group) {
+            table = &candidate;
+            break;
+        }
+    }
+    if (!table && group < w3i.randomUnitTables.size()) {
+        table = &w3i.randomUnitTables[(size_t)group];
+    }
+    if (!table || table->units.empty()) return false;
+    if (position >= table->units.front().ids.size()) return false;
+    // Chance roll like the inline flag==2 tables (percent scale; a roll
+    // past the total keeps the fixed id, same as the loader fallback).
+    const float roll = roll01 * 100.0f;
+    float accum = 0.0f;
+    for (const auto& row : table->units) {
+        accum += (float)row.chance;
+        if (roll < accum) {
+            if (position >= row.ids.size()) return false;
+            outUnit = War3ID(row.ids[(size_t)position]);
+            return outUnit.value != 0;
+        }
+    }
+    return false;
+}
+
+bool CollectRandomItemTableDrops(const W3iInfo& w3i, int tableNumber,
+                                 std::vector<W3iDropItem>& out) {
+    // droppedItemTable is a 0-based table number (HiveWE: "the item table
+    // with this number"); -1 (and out-of-range) means no table.
+    if (tableNumber < 0 || (size_t)tableNumber >= w3i.randomItemTables.size()) {
+        return false;
+    }
+    const W3iRandomItemTable& table = w3i.randomItemTables[(size_t)tableNumber];
+    bool any = false;
+    for (const auto& set : table.sets) {
+        for (const auto& entry : set) {
+            if (entry.id == 0) continue;
+            out.push_back({War3ID(entry.id), entry.chance});
+            any = true;
+        }
+    }
+    return any;
+}

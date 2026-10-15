@@ -7,6 +7,7 @@
 #include "ecs/abilities/spells28.h"
 #include "data/abilitydata.h"
 #include "data/unitdata.h"
+#include "data/itemdata.h"
 #include "ecs/abilities/spells4.h"
 #include "ecs/abilities/spells5.h"
 #include "ecs/abilities/spells9.h"
@@ -154,6 +155,20 @@ void CUnit::KillPathingInstance(CSimulation& game) {
         if (pf->HasPathingMap()) pf->GetPathingMap()->UnstampFootprint(pathingStampId_);
     }
     pathingStampId_ = -1;
+}
+
+void CUnit::DropDeathItems(CSimulation& game) {
+    if (deathDrops_.empty()) return;
+    for (const auto& drop : deathDrops_) {
+        if (drop.itemId.value == 0 || drop.chancePercent <= 0) continue;
+        if (drop.chancePercent < 100 &&
+            game.SimRand01() * 100.0f >= (float)drop.chancePercent) {
+            continue;
+        }
+        auto* itemData = game.GetItemData();
+        if (!itemData || !itemData->HasItem(drop.itemId)) continue;
+        game.CreateItem(drop.itemId, GetX(), GetY());
+    }
 }
 
 void CUnit::PopoutWorker(CSimulation& game) {
@@ -1281,6 +1296,9 @@ bool CUnit::Update(CSimulation& simulation) {
                     foodUsed_ = 0;
                 }
             }
+            // Death drops (units.doo dropSets + w3i droppedItemTable): won
+            // items materialize at the corpse on the death tick.
+            DropDeathItems(simulation);
             // Cargo goes down with the transport (WC3 rule).
             for (auto* passenger : cargoUnits_) {
                 if (passenger && !passenger->IsDead()) {

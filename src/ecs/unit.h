@@ -344,6 +344,20 @@ public:
     int GetHeroLevel() const { return heroLevel_; }
     void SetHeroLevel(int lvl) { heroLevel_ = lvl; }
 
+    // Death drops (ref units.doo dropSets + w3i droppedItemTable): items
+    // created at the corpse on the death tick, each rolling its own
+    // percent chance independently (sets are editor groupings only).
+    struct DeathDropItem {
+        War3ID itemId;
+        int chancePercent = 0;
+    };
+    void SetDeathDrops(std::vector<DeathDropItem> drops) {
+        deathDrops_ = std::move(drops);
+    }
+    const std::vector<DeathDropItem>& GetDeathDrops() const { return deathDrops_; }
+    // Rolls the death drops and creates the won items (ref drop chance %).
+    void DropDeathItems(CSimulation& simulation);
+
     // Death
     int GetDeathTurnTick() const { return deathTurnTick_; }
     void SetDeathTurnTick(int t) { deathTurnTick_ = t; }
@@ -574,6 +588,8 @@ private:
     int workerHandleId_ = -1;
     bool workerInside_ = false;
     bool constructionConsumesWorker_ = false;
+    // Death-drop table (units.doo dropSets + w3i droppedItemTable).
+    std::vector<DeathDropItem> deathDrops_;
     int foodUsed_ = 0;
     int foodMade_ = 0;
     bool useFood_ = true;

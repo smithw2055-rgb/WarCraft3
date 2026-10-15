@@ -338,6 +338,17 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
                 }
             }
         }
+        // Global random-group spawn (ref randomFlag==1): unit group + column
+        // from the w3i global unit tables, same chance roll. Unresolvable
+        // groups keep the fixed id (previous behavior).
+        if (u.randomFlag == 1) {
+            War3ID resolved;
+            if (ResolveRandomGroupUnit(w3i_, u.randomGroup, u.randomPosition,
+                                       sim_.SimRand01(), resolved) &&
+                unitData_.HasUnitType(resolved)) {
+                id = resolved;
+            }
+        }
         CUnit* simUnit = nullptr;
         if (unitData_.HasUnitType(id)) {
             simUnit = sim_.CreateUnit(id, u.player, u.pos[0], u.pos[1], u.angle);
@@ -384,6 +395,29 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
                             }
                         }
                     }
+                }
+                // Death drops (ref units.doo dropSets + w3i droppedItemTable):
+                // explicit sets plus the referenced global item table's
+                // sets, rolled per item at the death tick.
+                {
+                    std::vector<CUnit::DeathDropItem> drops;
+                    for (const auto& set : u.dropSets) {
+                        for (const auto& entry : set.items) {
+                            if (entry.id == 0 || entry.chance <= 0) continue;
+                            drops.push_back({War3ID(entry.id), entry.chance});
+                        }
+                    }
+                    // Table index only exists on version > 7 (older maps
+                    // leave the default 0, which must not resolve table 0).
+                    if (unitsDoo_.version > 7 && u.droppedItemTable >= 0) {
+                        std::vector<W3iDropItem> tableDrops;                        if (CollectRandomItemTableDrops(w3i_, u.droppedItemTable,
+                                                        tableDrops)) {
+                            for (const auto& entry : tableDrops) {
+                                drops.push_back({entry.itemId, entry.chancePercent});
+                            }
+                        }
+                    }
+                    if (!drops.empty()) simUnit->SetDeathDrops(std::move(drops));
                 }
             }
         }

@@ -272,6 +272,11 @@ bool TestTechCapCountsPossession();
 bool TestTechBanBlocksTraining();
 bool TestTechBanBlocksResearch();
 bool TestApplyW3iAvailability();
+bool TestResolveGroupUnitById();
+bool TestResolveGroupUnitIndexFallback();
+bool TestResolveGroupUnitMisses();
+bool TestCollectItemTableDrops();
+bool TestDeathDropsOnDeathTick();
 bool TestSameAuraTwoCastersTakesMax();
 bool TestDifferentAurasSum();
 bool TestHasteAddsAcrossKeys();
@@ -983,6 +988,11 @@ int main(int argc, char** argv) {
         {"Tech ban blocks training", TestTechBanBlocksTraining},
         {"Tech ban blocks research", TestTechBanBlocksResearch},
         {"Apply w3i availability", TestApplyW3iAvailability},
+        {"Resolve group unit by id", TestResolveGroupUnitById},
+        {"Resolve group unit index fallback", TestResolveGroupUnitIndexFallback},
+        {"Resolve group unit misses", TestResolveGroupUnitMisses},
+        {"Collect item table drops", TestCollectItemTableDrops},
+        {"Death drops on death tick", TestDeathDropsOnDeathTick},
         {"Same aura two casters takes max", TestSameAuraTwoCastersTakesMax},
         {"Different auras sum", TestDifferentAurasSum},
         {"Haste adds across keys", TestHasteAddsAcrossKeys},

@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include "../resource/slk.h" // War3ID
 
 struct W3iPlayer {
     int id = 0;
@@ -111,3 +112,21 @@ void W3IPrint(const W3iInfo& info);
 // 2=researched->unlimited plus researched at levelAffected+1 (0-based).
 class CSimulation;
 void ApplyW3iTechtreeAvailability(CSimulation& sim, const W3iInfo& w3i);
+
+// Resolves a units.doo random-group spawn (randomFlag==1) against the w3i
+// global unit tables: table by id match (WE group number), falling back to
+// the table at that vector index; column randomPosition; rows rolled by
+// chance like the inline flag==2 tables (roll01 in [0,1) scaled to 100).
+// Returns false (caller keeps the fixed id) when nothing resolves.
+bool ResolveRandomGroupUnit(const W3iInfo& w3i, uint32_t group, uint32_t position,
+                            float roll01, War3ID& outUnit);
+
+// Collects the item drops of one w3i global item table (units.doo
+// droppedItemTable, a 0-based table number): every set's (item, chance)
+// entries appended in order. Returns false when the table is missing.
+struct W3iDropItem {
+    War3ID itemId;
+    int chancePercent = 0;
+};
+bool CollectRandomItemTableDrops(const W3iInfo& w3i, int tableNumber,
+                                 std::vector<W3iDropItem>& out);
