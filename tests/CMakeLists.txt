@@ -43,6 +43,7 @@ add_executable(warsmash_tests
     test_transport.cpp
     test_death_sequence.cpp
     test_attack_bonus.cpp
+    test_damage_minors.cpp
     test_ability_builder.cpp
     test_spells3.cpp
     test_spells4.cpp

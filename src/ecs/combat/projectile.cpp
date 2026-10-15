@@ -37,7 +37,8 @@ void DetonateGround(CSimulation& sim, CProjectile& shot, float px, float py) {
         splashAttack.damageFactorQuarter = shot.splashFactorQuarter;
         combat->ApplySplashDamageAtPoint(sim, source, px, py, shot.isAttack, shot.isRanged,
                                          shot.attackType, shot.damageType,
-                                         shot.damage, shot.splashBonus, 0, 0, splashAttack);
+                                         shot.damage, shot.splashBonus, 0, 0, splashAttack,
+                                         nullptr, 1.0f, false);
     }
     if (shot.spillRadius > 0.0f && shot.spillDistance > 0.0f) {
         combat->ApplyLineDamage(sim, source, px, py, shot.tx - shot.fx, shot.ty - shot.fy,

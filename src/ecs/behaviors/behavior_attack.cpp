@@ -99,9 +99,12 @@ void CBehaviorAttack::FireAtPoint(CSimulation& simulation, const CUnitAttack& at
     auto* combat = simulation.GetCombatSystem();
     if (!combat) return;
     if (attack.areaHalf > 0.0f) {
+        // Ground shells never roll miss (ref: point targets are not units,
+        // so the accuracy listener has nothing to roll against).
         combat->ApplySplashDamageAtPoint(simulation, unit_, x, y, true, ranged,
                                          attack.attackType, CDamageType::NORMAL,
-                                         damageAmount, 0, 0, 0, attack);
+                                         damageAmount, 0, 0, 0, attack,
+                                         nullptr, 1.0f, false);
     } else if (CWeaponTypeInfo::IsLineWeapon(attack.weaponType) &&
                attack.damageSpillRadius > 0.0f && attack.damageSpillDistance > 0.0f) {
         combat->ApplyLineDamage(simulation, unit_, unit_->GetX(), unit_->GetY(),

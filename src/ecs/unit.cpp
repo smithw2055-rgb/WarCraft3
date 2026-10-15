@@ -1533,10 +1533,15 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         return 0;
     }
 
-    if (invulnerable_) return 0;
+    // Retail invulnerability suppresses only the taken-mods, the life
+    // change and the kill (ref CUnit.damage guard); taken-listeners, the
+    // damage event and return-fire below still run. CalculateDamage rolls
+    // evasion/crit regardless and reports 0 dealt for invulnerable targets.
+    const bool invulnerableTarget = invulnerable_;
 
     // Mana Shield (Sea Witch): incoming damage drains mana first.
-    if (damage > 0 && GetMana() > 0 && GetBuff(War3ID("BNms"))) {
+    // A taken-mod: suppressed while invulnerable (no mana should burn).
+    if (!invulnerableTarget && damage > 0 && GetMana() > 0 && GetBuff(War3ID("BNms"))) {
         float absorbed = damage;
         if (absorbed > GetMana()) absorbed = GetMana();
         SetMana(GetMana() - absorbed);
@@ -1562,7 +1567,9 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
     }
 
     // Avatar (Mountain King): spell immunity while the god-rage holds.
-    if (attackType == CAttackType::SPELLS && GetBuff(War3ID("BAvt"))) return 0;
+    // A taken-mod gate, so it only short-circuits live targets; an
+    // invulnerable target falls through to the listener path below.
+    if (!invulnerableTarget && attackType == CAttackType::SPELLS && GetBuff(War3ID("BAvt"))) return 0;
 
     // Single shared formula (ref CUnit.damage): attack-type table always
     // applies; armor value only matters for Normal damage type.
@@ -1613,12 +1620,19 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
     }
 
     float oldLife = life_;
-    life_ -= actualDamage;
-    if (life_ < 0) life_ = 0;
+    if (!invulnerableTarget) {
+        life_ -= actualDamage;
+        if (life_ < 0) life_ = 0;
+        // Retail heals on negative damage, capped at max life (unless the
+        // unit was already above max, ref CUnit.damage).
+        if (actualDamage < 0 && oldLife <= GetMaxLife() && life_ > GetMaxLife()) {
+            life_ = GetMaxLife();
+        }
+    }
 
-    // Sleep breaks on any damage (ref sleep). Removal runs OnRemove; the
-    // buff has no behavior of its own so no extra cleanup is needed.
-    if (actualDamage > 0 && IsAsleep()) {
+    // Sleep breaks on damage (ref sleep listener runs on every damage call,
+    // even vs invulnerable targets). Missed/zero swings stay asleep.
+    if ((invulnerableTarget || actualDamage != 0) && IsAsleep()) {
         RemoveBuff(War3ID("BUsl"), simulation);
     }
 
@@ -1631,8 +1645,13 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
     // DEFENSIVE type, so they never re-reflect (no ping-pong) and never
     // re-proc attacker listeners.
     // Any CBuffThorns counts, whatever its id (Bthr item buff, BEah aura).
+    // Runs even vs invulnerable targets (ref damageTakenListeners outside
+    // the invulnerability guard), but never on an evaded swing (retail
+    // zeroes the base first) and never on zero/negative actuals beyond the
+    // reflected>0 guard below.
     if (isAttack && !isRanged && source && source != this &&
-        damageType == CDamageType::NORMAL && actualDamage > 0) {
+        damageType == CDamageType::NORMAL &&
+        (invulnerableTarget ? !result.isEvaded : actualDamage != 0)) {
         // Enemy gate (ref ENEMY_TARGET check): no reflection for allies.
         // Mapless tests (no players) stay permissive.
         bool enemy = true;

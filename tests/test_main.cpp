@@ -261,6 +261,13 @@ bool TestCargoFollowsTransport();
 bool TestTransportDeathKillsCargo();
 bool TestDeathRefundsFoodAtDeath();
 bool TestRoarAndInnerFireSum();
+bool TestSplashMissHalvesWholeAoE();
+bool TestArtilleryMissIsSilentButReduced();
+bool TestNonSplashMissZeroes();
+bool TestNegativeDamageHealsCapped();
+bool TestNegativeDamageViaApplyDamage();
+bool TestInvulnerableRunsTakenListeners();
+bool TestInvulnerableStillShowsCritText();
 bool TestSameAuraTwoCastersTakesMax();
 bool TestDifferentAurasSum();
 bool TestHasteAddsAcrossKeys();
@@ -961,6 +968,13 @@ int main(int argc, char** argv) {
         {"Cargo follows transport", TestCargoFollowsTransport},
         {"Transport death kills cargo", TestTransportDeathKillsCargo},
         {"Roar and Inner Fire sum", TestRoarAndInnerFireSum},
+        {"Splash miss halves whole AoE", TestSplashMissHalvesWholeAoE},
+        {"Artillery miss is silent but reduced", TestArtilleryMissIsSilentButReduced},
+        {"Non-splash miss zeroes", TestNonSplashMissZeroes},
+        {"Negative damage heals capped", TestNegativeDamageHealsCapped},
+        {"Negative damage via ApplyDamage", TestNegativeDamageViaApplyDamage},
+        {"Invulnerable runs taken listeners", TestInvulnerableRunsTakenListeners},
+        {"Invulnerable still shows crit text", TestInvulnerableStillShowsCritText},
         {"Same aura two casters takes max", TestSameAuraTwoCastersTakesMax},
         {"Different auras sum", TestDifferentAurasSum},
         {"Haste adds across keys", TestHasteAddsAcrossKeys},

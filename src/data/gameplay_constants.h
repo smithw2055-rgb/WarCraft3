@@ -112,6 +112,11 @@ struct CGameplayConstants {
     // (Units\MiscData.txt ChanceToMiss, TFT retail 0.25).
     float chanceToMiss = 0.25f;
 
+    // Splash-miss damage (Units\MiscData.txt MissDamageReduction, TFT
+    // retail 0.5; ref runPreDamageListeners): a missed MSPLASH/ARTILLERY
+    // swing still deals reduced base damage across the whole AoE.
+    float missDamageReduction = 0.5f;
+
     // Death reveal (Units\MiscData.txt FogFlashTime/DyingRevealRadius, TFT
     // retail 3s/500; ref CFogModifier statics + CUnitDeathVisionFogModifier):
     // a dying unit briefly reveals around itself to its owner and its killer.

@@ -36,24 +36,40 @@ public:
     // Attack-type vs defense-type multiplier table (WC3 standard)
     static float GetAttackDefenseMultiplier(CAttackType atk, CDefenseType def);
 
-    // Full damage calculation
+    // Full damage calculation. rollMiss=false skips the evasion roll
+    // (splash secondaries after the single primary roll; retail secondaries
+    // never re-roll). Invulnerable targets still roll evasion/crit for the
+    // combat text, but always deal 0 (ref pre-damage listeners run outside
+    // the invulnerability guard). Negative damage flows through unclamped
+    // (retail heals, capped at max by the caller).
     DamageResult CalculateDamage(CUnit* attacker, CWidget* target,
                                   bool isAttack, bool isRanged,
                                   CAttackType attackType, CDamageType damageType,
                                   float damageBase, float bonusDamage,
-                                  int dice, int sidesPerDie);
+                                  int dice, int sidesPerDie,
+                                  bool rollMiss = true);
 
-    // Apply damage to a widget, returns actual damage dealt
+    // Apply damage to a widget, returns actual damage dealt (negative heals,
+    // capped at max). baseMultiplier scales the dealt total (splash-miss
+    // reduction); rollMiss=false skips the per-victim miss rolls.
     float ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidget* target,
                        bool isAttack, bool isRanged,
                        CAttackType attackType, CDamageType damageType,
                        const std::string& weaponSoundType,
                        float damageBase, float bonusDamage,
-                       int dice = 0, int sidesPerDie = 0);
+                       int dice = 0, int sidesPerDie = 0,
+                       float baseMultiplier = 1.0f, bool rollMiss = true);
 
-    // Splash damage (ref missile-splash / artillery): full damage to the
-    // primary target plus falloff damage to other enemy units in the
-    // areaHalf/areaQuarter rings. Returns total damage dealt.
+    // Single miss roll vs the primary (ref runPreDamageListeners once).
+    // No combat text here; the caller fires MISS/CRIT as appropriate.
+    bool RollAttackMiss(CSimulation& simulation, CUnit* attacker,
+                        CWidget* target, bool isAttack);
+
+    // Splash damage (ref missile-splash / artillery): the miss is rolled
+    // once vs the primary; on a miss the whole AoE (primary + rings) deals
+    // base x MissDamageReduction with the bonus in full (retail), and
+    // non-splash weapons fizzle entirely. Secondaries never re-roll.
+    // Returns total damage dealt.
     float ApplySplashDamage(CSimulation& simulation, CUnit* attacker, CWidget* target,
                             bool isAttack, bool isRanged,
                             CAttackType attackType, CDamageType damageType,
@@ -66,7 +82,9 @@ public:
     // same ring falloff centered on (x, y) with no primary widget.
     // Artillery shells converted at fire time funnel here on impact.
     // excludeWidget (already-damaged primary) skips one widget so targeted
-    // splashes never double-hit it.
+    // splashes never double-hit it. Ground shelling never rolls miss (ref:
+    // point targets are not units); the params let targeted splashes pass
+    // their single primary roll down instead of re-rolling per victim.
     float ApplySplashDamageAtPoint(CSimulation& simulation, CUnit* attacker,
                                   float x, float y,
                                   bool isAttack, bool isRanged,
@@ -74,7 +92,8 @@ public:
                                   float damageBase, float bonusDamage,
                                   int dice, int sidesPerDie,
                                   const CUnitAttack& attack,
-                                  const CWidget* excludeWidget = nullptr);
+                                  const CWidget* excludeWidget = nullptr,
+                                  float baseMultiplier = 1.0f, bool rollMiss = true);
 
     // Line spill (MLINE/ALINE corridor): full damage to enemy units within
     // spillRadius of the segment from (x0, y0) along (dirX, dirY) for

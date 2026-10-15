@@ -108,20 +108,37 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
                                                bool isAttack, bool isRanged,
                                                CAttackType attackType, CDamageType damageType,
                                                float damageBase, float bonusDamage,
-                                               int dice, int sidesPerDie) {
+                                               int dice, int sidesPerDie,
+                                               bool rollMiss) {
     (void)attacker; // reserved for future evasion/level hooks
     DamageResult result;
 
     if (!target || target->IsDead()) return result;
-    if (target->IsInvulnerable()) return result;
+    const bool invulnerable = target->IsInvulnerable();
 
-    // Check evasion
-    if (isAttack && target != attacker) {
+    // Check evasion (ref evasionListeners: pre-damage, so it runs even vs
+    // invulnerable targets for the miss text; splash secondaries skip it
+    // via rollMiss=false after the single primary roll).
+    if (rollMiss && isAttack && target != attacker) {
         CUnit* targetUnit = dynamic_cast<CUnit*>(target);
         if (targetUnit && CheckEvasion(targetUnit, attacker)) {
             result.isEvaded = true;
             return result;
         }
+    }
+    if (invulnerable) {
+        // Retail invulnerability suppresses only the taken-mods, the life
+        // change and the kill; evasion above and the crit roll below still
+        // run so the combat text matches a live target's.
+        if (isAttack && attacker && attacker != dynamic_cast<CUnit*>(target)) {
+            for (const auto& src : attacker->GetCritSources()) {
+                if (src.chance > 0.0f && CombatRand01() < src.chance) {
+                    result.isCritical = true;
+                    break;
+                }
+            }
+        }
+        return result;
     }
 
     // Magic immunity (ref CUnitDefaultMagicImmuneDamageModListener): MAGIC
@@ -214,10 +231,21 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
     result.damageBlocked = rolledDamage * armorReduction;
     rolledDamage *= (1.0f - armorReduction);
 
-    if (rolledDamage < 0) rolledDamage = 0;
-
+    // No clamp to zero (ref CUnit.damage): negative damage flows through
+    // and heals, capped at max life by the caller.
     result.damageDealt = rolledDamage;
     return result;
+}
+
+bool CCombatSystem::RollAttackMiss(CSimulation& simulation, CUnit* attacker,
+                                   CWidget* target, bool isAttack) {
+    if (simulation.CheckHighlandMiss(attacker, target, isAttack)) return true;
+    if (isAttack && target && target != attacker) {
+        if (CUnit* targetUnit = dynamic_cast<CUnit*>(target)) {
+            if (CheckEvasion(targetUnit, attacker)) return true;
+        }
+    }
+    return false;
 }
 
 float CCombatSystem::ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidget* target,
@@ -225,11 +253,13 @@ float CCombatSystem::ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidg
                                    CAttackType attackType, CDamageType damageType,
                                    const std::string& weaponSoundType,
                                    float damageBase, float bonusDamage,
-                                   int dice, int sidesPerDie) {
+                                   int dice, int sidesPerDie,
+                                   float baseMultiplier, bool rollMiss) {
     if (!target || target->IsDead()) return 0;
     // Uphill accuracy (ref CUnitDefaultAccuracyCheckListener; same gate as
     // CUnit::Damage so splash/JASS paths share the retail miss rule).
-    if (simulation.CheckHighlandMiss(attacker, target, isAttack)) {
+    // Skipped when the caller already rolled once (splash secondaries).
+    if (rollMiss && simulation.CheckHighlandMiss(attacker, target, isAttack)) {
         simulation.FireCombatText(attacker ? attacker->GetHandleId() : -1, target->GetHandleId(),
                                   CSimulation::CombatTextKind::MISS, 0.0f);
         return 0;
@@ -237,27 +267,44 @@ float CCombatSystem::ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidg
 
     auto result = CalculateDamage(attacker, target, isAttack, isRanged,
                                    attackType, damageType,
-                                   damageBase, bonusDamage, dice, sidesPerDie);
+                                   damageBase, bonusDamage, dice, sidesPerDie,
+                                   rollMiss);
     if (result.isEvaded) {
         simulation.FireCombatText(attacker ? attacker->GetHandleId() : -1, target->GetHandleId(),
                                   CSimulation::CombatTextKind::MISS, 0.0f);
         return 0;
     }
-    if (result.damageDealt <= 0) return 0;
+    const float dealt = result.damageDealt * baseMultiplier;
+    if (dealt == 0.0f) {
+        // Retail still reports the damage event for invulnerable targets
+        // (suppressed mods, no life change); evaded/spent hits stay silent.
+        if (target->IsInvulnerable()) {
+            auto& quietCb = simulation.GetUnitDamageCallback();
+            if (quietCb) {
+                quietCb(target->GetHandleId(),
+                        attacker ? attacker->GetHandleId() : -1, 0.0f);
+            }
+        }
+        return 0;
+    }
     if (result.isCritical) {
         simulation.FireCombatText(attacker ? attacker->GetHandleId() : -1, target->GetHandleId(),
-                                  CSimulation::CombatTextKind::CRIT, result.damageDealt);
+                                  CSimulation::CombatTextKind::CRIT, dealt);
     }
 
-    float oldLife = target->GetLife();
-    float newLife = oldLife - result.damageDealt;
+    const float oldLife = target->GetLife();
+    float newLife = oldLife - dealt;
+    // Retail heals on negative damage, capped at max unless already above.
+    if (dealt < 0.0f && oldLife <= target->GetMaxLife() && newLife > target->GetMaxLife()) {
+        newLife = target->GetMaxLife();
+    }
     target->SetLife(simulation, newLife);
 
     // Fire damage event
     auto& dmgCb = simulation.GetUnitDamageCallback();
     if (dmgCb) {
         int srcHandle = attacker ? attacker->GetHandleId() : -1;
-        dmgCb(target->GetHandleId(), srcHandle, result.damageDealt);
+        dmgCb(target->GetHandleId(), srcHandle, dealt);
     }
 
     (void)isRanged;
@@ -268,7 +315,7 @@ float CCombatSystem::ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidg
         audio->Play3D(weaponSoundType, target->GetX(), target->GetY() + 50.0f, 0, 0.7f);
     }
 
-    return result.damageDealt;
+    return dealt;
 }
 
 float CCombatSystem::ApplySplashDamage(CSimulation& simulation, CUnit* attacker, CWidget* target,
@@ -278,15 +325,38 @@ float CCombatSystem::ApplySplashDamage(CSimulation& simulation, CUnit* attacker,
                                        float damageBase, float bonusDamage,
                                        int dice, int sidesPerDie,
                                        const CUnitAttack& attack) {
+    // Single miss roll vs the primary (ref runPreDamageListeners once for
+    // the whole splash). A missed splash-family swing deals base x
+    // MissDamageReduction across primary + rings with the bonus in full;
+    // other weapons fizzle entirely. MSPLASH shows the miss text,
+    // ARTILLERY stays silent (ref).
+    float baseMultiplier = 1.0f;
+    if (target && RollAttackMiss(simulation, attacker, target, isAttack)) {
+        if (CWeaponTypeInfo::IsSplashWeapon(attack.weaponType)) {
+            baseMultiplier = simulation.GetGameplayConstants().missDamageReduction;
+            if (attack.weaponType != CWeaponType::ARTILLERY) {
+                simulation.FireCombatText(attacker ? attacker->GetHandleId() : -1,
+                                          target->GetHandleId(),
+                                          CSimulation::CombatTextKind::MISS, 0.0f);
+            }
+        } else {
+            simulation.FireCombatText(attacker ? attacker->GetHandleId() : -1,
+                                      target->GetHandleId(),
+                                      CSimulation::CombatTextKind::MISS, 0.0f);
+            return 0;
+        }
+    }
     float total = ApplyDamage(simulation, attacker, target, isAttack, isRanged,
                               attackType, damageType, weaponSoundType,
-                              damageBase, bonusDamage, dice, sidesPerDie);
+                              damageBase, bonusDamage, dice, sidesPerDie,
+                              baseMultiplier, false);
     if (!target || attack.areaHalf <= 0.0f) {
         return total;
     }
     total += ApplySplashDamageAtPoint(simulation, attacker, target->GetX(), target->GetY(),
                                       isAttack, isRanged, attackType, damageType,
-                                      damageBase, bonusDamage, dice, sidesPerDie, attack, target);
+                                      damageBase, bonusDamage, dice, sidesPerDie, attack, target,
+                                      baseMultiplier, false);
     return total;
 }
 
@@ -297,7 +367,8 @@ float CCombatSystem::ApplySplashDamageAtPoint(CSimulation& simulation, CUnit* at
                                               float damageBase, float bonusDamage,
                                               int dice, int sidesPerDie,
                                               const CUnitAttack& attack,
-                                              const CWidget* excludeWidget) {
+                                              const CWidget* excludeWidget,
+                                              float baseMultiplier, bool rollMiss) {
     if (attack.areaHalf <= 0.0f) return 0.0f;
     float total = 0.0f;
     const float fullSq = attack.areaFull * attack.areaFull;
@@ -336,9 +407,12 @@ float CCombatSystem::ApplySplashDamageAtPoint(CSimulation& simulation, CUnit* at
             continue;
         }
         // Ring falloff scales the base; instance bonuses apply in full.
+        // Miss rolls are the caller's single primary roll (rollMiss=false
+        // from splash/ground paths); direct callers keep per-victim rolls.
         total += ApplyDamage(simulation, attacker, other, isAttack, isRanged,
                              attackType, damageType, "",
-                             damageBase * factor, bonusDamage, dice, sidesPerDie);
+                             damageBase * factor, bonusDamage, dice, sidesPerDie,
+                             baseMultiplier, rollMiss);
     }
     return total;
 }
