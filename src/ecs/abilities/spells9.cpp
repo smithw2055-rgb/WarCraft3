@@ -13,16 +13,104 @@ CAbilityOrbOfFrost::CAbilityOrbOfFrost(int handleId)
     SetTargetType(CSpellTargetType::NO_TARGET);
 }
 
+namespace {
+
+// Chilling proc (values snapshotted at install so later level-ups
+// reinstall via OnRemove/OnAdd instead of aliasing live ability state).
+class OrbFrostEffect : public CAttackModifierEffect {
+public:
+    OrbFrostEffect(float duration, float slowPercent)
+        : duration_(duration), slowPercent_(slowPercent) {}
+    void OnAttackLanded(CSimulation& game, CUnit* attacker, CUnit* victim,
+                        float damageDealt) override {
+        (void)damageDealt;
+        if (!victim) return;
+        victim->AddBuff(std::make_unique<CBuffSlow>(duration_, slowPercent_,
+                                                    attacker ? attacker->GetHandleId() : -1),
+                        game);
+    }
+private:
+    float duration_;
+    float slowPercent_;
+};
+
+class OrbCorruptionEffect : public CAttackModifierEffect {
+public:
+    OrbCorruptionEffect(float duration, int armorPenalty)
+        : duration_(duration), armorPenalty_(armorPenalty) {}
+    void OnAttackLanded(CSimulation& game, CUnit* attacker, CUnit* victim,
+                        float damageDealt) override {
+        (void)attacker;
+        (void)damageDealt;
+        if (!victim) return;
+        victim->AddBuff(std::make_unique<CBuffArmor>(War3ID("AIcb"), duration_, armorPenalty_, false),
+                        game);
+    }
+private:
+    float duration_;
+    int armorPenalty_;
+};
+
+class OrbFireEffect : public CAttackModifierEffect {
+public:
+    explicit OrbFireEffect(float bonusDamage) : bonusDamage_(bonusDamage) {}
+    void OnAttackLanded(CSimulation& game, CUnit* attacker, CUnit* victim,
+                        float damageDealt) override {
+        (void)damageDealt;
+        if (!victim) return;
+        victim->Damage(game, attacker, false, false,
+                       CAttackType::SPELLS, CDamageType::FIRE,
+                       "", bonusDamage_, 0);
+    }
+private:
+    float bonusDamage_;
+};
+
+} // namespace
+
+void CAbilityOrbOfFrost::OnAdd(CSimulation& game, CUnit* unit) {
+    (void)game;
+    if (unit) unit->SetAttackModifier(0, War3ID("AIob"),
+        std::make_unique<OrbFrostEffect>(duration_, slowPercent_));
+}
+
+void CAbilityOrbOfFrost::OnRemove(CSimulation& game, CUnit* unit) {
+    (void)game;
+    if (unit) unit->ClearAttackModifier(0, War3ID("AIob"));
+}
+
 // ===== Orb of Corruption =====
 CAbilityOrbOfCorruption::CAbilityOrbOfCorruption(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AIcb"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::NO_TARGET);
 }
 
+void CAbilityOrbOfCorruption::OnAdd(CSimulation& game, CUnit* unit) {
+    (void)game;
+    if (unit) unit->SetAttackModifier(0, War3ID("AIcb"),
+        std::make_unique<OrbCorruptionEffect>(duration_, armorPenalty_));
+}
+
+void CAbilityOrbOfCorruption::OnRemove(CSimulation& game, CUnit* unit) {
+    (void)game;
+    if (unit) unit->ClearAttackModifier(0, War3ID("AIcb"));
+}
+
 // ===== Orb of Fire =====
 CAbilityOrbOfFire::CAbilityOrbOfFire(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AIfb"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::NO_TARGET);
+}
+
+void CAbilityOrbOfFire::OnAdd(CSimulation& game, CUnit* unit) {
+    (void)game;
+    if (unit) unit->SetAttackModifier(0, War3ID("AIfb"),
+        std::make_unique<OrbFireEffect>(bonusDamage_));
+}
+
+void CAbilityOrbOfFire::OnRemove(CSimulation& game, CUnit* unit) {
+    (void)game;
+    if (unit) unit->ClearAttackModifier(0, War3ID("AIfb"));
 }
 
 // ===== Wand of Illusion =====

@@ -23,6 +23,14 @@ public:
         pathingMap_ = (wpm && wpm->IsValid()) ? wpm : nullptr;
         worldOffsetX_ = worldOffsetX;
         worldOffsetY_ = worldOffsetY;
+        // WPM stamps use the same cell origin (ref PathingGrid.centerOffset).
+        if (pathingMap_) {
+            pathingMap_->originX = worldOffsetX;
+            pathingMap_->originY = worldOffsetY;
+            if (pathingMap_->basePathing.size() != pathingMap_->pathing.size()) {
+                pathingMap_->basePathing = pathingMap_->pathing;
+            }
+        }
     }
     void SetWorldCollision(CWorldCollision* worldCollision) { worldCollision_ = worldCollision; }
 

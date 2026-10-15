@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "data/unitdata.h"
+#include "data/destructabledata.h"
 #include "ecs/abilities/ability_build.h"
 #include "ecs/abilities/ability_gold_mine.h"
 #include "ecs/item_bonuses.h"
@@ -697,5 +698,173 @@ bool TestHeroTokensAndReviveFormula() {
     TEST_ASSERT(gc.GetHeroReviveGoldCost(425, 3) == (int)(425 * 0.6f));
     TEST_ASSERT(gc.GetHeroAwakenGoldCost(425, 1) == 340);
     TEST_ASSERT(gc.GetHeroAwakenLumberCost(100, 1) == 80);
+    return true;
+}
+
+namespace {
+
+std::unique_ptr<CUnitType> MakeBuildingType(const char* id) {
+    auto type = MakeType(id);
+    // Rebuild as a building: same ctor shape as MakeType, building=true.
+    CUnitAttack atk;
+    atk.range = 100.0f;
+    atk.cooldown = 1.0f;
+    atk.damageBase = 10;
+    return std::make_unique<CUnitType>(
+        "Test", "Test", "icon", War3ID(id),
+        10000, 1.0f, 0.5f, CRegenType::ALWAYS,
+        100, 200, 200, 0, War3ID(),
+        std::vector<War3ID>{}, true, PathingGridMovementType::FOOT,
+        0.0f, 32.0f, std::vector<std::string>{},
+        std::unordered_set<CUnitClassification>{},
+        std::vector<CUnitAttack>{atk},
+        1, std::string(""), false, true, CDefenseType::NONE,
+        0.0f, 1.0f, std::unordered_set<CTargetType>{},
+        600.0f, 0.0f, std::vector<War3ID>{}, std::vector<War3ID>{},
+        std::vector<War3ID>{}, std::vector<War3ID>{},
+        std::unordered_map<CUpgradeClass, War3ID>{}, std::vector<War3ID>{},
+        std::vector<War3ID>{}, std::vector<War3ID>{}, CUnitRace{"Human", War3ID("H")},
+        100, 50, 1, 0, 30, 0, 0, 0,
+        std::unordered_set<CBuildingPathingType>{},
+        std::unordered_set<CBuildingPathingType>{},
+        0.5f, 0.6f, std::vector<CUnitTypeRequirement>{},
+        std::vector<std::vector<CUnitTypeRequirement>>{},
+        1, false, 20, 2.0f, 15, 1.5f, 10, 1.0f,
+        CPrimaryAttribute::STRENGTH, std::vector<War3ID>{},
+        std::vector<std::string>{"Bob"}, 1, false, 1, false, 100,
+        0.3f, 0.3f, false, false, 1, 800, 600, false,
+        10, 1, 6, 5, 1, 3, false);
+}
+
+std::shared_ptr<PathTexImage> MakeSolidTex(int w, int h, uint8_t r, uint8_t g, uint8_t b) {
+    auto img = std::make_shared<PathTexImage>();
+    img->w = w;
+    img->h = h;
+    img->rgb.assign((size_t)w * (size_t)h * 3, 0);
+    for (size_t i = 0; i < (size_t)w * (size_t)h; ++i) {
+        img->rgb[i * 3 + 0] = r;
+        img->rgb[i * 3 + 1] = g;
+        img->rgb[i * 3 + 2] = b;
+    }
+    img->valid = true;
+    return img;
+}
+
+} // namespace
+
+bool TestWpmStampRebuild() {
+    // Retail blit ORs footprint flags over the pristine base; unstamping
+    // rebuilds from base (ref RemovablePathingMapInstance remove()).
+    WpmData wpm;
+    wpm.width = 8;
+    wpm.height = 8;
+    wpm.pathing.assign(64, 0);
+    wpm.basePathing = wpm.pathing;
+    wpm.originX = 0.0f;
+    wpm.originY = 0.0f;
+    auto img = MakeSolidTex(1, 1, 200, 0, 0);
+    const int id = wpm.StampFootprint(80.0f, 80.0f, 0, img, false);
+    TEST_ASSERT(id >= 0);
+    // Cell (2,2): 80/32 = 2, 1x1 footprint centered -> (2,2).
+    TEST_ASSERT((wpm.pathing[2 + 2 * 8] & WpmData::UNWALKABLE) != 0);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 8] & WpmData::BLOCKVISION) == 0);
+    wpm.UnstampFootprint(id);
+    TEST_ASSERT(wpm.pathing[2 + 2 * 8] == 0);
+    // Vision-blocking stamp sets BLOCKVISION alongside walk block.
+    const int id2 = wpm.StampFootprint(80.0f, 80.0f, 0, img, true);
+    TEST_ASSERT(id2 >= 0);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 8] & WpmData::BLOCKVISION) != 0);
+    wpm.SetStampBlocksVision(id2, false);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 8] & WpmData::BLOCKVISION) == 0);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 8] & WpmData::UNWALKABLE) != 0);
+    // Null/empty images never stamp (ref BLANK guard).
+    TEST_ASSERT(wpm.StampFootprint(80.0f, 80.0f, 0, nullptr, false) == -1);
+    return true;
+}
+
+bool TestBuildingStampLifecycle() {
+    // Retail setupCreatedUnit blits the footprint on creation and clears
+    // it on death/removal (ref regenerate/killPathingInstance).
+    CSimulation sim;
+    CUnitData data;
+    data.RegisterUnitType(War3ID("hbar"), MakeBuildingType("hbar"));
+    sim.SetUnitData(&data);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    WpmData wpm;
+    wpm.width = 16;
+    wpm.height = 16;
+    wpm.pathing.assign(256, 0);
+    sim.SetPathingMap(&wpm, 0.0f, 0.0f);
+    data.GetUnitType(War3ID("hbar"))->SetPathTexImage(MakeSolidTex(2, 2, 200, 0, 0));
+    CUnit* hall = sim.CreateUnit(War3ID("hbar"), 0, 100.0f, 100.0f, 0.0f);
+    TEST_ASSERT(hall != nullptr);
+    // Snapped to the 64-grid with the odd-half nudge (ref: 100 -> 96).
+    TEST_ASSERT(std::fabs(hall->GetX() - 96.0f) < 0.01f);
+    TEST_ASSERT(std::fabs(hall->GetY() - 96.0f) < 0.01f);
+    TEST_ASSERT(hall->GetPathingStampId() >= 0);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 16] & WpmData::UNWALKABLE) != 0);
+    // Flush newUnits_ into the active list so the death tick runs.
+    sim.Update();
+    sim.Update();
+    // Death clears the footprint on the next Update.
+    hall->Damage(sim, nullptr, false, false, CAttackType::CHAOS, CDamageType::NORMAL, "", 1e9f, 0);
+    TEST_ASSERT(hall->IsDead());
+    sim.Update();
+    TEST_ASSERT(hall->GetPathingStampId() < 0);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 16] & WpmData::UNWALKABLE) == 0);
+    // Removal also clears (idempotent when already dead).
+    CUnit* shed = sim.CreateUnit(War3ID("hbar"), 0, 300.0f, 300.0f, 0.0f);
+    TEST_ASSERT(shed != nullptr && shed->GetPathingStampId() >= 0);
+    sim.RemoveUnit(shed);
+    sim.Update();
+    TEST_ASSERT(shed->GetPathingStampId() < 0);
+    return true;
+}
+
+bool TestDestructableDeathSwap() {
+    // Retail CDestructable.kill(): live pathTex out, pathTexDeath in;
+    // revive swaps back (ref setLife branch).
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    CDestructableData data;
+    auto type = std::make_unique<CDestructableType>();
+    type->id = War3ID("LTlt");
+    type->maxLife = 100;
+    type->occlusionHeight = 200.0f;
+    type->pathTex = "live";
+    type->pathTexDeath = "dead";
+    type->pathTexImage = MakeSolidTex(1, 1, 200, 0, 0);
+    type->pathTexDeathImage = MakeSolidTex(1, 1, 0, 0, 200);
+    data.RegisterDestructable(War3ID("LTlt"), std::move(type));
+    sim.SetDestructableData(&data);
+    WpmData wpm;
+    wpm.width = 16;
+    wpm.height = 16;
+    wpm.pathing.assign(256, 0);
+    sim.SetPathingMap(&wpm, 0.0f, 0.0f);
+    CDestructable* tree = sim.CreateDestructable(War3ID("LTlt"), 80.0f, 80.0f, 100.0f, 0);
+    TEST_ASSERT(tree != nullptr);
+    TEST_ASSERT(tree->GetPathingStampId() >= 0);
+    TEST_ASSERT(tree->GetDeathStampId() < 0);
+    // Live cell blocks walk + vision (occluder), not build.
+    TEST_ASSERT((wpm.pathing[2 + 2 * 16] & WpmData::UNWALKABLE) != 0);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 16] & WpmData::BLOCKVISION) != 0);
+    tree->Damage(sim, nullptr, false, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 1e9f, 0);
+    TEST_ASSERT(tree->IsDead());
+    TEST_ASSERT(tree->GetPathingStampId() < 0);
+    TEST_ASSERT(tree->GetDeathStampId() >= 0);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 16] & WpmData::UNWALKABLE) == 0);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 16] & WpmData::UNBUILDABLE) != 0);
+    // Revive swaps back to the live footprint.
+    tree->SetLife(sim, 100.0f);
+    TEST_ASSERT(!tree->IsDead());
+    TEST_ASSERT(tree->GetPathingStampId() >= 0);
+    TEST_ASSERT(tree->GetDeathStampId() < 0);
+    TEST_ASSERT((wpm.pathing[2 + 2 * 16] & WpmData::UNWALKABLE) != 0);
+    // Removal clears both footprints.
+    sim.RemoveDestructable(tree);
+    sim.Update();
+    TEST_ASSERT(tree->GetPathingStampId() < 0 && tree->GetDeathStampId() < 0);
+    TEST_ASSERT(wpm.pathing[2 + 2 * 16] == 0);
     return true;
 }

@@ -10,9 +10,11 @@
 #include "ecs/behaviors/behavior_stun.h"
 #include "ecs/combat/combat_system.h"
 #include "ecs/csimulation.h"
+#include "ecs/destructable.h"
 #include "ecs/player.h"
 #include "ecs/unit.h"
 #include "ecs/unit_type.h"
+#include "map/w3e.h"
 
 #define TEST_ASSERT(cond) do { if (!(cond)) return false; } while (0)
 #define TEST_NEAR(a, b, eps) do { if (std::fabs((a) - (b)) > (eps)) return false; } while (0)
@@ -246,5 +248,105 @@ bool TestStunDefersOrdersUntilExpiry() {
     // After expiry the deferred order runs and the queue drains.
     for (int i = 0; i < 50 && unit.HasQueuedOrders(); i++) unit.Update(sim);
     TEST_ASSERT(!unit.HasQueuedOrders());
+    return true;
+}
+
+namespace {
+
+W3EMap MakeCliffMap(int leftLayer, int rightLayer) {
+    // Two 128-unit tiles side by side: x in [0,128) -> left, [128,256) -> right.
+    W3EMap map;
+    map.version = 11;
+    map.tileset = 'A';
+    map.customTilesets = 0;
+    map.tileWidth = 2;
+    map.tileHeight = 1;
+    map.offsetX = 0.0f;
+    map.offsetY = 0.0f;
+    map.tiles.resize(2);
+    map.tiles[0].cliffAndLayer = (uint8_t)(leftLayer & 0x0F);
+    map.tiles[1].cliffAndLayer = (uint8_t)(rightLayer & 0x0F);
+    return map;
+}
+
+void SetAlwaysMiss(CSimulation& sim) {
+    CGameplayConstants gc;
+    gc.chanceToMiss = 1.0f;
+    sim.SetGameplayConstants(gc);
+}
+
+} // namespace
+
+bool TestHighlandMissUphill() {
+    // Retail uphill rule (ref CUnitDefaultAccuracyCheckListener): a weapon
+    // attack from a lower cliff layer at a higher unit misses.
+    CSimulation sim;
+    SetAlwaysMiss(sim);
+    W3EMap map = MakeCliffMap(0, 2);
+    sim.SetTerrainMap(&map);
+    TEST_ASSERT(sim.GetTerrainHeight(64.0f, 64.0f) == 0);
+    TEST_ASSERT(sim.GetTerrainHeight(192.0f, 64.0f) == 2);
+    CUnit attacker(31, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 64.0f, 64.0f, 0);
+    CUnit target(32, MakeCombatType(CDefenseType::NONE, 0), 1, War3ID("hfoo"), 192.0f, 64.0f, 0);
+    const float lifeBefore = target.GetLife();
+    target.Damage(sim, &attacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f, 0);
+    TEST_NEAR(target.GetLife(), lifeBefore, 0.001f);
+    // The splash/JASS path shares the rule (ref: the listener runs for
+    // every attack, whichever damage entry point it funnels through).
+    CUnit target2(33, MakeCombatType(CDefenseType::NONE, 0), 1, War3ID("hfoo"), 192.0f, 64.0f, 0);
+    const float dealt = sim.GetCombatSystem()->ApplyDamage(
+        sim, &attacker, &target2, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f, 0);
+    TEST_NEAR(dealt, 0.0f, 0.001f);
+    TEST_NEAR(target2.GetLife(), lifeBefore, 0.001f);
+    return true;
+}
+
+bool TestHighlandNoMissDownhillFlatAndSpells() {
+    CSimulation sim;
+    SetAlwaysMiss(sim);
+    W3EMap map = MakeCliffMap(0, 2);
+    sim.SetTerrainMap(&map);
+    // Downhill always lands, even with chance forced to 1.
+    CUnit attacker(34, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 192.0f, 64.0f, 0);
+    CUnit target(35, MakeCombatType(CDefenseType::NONE, 0), 1, War3ID("hfoo"), 64.0f, 64.0f, 0);
+    const float lifeBefore = target.GetLife();
+    target.Damage(sim, &attacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f, 0);
+    TEST_NEAR(lifeBefore - target.GetLife(), 100.0f, 0.01f);
+    // Flat ground lands too.
+    CUnit flatAttacker(36, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 64.0f, 64.0f, 0);
+    CUnit flatTarget(37, MakeCombatType(CDefenseType::NONE, 0), 1, War3ID("hfoo"), 70.0f, 70.0f, 0);
+    const float flatBefore = flatTarget.GetLife();
+    flatTarget.Damage(sim, &flatAttacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f, 0);
+    TEST_NEAR(flatBefore - flatTarget.GetLife(), 100.0f, 0.01f);
+    // Spells are not weapon attacks: uphill still lands.
+    CUnit caster(38, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 64.0f, 64.0f, 0);
+    CUnit victim(39, MakeCombatType(CDefenseType::NONE, 0), 1, War3ID("hfoo"), 192.0f, 64.0f, 0);
+    const float spellBefore = victim.GetLife();
+    victim.Damage(sim, &caster, false, false, CAttackType::MAGIC, CDamageType::MAGIC, "", 100.0f, 0);
+    TEST_ASSERT(spellBefore - victim.GetLife() > 0.0f);
+    return true;
+}
+
+bool TestHighlandNoMissVsDestructableAndOffMap() {
+    CSimulation sim;
+    SetAlwaysMiss(sim);
+    W3EMap map = MakeCliffMap(0, 2);
+    sim.SetTerrainMap(&map);
+    // Retail gates on CUnit targets: uphill at a tree still fells it.
+    CUnit attacker(40, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 64.0f, 64.0f, 0);
+    CDestructable tree(41, War3ID("LTlt"), 192.0f, 64.0f, 1000.0f);
+    const float dealt = sim.GetCombatSystem()->ApplyDamage(
+        sim, &attacker, &tree, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f, 0);
+    TEST_NEAR(dealt, 100.0f, 0.01f);
+    // Mapless sim reports 999 everywhere (ref null corner): no height
+    // diff, so even chance 1.0 lands.
+    CSimulation flat;
+    SetAlwaysMiss(flat);
+    TEST_ASSERT(flat.GetTerrainHeight(0.0f, 0.0f) == 999);
+    CUnit a2(42, MakeCombatType(CDefenseType::NONE, 0), 0, War3ID("hfoo"), 0.0f, 0.0f, 0);
+    CUnit t2(43, MakeCombatType(CDefenseType::NONE, 0), 1, War3ID("hfoo"), 5000.0f, 0.0f, 0);
+    const float before = t2.GetLife();
+    t2.Damage(flat, &a2, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f, 0);
+    TEST_NEAR(before - t2.GetLife(), 100.0f, 0.01f);
     return true;
 }

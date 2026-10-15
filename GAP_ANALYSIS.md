@@ -2,24 +2,24 @@
 
 > 对照原版 Warsmash Java（`warsmash_ref/`）与 C++ 版（`src/`）。
 > 联机（Battle.net/UDP）明确排除。
-> 已完成 Gap-fill 1–30（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础等）。
+> 已完成 Gap-fill 1–39（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础、占位像素图+静态 stamp、高地 miss、穿刺线/炮击、伤害替换框架、闪避暴击叠加、荆棘吸血语义等）。
 
 ## P0：战斗模拟正确性（影响对局）
 
 - [x] 1. 受击反击/逃跑（Gap-31：`MaybeReturnFire`，idle/default 门控 + 敌对 + 非 PEON + 攻击行为/逃跑；`interruptable` 精化见第 2 项）。
 - [x] 2. 打断框架（Gap-32：`IsInterruptable` 虚函数默认 true、Stun false；新订单当 tick 抢占可打断行为，眩晕期队列坍缩为最新一条；反击门控同步精化）。
-- [ ] 3. 高地 miss：`combat_system.cpp` 只有闪避 roll，无地形高差 + `ChanceToMiss`（`CUnitDefaultAccuracyCheckListener`）。
-- [ ] 4. MLINE 穿刺线 / ARTILLERY 对地：迫击炮溅射变单体，无地面点攻击路径（`behavior_attack.cpp` 只分叉 SPLASH/BOUNCE）。
-- [ ] 5. 伤害替换框架：`unit_attack.h` 无 `attackReplacement` 字段，Orb/灼热之箭只能硬编码。
-- [ ] 6. 闪避/暴击多源叠加：后写覆盖（酒仙闪避清零 DH 闪避）；暴击单 roll、无 CRIT/BASH floating text。
-- [ ] 7. 荆棘/吸血语义：按实际伤害而非基础伤害，无敌对阵营门、无 `ResistsThorns/Leech` 门，只认单 buff 源。
+- [x] 3. 高地 miss（Gap-35：`GetTerrainHeight` 取悬崖层、越层时 `ChanceToMiss`（零售 0.25）掷骰，仅武器攻击、仅对单位；`CUnit::Damage` 与 `ApplyDamage` 双入口，无图/平地不耗 RNG）。
+- [x] 4. MLINE 穿刺线 / ARTILLERY 对地（Gap-36：`Hfact/Qfact/damageLoss/spillDist/spillRadius` 解析；溅射族=MSPLASH+ARTILLERY、穿刺族=MLINE+ALINE；ARTILLERY 落点邮戳+对地爆炸、ATTACK_GROUND 点目标链路、抛射体/瞬发双口径点溅射与走廊穿刺）。
+- [x] 5. 伤害替换框架（Gap-37：`unit_attack.h` 新增 `CAttackModifierEffect` 接口 + `CUnit` 按攻击索引槽位（安装替换、按安装者清除）；Orb 霜/腐蚀/火、灼热箭、冷箭迁出 `Damage` 硬编码，改 OnAdd/OnRemove 注册；顺带修多 Orb 叠加——单槽不叠加）。
+- [x] 6. 闪避/暴击多源叠加（Gap-38：`CUnit` 闪避/暴击改按源列表（同 id 替换、按 id 清除），闪避各源独立掷骰、暴击取最强倍率；`CSimulation::CombatTextKind` MISS/CRIT/BASH 回调供表现层挂浮字；酒仙闪避不再清零 DH 闪避）。
+- [x] 7. 荆棘/吸血语义（Gap-39：荆棘改按入射基础伤害（战前快照，含 bonus，抵御前），补 NORMAL 类型门+敌对阵营门+ResistsThorns 门；吸血补 PASSIVE 联盟门+ResistsLeech 门；双边多源取最强；另修魔法免疫 `||`→`&&` 使 UNIVERSAL/门关法术穿透与原版一致）。
 - [ ] 8. 死亡序列：缺 popout 工人、食物返还、死亡视野雾、建造中死亡爆炸效果。
 - [ ] 9. 非叠加攻击属性：咆哮/内火等多源应取最大，当前线性叠加（`unit_attack.h` 无表）。
 - [ ] 10. 小项：溅射 miss 应减伤而非归零、负伤害钳制、无敌仍跑受击监听。
 
 ## P1：数据/地图正确性（错起来隐蔽）
 
-- [x] 11. 占位像素图（Gap-33 前半：pathTex 解码/缓存、`pathTex` 字段、放置校验改足迹矩形、`BuildingAngle`、吸附偏移；后半 WPM 静态 stamp/死亡切换仍待办）。
+- [x] 11. 占位像素图（Gap-33：pathTex 解码/缓存、`pathTex` 字段、放置校验改足迹矩形、`BuildingAngle`、吸附偏移；Gap-34：WPM 静态 stamp/死亡切换——建筑创建吸附+blit、死亡/移除 unstamp、Root/Uproot 切换，可破坏物 pathTex/pathTexDeath 双足迹+occH 视野块、复活换回）。
 - [ ] 12. w3i 开局科技/升级可用性解析了不用（`w3i.h` → `map_loader` 不消费）。
 - [ ] 13. w3i 全局随机单位/物品表未接入（`PlaceRandomUnit/Item` 只用自带表）。
 - [ ] 14. 通行/高度/水面三套定义打架：缺 BOUNDARY 旗、`FLOAT/AMPH` 映射；`DecodeGroundHeight` 忽略崖层高+水位偏移；WPM 与 W3E 水面定义不一致。
@@ -49,4 +49,4 @@
 
 ## 实施顺序
 
-1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图（P1-11）→ …
+1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图+静态 stamp（P1-11，Gap-33/34）→ 4. 高地 miss（P0-3，Gap-35）→ 5. 穿刺线/炮击（P0-4，Gap-36）→ 6. 伤害替换框架（P0-5，Gap-37）→ 7. 闪避暴击叠加（P0-6，Gap-38）→ 8. 荆棘吸血语义（P0-7，Gap-39）→ …

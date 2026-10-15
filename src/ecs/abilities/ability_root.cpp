@@ -21,6 +21,8 @@ CBehavior* CAbilityRoot::BeginNoTarget(CSimulation& game, CUnit* caster, int ord
     (void)game; (void)orderId;
     if (!caster || caster->IsRooted()) return nullptr;
     caster->SetRooted(true);
+    // Retail root blits the building footprint (ref setRooted rooting).
+    caster->RegeneratePathingInstance(game);
     // Halt any in-progress movement; attacks continue while rooted.
     caster->Stop(game);
     // Swap the command card: Root out, Uproot in (ref transformation swap).
@@ -54,6 +56,8 @@ CBehavior* CAbilityUproot::BeginNoTarget(CSimulation& game, CUnit* caster, int o
     (void)game; (void)orderId;
     if (!caster || !caster->IsRooted()) return nullptr;
     caster->SetRooted(false);
+    // Retail uproot clears the footprint (ref setRooted uprooting).
+    caster->KillPathingInstance(game);
     // Swap the command card back: Uproot out, Root in.
     if (CAbility* root = caster->GetAbility(War3ID("Aroo"))) {
         root->SetDisabled(false, CAbilityDisableType::TRANSFORMATION);

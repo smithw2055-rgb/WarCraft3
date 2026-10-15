@@ -1,6 +1,7 @@
 #include "destructabledata.h"
 #include "data/slk_merge.h"
 #include "map/object_mods.h"
+#include "map/path_tex.h"
 #include "resource/mpq_storm.h"
 #include <algorithm>
 #include <cstdlib>
@@ -50,6 +51,7 @@ CDestructableData CDestructableData::LoadFromMpq(const MpqManager& mpq,
     const int deathEffectColumn = FindFirstColumn(slk, {"deathEffect"});
     const int deathSoundColumn = FindFirstColumn(slk, {"deathSnd"});
     const int deathModelColumn = FindFirstColumn(slk, {"deathModel"});
+    const int occHColumn = FindFirstColumn(slk, {"occH", "occlusionHeight"});
 
     if (idColumn < 0 && slk.Cols() > 0) {
         idColumn = 0;
@@ -87,8 +89,23 @@ CDestructableData CDestructableData::LoadFromMpq(const MpqManager& mpq,
         d->pathTex = GetMergedString(slk, row, pathTexColumn, skinTbl, sid, "pathTex", "");
         const int pathTexDeathColumn = FindFirstColumn(slk, {"pathTexDeath"});
         d->pathTexDeath = GetMergedString(slk, row, pathTexDeathColumn, skinTbl, sid, "pathTexDeath", "");
+        {
+            const std::string occ = GetMergedString(slk, row, occHColumn, skinTbl, sid, "occH", "0");
+            try { d->occlusionHeight = occ.empty() ? 0.0f : std::stof(occ); }
+            catch (...) { d->occlusionHeight = 0.0f; }
+        }
 
         data.destructables_[id] = std::move(d);
+    }
+
+    // Decode footprint textures once (ref War3MapViewer destructable
+    // pathing): placement and WPM stamps never touch the MPQ at runtime.
+    for (const auto& [id, type] : data.destructables_) {
+        (void)id;
+        if (type) {
+            if (!type->pathTex.empty()) type->pathTexImage = LoadPathTex(mpq, type->pathTex);
+            if (!type->pathTexDeath.empty()) type->pathTexDeathImage = LoadPathTex(mpq, type->pathTexDeath);
+        }
     }
 
     std::cout << "CDestructableData: loaded " << data.destructables_.size() << " destructables" << std::endl;
@@ -97,6 +114,11 @@ CDestructableData CDestructableData::LoadFromMpq(const MpqManager& mpq,
 
 bool CDestructableData::HasDestructable(War3ID id) const {
     return destructables_.find(id) != destructables_.end();
+}
+
+void CDestructableData::RegisterDestructable(War3ID id, std::unique_ptr<CDestructableType> type) {
+    if (!type) return;
+    destructables_[id] = std::move(type);
 }
 
 const CDestructableType* CDestructableData::GetDestructable(War3ID id) const {

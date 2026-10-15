@@ -38,6 +38,11 @@ struct CGameplayConstants {
     bool etherealDamageBonusAlly = false;
     bool magicImmuneResistsDamage = true;
     bool magicImmuneResistsUltimates = true;
+    // Thorns/leech vs magic immunity (Units\MiscGame.txt
+    // MagicImmunesResistThorns/Leech, ref thorns/lifesteal listeners).
+    // TFT retail leaves both off (0).
+    bool magicImmuneResistsThorns = false;
+    bool magicImmuneResistsLeech = false;
     // Pawn shops pay goldCost * pawnItemRate for pawnable items (ref
     // CGameplayConstants PawnItemRate from Units\MiscGame.txt).
     float pawnItemRate = 0.5f;
@@ -101,6 +106,11 @@ struct CGameplayConstants {
 
     // Placement footprint rotation in degrees (ref BuildingAngle).
     float buildingAngle = 0.0f;
+
+    // Uphill accuracy (ref CUnitDefaultAccuracyCheckListener): attacks
+    // from a lower cliff layer at a higher one miss with this chance
+    // (Units\MiscData.txt ChanceToMiss, TFT retail 0.25).
+    float chanceToMiss = 0.25f;
 
     CGameplayConstants();
     explicit CGameplayConstants(const TxtTable& miscData);

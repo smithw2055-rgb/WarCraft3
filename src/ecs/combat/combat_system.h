@@ -62,6 +62,33 @@ public:
                             int dice, int sidesPerDie,
                             const CUnitAttack& attack);
 
+    // Ground-point splash (ref ARTILLERY firing at a point target): the
+    // same ring falloff centered on (x, y) with no primary widget.
+    // Artillery shells converted at fire time funnel here on impact.
+    // excludeWidget (already-damaged primary) skips one widget so targeted
+    // splashes never double-hit it.
+    float ApplySplashDamageAtPoint(CSimulation& simulation, CUnit* attacker,
+                                  float x, float y,
+                                  bool isAttack, bool isRanged,
+                                  CAttackType attackType, CDamageType damageType,
+                                  float damageBase, float bonusDamage,
+                                  int dice, int sidesPerDie,
+                                  const CUnitAttack& attack,
+                                  const CWidget* excludeWidget = nullptr);
+
+    // Line spill (MLINE/ALINE corridor): full damage to enemy units within
+    // spillRadius of the segment from (x0, y0) along (dirX, dirY) for
+    // spillDistance. excludeWidget (the pierced primary) is skipped so it
+    // is never double-hit. Returns total damage dealt.
+    float ApplyLineDamage(CSimulation& simulation, CUnit* attacker,
+                          float x0, float y0, float dirX, float dirY,
+                          bool isAttack, bool isRanged,
+                          CAttackType attackType, CDamageType damageType,
+                          float damageBase, float bonusDamage,
+                          int dice, int sidesPerDie,
+                          float spillDistance, float spillRadius,
+                          const CWidget* excludeWidget = nullptr);
+
     // Armor calc
     static float CalcArmorDamageReduction(int defense, int attackerLevel, float defenseArmor = 0.06f);
 

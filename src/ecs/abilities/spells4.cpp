@@ -15,12 +15,12 @@ CAbilityEvasion::CAbilityEvasion(int handleId)
 
 void CAbilityEvasion::OnAdd(CSimulation& game, CUnit* unit) {
     (void)game;
-    if (unit) unit->SetEvasionChance(chance_);
+    if (unit) unit->AddEvasionSource(War3ID("AEev"), chance_);
 }
 
 void CAbilityEvasion::OnRemove(CSimulation& game, CUnit* unit) {
     (void)game;
-    if (unit) unit->SetEvasionChance(0.0f);
+    if (unit) unit->RemoveEvasionSource(War3ID("AEev"));
 }
 
 void CAbilityEvasion::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -35,12 +35,12 @@ CAbilityCriticalStrike::CAbilityCriticalStrike(int handleId)
 
 void CAbilityCriticalStrike::OnAdd(CSimulation& game, CUnit* unit) {
     (void)game;
-    if (unit) unit->SetCriticalStrike(chance_, multiplier_);
+    if (unit) unit->AddCritSource(GetAlias(), chance_, multiplier_);
 }
 
 void CAbilityCriticalStrike::OnRemove(CSimulation& game, CUnit* unit) {
     (void)game;
-    if (unit) unit->SetCriticalStrike(0.0f, 1.0f);
+    if (unit) unit->RemoveCritSource(GetAlias());
 }
 
 void CAbilityCriticalStrike::ApplyEffectData(const CAbilityDefFull& def, int level) {

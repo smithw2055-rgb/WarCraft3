@@ -182,6 +182,8 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     etherealDamageBonusAlly = readMiscInt("EtherealDamageBonusAlly", 0) != 0;
     magicImmuneResistsDamage = readMiscInt("MagicImmunesResistDamage", 1) != 0;
     magicImmuneResistsUltimates = readMiscInt("MagicImmunesResistUltimates", 1) != 0;
+    magicImmuneResistsThorns = readMiscInt("MagicImmunesResistThorns", 0) != 0;
+    magicImmuneResistsLeech = readMiscInt("MagicImmunesResistLeech", 0) != 0;
     pawnItemRate = readFloat("PawnItemRate", 0.5f);
     reviveBaseFactor = readFloat("ReviveBaseFactor", 0.40f);
     reviveLevelFactor = readFloat("ReviveLevelFactor", 0.10f);
@@ -306,6 +308,7 @@ CGameplayConstants::CGameplayConstants(const TxtTable& miscData) {
     globalExperience = readMiscInt("GlobalExperience", 0) != 0;
     buildingKillsGiveExp = readMiscInt("BuildingKillsGiveExp", 0) != 0;
     buildingAngle = readFloat("BuildingAngle", 0.0f);
+    chanceToMiss = readFloat("ChanceToMiss", 0.25f);
 }
 
 int CGameplayConstants::GetHeroReviveGoldCost(int originalGoldCost, int level) const {

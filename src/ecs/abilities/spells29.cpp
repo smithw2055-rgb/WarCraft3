@@ -28,12 +28,14 @@ CAbilityDrunkenBrawler::CAbilityDrunkenBrawler(int handleId)
 
 void CAbilityDrunkenBrawler::OnAdd(CSimulation& game, CUnit* unit) {
     CAbilityCriticalStrike::OnAdd(game, unit);
-    if (unit) unit->SetEvasionChance(dodge_);
+    // Dodge rides its own evasion source (alias ANdb), so removing the
+    // brawler never clears foreign evasion (ref evasionListeners list).
+    if (unit) unit->AddEvasionSource(GetAlias(), dodge_);
 }
 
 void CAbilityDrunkenBrawler::OnRemove(CSimulation& game, CUnit* unit) {
     CAbilityCriticalStrike::OnRemove(game, unit);
-    if (unit) unit->SetEvasionChance(0.0f);
+    if (unit) unit->RemoveEvasionSource(GetAlias());
 }
 
 CAbilityEntangleGoldMine::CAbilityEntangleGoldMine(int handleId)

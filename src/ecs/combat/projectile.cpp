@@ -22,9 +22,61 @@ bool IsProjectileEnemy(CSimulation& sim, CUnit* attacker, CUnit* other) {
     return other->GetPlayerIndex() != attacker->GetPlayerIndex();
 }
 
+// Ground detonation shared by attack-ground shells and fire-stamped
+// artillery: splash rings and/or the line corridor at (px, py).
+void DetonateGround(CSimulation& sim, CProjectile& shot, float px, float py) {
+    CUnit* source = sim.GetUnit(shot.attackerHandleId);
+    auto* combat = sim.GetCombatSystem();
+    if (!combat) return;
+    if (shot.splashHalf > 0.0f) {
+        CUnitAttack splashAttack;
+        splashAttack.areaFull = shot.splashFull;
+        splashAttack.areaHalf = shot.splashHalf;
+        splashAttack.areaQuarter = shot.splashQuarter;
+        splashAttack.damageFactorHalf = shot.splashFactorHalf;
+        splashAttack.damageFactorQuarter = shot.splashFactorQuarter;
+        combat->ApplySplashDamageAtPoint(sim, source, px, py, shot.isAttack, shot.isRanged,
+                                         shot.attackType, shot.damageType,
+                                         shot.damage, shot.splashBonus, 0, 0, splashAttack);
+    }
+    if (shot.spillRadius > 0.0f && shot.spillDistance > 0.0f) {
+        combat->ApplyLineDamage(sim, source, px, py, shot.tx - shot.fx, shot.ty - shot.fy,
+                                shot.isAttack, shot.isRanged,
+                                shot.attackType, shot.damageType,
+                                shot.damage, 0, 0, 0,
+                                shot.spillDistance, shot.spillRadius);
+    }
+}
+
 } // namespace
 
 bool CProjectile::Update(CSimulation& sim) {
+    // Ground shells fly to a fixed point and always detonate (ref ARTILLERY
+    // firing at a point target): no widget, no fizzle.
+    if (groundTarget) {
+        const float dx = tx - x;
+        const float dy = ty - y;
+        const float dist = std::sqrt(dx * dx + dy * dy);
+        const float step = std::max(0.0f, speed) * sim.GetSimStepTime();
+        const float hitRadius = std::max(step, 16.0f);
+        if (dist <= hitRadius) {
+            x = tx;
+            y = ty;
+            DetonateGround(sim, *this, x, y);
+            return true;
+        }
+        if (dist > 0.0f && step > 0.0f) {
+            x += dx / dist * step;
+            y += dy / dist * step;
+            traveled += step;
+        }
+        if (traveled >= maxTravel) {
+            DetonateGround(sim, *this, x, y);
+            return true;
+        }
+        return false;
+    }
+
     CWidget* target = sim.GetWidget(targetHandleId);
     if (!target || target->IsDead()) return true; // fizzle: no damage
 
@@ -74,12 +126,32 @@ bool CProjectile::Update(CSimulation& sim) {
                 target->Damage(sim, source, isAttack, isRanged, attackType,
                                damageType, weaponSound, damage, splashBonus);
             }
+            // Line spill rides along when the missile carries both (the
+            // pierced primary is excluded from its own corridor).
+            if (spillRadius > 0.0f && spillDistance > 0.0f) {
+                if (auto* combat = sim.GetCombatSystem()) {
+                    combat->ApplyLineDamage(sim, source, x, y, x - fx, y - fy,
+                                            isAttack, isRanged, attackType, damageType,
+                                            damage, 0, 0, 0,
+                                            spillDistance, spillRadius, target);
+                }
+            }
             if (onHit) onHit(sim, source, target);
             return true;
         }
         target->Damage(sim, source, isAttack, isRanged, attackType,
                        damageType, weaponSound, damage, 0);
         if (onHit) onHit(sim, source, target);
+        // Line spill (MLINE/ALINE): corridor damage past the impact point
+        // along the flight path; the pierced primary is excluded.
+        if (spillRadius > 0.0f && spillDistance > 0.0f) {
+            if (auto* combat = sim.GetCombatSystem()) {
+                combat->ApplyLineDamage(sim, source, x, y, x - fx, y - fy,
+                                        isAttack, isRanged, attackType, damageType,
+                                        damage, 0, 0, 0,
+                                        spillDistance, spillRadius, target);
+            }
+        }
         // Bounce: chain to the nearest other enemy in range with falloff.
         if (bouncesLeft > 0 && source) {
             CUnit* next = nullptr;

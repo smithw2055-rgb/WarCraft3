@@ -7,7 +7,8 @@
 // Units\AbilityData.slk.
 
 // ===== Cleaving Attack (Pit Lord, ANca) - splash on attack =====
-// The splash hook lives in CUnit::Damage next to the orb procs.
+// The splash hook lives in CUnit::Damage next to the modifier slot.
+// The proc itself is a CAttackModifierEffect (see unit_attack.h).
 class CAbilityCleavingAttack : public CAbilitySpellBase {
 public:
     CAbilityCleavingAttack(int handleId);
@@ -19,10 +20,12 @@ private:
 };
 
 // ===== Searing Arrows (Priestess, AHfa) - bonus fire on attack =====
-// Toggle mana cost is behavior-side; the damage proc lives in Damage.
+// Toggle mana cost is behavior-side; the proc is a slot effect.
 class CAbilitySearingArrows : public CAbilitySpellBase {
 public:
     CAbilitySearingArrows(int handleId);
+    void OnAdd(CSimulation& game, CUnit* unit) override;
+    void OnRemove(CSimulation& game, CUnit* unit) override;
     float GetBonusDamage() const { return bonusDamage_; }
 private:
     float bonusDamage_ = 20.0f;

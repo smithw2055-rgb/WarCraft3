@@ -82,4 +82,17 @@ struct CWeaponTypeInfo {
         return t != CWeaponType::NONE && t != CWeaponType::NORMAL &&
                t != CWeaponType::UNKNOWN;
     }
+    // Mirrors ref isAttackGroundSupported: shelling weapons accept ground
+    // orders (mortar-style ARTILLERY and its line sibling).
+    static bool IsAttackGroundSupported(CWeaponType t) {
+        return t == CWeaponType::ARTILLERY || t == CWeaponType::ARTILLERY_LINE;
+    }
+    // Splash family (ref createAttack: MSPLASH and ARTILLERY share the
+    // MissileSplash class); line family (MLINE and ALINE share MissileLine).
+    static bool IsSplashWeapon(CWeaponType t) {
+        return t == CWeaponType::MISSILE_SPLASH || t == CWeaponType::ARTILLERY;
+    }
+    static bool IsLineWeapon(CWeaponType t) {
+        return t == CWeaponType::MISSILE_LINE || t == CWeaponType::ARTILLERY_LINE;
+    }
 };

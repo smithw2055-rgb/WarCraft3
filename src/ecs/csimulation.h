@@ -69,7 +69,8 @@ public:
     virtual void RemoveUnit(CUnit* unit);
     const std::vector<CUnit*>& GetUnits() const { return units_; }
     std::vector<CUnit*>& GetUnits() { return units_; }
-    virtual CDestructable* CreateDestructable(War3ID typeId, float x, float y, float life);
+    virtual CDestructable* CreateDestructable(War3ID typeId, float x, float y, float life,
+                                              int rotationDeg = 0);
     CDestructable* GetDestructable(int handleId) const;
     virtual void RemoveDestructable(CDestructable* destructable);
     const std::vector<CDestructable*>& GetDestructables() const { return destructables_; }
@@ -137,6 +138,15 @@ public:
     // SetTerrainType edits tiles in place (loader-owned, version-bumped).
     void SetTerrainMap(W3EMap* w3e) { terrainMap_ = w3e; }
     W3EMap* GetTerrainMap() const { return terrainMap_; }
+    // Cliff layer at a world point (ref SimulationRenderController /
+    // getTerrainHeight: corner LayerHeight, 999 when off-map or mapless so
+    // off-map attackers never count as downhill).
+    int GetTerrainHeight(float x, float y) const;
+    // Uphill accuracy (ref CUnitDefaultAccuracyCheckListener): weapon
+    // attacks from a lower cliff layer at a higher unit miss with
+    // ChanceToMiss. Rolls the sim stream; no-op (no RNG consumed) on flat
+    // ground, vs non-units, or for non-attacks.
+    bool CheckHighlandMiss(CUnit* attacker, const CWidget* target, bool isAttack);
 
     // Water deformation toggle (ref SetWaterDeforms). The water mesh
     // adds a traveling wave while this is true.
@@ -288,6 +298,21 @@ public:
         heroSkillCallback_ = std::move(cb);
     }
     const std::function<void(int, int, int)>& GetHeroSkillCallback() const { return heroSkillCallback_; }
+    // Floating combat text (ref spawnTextTag for miss/crit/bash): the sim
+    // only reports the event; presentation (JASS text tags) subscribes.
+    // MISS amount is 0, CRIT amount is the final damage number, BASH
+    // amount is the bonus damage (0 until bash carries a damage bonus).
+    enum class CombatTextKind : uint8_t { MISS, CRIT, BASH };
+    void SetCombatTextCallback(
+        std::function<void(int attackerHandle, int victimHandle, CombatTextKind kind, float amount)> cb) {
+        combatTextCallback_ = std::move(cb);
+    }
+    const std::function<void(int, int, CombatTextKind, float)>& GetCombatTextCallback() const {
+        return combatTextCallback_;
+    }
+    void FireCombatText(int attackerHandle, int victimHandle, CombatTextKind kind, float amount) {
+        if (combatTextCallback_) combatTextCallback_(attackerHandle, victimHandle, kind, amount);
+    }
     // Queue lifecycle (building handle, type rawcode, kind 0 = train,
     // 1 = research, 2 = upgrade morph; started false = cancelled, except
     // upgrades where it means finished).
@@ -418,6 +443,7 @@ private:
     std::function<void(int, int, int)> shopUnitEventCallback_;
     std::function<void(int, int, int)> pawnEventCallback_;
     std::function<void(int, int, int)> heroSkillCallback_;
+    std::function<void(int, int, CombatTextKind, float)> combatTextCallback_;
     std::function<void(int, bool)> constructEventCallback_;
     std::function<void(int, int, int, bool)> queueEventCallback_;
     std::function<void(int, int)> ownerChangedCallback_;

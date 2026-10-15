@@ -142,6 +142,55 @@ bool TestOrbOfFireProcs() {
     return true;
 }
 
+bool TestAttackModifiersDoNotStack() {
+    // Retail orb rule via the replacement slot: the second installed
+    // modifier replaces the first (no double proc); removing it leaves
+    // the slot empty (the first is not restored).
+    CSimulation sim;
+    AddPlayers(sim);
+    auto* holder = AdoptAt(sim, 925, 0, 0, 0);
+    auto* target = AdoptAt(sim, 926, 1, 100, 0);
+    Settle(sim);
+    holder->AddAbility(sim, std::make_unique<CAbilityOrbOfFrost>(9202));
+    TEST_ASSERT(holder->GetAttackModifier(0) != nullptr);
+    holder->AddAbility(sim, std::make_unique<CAbilityOrbOfFire>(9203));
+    const float before = target->GetLife();
+    target->Damage(sim, holder, true, false, CAttackType::NORMAL,
+                   CDamageType::NORMAL, "", 100.0f, 0);
+    TEST_NEAR(before - target->GetLife(), 115.0f, 0.01f); // fire only
+    TEST_ASSERT(target->GetBuff(War3ID("Bslo")) == nullptr); // frost gone
+    // Removing the winner empties the slot; the replaced frost is gone.
+    TEST_ASSERT(holder->RemoveAbility(sim, War3ID("AIfb")));
+    TEST_ASSERT(holder->GetAttackModifier(0) == nullptr);
+    auto* fresh = AdoptAt(sim, 927, 1, 100, 100);
+    Settle(sim);
+    const float before2 = fresh->GetLife();
+    fresh->Damage(sim, holder, true, false, CAttackType::NORMAL,
+                  CDamageType::NORMAL, "", 100.0f, 0);
+    TEST_NEAR(before2 - fresh->GetLife(), 100.0f, 0.01f);
+    TEST_ASSERT(fresh->GetBuff(War3ID("Bslo")) == nullptr);
+    return true;
+}
+
+bool TestAttackModifierRemovedWithAbility() {
+    CSimulation sim;
+    AddPlayers(sim);
+    auto* holder = AdoptAt(sim, 928, 0, 0, 0);
+    auto* first = AdoptAt(sim, 929, 1, 100, 0);
+    Settle(sim);
+    holder->AddAbility(sim, std::make_unique<CAbilityOrbOfFrost>(9204));
+    first->Damage(sim, holder, true, false, CAttackType::NORMAL,
+                  CDamageType::NORMAL, "", 10.0f, 0);
+    TEST_ASSERT(first->GetBuff(War3ID("Bslo")) != nullptr);
+    TEST_ASSERT(holder->RemoveAbility(sim, War3ID("AIob")));
+    auto* second = AdoptAt(sim, 930, 1, 100, 100);
+    Settle(sim);
+    second->Damage(sim, holder, true, false, CAttackType::NORMAL,
+                   CDamageType::NORMAL, "", 10.0f, 0);
+    TEST_ASSERT(second->GetBuff(War3ID("Bslo")) == nullptr);
+    return true;
+}
+
 bool TestIllusionCopiesTarget() {
     if (!ResourcesPresent()) return true;
     MpqManager mpq;

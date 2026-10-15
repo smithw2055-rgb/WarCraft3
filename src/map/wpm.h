@@ -1,7 +1,10 @@
 #pragma once
 #include <cstdint>
-#include <vector>
+#include <memory>
 #include <string>
+#include <vector>
+
+struct PathTexImage;
 
 struct WpmData {
     enum Flags : uint8_t {
@@ -17,6 +20,32 @@ struct WpmData {
     int height = 0;
     std::vector<uint8_t> pathing; // width * height bytes
     bool IsValid() const { return width > 0 && height > 0 && pathing.size() == static_cast<size_t>(width) * static_cast<size_t>(height); }
+
+    // ---- Dynamic footprint stamps (ref RemovablePathingMapInstance) ----
+    // Buildings and destructables OR their pathTex footprints here;
+    // removal rebuilds from the pristine base copy.
+    struct Stamp {
+        float x = 0, y = 0;
+        int rotationDeg = 0;
+        std::shared_ptr<const PathTexImage> image;
+        bool blocksVision = false;
+        bool alive = true;
+    };
+    std::vector<uint8_t> basePathing; // pristine copy, filled by WpmLoad
+    std::vector<Stamp> stamps;
+    // World origin of cell (0,0) in world units (32-unit cells, truncation
+    // toward zero like the retail cell math).
+    float originX = 0, originY = 0;
+    static constexpr int kCellSize = 32;
+
+    // Stamp a footprint; returns the stamp id, or -1 when there is
+    // nothing to stamp (null/empty image, invalid grid).
+    int StampFootprint(float x, float y, int rotationDeg,
+                       std::shared_ptr<const PathTexImage> image,
+                       bool blocksVision = false);
+    void UnstampFootprint(int id);
+    void SetStampBlocksVision(int id, bool blocksVision);
+    void RebuildDynamic();
 
     bool IsWalkable(int x, int y) const;
     bool IsFlyable(int x, int y) const;

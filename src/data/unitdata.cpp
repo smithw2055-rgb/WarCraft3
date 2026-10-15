@@ -609,6 +609,15 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
             atk.areaFull = GetMergedFloat(unitWeaponsTxt, unitWeapons, sid, "Farea" + suffix, 0.0f);
             atk.areaHalf = GetMergedFloat(unitWeaponsTxt, unitWeapons, sid, "Harea" + suffix, 0.0f);
             atk.areaQuarter = GetMergedFloat(unitWeaponsTxt, unitWeapons, sid, "Qarea" + suffix, 0.0f);
+            // Ring falloff + line spill (ref Hfact/Qfact/damageLoss/spillDist/
+            // spillRadius; missing keys keep the struct TFT defaults).
+            atk.damageFactorHalf = GetMergedFloat(unitWeaponsTxt, unitWeapons, sid, "Hfact" + suffix,
+                                                  atk.damageFactorHalf);
+            atk.damageFactorQuarter = GetMergedFloat(unitWeaponsTxt, unitWeapons, sid, "Qfact" + suffix,
+                                                     atk.damageFactorQuarter);
+            atk.damageLossFactor = GetMergedFloat(unitWeaponsTxt, unitWeapons, sid, "damageLoss" + suffix, 0.0f);
+            atk.damageSpillDistance = GetMergedFloat(unitWeaponsTxt, unitWeapons, sid, "spillDist" + suffix, 0.0f);
+            atk.damageSpillRadius = GetMergedFloat(unitWeaponsTxt, unitWeapons, sid, "spillRadius" + suffix, 0.0f);
             atk.targetCount = GetMergedInt(unitWeaponsTxt, unitWeapons, sid, "targCount" + suffix, 0);
             atk.areaSpread = GetMergedFloat(unitWeaponsTxt, unitWeapons, sid, "areaSpread" + suffix, 0.0f);
             atk.weaponSound = GetMergedString(unitWeaponsTxt, unitWeapons, sid, "weapSnd" + suffix);

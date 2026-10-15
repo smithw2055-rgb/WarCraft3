@@ -37,6 +37,17 @@ struct CProjectile {
     int bouncesLeft = 0;
     float bounceRange = 0.0f;
     float bounceLossFactor = 1.0f;
+    // Ground destination (ref ARTILLERY firing at a point target, and
+    // attack-ground orders): flies to (tx, ty) and detonates there instead
+    // of homing a widget. Never fizzles for lack of a target.
+    bool groundTarget = false;
+    float tx = 0.0f;
+    float ty = 0.0f;
+    // Line spill (MLINE/ALINE corridor): corridor state for impact.
+    float fx = 0.0f; // fire position (corridor direction reference)
+    float fy = 0.0f;
+    float spillDistance = 0.0f;
+    float spillRadius = 0.0f;
 
     // On-hit hook (ref spell-missile onHit, e.g. StormBolt stun): fired on
     // every damaging impact after base damage, never on fizzle. Source may

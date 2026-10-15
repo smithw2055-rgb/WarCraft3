@@ -20,6 +20,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -114,16 +115,37 @@ public:
     // Recompute every aura-stat slot (ref computeDerivedFields sweep;
     // backs the RecomputeStatBonusesOnUnit native).
     void RecomputeAllAuraStats();
-    // Evasion / critical strike (0..1 chances; e.g. from abilities/items).
-    // Wired into CCombatSystem::CalculateDamage like ref attack listeners.
-    float GetEvasionChance() const { return evasionChance_; }
-    void SetEvasionChance(float v) { evasionChance_ = v; }
-    float GetCritChance() const { return critChance_; }
-    float GetCritMultiplier() const { return critMultiplier_; }
-    void SetCriticalStrike(float chance, float multiplier) {
-        critChance_ = chance;
-        critMultiplier_ = multiplier;
-    }
+    // Evasion / critical strike sources (ref evasionListeners + crit
+    // listeners: every source rolls independently). Same-id installs
+    // replace; removals only clear their own id, so Drunken Brawler dodge
+    // no longer wipes Demon Hunter evasion (and vice versa).
+    struct EvasionSource {
+        War3ID id = War3ID(0u);
+        float chance = 0.0f;
+    };
+    struct CritSource {
+        War3ID id = War3ID(0u);
+        float chance = 0.0f;
+        float multiplier = 1.0f;
+    };
+    void AddEvasionSource(War3ID id, float chance);
+    void RemoveEvasionSource(War3ID id);
+    const std::vector<EvasionSource>& GetEvasionSources() const { return evasionSources_; }
+    // Combined dodge probability 1 - Π(1 - p) (for UI/inspect).
+    float GetEvasionChance() const;
+    // Legacy single-value shim (tests): clears all sources, installs one
+    // anonymous source.
+    void SetEvasionChance(float v);
+    void AddCritSource(War3ID id, float chance, float multiplier);
+    void RemoveCritSource(War3ID id);
+    const std::vector<CritSource>& GetCritSources() const { return critSources_; }
+    // Display pair: chance/multiplier of the likeliest source (exact when
+    // only one source is installed).
+    float GetCritChance() const;
+    float GetCritMultiplier() const;
+    // Legacy single-value shim (tests): clears all sources, installs one
+    // anonymous source.
+    void SetCriticalStrike(float chance, float multiplier);
     float GetAttackSpeedMultiplier() const { return attackSpeedMul_; }
     void MultiplyAttackSpeed(float m) { attackSpeedMul_ *= m; }
     void DivideAttackSpeed(float m) { if (m != 0.0f) attackSpeedMul_ /= m; }
@@ -340,12 +362,25 @@ public:
     bool UsesFood() const { return useFood_; }
     void SetUseFood(bool v) { useFood_ = v; }
     // Revive a dead hero at a position (ref ReviveHero).
-    void Revive(CSimulation& game, float x, float y);
-    // Alternate-form morph (Metamorphosis, Bear/Raven/Robo forms):
+    void Revive(CSimulation& game, float x, float y);    // Alternate-form morph (Metamorphosis, Bear/Raven/Robo forms):
     // swaps the type snapshot, saving the original for Unmorph().
     void MorphTo(CUnitType* form, War3ID formId);
     void Unmorph();
     bool IsMorphed() const { return morphed_; }
+    // Attack modifier slot (ref attackReplacement): one data-driven proc
+    // effect per attack index, installed by orb/arrow abilities. Installing
+    // replaces whatever was there (retail orbs do not stack). Behaviors
+    // only ever fire the primary attack, so Damage consults index 0.
+    void SetAttackModifier(int attackIndex, War3ID installer,
+                           std::unique_ptr<CAttackModifierEffect> effect);
+    // Clears only when the recorded installer matches (stale removes from
+    // a replaced orb are ignored).
+    void ClearAttackModifier(int attackIndex, War3ID installer);
+    CAttackModifierEffect* GetAttackModifier(int attackIndex);
+    const CAttackModifierEffect* GetAttackModifier(int attackIndex) const;
+    // Runs the primary-attack modifier after a landed weapon hit (gated by
+    // ChargeResources; no-op when the slot is empty).
+    void FireAttackModifiers(CSimulation& game, CUnit* victim, float damageDealt);
 
     // Fly height
     float GetDefaultFlyHeight() const { return flyHeight_; }
@@ -383,6 +418,12 @@ public:
     float GetWaygateX() const { return waygateX_; }
     float GetWaygateY() const { return waygateY_; }
     void SetWaygateDestination(float x, float y) { waygateX_ = x; waygateY_ = y; }
+    // Building footprint stamp (ref CUnit.pathingInstance). Buildings OR
+    // their pathTex footprint on creation (snapped, rotation 270); death
+    // and removal unstamp. Ancients toggle via Root/Uproot.
+    void RegeneratePathingInstance(CSimulation& game);
+    void KillPathingInstance(CSimulation& game);
+    int GetPathingStampId() const { return pathingStampId_; }
 
 private:
     void PerformDefaultBehavior(CSimulation& simulation);
@@ -432,9 +473,8 @@ private:
     };
     std::map<std::pair<int, bool>, std::vector<AuraStatSource>> auraStats_;
     std::map<std::pair<int, bool>, float> auraApplied_;
-    float evasionChance_ = 0.0f;
-    float critChance_ = 0.0f;
-    float critMultiplier_ = 1.0f;
+    std::vector<EvasionSource> evasionSources_;
+    std::vector<CritSource> critSources_;
     std::vector<float> attackRangeBonus_;
     float turnRate_;
     PathingGridMovementType movementType_;
@@ -496,6 +536,8 @@ private:
     bool waygateActive_ = false;
     float waygateX_ = 0.0f;
     float waygateY_ = 0.0f;
+    // WPM footprint stamp id from RegeneratePathingInstance (-1 = none).
+    int pathingStampId_ = -1;
 
     // Abilities
     std::vector<CAbility*> abilities_; // raw pointers to owned abilities
@@ -535,4 +577,11 @@ private:
     std::vector<CUnit*> cargoUnits_;
     bool loadedAboard_ = false;
     bool attacksDisabled_ = false;
+
+    // Attack modifier slots by attack index (ref attackReplacement).
+    struct AttackModifierSlot {
+        War3ID installer = War3ID(0u);
+        std::unique_ptr<CAttackModifierEffect> effect;
+    };
+    std::unordered_map<int, AttackModifierSlot> attackModifiers_;
 };

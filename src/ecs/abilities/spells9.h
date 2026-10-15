@@ -3,12 +3,17 @@
 
 // Batch 9: orb attack modifiers (item->ability mapping from retail
 // Units\ItemData.slk abilList) plus wand/scroll reuse of existing
-// mechanics. Orb procs hook into CUnit::Damage next to Bash.
+// mechanics. Orbs install CAttackModifierEffects (one per attack, no
+// stacking); CUnit::FireAttackModifiers runs the slot after a landed hit.
 
 // ===== Orb of Frost (ofro -> AIob) - chilling attacks =====
+// Installs a frost modifier into the attacker-side slot 0; the proc runs
+// via CUnit::FireAttackModifiers, never hardcoded in Damage.
 class CAbilityOrbOfFrost : public CAbilitySpellBase {
 public:
     CAbilityOrbOfFrost(int handleId);
+    void OnAdd(CSimulation& game, CUnit* unit) override;
+    void OnRemove(CSimulation& game, CUnit* unit) override;
     float GetSlowPercent() const { return slowPercent_; }
     float GetDuration() const { return duration_; }
 private:
@@ -20,6 +25,8 @@ private:
 class CAbilityOrbOfCorruption : public CAbilitySpellBase {
 public:
     CAbilityOrbOfCorruption(int handleId);
+    void OnAdd(CSimulation& game, CUnit* unit) override;
+    void OnRemove(CSimulation& game, CUnit* unit) override;
     float GetDuration() const { return duration_; }
     int GetArmorPenalty() const { return armorPenalty_; }
 private:
@@ -31,6 +38,8 @@ private:
 class CAbilityOrbOfFire : public CAbilitySpellBase {
 public:
     CAbilityOrbOfFire(int handleId);
+    void OnAdd(CSimulation& game, CUnit* unit) override;
+    void OnRemove(CSimulation& game, CUnit* unit) override;
     float GetBonusDamage() const { return bonusDamage_; }
 private:
     float bonusDamage_ = 15.0f;

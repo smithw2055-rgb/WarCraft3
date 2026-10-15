@@ -89,7 +89,8 @@ bool TestEvasionPassive() {
     Settle(sim);
     TEST_ASSERT(unit->GetEvasionChance() == 0.0f);
     unit->AddAbility(sim, std::make_unique<CAbilityEvasion>(4001));
-    TEST_ASSERT(unit->GetEvasionChance() == 0.10f); // ref DataA level 1
+    // Combined single-source value (1 - (1 - p)); fabs, not ==, for the 1ulp.
+    TEST_ASSERT(std::fabs(unit->GetEvasionChance() - 0.10f) < 1e-6f); // ref DataA level 1
     TEST_ASSERT(unit->RemoveAbility(sim, War3ID("AEev")));
     TEST_ASSERT(unit->GetEvasionChance() == 0.0f);
     return true;

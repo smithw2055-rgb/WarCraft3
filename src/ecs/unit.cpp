@@ -129,6 +129,32 @@ void CUnit::SetPosition(float x, float y) {
     y_ = y;
 }
 
+void CUnit::RegeneratePathingInstance(CSimulation& game) {
+    KillPathingInstance(game);
+    if (!unitType_) return;
+    auto img = unitType_->GetPathTexImage();
+    if (!img || !img->valid) return;
+    // Retail snap (ref CUnit.regeneratePathingInstance): floor to the
+    // 64-unit build grid, then nudge odd half-footprints by one cell so
+    // the blit rect stays centered on the building.
+    float ux = std::floor(GetX() / 64.0f) * 64.0f;
+    float uy = std::floor(GetY() / 64.0f) * 64.0f;
+    if (((img->w / 2) % 2) == 1) ux += 32.0f;
+    if (((img->h / 2) % 2) == 1) uy += 32.0f;
+    SetPosition(ux, uy);
+    auto* pf = game.GetPathfinding();
+    if (!pf || !pf->HasPathingMap()) return;
+    pathingStampId_ = pf->GetPathingMap()->StampFootprint(ux, uy, 270, img, false);
+}
+
+void CUnit::KillPathingInstance(CSimulation& game) {
+    if (pathingStampId_ < 0) return;
+    if (auto* pf = game.GetPathfinding()) {
+        if (pf->HasPathingMap()) pf->GetPathingMap()->UnstampFootprint(pathingStampId_);
+    }
+    pathingStampId_ = -1;
+}
+
 void CUnit::RefreshMaxLifeTotal() {
     maxLife_ = (float)baseMaxLife_ + heroBonusLife_ + bonusMaxLife_;
     if (maxLife_ < 1.0f) maxLife_ = 1.0f;
@@ -192,6 +218,44 @@ void CUnit::Unmorph() {
     RefreshMaxManaTotal();
 }
 
+void CUnit::SetAttackModifier(int attackIndex, War3ID installer,
+                              std::unique_ptr<CAttackModifierEffect> effect) {
+    if (!effect) {
+        ClearAttackModifier(attackIndex, installer);
+        return;
+    }
+    AttackModifierSlot& slot = attackModifiers_[attackIndex];
+    slot.installer = installer;
+    slot.effect = std::move(effect);
+}
+
+void CUnit::ClearAttackModifier(int attackIndex, War3ID installer) {
+    auto it = attackModifiers_.find(attackIndex);
+    if (it == attackModifiers_.end()) return;
+    if (!(it->second.installer == installer)) return;
+    attackModifiers_.erase(it);
+}
+
+const CAttackModifierEffect* CUnit::GetAttackModifier(int attackIndex) const {
+    auto it = attackModifiers_.find(attackIndex);
+    if (it == attackModifiers_.end() || !it->second.effect) return nullptr;
+    return it->second.effect.get();
+}
+
+CAttackModifierEffect* CUnit::GetAttackModifier(int attackIndex) {
+    auto it = attackModifiers_.find(attackIndex);
+    if (it == attackModifiers_.end() || !it->second.effect) return nullptr;
+    return it->second.effect.get();
+}
+
+void CUnit::FireAttackModifiers(CSimulation& game, CUnit* victim, float damageDealt) {
+    if (!victim || victim->IsDead()) return;
+    CAttackModifierEffect* effect = GetAttackModifier(0);
+    if (!effect) return;
+    if (!effect->ChargeResources(this)) return;
+    effect->OnAttackLanded(game, this, victim, damageDealt);
+}
+
 void CUnit::AddBonusMaxLife(float v) {
     bonusMaxLife_ += v;
     RefreshMaxLifeTotal();
@@ -212,8 +276,7 @@ void CUnit::SetHeroBonusMana(int v) {
     RefreshMaxManaTotal();
 }
 
-void CUnit::SetPositionAndCheckUnstuck(float x, float y, CSimulation& simulation) {
-    CPathfindingProcessor* path = simulation.GetPathfinding();
+void CUnit::SetPositionAndCheckUnstuck(float x, float y, CSimulation& simulation) {    CPathfindingProcessor* path = simulation.GetPathfinding();
     if (path && path->HasPathingMap()) {
         const float radius = std::max(0.0f, collisionSize_);
         auto fits = [&](float px, float py) {
@@ -596,6 +659,79 @@ void CUnit::RecomputeAllAuraStats() {
     }
 }
 
+void CUnit::AddEvasionSource(War3ID id, float chance) {
+    for (auto& src : evasionSources_) {
+        if (src.id == id) {
+            src.chance = chance;
+            return;
+        }
+    }
+    evasionSources_.push_back({id, chance});
+}
+
+void CUnit::RemoveEvasionSource(War3ID id) {
+    evasionSources_.erase(
+        std::remove_if(evasionSources_.begin(), evasionSources_.end(),
+                       [&](const EvasionSource& src) { return src.id == id; }),
+        evasionSources_.end());
+}
+
+float CUnit::GetEvasionChance() const {
+    float survive = 1.0f;
+    for (const auto& src : evasionSources_) {
+        survive *= (1.0f - src.chance);
+    }
+    return 1.0f - survive;
+}
+
+void CUnit::SetEvasionChance(float v) {
+    evasionSources_.clear();
+    if (v != 0.0f) evasionSources_.push_back({War3ID(0u), v});
+}
+
+void CUnit::AddCritSource(War3ID id, float chance, float multiplier) {
+    for (auto& src : critSources_) {
+        if (src.id == id) {
+            src.chance = chance;
+            src.multiplier = multiplier;
+            return;
+        }
+    }
+    critSources_.push_back({id, chance, multiplier});
+}
+
+void CUnit::RemoveCritSource(War3ID id) {
+    critSources_.erase(
+        std::remove_if(critSources_.begin(), critSources_.end(),
+                       [&](const CritSource& src) { return src.id == id; }),
+        critSources_.end());
+}
+
+float CUnit::GetCritChance() const {
+    float best = 0.0f;
+    for (const auto& src : critSources_) {
+        if (src.chance > best) best = src.chance;
+    }
+    return best;
+}
+
+float CUnit::GetCritMultiplier() const {
+    float bestChance = 0.0f;
+    float multiplier = 1.0f;
+    for (const auto& src : critSources_) {
+        if (src.chance > bestChance) {
+            bestChance = src.chance;
+            multiplier = src.multiplier;
+        }
+    }
+    return multiplier;
+}
+
+void CUnit::SetCriticalStrike(float chance, float multiplier) {
+    critSources_.clear();
+    if (chance != 0.0f || multiplier != 1.0f) critSources_.push_back({War3ID(0u), chance, multiplier});
+}
+
 void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {    auto key = std::make_pair((int)type, percent);
     float best = 0.0f;
     bool have = false;
@@ -912,6 +1048,9 @@ void CUnit::Revive(CSimulation& game, float x, float y) {
     RefreshMaxLifeTotal();
     RefreshMaxManaTotal();
     SetLife(game, GetMaxLife());
+    // Buildings never revive via heroes, but a restored structure needs
+    // its footprint back (ref pathingInstance lifecycle).
+    if (IsBuilding() && pathingStampId_ < 0) RegeneratePathingInstance(game);
     // Mana intentionally preserved (reincarnation spends it pre-revive).
 }
 
@@ -955,6 +1094,8 @@ bool CUnit::Update(CSimulation& simulation) {
             deathTurnTick_ = currentTick;
             corpse_ = false;
             boneCorpse_ = false;
+            // Retail death clears the building footprint (ref killPathingInstance).
+            KillPathingInstance(simulation);
             // Ref death path: the fallen stop satisfying techtree
             // requirements (heroes keep theirs while awaiting revive).
             if (!IsHero()) {
@@ -1189,6 +1330,11 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                     CAttackType attackType, CDamageType damageType,
                     const std::string& weaponSoundType,
                     float damage, float bonusDamage) {
+    // Incoming base for damage-taken listeners (ref thorns scales the raw
+    // base damage): snapshotted before mana shield / weaken mods below
+    // mutate the `damage` parameter.
+    const float incomingBaseDamage = damage;
+    const float incomingBaseBonus = bonusDamage;
     // Drunken Haze (Brewmaster): the swing may miss outright and land
     // nothing at all (ref miss chance). Checked before everything,
     // including invulnerability and callbacks.
@@ -1199,6 +1345,14 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         if (auto* curse = dynamic_cast<CBuffCurse*>(source->GetBuff(War3ID("Bcrs")))) {
             if (simulation.SimRand01() < curse->GetMissChance()) return 0;
         }
+    }
+    // Uphill accuracy (ref CUnitDefaultAccuracyCheckListener): firing up
+    // a cliff layer misses with ChanceToMiss. Same early gate as the
+    // buff miss rolls above (no RNG consumed on flat ground).
+    if (simulation.CheckHighlandMiss(source, this, isAttack)) {
+        simulation.FireCombatText(source ? source->GetHandleId() : -1, handleId_,
+                                  CSimulation::CombatTextKind::MISS, 0.0f);
+        return 0;
     }
 
     if (invulnerable_) return 0;
@@ -1238,6 +1392,16 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         source, this, isAttack, isRanged, attackType, damageType,
         damage, bonusDamage, 0, 0);
     float actualDamage = result.damageDealt;
+    // Floating combat text (ref spawnTextTag): evasion shows "miss",
+    // crits show the final number. Fired here for the direct-damage path
+    // (ApplyDamage covers the splash/JASS path).
+    if (result.isEvaded) {
+        simulation.FireCombatText(source ? source->GetHandleId() : -1, handleId_,
+                                  CSimulation::CombatTextKind::MISS, 0.0f);
+    } else if (result.isCritical) {
+        simulation.FireCombatText(source ? source->GetHandleId() : -1, handleId_,
+                                  CSimulation::CombatTextKind::CRIT, actualDamage);
+    }
 
     // Defend (Footman/Knight): timed-buff stand-in for the defend toggle;
     // halves weapon-attack damage before it lands (ref Defend reduction).
@@ -1280,46 +1444,85 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         RemoveBuff(War3ID("BUsl"), simulation);
     }
 
-    // Thorns aura: reflect a share of melee attack damage back to the attacker.
-    // Guarded by isAttack+!isRanged so reflected hits never re-reflect
-    // (no ping-pong) and ranged attacks are unaffected (ref listener:
-    // SPELLS attack + DEFENSIVE damage, non-attack).
+    // Thorns aura: reflect a share of melee NORMAL-damage attacks back to
+    // the attacker (ref CUnitDefaultThornsListener: NORMAL type, melee,
+    // victim targetable-as-enemy, ResistsThorns gate). Scales the incoming
+    // BASE (pre-armor, pre-crit), not the sustained actual; the strongest
+    // thorns buff wins when several apply, and Spiked Carapace reflects on
+    // top as its own passive. Reflected hits are sourceless non-attacks of
+    // DEFENSIVE type, so they never re-reflect (no ping-pong) and never
+    // re-proc attacker listeners.
     // Any CBuffThorns counts, whatever its id (Bthr item buff, BEah aura).
-    if (isAttack && !isRanged && source && source != this && actualDamage > 0) {
-        for (const auto& buff : buffs_) {
-            auto* thorns = dynamic_cast<CBuffThorns*>(buff.get());
-            if (!thorns) continue;
-            float reflected = actualDamage * thorns->GetReflectPercent();
-            if (reflected > 0) {
-                source->Damage(simulation, nullptr, false, false,
-                               CAttackType::SPELLS, CDamageType::DEFENSIVE,
-                               "", reflected, 0);
+    if (isAttack && !isRanged && source && source != this &&
+        damageType == CDamageType::NORMAL && actualDamage > 0) {
+        // Enemy gate (ref ENEMY_TARGET check): no reflection for allies.
+        // Mapless tests (no players) stay permissive.
+        bool enemy = true;
+        if (CPlayer* self = simulation.GetPlayer(GetPlayerIndex())) {
+            if (CPlayer* foe = simulation.GetPlayer(source->GetPlayerIndex())) {
+                enemy = !self->HasAlliance(*foe, CAllianceType::ALLIED);
             }
-            break;
         }
-        // Spiked Carapace (Crypt Lord passive): same melee-only reflect
-        // terms as thorns; the armor half rides the unit bonus field.
-        if (auto* carapace = dynamic_cast<CAbilitySpikedCarapace*>(GetAbility(War3ID("AUts")))) {
-            float reflected = actualDamage * carapace->GetReflectPercent();
-            if (reflected > 0) {
-                source->Damage(simulation, nullptr, false, false,
-                               CAttackType::SPELLS, CDamageType::DEFENSIVE,
-                               "", reflected, 0);
+        const bool resisted = simulation.GetGameplayConstants().magicImmuneResistsThorns &&
+                              source->IsMagicImmune();
+        if (enemy && !resisted) {
+            float bestPercent = 0.0f;
+            for (const auto& buff : buffs_) {
+                if (auto* thorns = dynamic_cast<CBuffThorns*>(buff.get())) {
+                    bestPercent = std::max(bestPercent, thorns->GetReflectPercent());
+                }
+            }
+            if (bestPercent > 0.0f) {
+                const float reflected = (incomingBaseDamage + incomingBaseBonus) * bestPercent;
+                if (reflected > 0) {
+                    source->Damage(simulation, nullptr, false, false,
+                                   CAttackType::SPELLS, CDamageType::DEFENSIVE,
+                                   "", reflected, 0);
+                }
+            }
+            // Spiked Carapace (Crypt Lord passive): same melee-only reflect
+            // terms as thorns; the armor half rides the unit bonus field.
+            if (auto* carapace = dynamic_cast<CAbilitySpikedCarapace*>(GetAbility(War3ID("AUts")))) {
+                const float reflected = (incomingBaseDamage + incomingBaseBonus) *
+                                        carapace->GetReflectPercent();
+                if (reflected > 0) {
+                    source->Damage(simulation, nullptr, false, false,
+                                   CAttackType::SPELLS, CDamageType::DEFENSIVE,
+                                   "", reflected, 0);
+                }
             }
         }
     }
 
-    // Vampiric aura: heal the attacker for a share of attack damage dealt.
-    // No leech from buildings or mechanical units (ref lifesteal listener).
+    // Vampiric aura: heal the attacker for a share of attack damage DEALT
+    // (post-mitigation actual, ref lifesteal listener). No leech from
+    // buildings or mechanical units, none across a PASSIVE alliance, none
+    // from magic-immune victims while ResistsLeech is set. Strongest leech
+    // wins when several apply.
     if (isAttack && source && source != this && actualDamage > 0 && !IsBuilding()) {
         bool mechanical = false;
         if (unitType_) {
             const auto& classes = unitType_->GetClassifications();
             mechanical = classes.find(CUnitClassification::MECHANICAL) != classes.end();
         }
-        if (!mechanical) {
-            if (auto* leech = dynamic_cast<CBuffLifesteal*>(source->GetBuff(War3ID("BUav")))) {
-                float healed = source->GetLife() + actualDamage * leech->GetStealPercent();
+        // PASSIVE-alliance gate (ref): mapless tests stay permissive.
+        bool passiveAlly = false;
+        if (CPlayer* atk = simulation.GetPlayer(source->GetPlayerIndex())) {
+            if (CPlayer* vic = simulation.GetPlayer(GetPlayerIndex())) {
+                passiveAlly = atk->HasAlliance(*vic, CAllianceType::PASSIVE);
+            }
+        }
+        const bool resisted = simulation.GetGameplayConstants().magicImmuneResistsLeech &&
+                              IsMagicImmune();
+        if (!mechanical && !passiveAlly && !resisted) {
+            float bestPercent = 0.0f;
+            for (const auto& buff : source->GetBuffs()) {
+                if (auto* leech = dynamic_cast<CBuffLifesteal*>(buff.get())) {
+                    bestPercent = std::max(bestPercent, leech->GetStealPercent());
+                }
+            }
+            if (bestPercent > 0.0f) {
+                float healed = source->GetLife() + actualDamage * bestPercent;
                 if (healed > source->GetMaxLife()) healed = source->GetMaxLife();
                 source->SetLife(simulation, healed);
             }
@@ -1333,48 +1536,24 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         if (auto* bash = dynamic_cast<CAbilityBash*>(source->GetAbility(War3ID("AHbh")))) {
             if (simulation.SimRand01() < bash->GetChance()) {
                 AddBuff(std::make_unique<CBuffStun>(bash->GetDuration()), simulation);
+                simulation.FireCombatText(source->GetHandleId(), handleId_,
+                                          CSimulation::CombatTextKind::BASH, 0.0f);
             }
         }
     }
 
-    // Orb attack modifiers (ref orb listeners): frost chills, corruption
-    // strips armor, fire adds a spell-damage proc. Same isAttack guard as
-    // Bash; procs deal non-attack damage so they never re-proc.
+    // Attack modifier slot (ref attackReplacement): orb/arrow procs are
+    // data-driven effects installed by their abilities, not hardcoded
+    // branches. Exactly one family fires per attack (installing a second
+    // modifier replaces the first); procs deal non-attack damage so they
+    // never re-proc.
     if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
-        if (auto* frost = dynamic_cast<CAbilityOrbOfFrost*>(source->GetAbility(War3ID("AIob")))) {
-            AddBuff(std::make_unique<CBuffSlow>(
-                frost->GetDuration(), frost->GetSlowPercent(), source->GetHandleId()), simulation);
-        }
-        if (auto* corr = dynamic_cast<CAbilityOrbOfCorruption*>(source->GetAbility(War3ID("AIcb")))) {
-            AddBuff(std::make_unique<CBuffArmor>(
-                War3ID("AIcb"), corr->GetDuration(), corr->GetArmorPenalty(), false), simulation);
-        }
-        if (auto* fire = dynamic_cast<CAbilityOrbOfFire*>(source->GetAbility(War3ID("AIfb")))) {
-            Damage(simulation, source, false, false,
-                   CAttackType::SPELLS, CDamageType::FIRE,
-                   "", fire->GetBonusDamage(), 0);
-        }
-        // Cold/Frost Arrows (AHca/ANfa): chilling poison proc on attack.
-        CAbilityColdArrows* arrows = dynamic_cast<CAbilityColdArrows*>(
-            source->GetAbility(War3ID("AHca")));
-        if (!arrows) arrows = dynamic_cast<CAbilityColdArrows*>(
-            source->GetAbility(War3ID("ANfa")));
-        if (arrows) {
-            AddBuff(std::make_unique<CBuffSlow>(
-                arrows->GetSlowDuration(), arrows->GetSlowPercent(), source->GetHandleId()), simulation);
-            AddBuff(std::make_unique<CBuffPoison>(
-                arrows->GetPoisonDuration(), arrows->GetPoisonPerTick(), source->GetHandleId()), simulation);
-        }
-        // Searing Arrows (Priestess toggle): same fire-proc shape as the
-        // orb; per-shot mana cost is behavior-side.
-        if (auto* searing = dynamic_cast<CAbilitySearingArrows*>(source->GetAbility(War3ID("AHfa")))) {
-            Damage(simulation, source, false, false,
-                   CAttackType::SPELLS, CDamageType::FIRE,
-                   "", searing->GetBonusDamage(), 0);
-        }
-        // Cleaving Attack (Pit Lord): share of the landed damage splashes
-        // to the victim's neighbors (ref cleave). Non-attack damage so the
-        // splash itself never re-procs.
+        source->FireAttackModifiers(simulation, this, actualDamage);
+    }
+    // Cleaving Attack (Pit Lord): share of the landed damage splashes
+    // to the victim's neighbors (ref cleave). Non-attack damage so the
+    // splash itself never re-procs.
+    if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
         if (auto* cleave = dynamic_cast<CAbilityCleavingAttack*>(source->GetAbility(War3ID("ANca")))) {
             const float splash = actualDamage * cleave->GetSplashFraction();
             const float radius = cleave->GetSplashRadius();
@@ -1392,35 +1571,35 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                 }
             }
         }
-        // Wind Walk break (ref): landing an attack reveals the attacker;
-        // the strike carries a backstab bonus while the victim stands.
-        if (isAttack && source && source != this && actualDamage > 0) {
-            if (auto* walk = dynamic_cast<CBuffWindWalk*>(source->GetBuff(War3ID("BOwk")))) {
-                const float backstab = walk->GetBackstabDamage();
-                source->RemoveBuff(War3ID("BOwk"), simulation);
-                if (backstab > 0 && !IsDead()) {
-                    Damage(simulation, source, false, false,
-                           CAttackType::SPELLS, CDamageType::NORMAL,
-                           "", backstab, 0);
-                }
+    }
+    // Wind Walk break (ref): landing an attack reveals the attacker;
+    // the strike carries a backstab bonus while the victim stands.
+    if (isAttack && source && source != this && actualDamage > 0) {
+        if (auto* walk = dynamic_cast<CBuffWindWalk*>(source->GetBuff(War3ID("BOwk")))) {
+            const float backstab = walk->GetBackstabDamage();
+            source->RemoveBuff(War3ID("BOwk"), simulation);
+            if (backstab > 0 && !IsDead()) {
+                Damage(simulation, source, false, false,
+                       CAttackType::SPELLS, CDamageType::NORMAL,
+                       "", backstab, 0);
             }
         }
-        // Pulverize (Mountain Giant): chance for the landed damage to
-        // slam the victim's neighbors too (ref). Non-attack, no re-proc.
-        if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
-            if (auto* pulv = dynamic_cast<CAbilityPulverize*>(source->GetAbility(War3ID("Awar")))) {
-                if (simulation.SimRand01() < pulv->GetChance()) {
-                    const float radius = pulv->GetRadius();
-                    for (auto* unit : simulation.GetUnits()) {
-                        if (!unit || unit->IsDead() || unit == this || unit == source) continue;
-                        if (unit->GetPlayerIndex() == source->GetPlayerIndex()) continue;
-                        const float dx = unit->GetX() - GetX();
-                        const float dy = unit->GetY() - GetY();
-                        if (dx * dx + dy * dy <= radius * radius) {
-                            unit->Damage(simulation, source, false, false,
-                                         CAttackType::SPELLS, CDamageType::NORMAL,
-                                         "", actualDamage, 0);
-                        }
+    }
+    // Pulverize (Mountain Giant): chance for the landed damage to
+    // slam the victim's neighbors too (ref). Non-attack, no re-proc.
+    if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
+        if (auto* pulv = dynamic_cast<CAbilityPulverize*>(source->GetAbility(War3ID("Awar")))) {
+            if (simulation.SimRand01() < pulv->GetChance()) {
+                const float radius = pulv->GetRadius();
+                for (auto* unit : simulation.GetUnits()) {
+                    if (!unit || unit->IsDead() || unit == this || unit == source) continue;
+                    if (unit->GetPlayerIndex() == source->GetPlayerIndex()) continue;
+                    const float dx = unit->GetX() - GetX();
+                    const float dy = unit->GetY() - GetY();
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        unit->Damage(simulation, source, false, false,
+                                     CAttackType::SPELLS, CDamageType::NORMAL,
+                                     "", actualDamage, 0);
                     }
                 }
             }

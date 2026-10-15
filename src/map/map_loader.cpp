@@ -5,6 +5,7 @@
 #include "../map/wts.h"
 #include "../ecs/destructable.h"
 #include "../ecs/abilities/ability_inventory.h"
+#include <cmath>
 #include <iostream>
 
 namespace {
@@ -297,7 +298,10 @@ void MapLoader::LoadDoodadsAndDestructibles(const std::string& mapPath) {
                     float maxLife = (float)dt->maxLife;
                     float lifeRatio = std::clamp((float)d.life / 255.0f, 0.0f, 1.0f);
                     float life = maxLife * lifeRatio;
-                    if (sim_.CreateDestructable(doodadId, d.pos[0], d.pos[1], life))
+                    // DOO angles are radians (ref facingRadians); WPM stamps
+                    // take degrees (ref toDegrees for pathing instances).
+                    const int rotDeg = (int)std::round(d.angle * 180.0f / 3.14159265358979323846f);
+                    if (sim_.CreateDestructable(doodadId, d.pos[0], d.pos[1], life, rotDeg))
                         simDestructableCreated++;
                 }
             }

@@ -48,6 +48,45 @@ CAbilityColdArrows::CAbilityColdArrows(int handleId)
     SetTargetType(CSpellTargetType::NO_TARGET);
 }
 
+namespace {
+
+class ColdArrowsEffect : public CAttackModifierEffect {
+public:
+    ColdArrowsEffect(float slowDuration, float slowPercent,
+                     float poisonDuration, float poisonPerTick)
+        : slowDuration_(slowDuration), slowPercent_(slowPercent),
+          poisonDuration_(poisonDuration), poisonPerTick_(poisonPerTick) {}
+    void OnAttackLanded(CSimulation& game, CUnit* attacker, CUnit* victim,
+                        float damageDealt) override {
+        (void)damageDealt;
+        if (!victim) return;
+        const int caster = attacker ? attacker->GetHandleId() : -1;
+        victim->AddBuff(std::make_unique<CBuffSlow>(slowDuration_, slowPercent_, caster), game);
+        victim->AddBuff(std::make_unique<CBuffPoison>(poisonDuration_, poisonPerTick_, caster), game);
+    }
+private:
+    float slowDuration_;
+    float slowPercent_;
+    float poisonDuration_;
+    float poisonPerTick_;
+};
+
+} // namespace
+
+void CAbilityColdArrows::OnAdd(CSimulation& game, CUnit* unit) {
+    (void)game;
+    // ANfa instances alias ANfa (same class, ref X2 column): the alias
+    // keeps the two arrow lines distinct in the shared slot.
+    if (unit) unit->SetAttackModifier(0, GetAlias(),
+        std::make_unique<ColdArrowsEffect>(slowDuration_, slowPercent_,
+                                           poisonDuration_, poisonPerTick_));
+}
+
+void CAbilityColdArrows::OnRemove(CSimulation& game, CUnit* unit) {
+    (void)game;
+    if (unit) unit->ClearAttackModifier(0, GetAlias());
+}
+
 void CAbilityColdArrows::ApplyEffectData(const CAbilityDefFull& def, int level) {
     poisonPerTick_ = def.DataFloatAt(level, 0, poisonPerTick_);
     slowPercent_ = def.DataFloatAt(level, 1, slowPercent_);

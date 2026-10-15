@@ -373,6 +373,25 @@ bool CSimulation::IsPointBlighted(float x, float y) const {
     return blighted;
 }
 
+int CSimulation::GetTerrainHeight(float x, float y) const {
+    if (terrainMap_) {
+        if (const W3ETileCorner* corner = W3ECornerAt(*terrainMap_, x, y)) {
+            return corner->LayerHeight();
+        }
+    }
+    return 999;
+}
+
+bool CSimulation::CheckHighlandMiss(CUnit* attacker, const CWidget* target, bool isAttack) {
+    if (!isAttack || !attacker || !target) return false;
+    if (dynamic_cast<const CUnit*>(target) == nullptr) return false;
+    if (GetTerrainHeight(attacker->GetX(), attacker->GetY()) <
+        GetTerrainHeight(target->GetX(), target->GetY())) {
+        if (SimRand01() < gameplayConstants_.chanceToMiss) return true;
+    }
+    return false;
+}
+
 CUnit* CSimulation::AdoptUnit(std::unique_ptr<CUnit> unit) {
     if (!unit) return nullptr;
     CUnit* ptr = unit.get();
@@ -394,6 +413,7 @@ CUnit* CSimulation::AdoptUnit(std::unique_ptr<CUnit> unit) {
     });
     unitMap_[ptr->GetHandleId()] = std::move(unit);
     newUnits_.push_back(ptr);
+    ptr->RegeneratePathingInstance(*this);
     return ptr;
 }
 
@@ -591,6 +611,9 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
 
     unitMap_[handleId] = std::move(unit);
     newUnits_.push_back(ptr);
+    // Retail setupCreatedUnit: buildings blit their pathTex footprint now
+    // (snapped inside RegeneratePathingInstance).
+    ptr->RegeneratePathingInstance(*this);
 
     return ptr;
 }
@@ -600,7 +623,8 @@ CUnit* CSimulation::GetUnit(int handleId) const {
     return (it != unitMap_.end()) ? it->second.get() : nullptr;
 }
 
-CDestructable* CSimulation::CreateDestructable(War3ID typeId, float x, float y, float life) {
+CDestructable* CSimulation::CreateDestructable(War3ID typeId, float x, float y, float life,
+                                                 int rotationDeg) {
     int handleId = handleIdAlloc_.CreateId();
     auto destructable = std::make_unique<CDestructable>(handleId, typeId, x, y, life);
     if (destructableData_) {
@@ -612,6 +636,9 @@ CDestructable* CSimulation::CreateDestructable(War3ID typeId, float x, float y, 
     CDestructable* ptr = destructable.get();
     destructableMap_[handleId] = std::move(destructable);
     newDestructables_.push_back(ptr);
+    // Retail War3MapViewer: live pathTex now (or death pathTex when the
+    // doodad spawns dead); occlusionHeight drives the vision block.
+    ptr->BindPathing(*this, rotationDeg);
     return ptr;
 }
 
@@ -691,6 +718,9 @@ void CSimulation::AddPostUpdateCallback(std::function<void()> cb) {
 
 void CSimulation::ProcessUnitRemovals() {
     for (auto* unit : removedUnits_) {
+        // Retail removal drops the footprint (ref killPathingInstance on
+        // removeUnit; death already cleared it, guard is idempotent).
+        if (unit) unit->KillPathingInstance(*this);
         if (worldCollision_) {
             worldCollision_->RemoveUnit(unit);
         }
@@ -744,6 +774,7 @@ void CSimulation::ProcessNewUnits() {
 
 void CSimulation::ProcessDestructableRemovals() {
     for (auto* destructable : removedDestructables_) {
+        if (destructable) destructable->UnbindPathing(*this);
         auto it = std::find(destructables_.begin(), destructables_.end(), destructable);
         if (it != destructables_.end()) {
             destructables_.erase(it);

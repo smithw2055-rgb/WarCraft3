@@ -18,6 +18,36 @@ CAbilitySearingArrows::CAbilitySearingArrows(int handleId)
     SetTargetType(CSpellTargetType::NO_TARGET);
 }
 
+namespace {
+
+class SearingArrowsEffect : public CAttackModifierEffect {
+public:
+    explicit SearingArrowsEffect(float bonusDamage) : bonusDamage_(bonusDamage) {}
+    void OnAttackLanded(CSimulation& game, CUnit* attacker, CUnit* victim,
+                        float damageDealt) override {
+        (void)damageDealt;
+        if (!victim) return;
+        victim->Damage(game, attacker, false, false,
+                       CAttackType::SPELLS, CDamageType::FIRE,
+                       "", bonusDamage_, 0);
+    }
+private:
+    float bonusDamage_;
+};
+
+} // namespace
+
+void CAbilitySearingArrows::OnAdd(CSimulation& game, CUnit* unit) {
+    (void)game;
+    if (unit) unit->SetAttackModifier(0, War3ID("AHfa"),
+        std::make_unique<SearingArrowsEffect>(bonusDamage_));
+}
+
+void CAbilitySearingArrows::OnRemove(CSimulation& game, CUnit* unit) {
+    (void)game;
+    if (unit) unit->ClearAttackModifier(0, War3ID("AHfa"));
+}
+
 // ===== Ensnare =====
 CAbilityEnsnare::CAbilityEnsnare(int handleId)
     : CAbilitySpellBase(handleId, War3ID("Aens"), CAbilityCategory::SPELL) {

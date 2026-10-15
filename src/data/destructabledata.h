@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <memory>
 #include "resource/slk.h"
+#include "map/path_tex.h"
 
 struct CDestructableType {
     War3ID id;
@@ -22,10 +23,13 @@ struct CDestructableType {
     std::string deathEffect;
     std::string deathSound;
     std::string deathModel;
+    float occlusionHeight = 0.0f;
     // Pathing footprint textures (ref pathTex/pathTexDeath): decoded on
     // demand for blight checks and (next pass) static WPM stamps.
     std::string pathTex;
     std::string pathTexDeath;
+    std::shared_ptr<const PathTexImage> pathTexImage;
+    std::shared_ptr<const PathTexImage> pathTexDeathImage;
 };
 
 class CDestructableData {
@@ -34,6 +38,8 @@ public:
 
     bool HasDestructable(War3ID id) const;
     const CDestructableType* GetDestructable(War3ID id) const;
+    // Test/script injection (mirrors CUnitData::RegisterUnitType).
+    void RegisterDestructable(War3ID id, std::unique_ptr<CDestructableType> type);
 
     static CDestructableData LoadFromMpq(const class MpqManager& mpq,
                                          const std::string& mapPath = "");

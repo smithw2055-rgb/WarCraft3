@@ -92,8 +92,15 @@ bool CAbilityAttack::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
 bool CAbilityAttack::CheckCanTargetPoint(CSimulation& game, CUnit* unit, int orderId, float x, float y) const {
     (void)game; (void)x; (void)y;
     if (IsDisabled()) return false;
-    // Attack-move or attack-ground
-    return orderId == OrderIds::ATTACK || orderId == OrderIds::ATTACK_GROUND;
+    // Attack-move for every attacker; attack-ground only for shelling
+    // weapons (ref isAttackGroundSupported).
+    if (orderId == OrderIds::ATTACK) return true;
+    if (orderId == OrderIds::ATTACK_GROUND) {
+        if (!unit || !unit->GetUnitType() || unit->GetUnitType()->GetAttacks().empty()) return false;
+        return CWeaponTypeInfo::IsAttackGroundSupported(
+            unit->GetUnitType()->GetAttacks().front().weaponType);
+    }
+    return false;
 }
 
 bool CAbilityAttack::CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const {
@@ -129,6 +136,15 @@ CBehavior* CAbilityAttack::Begin(CSimulation& game, CUnit* caster, int orderId, 
         if (attackMoveBehavior) {
             attackMoveBehavior->SetDestination(x, y);
             return attackMoveBehavior;
+        }
+    }
+    if (orderId == OrderIds::ATTACK_GROUND) {
+        // Shelling weapons hold and fire at the fixed point (ref
+        // ARTILLERY/ALINE point orders).
+        auto* attackBehavior = caster->GetAttackBehavior();
+        if (attackBehavior) {
+            attackBehavior->SetTargetPoint(x, y);
+            return attackBehavior;
         }
     }
     return nullptr;

@@ -126,7 +126,9 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
 
     // Magic immunity (ref CUnitDefaultMagicImmuneDamageModListener): MAGIC
     // attacks fizzle when MagicImmunesResistDamage; SPELLS fizzle unless
-    // UNIVERSAL damage with MagicImmunesResistUltimates off.
+    // UNIVERSAL damage with MagicImmunesResistUltimates off. The inner
+    // conjunction is && (ref): UNIVERSAL always pierces, and non-universal
+    // SPELLS pass while the ultimates gate is off.
     {
         CUnit* targetUnit = dynamic_cast<CUnit*>(target);
         if (targetUnit && targetUnit->IsMagicImmune()) {
@@ -134,7 +136,7 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
                 return result;
             }
             if (attackType == CAttackType::SPELLS && damageType != CDamageType::NORMAL) {
-                if (damageType != CDamageType::UNIVERSAL || magicImmuneResistsUltimates_) {
+                if (damageType != CDamageType::UNIVERSAL && magicImmuneResistsUltimates_) {
                     return result;
                 }
             }
@@ -183,15 +185,22 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
     rolledDamage *= result.multiplier;
     rolledDamage *= etherealMultiplier;
 
-    // Critical strike (ref permanent-crit abilities): multiplies the damage
-    // after the attack/defense matchup, before armor reduction.
+    // Critical strike (ref permanent-crit abilities): every source rolls
+    // independently; when several proc, the strongest multiplier wins
+    // (they never multiply together). Applied after the attack/defense
+    // matchup, before armor reduction.
     if (isAttack && attacker && attacker != targetUnit) {
-        const float chance = attacker->GetCritChance();
-        if (chance > 0.0f) {
-            if (CombatRand01() < chance) {
-                rolledDamage *= std::max(1.0f, attacker->GetCritMultiplier());
-                result.isCritical = true;
+        float bestMultiplier = 1.0f;
+        bool procced = false;
+        for (const auto& src : attacker->GetCritSources()) {
+            if (src.chance > 0.0f && CombatRand01() < src.chance) {
+                procced = true;
+                if (src.multiplier > bestMultiplier) bestMultiplier = src.multiplier;
             }
+        }
+        if (procced) {
+            rolledDamage *= std::max(1.0f, bestMultiplier);
+            result.isCritical = true;
         }
     }
 
@@ -218,11 +227,27 @@ float CCombatSystem::ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidg
                                    float damageBase, float bonusDamage,
                                    int dice, int sidesPerDie) {
     if (!target || target->IsDead()) return 0;
+    // Uphill accuracy (ref CUnitDefaultAccuracyCheckListener; same gate as
+    // CUnit::Damage so splash/JASS paths share the retail miss rule).
+    if (simulation.CheckHighlandMiss(attacker, target, isAttack)) {
+        simulation.FireCombatText(attacker ? attacker->GetHandleId() : -1, target->GetHandleId(),
+                                  CSimulation::CombatTextKind::MISS, 0.0f);
+        return 0;
+    }
 
     auto result = CalculateDamage(attacker, target, isAttack, isRanged,
                                    attackType, damageType,
                                    damageBase, bonusDamage, dice, sidesPerDie);
-    if (result.isEvaded || result.damageDealt <= 0) return 0;
+    if (result.isEvaded) {
+        simulation.FireCombatText(attacker ? attacker->GetHandleId() : -1, target->GetHandleId(),
+                                  CSimulation::CombatTextKind::MISS, 0.0f);
+        return 0;
+    }
+    if (result.damageDealt <= 0) return 0;
+    if (result.isCritical) {
+        simulation.FireCombatText(attacker ? attacker->GetHandleId() : -1, target->GetHandleId(),
+                                  CSimulation::CombatTextKind::CRIT, result.damageDealt);
+    }
 
     float oldLife = target->GetLife();
     float newLife = oldLife - result.damageDealt;
@@ -259,8 +284,22 @@ float CCombatSystem::ApplySplashDamage(CSimulation& simulation, CUnit* attacker,
     if (!target || attack.areaHalf <= 0.0f) {
         return total;
     }
-    const float cx = target->GetX();
-    const float cy = target->GetY();
+    total += ApplySplashDamageAtPoint(simulation, attacker, target->GetX(), target->GetY(),
+                                      isAttack, isRanged, attackType, damageType,
+                                      damageBase, bonusDamage, dice, sidesPerDie, attack, target);
+    return total;
+}
+
+float CCombatSystem::ApplySplashDamageAtPoint(CSimulation& simulation, CUnit* attacker,
+                                              float x, float y,
+                                              bool isAttack, bool isRanged,
+                                              CAttackType attackType, CDamageType damageType,
+                                              float damageBase, float bonusDamage,
+                                              int dice, int sidesPerDie,
+                                              const CUnitAttack& attack,
+                                              const CWidget* excludeWidget) {
+    if (attack.areaHalf <= 0.0f) return 0.0f;
+    float total = 0.0f;
     const float fullSq = attack.areaFull * attack.areaFull;
     const float halfSq = attack.areaHalf * attack.areaHalf;
     const float quarterSq = attack.areaQuarter * attack.areaQuarter;
@@ -270,7 +309,7 @@ float CCombatSystem::ApplySplashDamage(CSimulation& simulation, CUnit* attacker,
         ownerPlayer = simulation.GetPlayer(attacker->GetPlayerIndex());
     }
     for (CUnit* other : simulation.GetUnits()) {
-        if (!other || other == target || other == attacker || other->IsDead()) continue;
+        if (!other || other == excludeWidget || other == attacker || other->IsDead()) continue;
         // Allies (and the attacker itself) are immune to friendly splash.
         bool isAlly = false;
         if (attacker) {
@@ -283,12 +322,12 @@ float CCombatSystem::ApplySplashDamage(CSimulation& simulation, CUnit* attacker,
             }
         }
         if (isAlly) continue;
-        const float dx = other->GetX() - cx;
-        const float dy = other->GetY() - cy;
+        const float dx = other->GetX() - x;
+        const float dy = other->GetY() - y;
         const float distSq = dx * dx + dy * dy;
         float factor = 0.0f;
         if (distSq <= fullSq) {
-            factor = 1.0f; // inside the full-damage area alongside the primary
+            factor = 1.0f; // inside the full-damage area
         } else if (distSq <= halfSq) {
             factor = attack.damageFactorHalf;
         } else if (attack.areaQuarter > 0.0f && distSq <= quarterSq) {
@@ -304,6 +343,57 @@ float CCombatSystem::ApplySplashDamage(CSimulation& simulation, CUnit* attacker,
     return total;
 }
 
+float CCombatSystem::ApplyLineDamage(CSimulation& simulation, CUnit* attacker,
+                                     float x0, float y0, float dirX, float dirY,
+                                     bool isAttack, bool isRanged,
+                                     CAttackType attackType, CDamageType damageType,
+                                     float damageBase, float bonusDamage,
+                                     int dice, int sidesPerDie,
+                                     float spillDistance, float spillRadius,
+                                     const CWidget* excludeWidget) {
+    if (spillDistance <= 0.0f || spillRadius <= 0.0f) return 0.0f;
+    const float len = std::sqrt(dirX * dirX + dirY * dirY);
+    if (len <= 0.0f) return 0.0f;
+    const float nx = dirX / len;
+    const float ny = dirY / len;
+    float total = 0.0f;
+
+    CPlayer* ownerPlayer = nullptr;
+    if (attacker) {
+        ownerPlayer = simulation.GetPlayer(attacker->GetPlayerIndex());
+    }
+    for (CUnit* other : simulation.GetUnits()) {
+        if (!other || other == excludeWidget || other == attacker || other->IsDead()) continue;
+        bool isAlly = false;
+        if (attacker) {
+            if (ownerPlayer) {
+                if (CPlayer* otherPlayer = simulation.GetPlayer(other->GetPlayerIndex())) {
+                    isAlly = ownerPlayer->HasAlliance(*otherPlayer, CAllianceType::ALLIED);
+                }
+            } else {
+                isAlly = other->GetPlayerIndex() == attacker->GetPlayerIndex();
+            }
+        }
+        if (isAlly) continue;
+        // Distance from the spill segment [p0, p0 + dir*spillDistance].
+        const float rx = other->GetX() - x0;
+        const float ry = other->GetY() - y0;
+        float t = rx * nx + ry * ny;
+        if (t < 0.0f) t = 0.0f;
+        if (t > spillDistance) t = spillDistance;
+        const float cx = x0 + nx * t;
+        const float cy = y0 + ny * t;
+        const float dx = other->GetX() - cx;
+        const float dy = other->GetY() - cy;
+        if (dx * dx + dy * dy > spillRadius * spillRadius) continue;
+        // Spill carries the full attack (no ring falloff).
+        total += ApplyDamage(simulation, attacker, other, isAttack, isRanged,
+                             attackType, damageType, "",
+                             damageBase, bonusDamage, dice, sidesPerDie);
+    }
+    return total;
+}
+
 float CCombatSystem::CalcArmorDamageReduction(int defense, int attackerLevel, float defenseArmor) {
     // Single source of truth lives in CDefenseTypeInfo (ref armor formula
     // including the negative-armor branch); kept here for API compatibility.
@@ -313,10 +403,14 @@ float CCombatSystem::CalcArmorDamageReduction(int defense, int attackerLevel, fl
 bool CCombatSystem::CheckEvasion(CUnit* target, CUnit* attacker) {
     (void)attacker;
     if (!target) return false;
-    const float chance = target->GetEvasionChance();
-    if (chance <= 0.0f) return false;
-    if (chance >= 1.0f) return true;
-    return CombatRand01() < chance;
+    // Ref evasionListeners loop: every source rolls independently; the
+    // attack is evaded when any roll succeeds (miss = miss || roll).
+    for (const auto& src : target->GetEvasionSources()) {
+        if (src.chance <= 0.0f) continue;
+        if (src.chance >= 1.0f) return true;
+        if (CombatRand01() < src.chance) return true;
+    }
+    return false;
 }
 
 float CCombatSystem::ApplyCritical(float damage, float chance, float multiplier) {

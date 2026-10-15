@@ -45,11 +45,76 @@ void CBehaviorAttack::End(CSimulation& simulation) {
 
 void CBehaviorAttack::SetTarget(CWidget* target) {
     target_ = target;
+    pointTarget_ = false;
     waypoints_.clear();
 }
 
+void CBehaviorAttack::SetTargetPoint(float x, float y) {
+    target_ = nullptr;
+    pointTarget_ = true;
+    pointX_ = x;
+    pointY_ = y;
+    waypoints_.clear();
+}
+
+void CBehaviorAttack::FireAtPoint(CSimulation& simulation, const CUnitAttack& attack,
+                                  float damageAmount, const std::string& weaponSound,
+                                  bool ranged, float x, float y) {
+    const bool firesProjectile = ranged &&
+        attack.weaponType != CWeaponType::INSTANT && attack.projectileSpeed > 0.0f;
+    if (firesProjectile) {
+        CProjectile shot;
+        shot.attackerHandleId = unit_->GetHandleId();
+        shot.targetHandleId = -1;
+        shot.groundTarget = true;
+        shot.x = unit_->GetX();
+        shot.y = unit_->GetY();
+        shot.fx = shot.x;
+        shot.fy = shot.y;
+        shot.tx = x;
+        shot.ty = y;
+        shot.speed = attack.projectileSpeed;
+        shot.damage = damageAmount;
+        shot.attackType = attack.attackType;
+        shot.weaponSound = weaponSound;
+        if (CWeaponTypeInfo::IsSplashWeapon(attack.weaponType) && attack.areaHalf > 0.0f) {
+            shot.splashFull = attack.areaFull;
+            shot.splashHalf = attack.areaHalf;
+            shot.splashQuarter = attack.areaQuarter;
+            shot.splashFactorHalf = attack.damageFactorHalf;
+            shot.splashFactorQuarter = attack.damageFactorQuarter;
+            shot.splashBonus = (float)unit_->GetBonusDamage();
+        }
+        if (CWeaponTypeInfo::IsLineWeapon(attack.weaponType) &&
+            attack.damageSpillRadius > 0.0f && attack.damageSpillDistance > 0.0f) {
+            shot.spillDistance = attack.damageSpillDistance;
+            shot.spillRadius = attack.damageSpillRadius;
+        }
+        const float dx0 = x - shot.x;
+        const float dy0 = y - shot.y;
+        shot.maxTravel = std::sqrt(dx0 * dx0 + dy0 * dy0) + 512.0f;
+        simulation.SpawnProjectile(std::move(shot));
+        return;
+    }
+    auto* combat = simulation.GetCombatSystem();
+    if (!combat) return;
+    if (attack.areaHalf > 0.0f) {
+        combat->ApplySplashDamageAtPoint(simulation, unit_, x, y, true, ranged,
+                                         attack.attackType, CDamageType::NORMAL,
+                                         damageAmount, 0, 0, 0, attack);
+    } else if (CWeaponTypeInfo::IsLineWeapon(attack.weaponType) &&
+               attack.damageSpillRadius > 0.0f && attack.damageSpillDistance > 0.0f) {
+        combat->ApplyLineDamage(simulation, unit_, unit_->GetX(), unit_->GetY(),
+                                x - unit_->GetX(), y - unit_->GetY(), true, ranged,
+                                attack.attackType, CDamageType::NORMAL,
+                                damageAmount, 0, 0, 0,
+                                attack.damageSpillDistance, attack.damageSpillRadius);
+    }
+}
+
 bool CBehaviorAttack::Update(CSimulation& simulation) {
-    if (!unit_ || !target_) return true;
+    if (!unit_) return true;
+    if (!target_ && !pointTarget_) return true;
     // Hexed units cannot attack (but may still move). Stay alive and idle
     // so the behavior resumes when the hex expires (ref hex).
     if (unit_->IsHexed() || unit_->AreAttacksDisabled()) {
@@ -58,11 +123,14 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
         return false;
     }
     // A target that turns invisible mid-chase is lost (ref invisibility).
-    if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
-        if (targetUnit->IsInvisibleTo(unit_)) {
-            ResetAttackSwingState();
-            propelling_ = false;
-            return true;
+    // Ground points never decloak.
+    if (!pointTarget_) {
+        if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+            if (targetUnit->IsInvisibleTo(unit_)) {
+                ResetAttackSwingState();
+                propelling_ = false;
+                return true;
+            }
         }
     }
     const CUnitAttack* attack = GetPrimaryAttack();
@@ -71,8 +139,10 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
     }
     attackRange_ = unit_->GetAttackRange(0);
 
-    float dx = target_->GetX() - unit_->GetX();
-    float dy = target_->GetY() - unit_->GetY();
+    const float tx = pointTarget_ ? pointX_ : target_->GetX();
+    const float ty = pointTarget_ ? pointY_ : target_->GetY();
+    float dx = tx - unit_->GetX();
+    float dy = ty - unit_->GetY();
     float dist = std::sqrt(dx * dx + dy * dy);
 
     const int currentTick = simulation.GetGameTurnTick();
@@ -99,8 +169,8 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
             bool shouldRecalculate = waypoints_.empty();
             if (!shouldRecalculate && !waypoints_.empty()) {
                 const auto& lastWp = waypoints_.back();
-                const float ddx = lastWp.first - target_->GetX();
-                const float ddy = lastWp.second - target_->GetY();
+                const float ddx = lastWp.first - tx;
+                const float ddy = lastWp.second - ty;
                 shouldRecalculate = (ddx * ddx + ddy * ddy) > (kRecalcDist * kRecalcDist);
             }
             if (shouldRecalculate) {
@@ -108,7 +178,7 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
                 if (pathfinding) {
                     std::vector<std::pair<float,float>> worldPath;
                     if (pathfinding->FindPathWorld(unit_->GetX(), unit_->GetY(),
-                                                    target_->GetX(), target_->GetY(),
+                                                    tx, ty,
                                                     std::max(0.0f, unit_->GetCollisionSize()),
                                                     unit_->GetMovementType(), unit_, worldPath)) {
                         for (size_t i = 1; i < worldPath.size(); i++) {
@@ -165,7 +235,7 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
             return false;
         }
 
-        if (!unit_->TurnTowardPoint(target_->GetX(), target_->GetY())) {
+        if (!unit_->TurnTowardPoint(tx, ty)) {
             propelling_ = false;
             return false;
         }
@@ -192,7 +262,7 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
     }
 
     propelling_ = false;
-    if (!unit_->TurnTowardPoint(target_->GetX(), target_->GetY())) {
+    if (!unit_->TurnTowardPoint(tx, ty)) {
         return false;
     }
 
@@ -218,6 +288,13 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
         damageAmount += (float)unit_->GetBonusDamage();
 
         const bool ranged = CWeaponTypeInfo::IsRanged(attack->weaponType);
+        // Attack-ground shells the fixed point (no widget): holding fire
+        // that keeps shelling while the order stands.
+        if (pointTarget_) {
+            FireAtPoint(simulation, *attack, damageAmount, weaponSound, ranged, tx, ty);
+            damageAppliedThisSwing_ = true;
+            return false;
+        }
         const bool firesProjectile = ranged &&
             attack->weaponType != CWeaponType::INSTANT && attack->projectileSpeed > 0.0f;
         if (firesProjectile) {
@@ -227,11 +304,13 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
             shot.targetHandleId = target_->GetHandleId();
             shot.x = unit_->GetX();
             shot.y = unit_->GetY();
+            shot.fx = shot.x;
+            shot.fy = shot.y;
             shot.speed = attack->projectileSpeed;
             shot.damage = damageAmount;
             shot.attackType = attack->attackType;
             shot.weaponSound = weaponSound;
-            if (attack->weaponType == CWeaponType::MISSILE_SPLASH && attack->areaHalf > 0.0f) {
+            if (CWeaponTypeInfo::IsSplashWeapon(attack->weaponType) && attack->areaHalf > 0.0f) {
                 shot.splashFull = attack->areaFull;
                 shot.splashHalf = attack->areaHalf;
                 shot.splashQuarter = attack->areaQuarter;
@@ -239,10 +318,25 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
                 shot.splashFactorQuarter = attack->damageFactorQuarter;
                 shot.splashBonus = (float)unit_->GetBonusDamage();
             }
+            if (CWeaponTypeInfo::IsLineWeapon(attack->weaponType) &&
+                attack->damageSpillRadius > 0.0f && attack->damageSpillDistance > 0.0f) {
+                shot.spillDistance = attack->damageSpillDistance;
+                shot.spillRadius = attack->damageSpillRadius;
+            }
             if (attack->weaponType == CWeaponType::MISSILE_BOUNCE && attack->targetCount > 0) {
                 shot.bouncesLeft = attack->targetCount;
                 shot.bounceRange = attack->areaHalf > 0.0f ? attack->areaHalf : 500.0f;
                 shot.bounceLossFactor = attack->damageLossFactor > 0.0f ? attack->damageLossFactor : 1.0f;
+            }
+            if (attack->weaponType == CWeaponType::ARTILLERY) {
+                // Ref CBehaviorAttack: shells are ballistic to the
+                // launch-time position, not homing (the point target is
+                // stamped here so the shell still lands if the victim
+                // moves or dies mid-flight).
+                shot.groundTarget = true;
+                shot.targetHandleId = -1;
+                shot.tx = target_->GetX();
+                shot.ty = target_->GetY();
             }
             const float dx0 = target_->GetX() - shot.x;
             const float dy0 = target_->GetY() - shot.y;
@@ -265,7 +359,7 @@ bool CBehaviorAttack::Update(CSimulation& simulation) {
                             weaponSound, damageAmount, 0);
         }
         damageAppliedThisSwing_ = true;
-        if (target_->IsDead()) {
+        if (!pointTarget_ && target_ && target_->IsDead()) {
             return true; // target dead, behavior done
         }
     }

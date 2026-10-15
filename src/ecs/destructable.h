@@ -45,6 +45,15 @@ public:
     // Occluder height for the renderer (ref Get/SetDestructableOccluderHeight).
     float GetOccluderHeight() const { return occluderHeight_; }
     void SetOccluderHeight(float v) { occluderHeight_ = v; }
+    // Pathing footprints (ref RemovablePathingMapInstance pair): live
+    // pathTex while alive, pathTexDeath once dead. Bind on creation,
+    // swap on life transitions, unbind on removal.
+    void BindPathing(CSimulation& sim, int rotationDeg);
+    void RefreshPathingAfterLifeChange(CSimulation& sim);
+    void UnbindPathing(CSimulation& sim);
+    int GetPathingStampId() const { return pathingStampId_; }
+    int GetDeathStampId() const { return deathStampId_; }
+    void SetLife(CSimulation& simulation, float life) override;
 
 private:
     War3ID typeId_;
@@ -55,4 +64,7 @@ private:
     std::string animation_;
     std::string queuedAnimation_;
     int animGeneration_ = 0;
+    int pathingStampId_ = -1;
+    int deathStampId_ = -1;
+    int pathingRotationDeg_ = 0;
 };

@@ -163,13 +163,27 @@ bool TestDoodadSimWiring();
 bool TestWeatherEffectLifecycle();
 bool TestSplashDamagesEnemiesNotAllies();
 bool TestProjectileBounceChainsWithFalloff();
+bool TestArtilleryProjectileSplashes();
+bool TestAttackGroundShellsPoint();
+bool TestMissileLineSpillsCorridor();
 bool TestEvasionNegatesAttacks();
+bool TestEvasionSourcesCombine();
+bool TestCritSourcesHighestWins();
+bool TestCombatTextEventsFire();
+bool TestBashFiresCombatText();
 bool TestCriticalStrikeMultipliesDamage();
 bool TestAbilityAndBuffMapMods();
 bool TestUpgradeMapModsAndBaseCosts();
 bool TestThornsAuraGrantsReflectBuff();
 bool TestVampiricAuraHealsAttacker();
 bool TestVampiricAuraViaAuraAbility();
+bool TestThornsScalesOnIncomingBase();
+bool TestThornsRequiresNormalType();
+bool TestThornsBlockedByAlliance();
+bool TestThornsResistsGate();
+bool TestThornsStrongestWins();
+bool TestLeechBlockedByPassiveAlliance();
+bool TestLeechResistsGate();
 bool TestRootUprootSwapAndHold();
 bool TestRootMorphBehaviorHoldsThenCompletes();
 bool TestMoveIntoRangeHelper();
@@ -214,6 +228,9 @@ bool TestNonNormalDamageTypeIgnoresArmorValue();
 bool TestNegativeArmorAmplifiesDamage();
 bool TestBonusDamageIsMultipliedNotBypassing();
 bool TestCombatSystemBlockedMathConsistent();
+bool TestHighlandMissUphill();
+bool TestHighlandNoMissDownhillFlatAndSpells();
+bool TestHighlandNoMissVsDestructableAndOffMap();
 bool TestItemLifeSurvivesHeroRecalc();
 bool TestUpgradeLifeSurvivesHeroLevelUp();
 bool TestMaxLossClampsLifeButGainDoesNotHeal();
@@ -330,6 +347,8 @@ bool TestSpells8FactoryCoverage();
 bool TestOrbOfFrostChills();
 bool TestOrbOfCorruptionStrips();
 bool TestOrbOfFireProcs();
+bool TestAttackModifiersDoNotStack();
+bool TestAttackModifierRemovedWithAbility();
 bool TestIllusionCopiesTarget();
 bool TestLightningShieldWandZaps();
 bool TestAnkhReincarnates();
@@ -464,6 +483,9 @@ bool TestUpgradeAndPowerup();
 bool TestItemPickupAppliesBonuses();
 bool TestBuildRejectsUnbuildableCell();
 bool TestBuildFootprintUsesPathTex();
+bool TestWpmStampRebuild();
+bool TestBuildingStampLifecycle();
+bool TestDestructableDeathSwap();
 bool TestBlightAndHauntedMine();
 bool TestWispAndLumberHarvest();
 bool TestAcolyteBindingPersistsAndReleasesOnDeath();
@@ -835,13 +857,27 @@ int main(int argc, char** argv) {
         {"Weather effect lifecycle", TestWeatherEffectLifecycle},
         {"Splash damages enemies not allies", TestSplashDamagesEnemiesNotAllies},
         {"Projectile bounce chains with falloff", TestProjectileBounceChainsWithFalloff},
+        {"Artillery projectile splashes", TestArtilleryProjectileSplashes},
+        {"Attack ground shells point", TestAttackGroundShellsPoint},
+        {"Missile line spills corridor", TestMissileLineSpillsCorridor},
         {"Evasion negates attacks", TestEvasionNegatesAttacks},
+        {"Evasion sources combine", TestEvasionSourcesCombine},
+        {"Crit sources highest wins", TestCritSourcesHighestWins},
+        {"Combat text events fire", TestCombatTextEventsFire},
+        {"Bash fires combat text", TestBashFiresCombatText},
         {"Critical strike multiplies damage", TestCriticalStrikeMultipliesDamage},
         {"Ability and buff map mods", TestAbilityAndBuffMapMods},
         {"Upgrade map mods and base costs", TestUpgradeMapModsAndBaseCosts},
         {"Thorns aura grants reflect buff", TestThornsAuraGrantsReflectBuff},
         {"Vampiric aura heals attacker", TestVampiricAuraHealsAttacker},
         {"Vampiric aura via aura ability", TestVampiricAuraViaAuraAbility},
+        {"Thorns scales on incoming base", TestThornsScalesOnIncomingBase},
+        {"Thorns requires normal type", TestThornsRequiresNormalType},
+        {"Thorns blocked by alliance", TestThornsBlockedByAlliance},
+        {"Thorns resists gate", TestThornsResistsGate},
+        {"Thorns strongest wins", TestThornsStrongestWins},
+        {"Leech blocked by passive alliance", TestLeechBlockedByPassiveAlliance},
+        {"Leech resists gate", TestLeechResistsGate},
         {"Root/uproot swap and hold", TestRootUprootSwapAndHold},
         {"Root morph holds then completes", TestRootMorphBehaviorHoldsThenCompletes},
         {"Move-into-range helper", TestMoveIntoRangeHelper},
@@ -892,6 +928,9 @@ int main(int argc, char** argv) {
         {"Negative armor amplifies damage", TestNegativeArmorAmplifiesDamage},
         {"Bonus damage is multiplied, not bypassing", TestBonusDamageIsMultipliedNotBypassing},
         {"Combat blocked math consistent", TestCombatSystemBlockedMathConsistent},
+        {"Highland miss uphill", TestHighlandMissUphill},
+        {"Highland no miss downhill/flat/spells", TestHighlandNoMissDownhillFlatAndSpells},
+        {"Highland no miss vs destructable/off-map", TestHighlandNoMissVsDestructableAndOffMap},
         {"Item life survives hero recalc", TestItemLifeSurvivesHeroRecalc},
         {"Upgrade life survives hero level-up", TestUpgradeLifeSurvivesHeroLevelUp},
         {"Max loss clamps life, gain does not heal", TestMaxLossClampsLifeButGainDoesNotHeal},
@@ -1002,6 +1041,8 @@ int main(int argc, char** argv) {
         {"Orb of frost chills", TestOrbOfFrostChills},
         {"Orb of corruption strips", TestOrbOfCorruptionStrips},
         {"Orb of fire procs", TestOrbOfFireProcs},
+        {"Attack modifiers do not stack", TestAttackModifiersDoNotStack},
+        {"Attack modifier removed with ability", TestAttackModifierRemovedWithAbility},
         {"Illusion copies target", TestIllusionCopiesTarget},
         {"Lightning shield wand zaps", TestLightningShieldWandZaps},
         {"Ankh reincarnates", TestAnkhReincarnates},
@@ -1136,6 +1177,9 @@ int main(int argc, char** argv) {
         {"Item pickup applies bonuses", TestItemPickupAppliesBonuses},
         {"Build rejects unbuildable cell", TestBuildRejectsUnbuildableCell},
         {"Build footprint uses pathTex", TestBuildFootprintUsesPathTex},
+        {"WPM stamp rebuild", TestWpmStampRebuild},
+        {"Building stamp lifecycle", TestBuildingStampLifecycle},
+        {"Destructable death swap", TestDestructableDeathSwap},
         {"Blight and haunted mine", TestBlightAndHauntedMine},
         {"Wisp and lumber harvest", TestWispAndLumberHarvest},
         {"Acolyte binding persists, releases on death", TestAcolyteBindingPersistsAndReleasesOnDeath},

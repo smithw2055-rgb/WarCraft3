@@ -30,10 +30,12 @@ private:
 
 // ===== Cold Arrows (AHca) - chilling poison arrows =====
 // Sea Witch Frost Arrows (ANfa) share this base (ref X2 code column).
-// Toggle mana cost is behavior-side; the proc lives in Damage.
+// Toggle mana cost is behavior-side; the proc is a slot effect.
 class CAbilityColdArrows : public CAbilitySpellBase {
 public:
     CAbilityColdArrows(int handleId);
+    void OnAdd(CSimulation& game, CUnit* unit) override;
+    void OnRemove(CSimulation& game, CUnit* unit) override;
     float GetSlowPercent() const { return slowPercent_; }
     float GetSlowDuration() const { return slowDuration_; }
     float GetPoisonPerTick() const { return poisonPerTick_; }
