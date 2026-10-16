@@ -126,3 +126,111 @@ bool TestLocalStoreNatives() {
         {JassValue::Int(store), JassValue::Str("k")}).boolVal);
     return true;
 }
+
+bool TestBlzFrameNatives() {
+    Fixture f;
+    // Create + lookup round-trip; repeated lookups alias the same frame.
+    const int frame = CallNative(f.vm, "BlzCreateFrame",
+        {JassValue::Str("MyBox"), JassValue::Int(0), JassValue::Int(1), JassValue::Int(0)}).intVal;
+    TEST_ASSERT(frame != 0);
+    const int simple = CallNative(f.vm, "BlzCreateSimpleFrame",
+        {JassValue::Str("MyText"), JassValue::Int(frame), JassValue::Int(0)}).intVal;
+    TEST_ASSERT(simple != 0 && simple != frame);
+    const int byName = CallNative(f.vm, "BlzGetFrameByName",
+        {JassValue::Str("MyBox"), JassValue::Int(0)}).intVal;
+    TEST_ASSERT(byName != 0);
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetName", {JassValue::Int(frame)}).strVal == "MyBox");
+    // Origin frames are stable singletons per (type, index).
+    const int o1 = CallNative(f.vm, "BlzGetOriginFrame",
+        {JassValue::Int(0), JassValue::Int(0)}).intVal;
+    const int o2 = CallNative(f.vm, "BlzGetOriginFrame",
+        {JassValue::Int(0), JassValue::Int(0)}).intVal;
+    TEST_ASSERT(o1 != 0 && o2 != 0);
+    {
+        const int s1 = f.data->GetSimHandle(o1, JassHandleInfo::FRAME);
+        const int s2 = f.data->GetSimHandle(o2, JassHandleInfo::FRAME);
+        TEST_ASSERT(s1 >= 0 && s1 == s2);
+    }
+    // Text set/get/append + size limit.
+    CallNative(f.vm, "BlzFrameSetText", {JassValue::Int(frame), JassValue::Str("Hello")});
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetText", {JassValue::Int(frame)}).strVal == "Hello");
+    CallNative(f.vm, "BlzFrameAddText", {JassValue::Int(frame), JassValue::Str(" World")});
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetText", {JassValue::Int(frame)}).strVal == "Hello World");
+    CallNative(f.vm, "BlzFrameSetTextSizeLimit", {JassValue::Int(frame), JassValue::Int(99)});
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetTextSizeLimit", {JassValue::Int(frame)}).intVal == 99);
+    // Visible / enable / focus / click / alpha round-trips.
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameIsVisible", {JassValue::Int(frame)}).boolVal);
+    CallNative(f.vm, "BlzFrameSetVisible", {JassValue::Int(frame), JassValue::Bool(false)});
+    TEST_ASSERT(!CallNative(f.vm, "BlzFrameIsVisible", {JassValue::Int(frame)}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetEnable", {JassValue::Int(frame)}).boolVal);
+    CallNative(f.vm, "BlzFrameSetEnable", {JassValue::Int(frame), JassValue::Bool(false)});
+    TEST_ASSERT(!CallNative(f.vm, "BlzFrameGetEnable", {JassValue::Int(frame)}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameSetFocus", {JassValue::Int(frame), JassValue::Bool(true)}).boolVal);
+    CallNative(f.vm, "BlzFrameClick", {JassValue::Int(frame)});
+    CallNative(f.vm, "BlzFrameSetAlpha", {JassValue::Int(frame), JassValue::Int(128)});
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetAlpha", {JassValue::Int(frame)}).intVal == 128);
+    // Points + size + value + min/max/step round-trips.
+    CallNative(f.vm, "BlzFrameSetAbsPoint",
+        {JassValue::Int(frame), JassValue::Int(0), JassValue::Real(0.1f), JassValue::Real(0.2f)});
+    CallNative(f.vm, "BlzFrameSetPoint",
+        {JassValue::Int(simple), JassValue::Int(0), JassValue::Int(frame),
+         JassValue::Int(0), JassValue::Real(0), JassValue::Real(0)});
+    CallNative(f.vm, "BlzFrameSetSize",
+        {JassValue::Int(frame), JassValue::Real(0.3f), JassValue::Real(0.05f)});
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetWidth", {JassValue::Int(frame)}).realVal == 0.3f);
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetHeight", {JassValue::Int(frame)}).realVal == 0.05f);
+    CallNative(f.vm, "BlzFrameSetValue", {JassValue::Int(frame), JassValue::Real(42.5f)});
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetValue", {JassValue::Int(frame)}).realVal == 42.5f);
+    CallNative(f.vm, "BlzFrameSetMinMaxValue",
+        {JassValue::Int(frame), JassValue::Real(0), JassValue::Real(100)});
+    CallNative(f.vm, "BlzFrameSetStepSize", {JassValue::Int(frame), JassValue::Real(5)});
+    CallNative(f.vm, "BlzFrameSetScale", {JassValue::Int(frame), JassValue::Real(1.5f)});
+    CallNative(f.vm, "BlzFrameSetModel",
+        {JassValue::Int(frame), JassValue::Str("UI\\Model.mdx"), JassValue::Int(0)});
+    CallNative(f.vm, "BlzFrameSetTexture",
+        {JassValue::Int(frame), JassValue::Str("UI\\Tex.blp"), JassValue::Int(0), JassValue::Bool(true)});
+    CallNative(f.vm, "BlzFrameSetSpriteAnimate",
+        {JassValue::Int(frame), JassValue::Int(1), JassValue::Int(0)});
+    CallNative(f.vm, "BlzFrameSetVertexColor",
+        {JassValue::Int(frame), JassValue::Int((int32_t)0xFF00FF00)});
+    CallNative(f.vm, "BlzFrameSetLevel", {JassValue::Int(frame), JassValue::Int(3)});
+    CallNative(f.vm, "BlzFrameCageMouse", {JassValue::Int(frame), JassValue::Bool(true)});
+    // Parent / children / tooltip linkage.
+    CallNative(f.vm, "BlzFrameSetParent", {JassValue::Int(simple), JassValue::Int(frame)});
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetChildrenCount", {JassValue::Int(frame)}).intVal == 1);
+    const int kid = CallNative(f.vm, "BlzFrameGetChild", {JassValue::Int(frame), JassValue::Int(0)}).intVal;
+    TEST_ASSERT(kid != 0);
+    {
+        const int ks = f.data->GetSimHandle(kid, JassHandleInfo::FRAME);
+        const int ss = f.data->GetSimHandle(simple, JassHandleInfo::FRAME);
+        TEST_ASSERT(ks >= 0 && ks == ss);
+    }
+    const int par = CallNative(f.vm, "BlzFrameGetParent", {JassValue::Int(simple)}).intVal;
+    TEST_ASSERT(par != 0);
+    {
+        const int ps = f.data->GetSimHandle(par, JassHandleInfo::FRAME);
+        const int fs = f.data->GetSimHandle(frame, JassHandleInfo::FRAME);
+        TEST_ASSERT(ps >= 0 && ps == fs);
+    }
+    CallNative(f.vm, "BlzFrameSetTooltip", {JassValue::Int(frame), JassValue::Int(simple)});
+    // Global toggles + TOC + clear-points.
+    CallNative(f.vm, "BlzEnableUIAutoPosition", {JassValue::Bool(false)});
+    TEST_ASSERT(!f.data->uiAutoPosition);
+    CallNative(f.vm, "BlzHideOriginFrames", {JassValue::Bool(true)});
+    TEST_ASSERT(f.data->hideOriginFrames);
+    TEST_ASSERT(CallNative(f.vm, "BlzLoadTOCFile", {JassValue::Str("UI\\Custom.toc")}).boolVal);
+    CallNative(f.vm, "BlzFrameClearAllPoints", {JassValue::Int(frame)});
+    CallNative(f.vm, "BlzFrameSetAllPoints", {JassValue::Int(frame), JassValue::Int(o1)});
+    // Destroy invalidates; getters go safe-zero, name becomes reusable.
+    CallNative(f.vm, "BlzDestroyFrame", {JassValue::Int(simple)});
+    TEST_ASSERT(!CallNative(f.vm, "BlzFrameIsVisible", {JassValue::Int(simple)}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetText", {JassValue::Int(simple)}).strVal.empty());
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetChildrenCount", {JassValue::Int(frame)}).intVal == 0);
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetChild", {JassValue::Int(frame), JassValue::Int(0)}).intVal == 0);
+    // Bad handles are safe no-ops.
+    CallNative(f.vm, "BlzFrameSetText", {JassValue::Int(999999), JassValue::Str("x")});
+    TEST_ASSERT(!CallNative(f.vm, "BlzFrameIsVisible", {JassValue::Int(999999)}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "BlzFrameGetParent", {JassValue::Int(999999)}).intVal == 0);
+    TEST_ASSERT(!CallNative(f.vm, "BlzFrameSetFocus", {JassValue::Int(999999), JassValue::Bool(true)}).boolVal);
+    return true;
+}

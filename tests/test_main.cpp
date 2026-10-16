@@ -304,6 +304,7 @@ bool TestJassFiles();
 bool TestJassSmallBatch();
 bool TestFrameNatives();
 bool TestLocalStoreNatives();
+bool TestBlzFrameNatives();
 bool TestJassEventFiring();
 bool TestRetailMapSmoke();
 bool TestTimedLifeKillsBearerOnExpiry();
@@ -1031,6 +1032,7 @@ int main(int argc, char** argv) {
         {"JASS small batch", TestJassSmallBatch},
         {"JASS frames", TestFrameNatives},
         {"JASS localstore", TestLocalStoreNatives},
+        {"Blz frame natives", TestBlzFrameNatives},
         {"JASS event firing", TestJassEventFiring},
         {"Retail map smoke", TestRetailMapSmoke},
         {"Timed life kills bearer on expiry", TestTimedLifeKillsBearerOnExpiry},

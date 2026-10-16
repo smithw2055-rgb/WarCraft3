@@ -11933,6 +11933,348 @@ void JassNatives::RegisterFrameNatives() {
         auto it = data->skinFields.find(args[0].strVal);
         return JassValue::Str(it != data->skinFields.end() ? it->second : "");
     });
+
+    vm_.RegisterNative("SkinGetField", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.empty()) return JassValue::Str("");
+        auto it = data->skinFields.find(args[0].strVal);
+        return JassValue::Str(it != data->skinFields.end() ? it->second : "");
+    });
+
+    // Retail Blz frame family (common.j 1.29+): same JassFrame store as the
+    // legacy CreateFrame set above. Getters read back setter state with
+    // retail defaults; bad handles are safe no-ops / zero values. The Java
+    // ref implements none of these, so signatures follow retail common.j.
+    auto frameSimOf = [data = data_](int jassHandle) -> int {
+        if (!data) return -1;
+        return data->GetSimHandle(jassHandle, JassHandleInfo::FRAME);
+    };
+    auto allocFrameHandle = [data = data_](int simId) -> JassValue {
+        if (!data || simId < 0) return JassValue::Int(0);
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::FRAME, simId));
+    };
+    auto numArg = [](const JassValue& v) -> float {
+        return v.type == JassValue::REAL ? v.realVal : (float)v.intVal;
+    };
+    vm_.RegisterNative("BlzCreateFrame", [data = data_, allocFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 4) return JassValue::Int(0);
+        return allocFrame(args[0].strVal, args[1].intVal, args[3].intVal, args[2].intVal, false);
+    });
+    vm_.RegisterNative("BlzCreateSimpleFrame", [data = data_, allocFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 3) return JassValue::Int(0);
+        return allocFrame(args[0].strVal, args[1].intVal, args[2].intVal, 0, true);
+    });
+    vm_.RegisterNative("BlzDestroyFrame", [data = data_, frameSimOf](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        const int simId = frameSimOf(args[0].intVal);
+        if (simId < 0) return JassValue::Null();
+        auto it = data->frames.find(simId);
+        if (it == data->frames.end()) return JassValue::Null();
+        // Detach from parent / children and drop the name mapping so the
+        // name becomes reusable (retail destroys the frame object).
+        for (auto& [id, f] : data->frames) {
+            (void)id;
+            if (!f) continue;
+            auto& kids = f->childSimIds;
+            kids.erase(std::remove(kids.begin(), kids.end(), simId), kids.end());
+            if (f->parentSimId == simId) f->parentSimId = -1;
+            if (f->tooltipSimId == simId) f->tooltipSimId = -1;
+        }
+        for (auto nit = data->framesByName.begin(); nit != data->framesByName.end();) {
+            if (nit->second == simId) nit = data->framesByName.erase(nit);
+            else ++nit;
+        }
+        data->frames.erase(it);
+        data->FreeHandle(args[0].intVal);
+        return JassValue::Null();
+    });
+    auto blzGetByName = [data = data_, allocFrame](const std::string& name, int ctx) -> JassValue {
+        auto it = data->framesByName.find(name);
+        if (it != data->framesByName.end())
+            return JassValue::Int(data->AllocHandle(JassHandleInfo::FRAME, it->second));
+        return allocFrame(name, 0, ctx, 0, false);
+    };
+    vm_.RegisterNative("BlzGetFrameByName", [data = data_, blzGetByName](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 2) return JassValue::Int(0);
+        return blzGetByName(args[0].strVal, args[1].intVal);
+    });
+    vm_.RegisterNative("BlzGetOriginFrame", [data = data_, blzGetByName](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 2) return JassValue::Int(0);
+        // Retail origin frames (ConsoleUI etc.) are stable singletons;
+        // synthesize one per (type, index) through the name registry.
+        return blzGetByName("ORIGIN_" + std::to_string(args[0].intVal) + "_" +
+                                std::to_string(args[1].intVal),
+                            0);
+    });
+    vm_.RegisterNative("BlzFrameGetName", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Str("");
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Str(f->name);
+        return JassValue::Str("");
+    });
+    vm_.RegisterNative("BlzFrameSetPoint", [getFrame, frameSimOf, numArg](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 6) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            JassNativesData::JassFrameAnchor a;
+            a.point = args[1].intVal;
+            a.otherHandle = args[2].intVal;
+            a.otherPoint = args[3].intVal;
+            a.x = numArg(args[4]);
+            a.y = numArg(args[5]);
+            f->anchors.push_back(a);
+            f->positioned = true;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetAbsPoint", [getFrame, numArg](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            JassNativesData::JassFrameAnchor a;
+            a.point = args[1].intVal;
+            a.absolute = true;
+            a.x = numArg(args[2]);
+            a.y = numArg(args[3]);
+            f->anchors.push_back(a);
+            f->positioned = true;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameClearAllPoints", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            f->anchors.clear();
+            f->positioned = false;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetAllPoints", [getFrame, frameSimOf](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            f->anchors.clear();
+            f->positioned = true;
+            (void)frameSimOf(args[1].intVal);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetVisible", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->visible = args[1].boolVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameIsVisible", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Bool(f->visible);
+        return JassValue::Bool(false);
+    });
+    vm_.RegisterNative("BlzFrameClick", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Null();
+        (void)getFrame(args[0].intVal); // no click dispatch without a viewer
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetText", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->text = args[1].strVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameGetText", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Str("");
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Str(f->text);
+        return JassValue::Str("");
+    });
+    vm_.RegisterNative("BlzFrameAddText", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->text += args[1].strVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetTextSizeLimit", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->textSizeLimit = args[1].intVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameGetTextSizeLimit", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Int(f->textSizeLimit);
+        return JassValue::Int(0);
+    });
+    vm_.RegisterNative("BlzFrameSetFocus", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Bool(false);
+        if (auto f = getFrame(args[0].intVal)) {
+            f->focused = args[1].boolVal;
+            return JassValue::Bool(true);
+        }
+        return JassValue::Bool(false);
+    });
+    vm_.RegisterNative("BlzFrameSetModel", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            f->model = args[1].strVal;
+            f->modelCamera = args[2].intVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetEnable", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->enabled = args[1].boolVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameGetEnable", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Bool(f->enabled);
+        return JassValue::Bool(false);
+    });
+    vm_.RegisterNative("BlzFrameSetAlpha", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->alpha = args[1].intVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameGetAlpha", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Int(f->alpha);
+        return JassValue::Int(0);
+    });
+    vm_.RegisterNative("BlzFrameSetSpriteAnimate", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            f->spritePrimaryProp = args[1].intVal;
+            f->spriteFlags = args[2].intVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetTexture", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 4) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            f->texture = args[1].strVal;
+            f->textureFlag = args[2].intVal;
+            f->textureBlend = args[3].boolVal;
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetScale", [getFrame, numArg](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->scale = numArg(args[1]);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetTooltip", [data = data_, getFrame, frameSimOf](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            f->tooltipSimId = frameSimOf(args[1].intVal);
+        }
+        (void)data;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameCageMouse", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->cageMouse = args[1].boolVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameGetValue", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Real(0.0f);
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Real(f->value);
+        return JassValue::Real(0.0f);
+    });
+    vm_.RegisterNative("BlzFrameSetValue", [getFrame, numArg](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->value = numArg(args[1]);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetMinMaxValue", [getFrame, numArg](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            f->minValue = numArg(args[1]);
+            f->maxValue = numArg(args[2]);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetStepSize", [getFrame, numArg](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->stepSize = numArg(args[1]);
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetSize", [getFrame, numArg](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 3) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) {
+            f->width = numArg(args[1]);
+            f->height = numArg(args[2]);
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameSetVertexColor", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->vertexColor = (uint32_t)args[1].intVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzEnableUIAutoPosition", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.empty()) return JassValue::Null();
+        data->uiAutoPosition = args[0].boolVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzHideOriginFrames", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.empty()) return JassValue::Null();
+        data->hideOriginFrames = args[0].boolVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzLoadTOCFile", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.empty()) return JassValue::Bool(false);
+        data->loadedTocFiles.push_back(args[0].strVal);
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("BlzFrameGetParent", [data = data_, getFrame, allocFrameHandle](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        auto f = getFrame(args[0].intVal);
+        if (!f) return JassValue::Int(0);
+        (void)data;
+        return allocFrameHandle(f->parentSimId);
+    });
+    vm_.RegisterNative("BlzFrameSetParent", [data = data_, getFrame, frameSimOf](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        auto f = getFrame(args[0].intVal);
+        if (!f) return JassValue::Null();
+        const int newParent = frameSimOf(args[1].intVal);
+        if (f->parentSimId >= 0) {
+            if (auto it = data->frames.find(f->parentSimId); it != data->frames.end() && it->second) {
+                auto& kids = it->second->childSimIds;
+                kids.erase(std::remove(kids.begin(), kids.end(),
+                                       data->GetSimHandle(args[0].intVal, JassHandleInfo::FRAME)),
+                           kids.end());
+            }
+        }
+        f->parentSimId = newParent;
+        if (newParent >= 0) {
+            if (auto it = data->frames.find(newParent); it != data->frames.end() && it->second) {
+                const int self = data->GetSimHandle(args[0].intVal, JassHandleInfo::FRAME);
+                auto& kids = it->second->childSimIds;
+                if (std::find(kids.begin(), kids.end(), self) == kids.end()) kids.push_back(self);
+            }
+        }
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameGetHeight", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Real(0.0f);
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Real(f->height);
+        return JassValue::Real(0.0f);
+    });
+    vm_.RegisterNative("BlzFrameGetWidth", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Real(0.0f);
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Real(f->width);
+        return JassValue::Real(0.0f);
+    });
+    vm_.RegisterNative("BlzFrameSetLevel", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Null();
+        if (auto f = getFrame(args[0].intVal)) f->level = args[1].intVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("BlzFrameGetChildrenCount", [getFrame](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Int(0);
+        if (auto f = getFrame(args[0].intVal)) return JassValue::Int((int)f->childSimIds.size());
+        return JassValue::Int(0);
+    });
+    vm_.RegisterNative("BlzFrameGetChild", [data = data_, getFrame, allocFrameHandle](const std::vector<JassValue>& args) -> JassValue {
+        if (args.size() < 2) return JassValue::Int(0);
+        auto f = getFrame(args[0].intVal);
+        if (!f) return JassValue::Int(0);
+        (void)data;
+        const int idx = args[1].intVal;
+        if (idx < 0 || idx >= (int)f->childSimIds.size()) return JassValue::Int(0);
+        return allocFrameHandle(f->childSimIds[(size_t)idx]);
+    });
 }
 
 // ============================================================

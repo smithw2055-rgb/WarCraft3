@@ -1067,6 +1067,33 @@ public:
         uint32_t textColor = 0xFFFFFFFF;
         std::vector<JassFrameAnchor> anchors;
         bool positioned = false;
+        // Blz frame state (retail getters read back what setters store;
+        // rendering stays a later pass, same as the legacy FrameSet* set).
+        bool visible = true;
+        bool enabled = true;
+        bool focused = false;
+        bool cageMouse = false;
+        int alpha = 255;
+        int textSizeLimit = 0;
+        int level = 0;
+        float value = 0.0f;
+        float minValue = 0.0f;
+        float maxValue = 0.0f;
+        float stepSize = 0.0f;
+        float width = 0.0f;
+        float height = 0.0f;
+        float scale = 1.0f;
+        uint32_t vertexColor = 0xFFFFFFFF;
+        std::string model;
+        int modelCamera = 0;
+        std::string texture;
+        int textureFlag = 0;
+        bool textureBlend = false;
+        int spritePrimaryProp = 0;
+        int spriteFlags = 0;
+        int parentSimId = -1;
+        int tooltipSimId = -1;
+        std::vector<int> childSimIds; // sim ids, insertion order
     };
     std::unordered_map<int, std::shared_ptr<JassFrame>> frames;
     int nextFrameId = 0x27000000;
@@ -1074,6 +1101,8 @@ public:
     std::unordered_map<std::string, std::string> skinFields;
     std::string skinName;
     std::vector<std::string> loadedTocFiles;
+    bool uiAutoPosition = true;
+    bool hideOriginFrames = false;
 
     // Warsmash LocalStore (ref CreateLocalStore/SetLocalStore*/GetLocalStore*):
     // string-keyed typeless bag per handle so AB/config scripts round-trip.
