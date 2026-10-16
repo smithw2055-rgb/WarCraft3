@@ -734,6 +734,9 @@ bool TestDestructableTargetedAsGate();
 bool TestDestructableDeathDrops();
 bool TestDestructableOccluderInit();
 bool TestRetailTargTypeParses();
+bool TestSpellTargetWidgets();
+bool TestUnitIllusionFlag();
+bool TestEffectZRidesFlyHeight();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1463,6 +1466,9 @@ int main(int argc, char** argv) {
         {"Destructable death drops", TestDestructableDeathDrops},
         {"Destructable occluder init", TestDestructableOccluderInit},
         {"Retail targType parses", TestRetailTargTypeParses},
+        {"Spell target widgets", TestSpellTargetWidgets},
+        {"Unit illusion flag", TestUnitIllusionFlag},
+        {"Effect Z rides fly height", TestEffectZRidesFlyHeight},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

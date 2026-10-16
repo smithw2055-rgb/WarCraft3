@@ -2456,9 +2456,9 @@ void GameController::WireJassCallbacks() {
     );
 
     simulation_.SetSpellEventCallback(
-        [this](int casterHandle, int stage) {
+        [this](int casterHandle, int stage, int targetSimHandle, float x, float y) {
             if (jassNatives_) {
-                jassNatives_->FireSpellEvent(casterHandle, stage);
+                jassNatives_->FireSpellEvent(casterHandle, stage, targetSimHandle, x, y);
             }
         }
     );

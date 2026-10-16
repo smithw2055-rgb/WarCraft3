@@ -330,9 +330,9 @@ void JassCommonEnv::WireCallbacks(CSimulation& sim) {
         }
     );
     sim.SetSpellEventCallback(
-        [this](int casterHandle, int stage) {
+        [this](int casterHandle, int stage, int targetSimHandle, float x, float y) {
             if (natives_)
-                natives_->FireSpellEvent(casterHandle, stage);
+                natives_->FireSpellEvent(casterHandle, stage, targetSimHandle, x, y);
         }
     );
 }

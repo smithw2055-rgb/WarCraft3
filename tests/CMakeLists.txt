@@ -48,6 +48,7 @@ add_executable(warsmash_tests
     test_random_tables.cpp
     test_pathing_types.cpp
     test_destructable_targeting.cpp
+    test_spell_event.cpp
     test_ability_builder.cpp
     test_spells3.cpp
     test_spells4.cpp

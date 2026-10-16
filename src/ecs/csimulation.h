@@ -370,11 +370,16 @@ public:
         heroRevivedCallback_ = std::move(cb);
     }
     const std::function<void(int, int)>& GetHeroRevivedCallback() const { return heroRevivedCallback_; }
-    // Spell lifecycle (caster handle, stage 0=channel 1=cast 2=effect 3=finish 4=endcast).
-    void SetSpellEventCallback(std::function<void(int casterHandle, int stage)> cb) {
+    // Spell lifecycle (caster handle, stage 0=channel 1=cast 2=effect
+    // 3=finish 4=endcast; target widget sim handle or -1, plus the aimed
+    // point so GetSpellTarget* event state can be populated).
+    void SetSpellEventCallback(std::function<void(int casterHandle, int stage, int targetSimHandle,
+                                                  float x, float y)> cb) {
         spellEventCallback_ = std::move(cb);
     }
-    const std::function<void(int, int)>& GetSpellEventCallback() const { return spellEventCallback_; }
+    const std::function<void(int, int, int, float, float)>& GetSpellEventCallback() const {
+        return spellEventCallback_;
+    }
 
 private:
     void ProcessUnitRemovals();
@@ -466,5 +471,5 @@ private:
     std::function<void(int, int)> unitSummonedCallback_;
     std::function<void(int, int)> researchFinishedCallback_;
     std::function<void(int, int)> heroRevivedCallback_;
-    std::function<void(int, int)> spellEventCallback_;
+    std::function<void(int, int, int, float, float)> spellEventCallback_;
 };

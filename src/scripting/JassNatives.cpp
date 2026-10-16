@@ -390,6 +390,8 @@ JassQueuedContext JassNatives::CaptureContext() const {
     context.eventSpellTargetX = data_->eventSpellTargetX;
     context.eventSpellTargetY = data_->eventSpellTargetY;
     context.eventSpellTargetUnitHandle = data_->eventSpellTargetUnitHandle;
+    context.eventSpellTargetDestructableHandle = data_->eventSpellTargetDestructableHandle;
+    context.eventSpellTargetItemHandle = data_->eventSpellTargetItemHandle;
     context.eventTriggerPlayerHandle = data_->eventTriggerPlayerHandle;
     context.eventTriggerWidgetHandle = data_->eventTriggerWidgetHandle;
     context.eventEnteringUnitHandle = data_->eventEnteringUnitHandle;
@@ -458,6 +460,8 @@ void JassNatives::ApplyContext(const JassQueuedContext& context) {
     data_->eventSpellTargetX = context.eventSpellTargetX;
     data_->eventSpellTargetY = context.eventSpellTargetY;
     data_->eventSpellTargetUnitHandle = context.eventSpellTargetUnitHandle;
+    data_->eventSpellTargetDestructableHandle = context.eventSpellTargetDestructableHandle;
+    data_->eventSpellTargetItemHandle = context.eventSpellTargetItemHandle;
     data_->eventTriggerPlayerHandle = context.eventTriggerPlayerHandle;
     data_->eventTriggerWidgetHandle = context.eventTriggerWidgetHandle;
     data_->eventEnteringUnitHandle = context.eventEnteringUnitHandle;
@@ -1344,10 +1348,31 @@ void JassNatives::FireReviveCancelEvent(int buildingSimHandle, int heroSimHandle
     data_->eventRevivingUnitHandle = -1;
 }
 
-void JassNatives::FireSpellEvent(int casterSimHandle, int stage) {
+void JassNatives::FireSpellEvent(int casterSimHandle, int stage, int targetSimHandle,
+                                float x, float y) {
     if (casterSimHandle < 0) return;
     // stage: 0=channel 1=cast 2=effect 3=finish 4=endcast (ref
     // EVENT_UNIT_SPELL_* 289-293 + player counterparts 272-276).
+    // Target context feeds GetSpellTargetUnit/Destructable/Item/X/Y (ref
+    // spell event state); exactly one widget-kind handle is live per cast.
+    data_->eventSpellTargetX = x;
+    data_->eventSpellTargetY = y;
+    data_->eventSpellTargetUnitHandle = -1;
+    data_->eventSpellTargetDestructableHandle = -1;
+    data_->eventSpellTargetItemHandle = -1;
+    if (targetSimHandle >= 0 && sim_) {
+        if (CUnit* targetUnit = sim_->GetUnit(targetSimHandle)) {
+            data_->eventSpellTargetUnitHandle =
+                data_->AllocHandle(JassHandleInfo::UNIT, targetUnit->GetHandleId());
+        } else if (CDestructable* targetDest = sim_->GetDestructable(targetSimHandle)) {
+            data_->eventSpellTargetDestructableHandle =
+                data_->AllocHandle(JassHandleInfo::DESTRUCTABLE, targetDest->GetHandleId());
+        } else if (CItem* targetItem = sim_->GetItem(targetSimHandle)) {
+            data_->items[targetItem->GetHandleId()] = targetItem;
+            data_->eventSpellTargetItemHandle =
+                data_->AllocHandle(JassHandleInfo::ITEM, targetItem->GetHandleId());
+        }
+    }
     static const int kUnit[5] = {
         JASS_EVENT_UNIT_SPELL_CHANNEL, JASS_EVENT_UNIT_SPELL_CAST,
         JASS_EVENT_UNIT_SPELL_EFFECT, JASS_EVENT_UNIT_SPELL_FINISH,
@@ -6526,10 +6551,22 @@ void JassNatives::RegisterEffectNatives() {
         if (args.empty()) return JassValue::Real(0);
         return JassValue::Real(effectPos(args[0].intVal, 1));
     });
-    vm_.RegisterNative("BlzGetSpecialEffectZ", [](const std::vector<JassValue>&) -> JassValue {
-        // Height offsets need the renderer's fly-height/attach-projection;
-        // sim-side height is flat 0 (documented until the scene pass lands).
-        return JassValue::Real(0);
+    vm_.RegisterNative("BlzGetSpecialEffectZ", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Real(0);
+        const int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::EFFECT);
+        if (id < 0) return JassValue::Real(0);
+        auto it = data->effects.find(id);
+        if (it == data->effects.end()) return JassValue::Real(0);
+        const auto& e = it->second;
+        // Point effects report the stored height; attached effects ride the
+        // target's fly height plus the stored offset (same follow rule as
+        // X/Y, which track the widget position).
+        if (e->targetSimHandle >= 0 && sim) {
+            if (CWidget* w = sim->GetWidget(e->targetSimHandle)) {
+                return JassValue::Real(e->z + w->GetFlyHeight());
+            }
+        }
+        return JassValue::Real(e->z);
     });
     // NOTE: Add/Remove/EnableWeatherEffect live in RegisterWeatherNatives
     // (registered later, so they own these names); no stubs here.
@@ -14765,11 +14802,13 @@ void JassNatives::RegisterMiscNatives() {
         const int owner = caster ? caster->GetHandleId() : -1;
         return JassValue::Int(AbilityToHandle(*data, War3ID((uint32_t)data->eventSpellAbilityId), level, owner));
     });
-    vm_.RegisterNative("GetSpellTargetDestructable", [](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Null(); // object-target tracking covers units; none otherwise
+    vm_.RegisterNative("GetSpellTargetDestructable", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        if (!data || data->eventSpellTargetDestructableHandle < 0) return JassValue::Int(0);
+        return JassValue::Int(data->eventSpellTargetDestructableHandle);
     });
-    vm_.RegisterNative("GetSpellTargetItem", [](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Null();
+    vm_.RegisterNative("GetSpellTargetItem", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        if (!data || data->eventSpellTargetItemHandle < 0) return JassValue::Int(0);
+        return JassValue::Int(data->eventSpellTargetItemHandle);
     });
     vm_.RegisterNative("GetTournamentFinishNowPlayer", [](const std::vector<JassValue>&) -> JassValue {
         return JassValue::Null(); // tournament rules unsupported; no player
@@ -14839,8 +14878,10 @@ void JassNatives::RegisterMiscNatives() {
         if (unit->IsInvisible()) return JassValue::Bool(false);
         return JassValue::Bool(sim->GetFogSystem()->IsVisibleTo(player, unit->GetX(), unit->GetY()));
     });
-    vm_.RegisterNative("IsUnitIllusion", [](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Bool(false); // illusion flag not simulated
+    vm_.RegisterNative("IsUnitIllusion", [getUnit](const std::vector<JassValue>& args) -> JassValue {
+        if (args.empty()) return JassValue::Bool(false);
+        CUnit* unit = getUnit(args[0].intVal);
+        return JassValue::Bool(unit && unit->IsIllusion());
     });
     vm_.RegisterNative("IsUnitInTransport", [getUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);

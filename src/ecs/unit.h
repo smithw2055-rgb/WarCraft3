@@ -211,6 +211,10 @@ public:
     bool IsSilenced() const;
     bool IsAsleep() const;
     bool IsSummoned() const;
+    // Illusion flag (ref IsUnitIllusion): set on Mirror Image / Wand of
+    // Illusion copies at summon time; never cleared while alive.
+    bool IsIllusion() const { return illusion_; }
+    void SetIsIllusion(bool v) { illusion_ = v; }
     // Spell effect reaction (ref CheckUnitForAbilityEffectReaction):
     // returns true when an enemy-targeted spell effect may land. A present
     // Spell Shield (BNss) is consumed and the effect fizzles instead.
@@ -564,6 +568,7 @@ private:
     std::unordered_set<int> sharedVision_;
     bool ethereal_ = false;
     bool magicImmune_ = false;
+    bool illusion_ = false;
     // Morph snapshot (ref alternate-form units).
     bool morphed_ = false;
     CUnitType* originalType_ = nullptr;

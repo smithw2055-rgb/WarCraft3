@@ -8,6 +8,22 @@
 
 CBehaviorSpell::CBehaviorSpell() {}
 
+namespace {
+
+// Spell-event context for the JASS event state (ref GetSpellTarget*):
+// widget target sim handle (or -1) plus the aimed point.
+void FireSpellStage(CSimulation& simulation, CUnit* caster, CWidget* target,
+                    bool hasPoint, float px, float py, int stage) {
+    auto& cb = simulation.GetSpellEventCallback();
+    if (!cb || !caster) return;
+    const int targetHandle = target ? target->GetHandleId() : -1;
+    const float x = hasPoint ? px : (target ? target->GetX() : caster->GetX());
+    const float y = hasPoint ? py : (target ? target->GetY() : caster->GetY());
+    cb(caster->GetHandleId(), stage, targetHandle, x, y);
+}
+
+} // namespace
+
 void CBehaviorSpell::SetTarget(CWidget* target) {
     target_ = target;
     hasPointTarget_ = false;
@@ -169,10 +185,8 @@ bool CBehaviorSpell::Update(CSimulation& simulation) {
             castTimer_ = 0;
             spellAnimationStartTick_ = simulation.GetGameTurnTick();
             spellAnimationDuration_ = std::max(0.05f, castPoint_ + backswingDuration_);
-            if (auto& cb = simulation.GetSpellEventCallback()) {
-                cb(unit_->GetHandleId(), 0); // channel
-                cb(unit_->GetHandleId(), 1); // cast
-            }
+            FireSpellStage(simulation, unit_, target_, hasPointTarget_, targetX_, targetY_, 0); // channel
+            FireSpellStage(simulation, unit_, target_, hasPointTarget_, targetX_, targetY_, 1); // cast
             return false;
         }
 
@@ -198,9 +212,7 @@ bool CBehaviorSpell::Update(CSimulation& simulation) {
                     } else {
                         spellAbility_->DoEffect(simulation, unit_);
                     }
-                    if (auto& cb = simulation.GetSpellEventCallback()) {
-                        cb(unit_->GetHandleId(), 2); // effect
-                    }
+                    FireSpellStage(simulation, unit_, target_, hasPointTarget_, targetX_, targetY_, 2); // effect
                 }
                 state_ = CastState::BACKSWING;
                 backswingTimer_ = 0;
@@ -213,10 +225,8 @@ bool CBehaviorSpell::Update(CSimulation& simulation) {
             backswingTimer_ += dt;
             if (backswingTimer_ >= backswingDuration_) {
                 state_ = CastState::DONE;
-                if (auto& cb = simulation.GetSpellEventCallback()) {
-                    cb(unit_->GetHandleId(), 3); // finish
-                    cb(unit_->GetHandleId(), 4); // endcast
-                }
+                FireSpellStage(simulation, unit_, target_, hasPointTarget_, targetX_, targetY_, 3); // finish
+                FireSpellStage(simulation, unit_, target_, hasPointTarget_, targetX_, targetY_, 4); // endcast
                 return true;
             }
             return false;

@@ -905,6 +905,10 @@ public:
     float eventSpellTargetX = 0;
     float eventSpellTargetY = 0;
     int eventSpellTargetUnitHandle = -1;
+    // Widget-kind spell targets (ref GetSpellTargetDestructable/Item):
+    // exactly one of the three target handles is live per cast.
+    int eventSpellTargetDestructableHandle = -1;
+    int eventSpellTargetItemHandle = -1;
 
     // General event state
     int eventTriggerPlayerHandle = -1;
@@ -1189,6 +1193,8 @@ struct JassQueuedContext {
     float eventSpellTargetX = 0.0f;
     float eventSpellTargetY = 0.0f;
     int eventSpellTargetUnitHandle = -1;
+    int eventSpellTargetDestructableHandle = -1;
+    int eventSpellTargetItemHandle = -1;
     int eventTriggerPlayerHandle = -1;
     int eventTriggerWidgetHandle = -1;
     int eventEnteringUnitHandle = -1;
@@ -1302,7 +1308,8 @@ public:
     void FireRevivableEvent(int heroSimHandle);
     void FireReviveStartEvent(int buildingSimHandle, int heroSimHandle);
     void FireReviveCancelEvent(int buildingSimHandle, int heroSimHandle);
-    void FireSpellEvent(int casterSimHandle, int stage);
+    void FireSpellEvent(int casterSimHandle, int stage, int targetSimHandle = -1,
+                        float x = 0.0f, float y = 0.0f);
     void FireTrackableEvent(int trackableHandle, int eventCode);
     void NotifyTrackableClick(float x, float y);
     void FireDialogButtonEvent(int buttonJassHandle);

@@ -662,9 +662,12 @@ void ABActionSummonCopyOfTarget::Run(CSimulation& game, CUnit* caster, CWidget* 
                                      bool, float, float) {
     auto* target = dynamic_cast<CUnit*>(unitTarget);
     if (!caster || !target || target->IsDead()) return;
-    SummonTimedUnit(game, caster, target->GetTypeId(), buffAlias_,
-                    target->GetX() + offsetX_, target->GetY() + offsetY_,
-                    target->GetFacing(), duration_);
+    CUnit* copy = SummonTimedUnit(game, caster, target->GetTypeId(), buffAlias_,
+                                  target->GetX() + offsetX_, target->GetY() + offsetY_,
+                                  target->GetFacing(), duration_);
+    // Both producers (Mirror Image, Wand of Illusion) raise illusions (ref
+    // IsUnitIllusion reads the copy flag, not the timed-life buff).
+    if (copy) copy->SetIsIllusion(true);
 }
 
 ABActionAnimateDeadCorpse::ABActionAnimateDeadCorpse(War3ID buffAlias, float duration)
