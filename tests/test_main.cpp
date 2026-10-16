@@ -739,6 +739,7 @@ bool TestRetailTargTypeParses();
 bool TestSpellTargetWidgets();
 bool TestUnitIllusionFlag();
 bool TestEffectZRidesFlyHeight();
+bool TestPortraitPathRule();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1473,6 +1474,7 @@ int main(int argc, char** argv) {
         {"Spell target widgets", TestSpellTargetWidgets},
         {"Unit illusion flag", TestUnitIllusionFlag},
         {"Effect Z rides fly height", TestEffectZRidesFlyHeight},
+        {"Portrait path rule", TestPortraitPathRule},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

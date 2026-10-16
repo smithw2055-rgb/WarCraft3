@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "core/map_path_resolver.h"
 #include "map/object_mods.h"
 #include "model/mdl.h"
 #include "resource/slk.h"
@@ -874,6 +875,22 @@ bool SceneManager::HasItemPath(uint32_t war3ID, uint32_t skinId) const {
         return true;
     }
     return itemPaths_.find(war3ID) != itemPaths_.end();
+}
+
+std::string SceneManager::PortraitPathFor(uint32_t war3ID, uint32_t skinId) const {
+    // Mirror the AddUnit skin-first lookup, then apply the portrait rule
+    // (ref RenderWidgetTypeData.getPortraitModel).
+    const uint32_t* ids[2] = {&skinId, &war3ID};
+    for (int i = 0; i < 2; ++i) {
+        const uint32_t id = *ids[i];
+        if (i == 0 && (id == 0 || id == war3ID)) continue;
+        auto it = unitPaths_.find(id);
+        if (it == unitPaths_.end() || it->second.empty()) continue;
+        const std::string portrait = PortraitPathForModel(it->second);
+        if (!portrait.empty() && mpq_ && mpq_->FileExists(portrait)) return portrait;
+        return it->second;
+    }
+    return {};
 }
 
 int SceneManager::AddItem(uint32_t war3ID, const float pos[3], float angle,

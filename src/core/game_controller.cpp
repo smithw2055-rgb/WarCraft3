@@ -5728,7 +5728,8 @@ void GameController::RefreshSelectionUi(bool rebuildCommandCard) {
     if (sel.empty()) {
         selectedUnitHandle_ = -1; selectedUnitTypeId_ = War3ID();
         ui_.SetSelectedUnit(-1); ui_.SetMultiSelection({}); ui_.ClearInfoPanel();
-        ui_.HideHeroPanel(); ui_.ClearPendingCommand(); return;
+        ui_.HideHeroPanel(); ui_.ClearPendingCommand(); ui_.SetPortraitModel("");
+        return;
     }
 
     CUnit* primary = nullptr;
@@ -5737,6 +5738,9 @@ void GameController::RefreshSelectionUi(bool rebuildCommandCard) {
     selectedUnitHandle_ = primary->GetHandleId();
     selectedUnitTypeId_ = primary->GetTypeId();
     ui_.SetSelectedUnit(selectedUnitHandle_);
+    // 3D portrait binding (ref portraitModel per selected unit): resolve
+    // the portrait variant for the viewport state; rendering follows later.
+    ui_.SetPortraitModel(scene_.PortraitPathFor(selectedUnitTypeId_.value));
     (void)rebuildCommandCard;
     ui_.SetUnitData(&unitData_);
     ui_.PopulateCommandCardForUnit(primary);

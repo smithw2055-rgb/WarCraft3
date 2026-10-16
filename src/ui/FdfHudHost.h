@@ -106,6 +106,10 @@ public:
     void SetQueue(const std::vector<HudQueueItem>& items, float progressRatio);
     void SetInventory(const std::vector<HudInventoryItem>& items, int capacity, bool available);
     void SetPortraitIcon(const std::string& iconUri);
+    // 3D portrait viewport state (P3-21): model resolved from the selected
+    // unit type; the render pass draws it when the portrait pipeline lands.
+    void SetPortraitModel(const std::string& modelPath) { portraitModelPath_ = modelPath; }
+    const std::string& GetPortraitModel() const { return portraitModelPath_; }
     void SetBuffs(const std::vector<HudBuffItem>& buffs);
     void OpenGameMenu();
     void OpenGameMenuDebugPanel(const std::string& panel);
@@ -277,6 +281,7 @@ private:
     bool inventoryAvailable_ = false;
     int inventoryCapacity_ = 0;
     std::string portraitIconUri_;
+    std::string portraitModelPath_;
     std::array<HudBuffItem, 8> buffStates_{};
     int buffCount_ = 0;
     std::array<MultiSelectUnitInfo, 12> multiSelectStates_{};

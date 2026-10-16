@@ -2,7 +2,7 @@
 
 > 对照原版 Warsmash Java（`warsmash_ref/`）与 C++ 版（`src/`）。
 > 联机（Battle.net/UDP）明确排除。
-> 已完成 Gap-fill 1–51（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础、占位像素图+静态 stamp、高地 miss、穿刺线/炮击、伤害替换框架、闪避暴击叠加、荆棘吸血语义、死亡序列、非叠加攻击属性、溅射 miss/负伤/无敌监听、w3i 开局科技/随机表、通行 movement-type/边界环/水面定义、可破坏物 targeting/掉落、BlzFrame 全系、地形雾、spell 目标、存档槽、JassAbility 对象等）。
+> 已完成 Gap-fill 1–52（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础、占位像素图+静态 stamp、高地 miss、穿刺线/炮击、伤害替换框架、闪避暴击叠加、荆棘吸血语义、死亡序列、非叠加攻击属性、溅射 miss/负伤/无敌监听、w3i 开局科技/随机表、通行 movement-type/边界环/水面定义、可破坏物 targeting/掉落、BlzFrame 全系、地形雾、spell 目标、存档槽、JassAbility 对象、肖像绑定等）。
 
 ## P0：战斗模拟正确性（影响对局）
 
@@ -36,7 +36,7 @@
 
 ## P3：视觉/音频/表现
 
-- [ ] 21. 3D 肖像缺失（`PortraitFrame` 纯 2D 占位）、SpriteFrame 不播模型。
+- [x] 21. 肖像绑定管线（Gap-52：`PortraitPathForModel` 纯规则（base+`_portrait.mdx`，ref `getPortraitModel`，本地 MPQ 实测 `*_Portrait.mdx` 存在可载）+ `SceneManager::PortraitPathFor`（skin 优先查 `unitPaths_`，MPQ 探 `_portrait` 有则用否则本体，无模型返空）+ 选择变更即 `ui_.SetPortraitModel`（空选清空）→ `FdfHudHost` 存 `portraitModelPath_` 供视口渲染。残留：视口真 3D 播放（portrait camera/实例，`PortraitFrame` 类仍无人实例化、SpriteFrame 不播模型同理）。
 - [ ] 22. 建筑阴影无 move/remove、雾只有线性（无 EXP1/EXP2/高度雾）。
 - [ ] 23. 瘟疫视觉全无（`SetBlight` + 枯树切换）、深水/岸线简化。
 - [ ] 24. 小地图：ping 无脉冲动画、不分敌我色、特殊图标尺寸全 4px。
@@ -50,4 +50,4 @@
 
 ## 实施顺序
 
-1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图+静态 stamp（P1-11，Gap-33/34）→ 4. 高地 miss（P0-3，Gap-35）→ 5. 穿刺线/炮击（P0-4，Gap-36）→ 6. 伤害替换框架（P0-5，Gap-37）→ 7. 闪避暴击叠加（P0-6，Gap-38）→ 8. 荆棘吸血语义（P0-7，Gap-39）→ 9. 死亡序列（P0-8，Gap-40）→ 10. 非叠加攻击属性（P0-9，Gap-41）→ 11. P0-10 小项（Gap-42）→ 12. w3i 开局科技（P1-12，Gap-43）→ 13. w3i 随机表+死亡掉落（P1-13，Gap-44）→ 14. 通行 movement-type/边界环/水面定义（P1-14，Gap-45）→ 15. 可破坏物 targeting/掉落/遮挡（P1-15，Gap-46）→ 16. BlzFrame 全系 45 个（P2-16，Gap-47）→ 17. 地形雾三桩（P2-17，Gap-48）→ 18. spell 目标/幻象/特效 Z（P2-18，Gap-49）→ 20. 存档槽目录层（P2-20，Gap-50）→ 19. JassAbility/Buff 对象（P2-19 切口，Gap-51）→ …
+1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图+静态 stamp（P1-11，Gap-33/34）→ 4. 高地 miss（P0-3，Gap-35）→ 5. 穿刺线/炮击（P0-4，Gap-36）→ 6. 伤害替换框架（P0-5，Gap-37）→ 7. 闪避暴击叠加（P0-6，Gap-38）→ 8. 荆棘吸血语义（P0-7，Gap-39）→ 9. 死亡序列（P0-8，Gap-40）→ 10. 非叠加攻击属性（P0-9，Gap-41）→ 11. P0-10 小项（Gap-42）→ 12. w3i 开局科技（P1-12，Gap-43）→ 13. w3i 随机表+死亡掉落（P1-13，Gap-44）→ 14. 通行 movement-type/边界环/水面定义（P1-14，Gap-45）→ 15. 可破坏物 targeting/掉落/遮挡（P1-15，Gap-46）→ 16. BlzFrame 全系 45 个（P2-16，Gap-47）→ 17. 地形雾三桩（P2-17，Gap-48）→ 18. spell 目标/幻象/特效 Z（P2-18，Gap-49）→ 20. 存档槽目录层（P2-20，Gap-50）→ 19. JassAbility/Buff 对象（P2-19 切口，Gap-51）→ 21. 肖像绑定管线（P3-21 切口，Gap-52）→ …

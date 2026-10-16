@@ -406,6 +406,11 @@ void MainUI::SetSelectedUnit(int handleId) {
     }
 }
 
+void MainUI::SetPortraitModel(const std::string& modelPath) {
+    selectedPortraitModelPath_ = modelPath;
+    if (hudHost_) hudHost_->SetPortraitModel(modelPath);
+}
+
 void MainUI::SetCommandSlotAt(int row, int col,
                               int orderId,
                               CommandClickMode clickMode,
@@ -565,6 +570,7 @@ void MainUI::Update(int screenW, int screenH) {
     hudHost_->SetQueue(queueItems_, queueProgressRatio_);
     hudHost_->SetInventory(inventoryItems_, inventoryCapacity_, inventoryAvailable_);
     hudHost_->SetPortraitIcon(selectedPortraitIconUri_);
+    hudHost_->SetPortraitModel(selectedPortraitModelPath_);
     hudHost_->SetBuffs(selectedBuffs_);
 
     uiTime_ += frameDt;

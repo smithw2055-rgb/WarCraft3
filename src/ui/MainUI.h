@@ -205,6 +205,10 @@ public:
     void ClearGameMessages();
     void SetSimulation(CSimulation* sim) { simulation_ = sim; }
     void SetSelectedUnit(int handleId);
+    // 3D portrait model for the selection (resolved by the controller via
+    // SceneManager::PortraitPathFor); stored for the portrait render pass.
+    void SetPortraitModel(const std::string& modelPath);
+    const std::string& GetPortraitModel() const { return selectedPortraitModelPath_; }
     void WireCommandCardCallbacks();
 
     void UpdateInfoPanel(War3ID unitTypeId, const std::string& name, int level,
@@ -424,6 +428,7 @@ private:
     bool inventoryAvailable_ = false;
     int inventoryCapacity_ = 0;
     std::string selectedPortraitIconUri_;
+    std::string selectedPortraitModelPath_;
     HudInfoStats selectedInfoStats_;
     std::vector<HudBuffItem> selectedBuffs_;
 

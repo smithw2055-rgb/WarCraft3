@@ -93,6 +93,11 @@ public:
                                          int player = 0, float fallbackLifeSeconds = 1.0f,
                                          const Vec3& initialVelocity = Vec3{0, 0, 0},
                                          float gravity = 0.0f);
+    // Portrait model for a unit type (ref getPortraitModel): "<base>
+    // _portrait.mdx" when the archives carry it, else the unit model
+    // itself; "" when the type has no known model. Feeds the portrait
+    // viewport state (FdfHudHost portrait model path).
+    std::string PortraitPathFor(uint32_t war3ID, uint32_t skinId = 0) const;
 
     // Persistent attached effect instance (JASS AddSpecialEffectTarget):
     // positioned by an explicit matrix the caller refreshes every frame
