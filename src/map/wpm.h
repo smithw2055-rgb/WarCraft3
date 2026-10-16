@@ -14,6 +14,9 @@ struct WpmData {
         BLOCKVISION = 0x10,
         BLIGHTED = 0x20,
         UNSWIMABLE = 0x40,
+        // Map-edge ring (ref PathingGrid BOUNDARY 0xF0): outside the
+        // playable area. All movement types fail on it.
+        BOUNDARY = 0xF0,
     };
 
     int width = 0;
@@ -54,7 +57,15 @@ struct WpmData {
     // Naval sense (ref PathingGrid FLOAT-pathable): clear UNSWIMABLE means
     // ships can navigate the cell (deep water). This is NOT the w3e tile
     // water flag (shallow/shore rendering); see W3ETileCorner::IsWater.
+    //
+    // Water-definition map (32px WPM cells vs 128px W3E corners):
+    // - naval movement, FLOAT/AMPH pathing and JASS float queries read
+    //   THIS grid (UNSWIMABLE clear = navigable deep water);
+    // - rendering, minimap blue and shore visuals read the W3E 0x40 corner
+    //   bit (includes shallow/shore rings where UNSWIMABLE stays set).
     bool IsWater(int x, int y) const;
+    // Playable-area ring (BOUNDARY bits set, or off-grid entirely).
+    bool IsBoundary(int x, int y) const;
 };
 
 bool WpmLoad(const uint8_t* data, size_t size, WpmData& out);

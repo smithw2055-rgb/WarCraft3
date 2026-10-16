@@ -88,7 +88,8 @@ bool CBehaviorMove::RecalculatePath(CSimulation& simulation) {
     const int targetCellX = pathfinding->WorldToCellX(targetX_);
     const int targetCellY = pathfinding->WorldToCellY(targetY_);
     const bool targetCellWalkable = !pathfinding->HasPathingMap()
-        || pathfinding->IsCellWalkable(targetCellX, targetCellY);
+        || pathfinding->IsCellPathableFor(targetCellX, targetCellY,
+                                          unit_->GetMovementType());
     const float collisionSize = std::max(0.0f, unit_->GetCollisionSize());
     const auto gridMapping = CPathfindingProcessor::SelectGridMapping(collisionSize);
     if (pathfinding->FindPathWorld(unit_->GetX(), unit_->GetY(),

@@ -56,6 +56,12 @@ public:
 
     // Check if a cell is walkable (within bounds and not blocked)
     bool IsCellWalkable(int cellX, int cellY, bool allowFlying = false) const;
+    // Movement-type pathing (ref PathingGrid.MovementType.isPathable):
+    // FLY needs flyable air, FLOAT needs swimmable water, AMPHIBIOUS takes
+    // either, DISABLED passes, everything else needs walkable ground.
+    // Boundary-ring cells fail for every type.
+    bool IsCellPathableFor(int cellX, int cellY,
+                           PathingGridMovementType movementType) const;
     bool HasPathingMap() const { return pathingMap_ && pathingMap_->IsValid(); }
     // Mutable access for script pathing edits (ref SetTerrainPathable).
     // The map stays loader-owned; edits are in place.

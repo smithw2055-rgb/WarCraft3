@@ -9744,21 +9744,33 @@ void JassNatives::RegisterTerrainQueryNatives() {
         const bool boundary = inMap && corner->IsBoundary();
         auto walkable = [&]() -> bool {
             if (!inMap) return false;
-            if (water || boundary) return false;
             if (sim->GetPathfinding() && sim->GetPathfinding()->HasPathingMap()) {
+                // WPM decides: shallow/shore water sets the W3E render-water
+                // bit while staying FOOT-pathable, so the tile flag must not
+                // gate here (it stays the mapless fallback below). The WPM
+                // boundary ring already fails inside IsCellPathableFor.
                 return sim->GetPathfinding()->IsWorldPointPathableForUnit(x, y, 0.0f, PathingGridMovementType::FOOT, nullptr);
             }
+            if (water || boundary) return false;
             return true;
+        };
+        // WPM-backed float/fly checks (deep-water UNSWIMABLE / UNFLYABLE
+        // bits, not the W3E render-water bit); mapless falls back to tile
+        // flags like before.
+        const bool hasPath = sim->GetPathfinding() && sim->GetPathfinding()->HasPathingMap();
+        auto wpmPathable = [&](PathingGridMovementType movement) -> bool {
+            return hasPath && sim->GetPathfinding()->IsWorldPointPathableForUnit(
+                       x, y, 0.0f, movement, nullptr);
         };
         switch (type) {
             case kPathAny: return JassValue::Bool(walkable() || (inMap && !boundary));
             case kPathWalk:
             case kPathPeon: return JassValue::Bool(walkable());
-            case kPathFly: return JassValue::Bool(inMap && !boundary);
+            case kPathFly: return JassValue::Bool(hasPath ? (wpmPathable(PathingGridMovementType::FLY) && !boundary) : (inMap && !boundary));
             case kPathBuild: return JassValue::Bool(walkable() && !sim->IsPointBlighted(x, y));
             case kPathBlight: return JassValue::Bool(sim->IsPointBlighted(x, y));
-            case kPathFloat: return JassValue::Bool(inMap && water && !boundary);
-            case kPathAmphib: return JassValue::Bool(walkable() || (inMap && water && !boundary));
+            case kPathFloat: return JassValue::Bool(hasPath ? (wpmPathable(PathingGridMovementType::FLOAT) && !boundary) : (inMap && water && !boundary));
+            case kPathAmphib: return JassValue::Bool(hasPath ? (wpmPathable(PathingGridMovementType::AMPHIBIOUS) && !boundary) : (walkable() || (inMap && water && !boundary)));
             default: return JassValue::Bool(false);
         }
     });

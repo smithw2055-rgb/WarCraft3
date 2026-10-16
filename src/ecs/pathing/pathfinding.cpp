@@ -58,11 +58,37 @@ bool UsesDynamicGroundCollision(PathingGridMovementType movementType) {
 }
 
 bool CPathfindingProcessor::IsCellWalkable(int cellX, int cellY, bool allowFlying) const {
+    return IsCellPathableFor(cellX, cellY,
+                             allowFlying ? PathingGridMovementType::FLY
+                                         : PathingGridMovementType::FOOT);
+}
+
+bool CPathfindingProcessor::IsCellPathableFor(int cellX, int cellY,
+                                              PathingGridMovementType movementType) const {
     if (!pathingMap_) return true;
-    // Ref PathingGrid.MovementType: FLY is blocked by UNFLYABLE (notably
-    // over doodad canopies/ceilings), every other ground type by UNWALKABLE.
-    if (allowFlying) return pathingMap_->IsFlyable(cellX, cellY);
-    return pathingMap_->IsWalkable(cellX, cellY);
+    // Boundary ring (and off-grid) is outside the playable area for every
+    // movement type (ref playable-area gate; off-grid stays failing).
+    if (pathingMap_->IsBoundary(cellX, cellY)) return false;
+    switch (movementType) {
+        case PathingGridMovementType::FLY:
+            // Blocked by UNFLYABLE (notably over doodad canopies/ceilings).
+            return pathingMap_->IsFlyable(cellX, cellY);
+        case PathingGridMovementType::FLOAT:
+            // Ships navigate clear-UNSWIMABLE deep water only.
+            return pathingMap_->IsWater(cellX, cellY);
+        case PathingGridMovementType::AMPHIBIOUS:
+            // Either ground or water passes (ref || rule).
+            return pathingMap_->IsWalkable(cellX, cellY) ||
+                   pathingMap_->IsWater(cellX, cellY);
+        case PathingGridMovementType::DISABLED:
+            return true;
+        case PathingGridMovementType::FOOT:
+        case PathingGridMovementType::HOVER:
+        case PathingGridMovementType::HORSE:
+        case PathingGridMovementType::FOOT_NO_COLLISION:
+        default:
+            return pathingMap_->IsWalkable(cellX, cellY);
+    }
 }
 
 int CPathfindingProcessor::MappedWidth(GridMapping mapping) const {
@@ -114,7 +140,7 @@ bool CPathfindingProcessor::IsWorldPointPathable(float worldX, float worldY, flo
     auto isSampleWalkable = [&](float sampleX, float sampleY) {
         const int cellX = WorldToCellX(sampleX);
         const int cellY = WorldToCellY(sampleY);
-        return IsCellWalkable(cellX, cellY);
+        return IsCellPathableFor(cellX, cellY, movementType);
     };
 
     if (collisionSize <= 0.0f) {

@@ -724,6 +724,9 @@ bool TestRallyTargetGetters();
 bool TestSetTerrainPathable();
 bool TestWaterDeformsAndDoodadAnim();
 bool TestTerrainDeformRegistry();
+bool TestMovementTypePathingBits();
+bool TestBoundaryFlagQueries();
+bool TestMaplessPathingPasses();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1443,6 +1446,9 @@ int main(int argc, char** argv) {
         {"Set terrain pathable", TestSetTerrainPathable},
         {"Water deforms and doodad anim", TestWaterDeformsAndDoodadAnim},
         {"Terrain deform registry", TestTerrainDeformRegistry},
+        {"Movement-type pathing bits", TestMovementTypePathingBits},
+        {"Boundary flag queries", TestBoundaryFlagQueries},
+        {"Mapless pathing passes", TestMaplessPathingPasses},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

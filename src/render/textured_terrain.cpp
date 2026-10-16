@@ -1337,12 +1337,12 @@ float TexturedTerrain::GetGroundHeight(float worldX, float worldY) const {
 }
 
 float TexturedTerrain::GetWaterHeight(float worldX, float worldY) const {
-    if (!waterHeights_ || columns_ <= 1 || rows_ <= 1) return 0.0f;
+    if (!waterHeights_ || columns_ <= 1 || rows_ <= 1) return waterHeightOffset_ * TILE_SIZE;
     float gx = worldX - centerOffsetX_;
     float gy = worldY - centerOffsetY_;
     float cx = gx / TILE_SIZE, cy = gy / TILE_SIZE;
     int ix = (int)std::floor(cx), iy = (int)std::floor(cy);
-    if (ix < 0 || ix >= columns_ - 1 || iy < 0 || iy >= rows_ - 1) return 0.0f;
+    if (ix < 0 || ix >= columns_ - 1 || iy < 0 || iy >= rows_ - 1) return waterHeightOffset_ * TILE_SIZE;
     float fx = cx - ix, fy = cy - iy;
     int idx = iy * columns_ + ix;
     float h00 = waterHeights_[idx];
@@ -1355,7 +1355,8 @@ float TexturedTerrain::GetWaterHeight(float worldX, float worldY) const {
     } else {
         height = h11 + ((h10 - h11) * (1.0f - fy)) + ((h01 - h11) * (1.0f - fx));
     }
-    return height * TILE_SIZE;
+    // Ref Terrain.getWaterHeight: (height + waterHeightOffset) * 128.
+    return (height + waterHeightOffset_) * TILE_SIZE;
 }
 bool TexturedTerrain::InPlayableArea(float worldX, float worldY) const {
     (void)worldX; (void)worldY; return true;

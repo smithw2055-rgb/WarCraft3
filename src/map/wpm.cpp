@@ -37,6 +37,14 @@ bool WpmData::IsWater(int x, int y) const {
     return (pathing[y * width + x] & UNSWIMABLE) == 0;
 }
 
+bool WpmData::IsBoundary(int x, int y) const {
+    if (x < 0 || x >= width || y < 0 || y >= height) return true;
+    // Full-nibble match: UNSWIMABLE (0x40), BLIGHTED (0x20) and
+    // BLOCKVISION (0x10) all overlap the 0xF0 mask, so `!= 0` would flag
+    // ordinary land/blight/vision cells as map edge.
+    return (pathing[(size_t)y * (size_t)width + (size_t)x] & BOUNDARY) == BOUNDARY;
+}
+
 int WpmData::StampFootprint(float x, float y, int rotationDeg,
                             std::shared_ptr<const PathTexImage> image,
                             bool blocksVision) {
