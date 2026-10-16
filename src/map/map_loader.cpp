@@ -304,8 +304,28 @@ void MapLoader::LoadDoodadsAndDestructibles(const std::string& mapPath) {
                     // DOO angles are radians (ref facingRadians); WPM stamps
                     // take degrees (ref toDegrees for pathing instances).
                     const int rotDeg = (int)std::round(d.angle * 180.0f / 3.14159265358979323846f);
-                    if (sim_.CreateDestructable(doodadId, d.pos[0], d.pos[1], life, rotDeg))
+                    // Death drops (ref Doodad.itemTable + itemSets): explicit
+                    // sets plus the referenced w3i global item table, rolled
+                    // per item on the killing blow (mirrors unit dropSets).
+                    if (CDestructable* dest = sim_.CreateDestructable(doodadId, d.pos[0], d.pos[1], life, rotDeg)) {
                         simDestructableCreated++;
+                        std::vector<CDestructable::DeathDropItem> drops;
+                        for (const auto& set : d.itemSets) {
+                            for (const auto& entry : set.items) {
+                                if (entry.id == 0 || entry.chance <= 0) continue;
+                                drops.push_back({War3ID(entry.id), entry.chance});
+                            }
+                        }
+                        if (w3d.version > 7 && d.itemTable >= 0) {
+                            std::vector<W3iDropItem> tableDrops;
+                            if (CollectRandomItemTableDrops(w3i_, d.itemTable, tableDrops)) {
+                                for (const auto& entry : tableDrops) {
+                                    drops.push_back({entry.itemId, entry.chancePercent});
+                                }
+                            }
+                        }
+                        if (!drops.empty()) dest->SetDeathDrops(std::move(drops));
+                    }
                 }
             }
             if (loadRenderAssets_ &&

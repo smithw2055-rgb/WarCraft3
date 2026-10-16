@@ -2,7 +2,9 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
+#include "data/combat_types.h"
 #include "resource/slk.h"
 #include "map/path_tex.h"
 
@@ -14,6 +16,10 @@ struct CDestructableType {
     int maxLife = 100;
     int armor = 0;
     std::string armorType;
+    // Targeting gate (ref targType/btar -> CTargetType set): an ability or
+    // attack whose targetsAllowed contains all of these may hit this
+    // destructable (tree/debris/wall/bridge fine branches).
+    std::unordered_set<CTargetType> targetedAs;
     bool canDropItems = false;
     bool isTree = false;
     bool isWall = false;

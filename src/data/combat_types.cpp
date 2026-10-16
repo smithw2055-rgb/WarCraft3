@@ -90,3 +90,36 @@ CWeaponType CWeaponTypeInfo::FromString(const std::string& s) {
     if (l == "missile splash") return CWeaponType::MISSILE_SPLASH;
     return CWeaponType::NONE;
 }
+
+bool CTargetTypeInfo::FromString(const std::string& s, CTargetType& out) {
+    const std::string l = Lower(s);
+    if (l == "air") { out = CTargetType::AIR; return true; }
+    if (l == "dead") { out = CTargetType::DEAD; return true; }
+    if (l == "debris" || l == "debr") { out = CTargetType::DEBRIS; return true; }
+    if (l == "enemies" || l == "enem" || l == "enemy") { out = CTargetType::ENEMY; return true; }
+    if (l == "ground" || l == "grou") { out = CTargetType::GROUND; return true; }
+    if (l == "hero") { out = CTargetType::HERO; return true; }
+    if (l == "invulnerable" || l == "invu") { out = CTargetType::INVULNERABLE; return true; }
+    if (l == "item") { out = CTargetType::ITEM; return true; }
+    if (l == "mechanical" || l == "mech") { out = CTargetType::MECHANICAL; return true; }
+    if (l == "neutral" || l == "neut") { out = CTargetType::NEUTRAL; return true; }
+    if (l == "nonhero" || l == "nonh") { out = CTargetType::NON_HERO; return true; }
+    if (l == "nonsapper") { out = CTargetType::NON_SAPPER; return true; }
+    if (l == "notself" || l == "nots") { out = CTargetType::NON_SELF; return true; }
+    if (l == "organic" || l == "orga") { out = CTargetType::ORGANIC; return true; }
+    if (l == "player" || l == "play") { out = CTargetType::PLAYER_UNITS; return true; }
+    if (l == "self") { out = CTargetType::SELF; return true; }
+    if (l == "structure" || l == "stru") { out = CTargetType::STRUCTURE; return true; }
+    if (l == "terrain" || l == "terr") { out = CTargetType::TERRAIN; return true; }
+    if (l == "tree") { out = CTargetType::TREE; return true; }
+    if (l == "vulnerable" || l == "vuln") { out = CTargetType::VULNERABLE; return true; }
+    if (l == "wall") { out = CTargetType::WALL; return true; }
+    if (l == "ward") { out = CTargetType::WARD; return true; }
+    if (l == "ancient") { out = CTargetType::ANCIENT; return true; }
+    if (l == "nonancient") { out = CTargetType::NON_ANCIENT; return true; }
+    if (l == "friend" || l == "frie") { out = CTargetType::FRIEND; return true; }
+    if (l == "allies" || l == "alli" || l == "ally") { out = CTargetType::ALLY; return true; }
+    if (l == "bridge") { out = CTargetType::BRIDGE; return true; }
+    if (l == "decoration" || l == "deco") { out = CTargetType::DECORATION; return true; }
+    return false;
+}

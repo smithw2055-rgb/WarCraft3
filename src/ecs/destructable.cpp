@@ -1,6 +1,7 @@
 #include "destructable.h"
 #include "csimulation.h"
 #include "data/destructabledata.h"
+#include "data/itemdata.h"
 #include "ecs/pathing/pathfinding.h"
 #include "map/wpm.h"
 
@@ -83,7 +84,26 @@ void CDestructable::UnbindPathing(CSimulation& sim) {
 void CDestructable::SetLife(CSimulation& simulation, float life) {
     const bool wasDead = IsDead();
     CWidget::SetLife(simulation, life);
-    if (IsDead() != wasDead) RefreshPathingAfterLifeChange(simulation);
+    if (IsDead() == wasDead) return;
+    RefreshPathingAfterLifeChange(simulation);
+    // The killing blow (damage or script setLife) drops items immediately:
+    // destructables have no corpse/decay ticks, so the transition itself is
+    // the death moment (ref kill() side of setLife).
+    if (IsDead()) DropDeathItems(simulation);
+}
+
+void CDestructable::DropDeathItems(CSimulation& simulation) {
+    if (deathDrops_.empty()) return;
+    for (const auto& drop : deathDrops_) {
+        if (drop.itemId.value == 0 || drop.chancePercent <= 0) continue;
+        if (drop.chancePercent < 100 &&
+            simulation.SimRand01() * 100.0f >= (float)drop.chancePercent) {
+            continue;
+        }
+        auto* itemData = simulation.GetItemData();
+        if (!itemData || !itemData->HasItem(drop.itemId)) continue;
+        simulation.CreateItem(drop.itemId, GetX(), GetY());
+    }
 }
 
 float CDestructable::Damage(CSimulation& simulation, CUnit* source,
@@ -98,12 +118,39 @@ float CDestructable::Damage(CSimulation& simulation, CUnit* source,
     if (life_ < 0) life_ = 0;
     (void)source; (void)isAttack; (void)isRanged; (void)attackType;
     (void)damageType; (void)weaponSoundType;
-    if (IsDead() != wasDead) RefreshPathingAfterLifeChange(simulation);
+    if (IsDead() != wasDead) {
+        RefreshPathingAfterLifeChange(simulation);
+        if (IsDead()) DropDeathItems(simulation);
+    }
     return oldLife - life_;
 }
 
 bool CDestructable::CanBeTargetedBy(CSimulation& simulation, CUnit* source,
                                      const std::vector<CTargetType>& targetsAllowed) const {
-    (void)simulation; (void)source; (void)targetsAllowed;
-    return !IsDead();
+    (void)simulation; (void)source;
+    // Ref CDestructable.canBeTargetedBy: the allowed set must contain every
+    // targetedAs entry (tree/debris/wall/bridge fine branches collapse to
+    // false here; the bool API carries no error receiver). Dead bodies need
+    // DEAD; living ones pass unless the ability targets corpses only (ref
+    // ALIVE check reduces to !DEAD: no C++ ALIVE enumerator exists).
+    const CDestructableType* type = LookupType(simulation, typeId_);
+    if (type) {
+        for (CTargetType need : type->targetedAs) {
+            bool found = false;
+            for (CTargetType have : targetsAllowed) {
+                if (have == need) { found = true; break; }
+            }
+            if (!found) return false;
+        }
+    }
+    if (IsDead()) {
+        for (CTargetType have : targetsAllowed) {
+            if (have == CTargetType::DEAD) return true;
+        }
+        return false;
+    }
+    for (CTargetType have : targetsAllowed) {
+        if (have == CTargetType::DEAD) return false;
+    }
+    return true;
 }

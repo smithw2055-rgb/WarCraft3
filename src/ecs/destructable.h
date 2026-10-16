@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 #include "ecs/widget.h"
 #include "resource/slk.h"
 
@@ -54,6 +55,18 @@ public:
     int GetPathingStampId() const { return pathingStampId_; }
     int GetDeathStampId() const { return deathStampId_; }
     void SetLife(CSimulation& simulation, float life) override;
+    // Death drops (ref war3map.doo itemSets + w3i itemTable): items created
+    // at the stump on the killing blow, each rolling its own percent chance
+    // independently (same rule as CUnit::DropDeathItems).
+    struct DeathDropItem {
+        War3ID itemId;
+        int chancePercent = 0;
+    };
+    void SetDeathDrops(std::vector<DeathDropItem> drops) {
+        deathDrops_ = std::move(drops);
+    }
+    const std::vector<DeathDropItem>& GetDeathDrops() const { return deathDrops_; }
+    void DropDeathItems(CSimulation& simulation);
 
 private:
     War3ID typeId_;
@@ -67,4 +80,5 @@ private:
     int pathingStampId_ = -1;
     int deathStampId_ = -1;
     int pathingRotationDeg_ = 0;
+    std::vector<DeathDropItem> deathDrops_;
 };

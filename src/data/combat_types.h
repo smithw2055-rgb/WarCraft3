@@ -74,6 +74,13 @@ struct CRegenTypeInfo {
     static CRegenType FromString(const std::string& s);
 };
 
+// Target-type name table (ref CTargetType.parseTargetType with
+// abbreviations): maps SLK targType tokens to the C++ enum. Returns true
+// and sets out on a known name; unknown names (and ref-only ALIVE/SAPPER/
+// NONE, which have no C++ enumerator) return false so callers skip them.
+struct CTargetTypeInfo {
+    static bool FromString(const std::string& s, CTargetType& out);
+};
 struct CWeaponTypeInfo {
     static CWeaponType FromString(const std::string& s);
     // Mirrors ref CWeaponType.ranged: only Normal melee (and None) hit

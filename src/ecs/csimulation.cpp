@@ -631,6 +631,10 @@ CDestructable* CSimulation::CreateDestructable(War3ID typeId, float x, float y, 
         if (const auto* type = destructableData_->GetDestructable(typeId)) {
             destructable->SetMaxLife(static_cast<float>(type->maxLife));
             destructable->SetLife(*this, std::clamp(life, 0.0f, static_cast<float>(type->maxLife)));
+            // Instance occluder starts at the type value (ref
+            // destType.getOcclusionHeight), not zero: GetOccluderHeight must
+            // agree with the vision block stamped by BindPathing.
+            destructable->SetOccluderHeight(type->occlusionHeight);
         }
     }
     CDestructable* ptr = destructable.get();

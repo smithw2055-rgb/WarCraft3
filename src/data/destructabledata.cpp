@@ -42,6 +42,7 @@ CDestructableData CDestructableData::LoadFromMpq(const MpqManager& mpq,
     const int maxLifeColumn = FindFirstColumn(slk, {"HP"});
     const int armorColumn = FindFirstColumn(slk, {"def"});
     const int armorTypeColumn = FindFirstColumn(slk, {"armor", "defType"});
+    const int targTypeColumn = FindFirstColumn(slk, {"targType", "btar"});
     const int canDropItemsColumn = FindFirstColumn(slk, {"canDropItems"});
     const int isTreeColumn = FindFirstColumn(slk, {"isTree"});
     const int isWallColumn = FindFirstColumn(slk, {"isWall"});
@@ -76,6 +77,26 @@ CDestructableData CDestructableData::LoadFromMpq(const MpqManager& mpq,
         d->armor = GetMergedInt(slk, row, armorColumn, skinTbl, sid, "def", 0);
         d->armorType = GetMergedString(slk, row, armorTypeColumn, skinTbl, sid, "armor",
                                        GetMergedString(slk, row, armorTypeColumn, skinTbl, sid, "defType", "medium"));
+        // Retail targType (ref CDestructableData TARGETED_AS): comma-separated
+        // target names, mixed case ("tree", "debris,vulnerable"). Unknown
+        // tokens are skipped so custom object data never breaks the load.
+        {
+            const std::string raw = GetMergedString(slk, row, targTypeColumn, skinTbl, sid, "targType",
+                                                    GetMergedString(slk, row, targTypeColumn, skinTbl, sid, "btar", ""));
+            std::string token;
+            for (size_t i = 0; i <= raw.size(); ++i) {
+                const char c = (i < raw.size()) ? raw[i] : ',';
+                if (c == ',') {
+                    const std::string key = TrimCopy(token);
+                    token.clear();
+                    if (key.empty()) continue;
+                    CTargetType parsed = CTargetType::GROUND;
+                    if (CTargetTypeInfo::FromString(key, parsed)) d->targetedAs.insert(parsed);
+                } else {
+                    token.push_back(c);
+                }
+            }
+        }
         d->canDropItems = GetMergedInt(slk, row, canDropItemsColumn, skinTbl, sid, "canDropItems", 0) != 0;
         d->isTree = GetMergedInt(slk, row, isTreeColumn, skinTbl, sid, "isTree", 0) != 0;
         d->isWall = GetMergedInt(slk, row, isWallColumn, skinTbl, sid, "isWall", 0) != 0;

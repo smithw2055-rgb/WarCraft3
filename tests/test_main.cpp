@@ -727,6 +727,11 @@ bool TestTerrainDeformRegistry();
 bool TestMovementTypePathingBits();
 bool TestBoundaryFlagQueries();
 bool TestMaplessPathingPasses();
+bool TestTargetTypeInfoParses();
+bool TestDestructableTargetedAsGate();
+bool TestDestructableDeathDrops();
+bool TestDestructableOccluderInit();
+bool TestRetailTargTypeParses();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1449,6 +1454,11 @@ int main(int argc, char** argv) {
         {"Movement-type pathing bits", TestMovementTypePathingBits},
         {"Boundary flag queries", TestBoundaryFlagQueries},
         {"Mapless pathing passes", TestMaplessPathingPasses},
+        {"Target-type names parse", TestTargetTypeInfoParses},
+        {"Destructable targetedAs gate", TestDestructableTargetedAsGate},
+        {"Destructable death drops", TestDestructableDeathDrops},
+        {"Destructable occluder init", TestDestructableOccluderInit},
+        {"Retail targType parses", TestRetailTargTypeParses},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif
