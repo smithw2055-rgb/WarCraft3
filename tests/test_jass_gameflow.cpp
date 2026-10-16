@@ -2,6 +2,7 @@
 // extras, sound state, texttag velocity, counted group enums (ref game,
 // camera, trigger, sound API).
 #include <iostream>
+#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -390,5 +391,59 @@ endfunction
     f.natives->PumpQueuedThreads();
     TEST_ASSERT(f.vm.GetGlobal("step").intVal == 2);
     TEST_ASSERT(!f.natives->HasQueuedThreads());
+    return true;
+}
+
+bool TestSaveSlotFileOps() {
+    // Save-slot directory layer is real: save/exists/copy/rename/remove
+    // round-trip; load/restart only record a pending request (P3 engine).
+    Fixture f;
+    f.data->saveMapPath = "Maps/Test.w3x";
+    const std::string a = "warsmash-test-slot-a";
+    const std::string b = "warsmash-test-slot-b";
+    auto cleanup = []() {
+        std::error_code lec;
+        std::filesystem::path local = std::filesystem::current_path(lec) / "Save";
+        if (lec) return;
+        for (const char* s : {"warsmash-test-slot-a", "warsmash-test-slot-b", ".._evil"}) {
+            std::error_code rec;
+            std::filesystem::remove_all(local / ("slot_" + std::string(s)), rec);
+        }
+    };
+    cleanup();
+    TEST_ASSERT(!CallNative(f.vm, "SaveGameExists", {JassValue::Str(a)}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "GetSaveBasicFilename", {}).strVal.empty());
+    TEST_ASSERT(CallNative(f.vm, "SaveGame", {JassValue::Str(a)}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "SaveGameExists", {JassValue::Str(a)}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "GetSaveBasicFilename", {}).strVal == a);
+    // Copy + rename + remove all report honestly.
+    TEST_ASSERT(CallNative(f.vm, "CopySaveGame",
+        {JassValue::Str(a), JassValue::Str(b)}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "SaveGameExists", {JassValue::Str(b)}).boolVal);
+    TEST_ASSERT(!CallNative(f.vm, "CopySaveGame",
+        {JassValue::Str("warsmash-test-slot-missing"), JassValue::Str(b)}).boolVal);
+    TEST_ASSERT(!CallNative(f.vm, "RenameSaveDirectory",
+        {JassValue::Str(b), JassValue::Str(a)}).boolVal); // dst exists
+    TEST_ASSERT(CallNative(f.vm, "RemoveSaveDirectory", {JassValue::Str(b)}).boolVal);
+    TEST_ASSERT(!CallNative(f.vm, "SaveGameExists", {JassValue::Str(b)}).boolVal);
+    TEST_ASSERT(!CallNative(f.vm, "RemoveSaveDirectory", {JassValue::Str(b)}).boolVal);
+    // Load records a pending request only when the slot exists.
+    CallNative(f.vm, "LoadGame", {JassValue::Str(b), JassValue::Bool(true)});
+    TEST_ASSERT(f.data->pendingLoad.kind == 0);
+    CallNative(f.vm, "LoadGame", {JassValue::Str(a), JassValue::Bool(true)});
+    TEST_ASSERT(f.data->pendingLoad.kind == 1);
+    TEST_ASSERT(f.data->pendingLoad.slot == a);
+    TEST_ASSERT(f.data->pendingLoad.scoreScreen);
+    CallNative(f.vm, "ReloadGame", {});
+    TEST_ASSERT(f.data->pendingLoad.kind == 2);
+    CallNative(f.vm, "RestartGame", {JassValue::Bool(false)});
+    TEST_ASSERT(f.data->pendingLoad.kind == 3);
+    TEST_ASSERT(!f.data->pendingLoad.scoreScreen);
+    // Path separators flatten and cannot escape the Save/ root.
+    TEST_ASSERT(CallNative(f.vm, "SaveGame", {JassValue::Str("../evil")}).boolVal);
+    TEST_ASSERT(CallNative(f.vm, "GetSaveBasicFilename", {}).strVal == ".._evil");
+    TEST_ASSERT(CallNative(f.vm, "SaveGameExists", {JassValue::Str("../evil")}).boolVal);
+    cleanup();
+    TEST_ASSERT(!CallNative(f.vm, "SaveGameExists", {JassValue::Str(a)}).boolVal);
     return true;
 }

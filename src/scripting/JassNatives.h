@@ -783,6 +783,18 @@ public:
     int nextGameCacheId = 0x1E000000;
     // campaignFile -> newest cache sim id (for reload adoption).
     std::unordered_map<std::string, int> gameCacheIdsByFile;
+    // Single-player save slots (ref SaveGame/CopySaveGame/...): slot dirs
+    // under Save/. saveMapPath is set by the game controller (empty when
+    // headless) and recorded into the slot metadata. Load/restart natives
+    // only record a pending request; the menu/glue engine consumes it (P3).
+    std::string saveMapPath;
+    std::string lastSaveSlot;
+    struct PendingLoadRequest {
+        int kind = 0; // 0=none 1=load 2=reload 3=restart
+        std::string slot;
+        bool scoreScreen = false;
+    };
+    PendingLoadRequest pendingLoad;
 
     // ---- Selection / unit display state (ref SelectUnit and friends) ----
     std::unordered_set<int> selectedUnits; // unit sim ids

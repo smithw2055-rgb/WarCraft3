@@ -657,6 +657,7 @@ bool TestUnitDamagePointDelayed();
 bool TestUnitIndicatorVisionFog();
 bool TestCameraFlowNatives();
 bool TestGameFlowNatives();
+bool TestSaveSlotFileOps();
 bool TestTriggerExtraNatives();
 bool TestSoundStateNatives();
 bool TestGroupEnumCountedNatives();
@@ -1389,6 +1390,7 @@ int main(int argc, char** argv) {
         {"Unit indicator/vision/fog", TestUnitIndicatorVisionFog},
         {"Camera flow natives", TestCameraFlowNatives},
         {"Game flow natives", TestGameFlowNatives},
+        {"Save slot file ops", TestSaveSlotFileOps},
         {"Trigger extra natives", TestTriggerExtraNatives},
         {"Sound state natives", TestSoundStateNatives},
         {"Group enum counted natives", TestGroupEnumCountedNatives},

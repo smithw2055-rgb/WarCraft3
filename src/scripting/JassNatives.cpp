@@ -38,6 +38,68 @@
 
 namespace fs = std::filesystem;
 
+namespace {
+
+// Save root shared by game caches and single-player slots: retail keeps
+// progress under Save/ next to the game; OS temp cleaners must not wipe
+// it. Prefer <cwd>/Save (created on first use), fall back to the old temp
+// location when not writable.
+std::string GameCacheSaveDir() {
+    std::error_code ec;
+    fs::path local = fs::current_path(ec) / "Save";
+    if (!ec) {
+        std::error_code mk;
+        fs::create_directories(local, mk);
+        if (!mk && fs::is_directory(local, ec) && !ec) return local.string();
+    }
+    fs::path dir = fs::temp_directory_path(ec) / "warsmash-save";
+    if (!ec) fs::create_directories(dir, ec);
+    return dir.string();
+}
+
+// Single-player save slots (ref SaveGame/CopySaveGame/...): one directory
+// per slot under the same Save/ root. Slot names sanitize like cache
+// campaign files; separators flatten to '_' so a script can never escape
+// the root.
+std::string SaveSlotSafeName(const std::string& slot) {
+    std::string safe;
+    for (char c : slot) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-') {
+            safe += c;
+        } else {
+            safe += '_';
+        }
+    }
+    if (safe.empty() || safe == "." || safe == "..") safe = "quicksave";
+    return safe;
+}
+
+std::string SaveSlotDir(const std::string& slot) {
+    return (fs::path(GameCacheSaveDir()) / ("slot_" + SaveSlotSafeName(slot))).string();
+}
+
+std::string SaveSlotMetadata(const std::string& slot) {
+    return (fs::path(SaveSlotDir(slot)) / "save.w3s").string();
+}
+
+// Full sim-state restore is future work (no sim serializer yet), so the
+// slot records engine/map metadata and flushes live game caches; the
+// directory ops below are real either way.
+bool WriteSaveSlotMetadata(const std::string& slot, const std::string& mapPath) {
+    std::error_code ec;
+    fs::create_directories(SaveSlotDir(slot), ec);
+    if (ec) return false;
+    std::ofstream f(SaveSlotMetadata(slot), std::ios::binary | std::ios::trunc);
+    if (!f) return false;
+    f << "WARSMASH-SAVE-1\n";
+    f << "slot " << SaveSlotSafeName(slot) << "\n";
+    f << "map " << (mapPath.empty() ? "unknown" : mapPath) << "\n";
+    f.flush();
+    return (bool)f;
+}
+
+} // namespace
+
 // Headless fallback RNG (null sim in unit tests): fixed-seed LCG, never
 // random_device, so script tests stay reproducible.
 static uint32_t s_fallbackRand = 0x12345678u;
@@ -7763,8 +7825,16 @@ void JassNatives::RegisterGameNatives() {
     vm_.RegisterNative("SetAllUnitTypeSlots", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("SetItemTypeSlots", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("SetUnitTypeSlots", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("GetSaveBasicFilename", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Str(""); });
-    vm_.RegisterNative("SaveGameExists", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
+    vm_.RegisterNative("GetSaveBasicFilename", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        return JassValue::Str(data ? data->lastSaveSlot : "");
+    });
+    vm_.RegisterNative("SaveGameExists", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.empty()) return JassValue::Bool(false);
+        std::error_code ec;
+        const bool ok = fs::is_regular_file(SaveSlotMetadata(args[0].strVal), ec) && !ec;
+        (void)data;
+        return JassValue::Bool(ok);
+    });
     vm_.RegisterNative("CommandAI", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !data) return JassValue::Null();
         const int playerId = ResolvePlayerId(data, args[0].intVal);
@@ -12979,26 +13049,10 @@ void JassNatives::RegisterHashtableNatives() {
 }
 
 // ============================================================
-// 36. GameCache natives (ref gamecache API)
+// 36. GameCache natives (ref gamecache API; save root + slot helpers live
+// in the file-top anonymous namespace for use by the save-slot natives)
 // ============================================================
 namespace {
-
-// Campaign save dir: retail keeps progress under Save/ next to the game;
-// OS temp cleaners must not wipe it. Prefer <cwd>/Save (created on first
-// use), fall back to the old temp location when not writable. Files are
-// named warsmash_<sanitized campaignFile>.w3v so later maps reload them.
-std::string GameCacheSaveDir() {
-    std::error_code ec;
-    fs::path local = fs::current_path(ec) / "Save";
-    if (!ec) {
-        std::error_code mk;
-        fs::create_directories(local, mk);
-        if (!mk && fs::is_directory(local, ec) && !ec) return local.string();
-    }
-    fs::path dir = fs::temp_directory_path(ec) / "warsmash-save";
-    if (!ec) fs::create_directories(dir, ec);
-    return dir.string();
-}
 
 std::string GameCacheFileFor(const std::string& campaignFile) {
     std::string safe;
@@ -14928,15 +14982,83 @@ void JassNatives::RegisterMiscNatives() {
         if (type) type->SetPointValue(args[1].intVal);
         return JassValue::Null();
     });
-    // Single-player save slots share the SaveGameExists=false contract: the
-    // engine never persists, so every call reports failure without side effects.
-    vm_.RegisterNative("SaveGame", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
-    vm_.RegisterNative("LoadGame", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("ReloadGame", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("RestartGame", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("CopySaveGame", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
-    vm_.RegisterNative("RemoveSaveDirectory", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
-    vm_.RegisterNative("RenameSaveDirectory", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
+    // Single-player save slots (retail Save/<slot>/): metadata snapshot +
+    // live game-cache flush on save; the directory ops are real. Full
+    // sim-state restore is future work, so Load/Reload/Restart only record
+    // a pending request for the menu/glue engine (P3).
+    vm_.RegisterNative("SaveGame", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.empty()) return JassValue::Bool(false);
+        const std::string slot = args[0].strVal;
+        if (!WriteSaveSlotMetadata(slot, data->saveMapPath)) return JassValue::Bool(false);
+        for (const auto& [id, cache] : data->gameCaches) {
+            (void)id;
+            if (cache && !cache->campaignFile.empty()) {
+                WriteGameCacheFile(GameCacheFileFor(cache->campaignFile),
+                                   cache->campaignFile, *cache);
+            }
+        }
+        data->lastSaveSlot = SaveSlotSafeName(slot);
+        return JassValue::Bool(true);
+    });
+    vm_.RegisterNative("LoadGame", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 1) return JassValue::Null();
+        std::error_code ec;
+        if (!fs::is_regular_file(SaveSlotMetadata(args[0].strVal), ec) || ec) return JassValue::Null();
+        data->pendingLoad.kind = 1;
+        data->pendingLoad.slot = SaveSlotSafeName(args[0].strVal);
+        data->pendingLoad.scoreScreen = args.size() > 1 && args[1].boolVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ReloadGame", [data = data_](const std::vector<JassValue>&) -> JassValue {
+        if (!data) return JassValue::Null();
+        data->pendingLoad.kind = 2;
+        data->pendingLoad.slot.clear();
+        data->pendingLoad.scoreScreen = false;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("RestartGame", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data) return JassValue::Null();
+        data->pendingLoad.kind = 3;
+        data->pendingLoad.slot.clear();
+        data->pendingLoad.scoreScreen = !args.empty() && args[0].boolVal;
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("CopySaveGame", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 2) return JassValue::Bool(false);
+        (void)data;
+        std::error_code ec;
+        const std::string src = SaveSlotDir(args[0].strVal);
+        const std::string dst = SaveSlotDir(args[1].strVal);
+        if (!fs::is_directory(src, ec) || ec || src == dst) return JassValue::Bool(false);
+        ec.clear();
+        fs::remove_all(dst, ec);
+        if (ec) return JassValue::Bool(false);
+        ec.clear();
+        fs::copy(src, dst, fs::copy_options::recursive, ec);
+        return JassValue::Bool(!ec);
+    });
+    vm_.RegisterNative("RemoveSaveDirectory", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.empty()) return JassValue::Bool(false);
+        (void)data;
+        std::error_code ec;
+        const std::string dir = SaveSlotDir(args[0].strVal);
+        if (!fs::is_directory(dir, ec) || ec) return JassValue::Bool(false);
+        fs::remove_all(dir, ec);
+        return JassValue::Bool(!ec);
+    });
+    vm_.RegisterNative("RenameSaveDirectory", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 2) return JassValue::Bool(false);
+        (void)data;
+        std::error_code ec;
+        const std::string src = SaveSlotDir(args[0].strVal);
+        const std::string dst = SaveSlotDir(args[1].strVal);
+        if (!fs::is_directory(src, ec) || ec || src == dst) return JassValue::Bool(false);
+        ec.clear();
+        if (fs::exists(dst, ec) || ec) return JassValue::Bool(false);
+        ec.clear();
+        fs::rename(src, dst, ec);
+        return JassValue::Bool(!ec);
+    });
     // Map-setup natives mirrored from the config env (common.j declares them
     // globally; custom maps may call them from main, not just config()).
     vm_.RegisterNative("SetPlayerController", [data = data_](const std::vector<JassValue>& args) -> JassValue {

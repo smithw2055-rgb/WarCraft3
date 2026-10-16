@@ -2026,6 +2026,9 @@ void GameController::WireJassCallbacks() {
     auto* jassData = jassNatives_->GetData().get();
     if (!jassData) return;
 
+    // Save-slot metadata records the map (ref SaveGame slot header).
+    jassData->saveMapPath = mapPath_;
+
     // Ref SetTerrainFogEx/ResetTerrainFog: script override wins while set;
     // ResetTerrainFog drops back to the w3i baseline (defaultFogSettings).
     jassData->terrainFogHook = [this]() {
