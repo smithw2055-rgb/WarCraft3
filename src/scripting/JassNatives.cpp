@@ -8668,11 +8668,16 @@ void JassNatives::RegisterGameNatives() {
     });
     vm_.RegisterNative("UnitAddAbility", [data = data_, addAbilityToUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);
+        // Buff handles wait on the buff factory (no CBuff construction from
+        // JASS yet); fail closed instead of attaching a do-nothing ability.
+        auto handle = HandleToAbility(data, args[1].intVal);
+        if (handle && handle->isBuff) return JassValue::Bool(false);
         return JassValue::Bool(addAbilityToUnit(args[0].intVal, AbilityCodeFromJassArg(data, args[1].intVal), 1));
     });
     vm_.RegisterNative("AddUnitAbility", [data = data_, addAbilityToUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         auto ability = HandleToAbility(data, args[1].intVal);
+        if (ability && ability->isBuff) return JassValue::Null();
         const War3ID abilityCode = ability ? ability->code : AbilityCodeFromJassArg(data, args[1].intVal);
         const int level = ability ? ability->level : 1;
         addAbilityToUnit(args[0].intVal, abilityCode, level);
@@ -12631,7 +12636,7 @@ void JassNatives::RegisterAbilityBuilderNatives() {
         "CreateAbilityBuilderConfiguration", "CreateAbilityBehavior",
         "CreateAbilityTargetVisitor", "CreateAbstractRangedBehavior",
         "CreateBehaviorExpr", "CreateRangedBehavior", "CreateOrderButton",
-        "CreateJassAbility", "CreateJassBuff", "CreatePassiveBuff", "CreateStunBuff",
+        "CreatePassiveBuff", "CreateStunBuff",
         "CreateTargetingBuff", "CreateTimedArtBuff", "CreateTimedBuff",
         "CreateTimedLifeBuff", "CreateTimedTargetingBuff", "CreateTimedTickingBuff",
         "CreateTimedTickingPausedBuff", "CreateTimedTickingPostDeathBuff",
@@ -12690,6 +12695,24 @@ void JassNatives::RegisterAbilityBuilderNatives() {
         [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("AbstractRangedBehaviorResetII",
         [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    // JASS-authored objects (ref CreateJassAbility/CreateJassBuff): real
+    // handle objects in the ability store, so create/query/cooldown paths
+    // work. Script callbacks don't execute yet (no ABActionJass bridge);
+    // attaching a buff handle fails closed in the factory (no crash).
+    vm_.RegisterNative("CreateJassAbility", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.empty()) return JassValue::Int(0);
+        return JassValue::Int(AbilityToHandle(*data, War3ID(static_cast<uint32_t>(args[0].intVal))));
+    });
+    vm_.RegisterNative("CreateJassBuff", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 2) return JassValue::Int(0);
+        const int abilityId = data->nextAbilityId++;
+        auto handle = std::make_shared<JassAbilityHandle>();
+        handle->code = War3ID(static_cast<uint32_t>(args[0].intVal));
+        handle->alias = War3ID(static_cast<uint32_t>(args[1].intVal));
+        handle->isBuff = true;
+        data->abilities[abilityId] = handle;
+        return JassValue::Int(data->AllocHandle(JassHandleInfo::ABILITY, abilityId));
+    });
 }
 
 // ============================================================

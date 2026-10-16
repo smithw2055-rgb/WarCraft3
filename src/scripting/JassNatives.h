@@ -399,6 +399,11 @@ struct JassAbilityHandle {
     War3ID code;
     int level = 1;
     int unitSimId = -1;
+    // JASS-authored objects (ref CreateJassAbility/CreateJassBuff): buff
+    // handles carry their alias; script callbacks don't execute yet, but
+    // the objects are real for create/query/remove paths.
+    bool isBuff = false;
+    War3ID alias;
 };
 
 struct JassHandleInfo {

@@ -2,7 +2,7 @@
 
 > 对照原版 Warsmash Java（`warsmash_ref/`）与 C++ 版（`src/`）。
 > 联机（Battle.net/UDP）明确排除。
-> 已完成 Gap-fill 1–50（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础、占位像素图+静态 stamp、高地 miss、穿刺线/炮击、伤害替换框架、闪避暴击叠加、荆棘吸血语义、死亡序列、非叠加攻击属性、溅射 miss/负伤/无敌监听、w3i 开局科技/随机表、通行 movement-type/边界环/水面定义、可破坏物 targeting/掉落、BlzFrame 全系、地形雾、spell 目标、存档槽等）。
+> 已完成 Gap-fill 1–51（技能/行为主体、JASS 1445 natives、地形基础、赏金/XP、复活事件、语音、榜单、昼夜雾基础、占位像素图+静态 stamp、高地 miss、穿刺线/炮击、伤害替换框架、闪避暴击叠加、荆棘吸血语义、死亡序列、非叠加攻击属性、溅射 miss/负伤/无敌监听、w3i 开局科技/随机表、通行 movement-type/边界环/水面定义、可破坏物 targeting/掉落、BlzFrame 全系、地形雾、spell 目标、存档槽、JassAbility 对象等）。
 
 ## P0：战斗模拟正确性（影响对局）
 
@@ -31,7 +31,7 @@
 - [x] 16. `Blz*Frame` 全系（Gap-47：45 个——创建/销毁/按名取（`GetOriginFrame` 按 (type,index) 合成稳定单例）、point/abs/clear/allPoints、visible/enable/focus/click/alpha、text/get/add/limit、model/texture/scale/sprite/vertexColor、value/minmax/step/size、parent/children/tooltip、level、height/width、全局 autoPosition/hideOrigin/TOC；getter 读回 setter 状态+零售默认值，坏 handle 安全零值；`JassFrame` 扩字段 + 父子双向链表，destroy 摘链+回收名字。残留：纯状态层，无真实渲染/点击派发；`BlzFrameSetFocus` 恒 true-on-exists）。
 - [x] 17. 地形雾三桩（Gap-48：`JassTerrainFog` 状态 + `terrainFogHook`（controller 推 `DayNightCycle`，headless 为空）；`SetTerrainFogEx` 按 ref 全量存 style/range/density/color（style 钳 0..2，短参忽略）；`ResetTerrainFog` 清 override、hook 回 w3i 基线（`defaultFogSettings` 等价）；老式 `SetTerrainFog` 零售本就无效果，best-effort 取 a/b 为线性 range、c 为 density、颜色不动并注明偏离。残留：渲染线性-only（P3-22）、exp style 存而不用）。
 - [x] 18. spell 目标三桩+幻象（Gap-49：`SetSpellEventCallback` 扩参（caster/stage/targetSim/x/y），`behavior_spell` 三处 firing 带目标点，`FireSpellEvent` 按 widget 种类 AllocHandle 进 `eventSpellTarget{Unit,Destructable,Item}Handle` + X/Y（含 queued context 存取）；`GetSpellTargetDestructable/Item` 返回 handle（无则 0，同 Unit 惯例），附带修好同源全死的 `GetSpellTargetUnit/X/Y`；`CUnit::illusion_` 旗（`ABActionSummonCopyOfTarget::Run` 置位，两处生产者皆幻象），`IsUnitIllusion` 读旗；`BlzGetSpecialEffectZ` 点特效报存值、挂接特效报存值+目标 flyHeight。残留：`GetSpellAbility/OrderId` 仍无 ability 上下文；幻象无承伤加成/驱散转移（spells3.h 既有注明）。
-- [ ] 19. abilitybuilder 151 桩 + `CreateJassAbility/Buff`（大工程，延后）。
+- [x] 19. abilitybuilder（Gap-51 切口：`CreateJassAbility` 返回真 ABILITY handle（创建/查 id/挂接/冷却/移除全通工厂路径）；`CreateJassBuff` 返回真 buff handle（code+alias 入 `JassAbilityHandle::isBuff/alias`，可查 id）；buff handle 挂接显式拒绝（无 CBuff 工厂前不挂 do-nothing ability）；未知 ability 码挂接走 `GenericDoNothing` 兜底（Warsmash 容忍，零售为 false，已注明）。残留：回调执行桥（ABActionJass/ABConf action 表）、`CreatePassiveBuff` 系（JASS code 参数）、OrderButton/GameObject/ABTimer 存取仍桩）。
 - [x] 20. 单机存档槽（Gap-50：`Save/slot_<safe>/save.w3s` 真目录层（与 gamecache 同根，`..` 等压平成 `_` 防逃逸）；`SaveGame` 写元数据（引擎 tag/map 路径）+ 落盘全部 live gamecache + 记 `lastSaveSlot`（`GetSaveBasicFilename` 可读）；`SaveGameExists/Copy/Rename/Remove` 真文件语义（rename 遇已存在 dst 拒绝）；`LoadGame`（槽存在才记录）/`ReloadGame`/`RestartGame` 只记 `pendingLoad` 供 P3 菜单消费。残留：整局 sim 序列化/恢复无（Load 系不实际读档）；controller 透 `mapPath_` 进元数据）。
 
 ## P3：视觉/音频/表现
@@ -50,4 +50,4 @@
 
 ## 实施顺序
 
-1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图+静态 stamp（P1-11，Gap-33/34）→ 4. 高地 miss（P0-3，Gap-35）→ 5. 穿刺线/炮击（P0-4，Gap-36）→ 6. 伤害替换框架（P0-5，Gap-37）→ 7. 闪避暴击叠加（P0-6，Gap-38）→ 8. 荆棘吸血语义（P0-7，Gap-39）→ 9. 死亡序列（P0-8，Gap-40）→ 10. 非叠加攻击属性（P0-9，Gap-41）→ 11. P0-10 小项（Gap-42）→ 12. w3i 开局科技（P1-12，Gap-43）→ 13. w3i 随机表+死亡掉落（P1-13，Gap-44）→ 14. 通行 movement-type/边界环/水面定义（P1-14，Gap-45）→ 15. 可破坏物 targeting/掉落/遮挡（P1-15，Gap-46）→ 16. BlzFrame 全系 45 个（P2-16，Gap-47）→ 17. 地形雾三桩（P2-17，Gap-48）→ 18. spell 目标/幻象/特效 Z（P2-18，Gap-49）→ 20. 存档槽目录层（P2-20，Gap-50）→ …
+1. 受击反击/逃跑（P0-1）→ 2. `interruptable` 打断（P0-2）→ 3. 占位像素图+静态 stamp（P1-11，Gap-33/34）→ 4. 高地 miss（P0-3，Gap-35）→ 5. 穿刺线/炮击（P0-4，Gap-36）→ 6. 伤害替换框架（P0-5，Gap-37）→ 7. 闪避暴击叠加（P0-6，Gap-38）→ 8. 荆棘吸血语义（P0-7，Gap-39）→ 9. 死亡序列（P0-8，Gap-40）→ 10. 非叠加攻击属性（P0-9，Gap-41）→ 11. P0-10 小项（Gap-42）→ 12. w3i 开局科技（P1-12，Gap-43）→ 13. w3i 随机表+死亡掉落（P1-13，Gap-44）→ 14. 通行 movement-type/边界环/水面定义（P1-14，Gap-45）→ 15. 可破坏物 targeting/掉落/遮挡（P1-15，Gap-46）→ 16. BlzFrame 全系 45 个（P2-16，Gap-47）→ 17. 地形雾三桩（P2-17，Gap-48）→ 18. spell 目标/幻象/特效 Z（P2-18，Gap-49）→ 20. 存档槽目录层（P2-20，Gap-50）→ 19. JassAbility/Buff 对象（P2-19 切口，Gap-51）→ …

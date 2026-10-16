@@ -888,3 +888,57 @@ bool TestJassBonus() {
     TEST_ASSERT(CallNative(vm, "GetPlayerState", {JassValue::Int(p0), JassValue::Int(3)}).intVal == 2);
     return true;
 }
+
+bool TestJassAbilityObjects() {
+    // CreateJassAbility/Buff return real handle objects (not 0): queryable
+    // by id, attachable through the factory path, removable again. Custom
+    // codes and buff handles fail closed without crashing.
+    JassVM vm;
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    auto data = natives.GetData();
+    auto* u = sim.AdoptUnit(std::make_unique<CUnit>(
+        9601, MakeP0Type("hfoo", War3ID("hfoo")), 0, War3ID("hfoo"), 0, 0, 0));
+    TEST_ASSERT(u);
+    sim.Update();
+    const int hu = data->AllocHandle(JassHandleInfo::UNIT, 9601);
+
+    const int atkId = (int)War3ID("Aatk").value;
+    const int customId = (int)War3ID("X001").value;
+    const int ha = CallNative(vm, "CreateJassAbility", {JassValue::Int(atkId)}).intVal;
+    TEST_ASSERT(ha != 0);
+    TEST_ASSERT(CallNative(vm, "BlzGetAbilityId", {JassValue::Int(ha)}).intVal == atkId);
+    // Factory-known code attaches through the normal path.
+    TEST_ASSERT(CallNative(vm, "UnitAddAbility", {JassValue::Int(hu), JassValue::Int(ha)}).boolVal);
+    TEST_ASSERT(CallNative(vm, "GetUnitAbility",
+        {JassValue::Int(hu), JassValue::Int(atkId)}).intVal != 0);
+    TEST_ASSERT(CallNative(vm, "UnitRemoveAbility", {JassValue::Int(hu), JassValue::Int(atkId)}).boolVal);
+    TEST_ASSERT(CallNative(vm, "GetUnitAbility",
+        {JassValue::Int(hu), JassValue::Int(atkId)}).intVal == 0);
+
+    // Custom code: object stays queryable; attach lands a do-nothing shim
+    // (Warsmash-tolerant; retail returns false) instead of crashing.
+    const int hx = CallNative(vm, "CreateJassAbility", {JassValue::Int(customId)}).intVal;
+    TEST_ASSERT(hx != 0 && hx != ha);
+    TEST_ASSERT(CallNative(vm, "BlzGetAbilityId", {JassValue::Int(hx)}).intVal == customId);
+    TEST_ASSERT(CallNative(vm, "UnitAddAbility", {JassValue::Int(hu), JassValue::Int(hx)}).boolVal);
+    TEST_ASSERT(CallNative(vm, "GetUnitAbility",
+        {JassValue::Int(hu), JassValue::Int(customId)}).intVal != 0);
+
+    // Buff handle carries code + alias; attach waits on the buff factory.
+    const int buffId = (int)War3ID("B001").value;
+    const int aliasId = (int)War3ID("B002").value;
+    const int hb = CallNative(vm, "CreateJassBuff",
+        {JassValue::Int(buffId), JassValue::Int(aliasId)}).intVal;
+    TEST_ASSERT(hb != 0);
+    TEST_ASSERT(CallNative(vm, "BlzGetAbilityId", {JassValue::Int(hb)}).intVal == buffId);
+    TEST_ASSERT(!CallNative(vm, "UnitAddAbility", {JassValue::Int(hu), JassValue::Int(hb)}).boolVal);
+
+    // Bad args stay null-safe.
+    TEST_ASSERT(CallNative(vm, "CreateJassAbility", {}).intVal == 0);
+    TEST_ASSERT(CallNative(vm, "CreateJassBuff", {JassValue::Int(buffId)}).intVal == 0);
+    TEST_ASSERT(CallNative(vm, "BlzGetAbilityId", {JassValue::Int(999999)}).intVal == 0);
+    return true;
+}

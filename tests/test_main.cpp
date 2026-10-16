@@ -297,6 +297,7 @@ bool TestJassSoundMusic();
 bool TestJassCinematicVisuals();
 bool TestJassSuspendDecayMisc();
 bool TestJassP0Natives();
+bool TestJassAbilityObjects();
 bool TestJassP1Natives();
 bool TestJassTargeting();
 bool TestJassBonus();
@@ -1030,6 +1031,7 @@ int main(int argc, char** argv) {
         {"JASS cinematic visuals", TestJassCinematicVisuals},
         {"JASS suspend decay misc", TestJassSuspendDecayMisc},
         {"JASS P0 natives", TestJassP0Natives},
+        {"JASS ability objects", TestJassAbilityObjects},
         {"JASS P1 natives", TestJassP1Natives},
         {"JASS targeting", TestJassTargeting},
         {"JASS bonus", TestJassBonus},
