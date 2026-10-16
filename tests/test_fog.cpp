@@ -353,3 +353,49 @@ bool TestStealthVisibilityRules() {
     TEST_ASSERT(!spook->IsInvisibleTo(foeEye));
     return true;
 }
+
+bool TestTerrainFogNatives() {
+    // SetTerrainFogEx stores style/range/density/color and notifies the
+    // renderer hook; ResetTerrainFog drops the override (hook restores the
+    // w3i baseline in-game); legacy SetTerrainFog drives linear fog.
+    Fixture f;
+    TEST_ASSERT(!f.data->terrainFog.overridden);
+    int hookCalls = 0;
+    f.data->terrainFogHook = [&hookCalls]() { ++hookCalls; };
+    CallNative(f.vm, "SetTerrainFogEx",
+        {JassValue::Int(0), JassValue::Real(3000), JassValue::Real(8000),
+         JassValue::Real(0.5f), JassValue::Real(0.1f), JassValue::Real(0.2f),
+         JassValue::Real(0.3f)});
+    TEST_ASSERT(f.data->terrainFog.overridden);
+    TEST_ASSERT(f.data->terrainFog.style == 0);
+    TEST_ASSERT(f.data->terrainFog.start == 3000.0f);
+    TEST_ASSERT(f.data->terrainFog.end == 8000.0f);
+    TEST_ASSERT(f.data->terrainFog.density == 0.5f);
+    TEST_ASSERT(f.data->terrainFog.r == 0.1f);
+    TEST_ASSERT(f.data->terrainFog.g == 0.2f);
+    TEST_ASSERT(f.data->terrainFog.b == 0.3f);
+    TEST_ASSERT(hookCalls == 1);
+    // Style clamps to the retail 0..2 range; short arg lists are ignored.
+    CallNative(f.vm, "SetTerrainFogEx",
+        {JassValue::Int(9), JassValue::Real(1), JassValue::Real(2),
+         JassValue::Real(0), JassValue::Real(0), JassValue::Real(0),
+         JassValue::Real(0)});
+    TEST_ASSERT(f.data->terrainFog.style == 2);
+    TEST_ASSERT(hookCalls == 2);
+    CallNative(f.vm, "SetTerrainFogEx", {JassValue::Int(0)});
+    TEST_ASSERT(hookCalls == 2);
+    CallNative(f.vm, "ResetTerrainFog", {});
+    TEST_ASSERT(!f.data->terrainFog.overridden);
+    TEST_ASSERT(hookCalls == 3);
+    // Legacy form: linear from a/b, density c, color untouched.
+    CallNative(f.vm, "SetTerrainFog",
+        {JassValue::Real(2500), JassValue::Real(6000), JassValue::Real(0.25f),
+         JassValue::Real(0), JassValue::Real(0)});
+    TEST_ASSERT(f.data->terrainFog.overridden);
+    TEST_ASSERT(f.data->terrainFog.style == 0);
+    TEST_ASSERT(f.data->terrainFog.start == 2500.0f);
+    TEST_ASSERT(f.data->terrainFog.end == 6000.0f);
+    TEST_ASSERT(f.data->terrainFog.density == 0.25f);
+    TEST_ASSERT(hookCalls == 4);
+    return true;
+}

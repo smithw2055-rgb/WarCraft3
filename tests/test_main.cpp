@@ -552,6 +552,7 @@ bool TestFogSharedVision();
 bool TestUnitShareVisionReveals();
 bool TestTerrainDeformLowersHeight();
 bool TestStealthVisibilityRules();
+bool TestTerrainFogNatives();
 bool TestLightningSegmentCount();
 bool TestLightningDefaultParams();
 bool TestLightningEndpointsAndBounds();
@@ -1280,6 +1281,7 @@ int main(int argc, char** argv) {
         {"Unit share vision reveals", TestUnitShareVisionReveals},
         {"Terrain deform lowers height", TestTerrainDeformLowersHeight},
         {"Stealth visibility rules", TestStealthVisibilityRules},
+        {"Terrain fog natives", TestTerrainFogNatives},
         {"Lightning segment count", TestLightningSegmentCount},
         {"Lightning default params", TestLightningDefaultParams},
         {"Lightning endpoints and bounds", TestLightningEndpointsAndBounds},

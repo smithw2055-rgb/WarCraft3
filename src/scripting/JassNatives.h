@@ -233,6 +233,19 @@ struct JassFogState {
     float zHeight = 0.0f;
 };
 
+// Script terrain-fog override (ref SetTerrainFogEx / ResetTerrainFog via
+// war3MapViewer fogSettings, defaultFogSettings as baseline). The renderer
+// (linear-only, see P3-22) is fed through terrainFogHook, wired by the
+// game controller to DayNightCycle; headless/tests just observe the state.
+struct JassTerrainFog {
+    bool overridden = false;
+    int style = 0; // retail 0=linear, 1=exp, 2=exp2 (renderer: linear only)
+    float start = 0.0f;
+    float end = 0.0f;
+    float density = 0.0f;
+    float r = 0.5f, g = 0.5f, b = 0.5f;
+};
+
 struct JassGroup {
     std::vector<int> unitHandles;
 };
@@ -864,6 +877,7 @@ public:
     JassGameConfig gameConfig;
     std::array<JassPlayerAIState, 24> playerAI;
     JassFogState fog;
+    JassTerrainFog terrainFog;
     // Resource trade tax: (player<<32 | other)<<4 | resource -> percent.
     // (ref SetPlayerTaxRate; retail default 0 until set.)
     std::unordered_map<int64_t, int> playerTaxRates;
@@ -1122,6 +1136,9 @@ public:
     void SetTerrainHeightCallback(std::function<float(float, float)> cb) {
         terrainGroundHeight = std::move(cb);
     }
+    // Terrain-fog override notification (set by the game controller to push
+    // JassTerrainFog into DayNightCycle; null when headless).
+    std::function<void()> terrainFogHook;
     void SetLocalPlayerIndex(int index) { localPlayerIndex = index; }
     std::function<void(float,float,float)> camSetPosition;
     std::function<void(float,float,float)> camSetTarget;

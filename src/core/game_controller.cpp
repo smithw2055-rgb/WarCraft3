@@ -2026,6 +2026,26 @@ void GameController::WireJassCallbacks() {
     auto* jassData = jassNatives_->GetData().get();
     if (!jassData) return;
 
+    // Ref SetTerrainFogEx/ResetTerrainFog: script override wins while set;
+    // ResetTerrainFog drops back to the w3i baseline (defaultFogSettings).
+    jassData->terrainFogHook = [this]() {
+        auto data = jassNatives_ ? jassNatives_->GetData() : nullptr;
+        if (!data) return;
+        const auto& fog = data->terrainFog;
+        if (fog.overridden) {
+            dayNight_.SetMapFog(true, fog.r, fog.g, fog.b, fog.density);
+            dayNight_.SetMapFogRange(fog.start, fog.end);
+            return;
+        }
+        if (w3i_.useTerrainFog) {
+            dayNight_.SetMapFog(true,
+                w3i_.fogColor[0] / 255.0f, w3i_.fogColor[1] / 255.0f,
+                w3i_.fogColor[2] / 255.0f, w3i_.fogDensity);
+            dayNight_.SetMapFogRange(w3i_.fogHeight[0], w3i_.fogHeight[1]);
+        } else {
+            dayNight_.SetMapFog(false, 0.5f, 0.5f, 0.5f, 0.0f);
+        }
+    };
     // Ref GetLocationZ reads the map terrain height; route JASS queries to
     // the live textured terrain (0 when no map is loaded).
     jassData->SetTerrainHeightCallback([this](float x, float y) -> float {

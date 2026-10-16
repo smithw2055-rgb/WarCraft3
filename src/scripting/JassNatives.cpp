@@ -6634,8 +6634,39 @@ void JassNatives::RegisterFogNatives() {
         if (fogId >= 0) sim->GetFogSystem()->SetModifierEnabled(fogId, false);
         return JassValue::Null();
     });
-    vm_.RegisterNative("SetTerrainFog", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("ResetTerrainFog", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    // Script terrain fog (ref SetTerrainFogEx/ResetTerrainFog): state lives
+    // in data->terrainFog and is pushed to the renderer through
+    // terrainFogHook (game controller -> DayNightCycle; null when headless).
+    auto notifyTerrainFog = [data = data_]() {
+        if (data && data->terrainFogHook) data->terrainFogHook();
+    };
+    auto numVal = [](const JassValue& v) -> float {
+        return v.type == JassValue::REAL ? v.realVal : (float)v.intVal;
+    };
+    vm_.RegisterNative("SetTerrainFog", [data = data_, notifyTerrainFog, numVal](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 5) return JassValue::Null();
+        // Legacy form is undocumented and ignored by retail (broken since
+        // ~2011 per community native lists). Best effort: positions match
+        // Ex's zstart/zend slots, so drive linear fog from a/b with c as
+        // density and keep the current color.
+        auto& fog = data->terrainFog;
+        fog.overridden = true;
+        fog.style = 0;
+        fog.start = numVal(args[0]);
+        fog.end = numVal(args[1]);
+        fog.density = std::max(0.0f, numVal(args[2]));
+        notifyTerrainFog();
+        return JassValue::Null();
+    });
+    vm_.RegisterNative("ResetTerrainFog", [data = data_, notifyTerrainFog](const std::vector<JassValue>& args) -> JassValue {
+        (void)args;
+        if (!data) return JassValue::Null();
+        // Ref resetTerrainFog: drop the override; the hook restores the w3i
+        // baseline (defaultFogSettings equivalent).
+        data->terrainFog.overridden = false;
+        notifyTerrainFog();
+        return JassValue::Null();
+    });
     vm_.RegisterNative("SetFogStateRect", [data = data_, sim = sim_, fogPlayers, fogStateOf](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 7 || !sim) return JassValue::Null();
         const int player = ResolvePlayerId(data, args[0].intVal);
@@ -7756,7 +7787,27 @@ void JassNatives::RegisterGameNatives() {
     });
     vm_.RegisterNative("UseCustomHeroAbilities", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
     vm_.RegisterNative("SetTerrainAvailable", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("SetTerrainFogEx", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
+    vm_.RegisterNative("SetTerrainFogEx", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+        if (!data || args.size() < 7) return JassValue::Null();
+        // Ref Jass2 SetTerrainFogEx: style/index + start/end/density/color
+        // straight into fogSettings (retail density is a no-op and only
+        // linear style renders; the renderer already folds density into
+        // range and stays linear-only, see P3-22).
+        auto numVal = [](const JassValue& v) -> float {
+            return v.type == JassValue::REAL ? v.realVal : (float)v.intVal;
+        };
+        auto& fog = data->terrainFog;
+        fog.overridden = true;
+        fog.style = std::max(0, std::min(2, args[0].intVal));
+        fog.start = numVal(args[1]);
+        fog.end = numVal(args[2]);
+        fog.density = std::max(0.0f, numVal(args[3]));
+        fog.r = numVal(args[4]);
+        fog.g = numVal(args[5]);
+        fog.b = numVal(args[6]);
+        if (data->terrainFogHook) data->terrainFogHook();
+        return JassValue::Null();
+    });
     vm_.RegisterNative("SetFogState", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         (void)args; (void)data;
         return JassValue::Null();
