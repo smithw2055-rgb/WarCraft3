@@ -28,8 +28,8 @@
 #include "../map/w3i.h"
 #include "../map/wts.h"
 #include "../resource/slk.h"
-#include "../third_party/sokol/sokol_app.h"
-#include "../third_party/sokol/sokol_gfx.h"
+#include "third_party/sokol/sokol_app.h"
+#include "third_party/sokol/sokol_gfx.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>

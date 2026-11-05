@@ -1,7 +1,7 @@
 #include "renderer.h"
-#include "../third_party/sokol/sokol_app.h"
-#include "../third_party/sokol/sokol_glue.h"
-#include "../third_party/sokol/sokol_log.h"
+#include "third_party/sokol/sokol_app.h"
+#include "third_party/sokol/sokol_glue.h"
+#include "third_party/sokol/sokol_log.h"
 #include <iostream>
 
 // OpenGL function pointer for glPolygonMode (avoids GL header conflicts)

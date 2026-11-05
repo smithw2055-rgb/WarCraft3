@@ -21,6 +21,12 @@ if(MSVC)
     add_compile_options(/wd4819 /bigobj)
 endif()
 
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
 # -------------------------------------------------------------------
 # Auto-detect vcpkg_installed (Windows)
 # -------------------------------------------------------------------
@@ -354,7 +360,7 @@ if(BUILD_APP)
     # Add executable
     add_executable(warsmash ${SOURCES})
 
-    target_include_directories(warsmash PRIVATE src)
+    target_include_directories(warsmash PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
     # Pass project source root to code so it can find assets regardless of build location
     target_compile_definitions(warsmash PRIVATE

@@ -1,7 +1,7 @@
 #pragma once
 #include "UIFrame.h"
 #include "TextRenderer.h"
-#include "../third_party/sokol/sokol_app.h"
+#include "third_party/sokol/sokol_app.h"
 #include <string>
 #include <vector>
 #include <deque>

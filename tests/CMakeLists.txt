@@ -277,7 +277,7 @@ add_executable(warsmash_tests
     ../src/ecs/abilities/ability_builder.cpp
 )
 
-target_include_directories(warsmash_tests PRIVATE ../src)
+target_include_directories(warsmash_tests PRIVATE ../src .. ../third_party)
 
 target_compile_definitions(warsmash_tests PRIVATE
     PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"

@@ -4,7 +4,7 @@
 #include "../resource/mpq_storm.h"
 
 #define MINIAUDIO_IMPLEMENTATION
-#include "../third_party/miniaudio/miniaudio.h"
+#include "third_party/miniaudio/miniaudio.h"
 
 #include <iostream>
 #include <algorithm>

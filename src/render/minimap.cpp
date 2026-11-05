@@ -9,7 +9,7 @@
 #include "map/w3e.h"
 #include "map/w3i.h"
 #include "resource/mpq_storm.h"
-#include "../third_party/sokol/sokol_gfx.h"
+#include "third_party/sokol/sokol_gfx.h"
 #include <iostream>
 #include <cmath>
 #include <algorithm>
