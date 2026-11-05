@@ -15,6 +15,7 @@ logs
 third_party/
 vcpkg*
 resources*
+assets/
 assets*
 warsmash_ref*
 Save*
