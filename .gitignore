@@ -12,7 +12,8 @@ terrain_analysis/
 .DS_Store
 .opencode
 logs
-third_party/
+third_party/AeroGUI
+third_party/AeroGUI/
 vcpkg*
 resources*
 assets/
