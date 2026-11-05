@@ -1,4 +1,5 @@
 // Batch-28 tests: pairing, blight, harvest, cargo, waygate, shops, shade.
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -18,8 +19,10 @@
 #include "ecs/abilities/ability_queue.h"
 #include "ecs/abilities/ability_upgrade.h"
 #include "ecs/abilities/spells25.h"
+#include "ecs/animation_utils.h"
 #include "ecs/behaviors/behavior.h"
 #include "ecs/behaviors/behavior_harvest.h"
+#include "ecs/behaviors/behavior_return_resources.h"
 #include "ecs/item.h"
 #include "ecs/abilities/spells28.h"
 #include "ecs/ability_factory.h"
@@ -866,5 +869,116 @@ bool TestDestructableDeathSwap() {
     sim.Update();
     TEST_ASSERT(tree->GetPathingStampId() < 0 && tree->GetDeathStampId() < 0);
     TEST_ASSERT(wpm.pathing[2 + 2 * 16] == 0);
+    return true;
+}
+
+
+bool TestHarvestAnimationCarryState() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    auto* worker = AdoptAt(sim, 29101, 0, 0, 0);
+    TEST_ASSERT(worker != nullptr);
+
+    using animation_utils::UnitVisualAnimationMode;
+    TEST_ASSERT(animation_utils::ResolveUnitVisualAnimationMode(
+        worker, true, CBehaviorCategory::RETURN_RESOURCES,
+        CResourceType::GOLD, 0) == UnitVisualAnimationMode::WALK_GOLD);
+    TEST_ASSERT(animation_utils::ResolveUnitVisualAnimationMode(
+        worker, true, CBehaviorCategory::RETURN_RESOURCES,
+        CResourceType::LUMBER, 0) == UnitVisualAnimationMode::WALK_LUMBER);
+    TEST_ASSERT(animation_utils::ResolveUnitVisualAnimationMode(
+        worker, false, CBehaviorCategory::RETURN_RESOURCES,
+        CResourceType::LUMBER, 0) == UnitVisualAnimationMode::READY_LUMBER);
+    TEST_ASSERT(animation_utils::ResolveUnitVisualAnimationMode(
+        worker, false, CBehaviorCategory::HARVEST,
+        CResourceType::NONE, 0) == UnitVisualAnimationMode::READY);
+
+    const auto goldTags = animation_utils::BuildContextualAnimationTags(
+        worker, nullptr, CResourceType::GOLD, {"work"});
+    TEST_ASSERT(std::find(goldTags.begin(), goldTags.end(), "gold") != goldTags.end());
+    TEST_ASSERT(std::find(goldTags.begin(), goldTags.end(), "work") != goldTags.end());
+    TEST_ASSERT(std::find(goldTags.begin(), goldTags.end(), "lumber") == goldTags.end());
+
+    const auto lumberTags = animation_utils::BuildContextualAnimationTags(
+        worker, nullptr, CResourceType::LUMBER, {});
+    TEST_ASSERT(std::find(lumberTags.begin(), lumberTags.end(), "lumber") != lumberTags.end());
+    TEST_ASSERT(std::find(lumberTags.begin(), lumberTags.end(), "gold") == lumberTags.end());
+    return true;
+}
+
+bool TestHarvestReturnsCarriedBeforeSwitchingResource() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    CDestructableData treeData;
+    auto treeType = std::make_unique<CDestructableType>();
+    treeType->id = War3ID("LTlt");
+    treeType->maxLife = 100;
+    treeType->isTree = true;
+    treeData.RegisterDestructable(War3ID("LTlt"), std::move(treeType));
+    sim.SetDestructableData(&treeData);
+
+    auto* worker = AdoptAt(sim, 29111, 0, 0, 0);
+    auto* mine = AdoptAt(sim, 29112, 0, 200, 0);
+    auto* tree = sim.CreateDestructable(War3ID("LTlt"), 100, 0, 100.0f, 0);
+    TEST_ASSERT(worker != nullptr && mine != nullptr && tree != nullptr);
+
+    auto harvestAbility = std::make_unique<CAbilityHarvest>(29113);
+    CAbilityHarvest* harvest = harvestAbility.get();
+    worker->AddAbility(sim, std::move(harvestAbility));
+    mine->AddAbility(sim, std::make_unique<CAbilityGoldMine>(29114));
+
+    harvest->SetCarried(CResourceType::GOLD, 10);
+    std::unique_ptr<CBehavior> goldToTree(
+        harvest->Begin(sim, worker, OrderIds::HARVEST, tree));
+    TEST_ASSERT(dynamic_cast<CBehaviorReturnResources*>(goldToTree.get()) != nullptr);
+    TEST_ASSERT(harvest->GetLastTargetHandle() == tree->GetHandleId());
+
+    harvest->SetCarried(CResourceType::LUMBER, 4);
+    std::unique_ptr<CBehavior> partialLumberToTree(
+        harvest->Begin(sim, worker, OrderIds::HARVEST, tree));
+    TEST_ASSERT(dynamic_cast<CBehaviorReturnResources*>(partialLumberToTree.get()) != nullptr);
+
+    harvest->SetCarried(CResourceType::LUMBER, 10);
+    std::unique_ptr<CBehavior> lumberToMine(
+        harvest->Begin(sim, worker, OrderIds::HARVEST, mine));
+    TEST_ASSERT(dynamic_cast<CBehaviorReturnResources*>(lumberToMine.get()) != nullptr);
+    TEST_ASSERT(harvest->GetLastTargetHandle() == mine->GetHandleId());
+
+    harvest->ClearCarried();
+    std::unique_ptr<CBehavior> freshHarvest(
+        harvest->Begin(sim, worker, OrderIds::HARVEST, tree));
+    TEST_ASSERT(dynamic_cast<CBehaviorHarvest*>(freshHarvest.get()) != nullptr);
+    return true;
+}
+
+bool TestLumberHarvestReturnsPartialWhenNoTreesRemain() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    CDestructableData treeData;
+    auto treeType = std::make_unique<CDestructableType>();
+    treeType->id = War3ID("LTlt");
+    treeType->maxLife = 100;
+    treeType->isTree = true;
+    treeData.RegisterDestructable(War3ID("LTlt"), std::move(treeType));
+    sim.SetDestructableData(&treeData);
+
+    auto* worker = AdoptAt(sim, 29121, 0, 0, 0);
+    auto* tree = sim.CreateDestructable(War3ID("LTlt"), 40, 0, 2.0f, 0);
+    TEST_ASSERT(worker != nullptr && tree != nullptr);
+
+    auto harvestAbility = std::make_unique<CAbilityHarvest>(29122);
+    CAbilityHarvest* harvest = harvestAbility.get();
+    worker->AddAbility(sim, std::move(harvestAbility));
+    worker->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, tree));
+
+    for (int i = 0; i < 120 && harvest->GetCarriedAmount() == 0; i++) {
+        sim.Update();
+    }
+
+    TEST_ASSERT(harvest->GetCarriedAmount() == 2);
+    TEST_ASSERT(harvest->GetCarriedResourceType() == CResourceType::LUMBER);
+    TEST_ASSERT(tree->IsDead());
     return true;
 }

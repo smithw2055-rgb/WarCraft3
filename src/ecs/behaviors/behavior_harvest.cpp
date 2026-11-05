@@ -167,7 +167,7 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             const float speed = unit_->GetSpeed() * simulation.GetSimStepTime();
             if (wdist <= std::max(1.0f, speed)) {
                 waypoints_.pop_front();
-                propelling_ = false;
+                propelling_ = true;
             } else {
                 if (!unit_->TurnTowardPoint(wp.first, wp.second)) {
                     propelling_ = false;
@@ -270,6 +270,15 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                             waypoints_.clear();
                             return false;
                         }
+                        auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(
+                            unit_->GetAbility(War3ID("Ahar")));
+                        if (harvestAbility && gatheredAmount_ > 0) {
+                            harvestAbility->SetCarried(resourceType_, gatheredAmount_);
+                            unit_->IssueOrder(std::make_unique<COrderNoTarget>(
+                                OrderIds::RETURN_RESOURCES));
+                        }
+                        propelling_ = false;
+                        return true;
                     }
                 }
                 std::cout << "Chopped lumber: " << gatheredAmount_ << "/" << capacity_ << std::endl;

@@ -224,6 +224,26 @@ int MdxSelectSequenceIndexByPrimaryAndTags(
         }
 
         const auto candidateTags = ExtractKnownSequenceSecondaryTags(sequence.name);
+
+        // WC3 Rule: Special state tags ("work", "alternate", "alternateex") must NOT match
+        // unless explicitly requested. If requestedTags does not contain "work", reject
+        // candidate sequences that contain "work". Similarly for "alternate"/"alternateex".
+        auto hasTag = [](const std::vector<std::string>& list, const char* t) {
+            return std::find(list.begin(), list.end(), t) != list.end();
+        };
+        if (!hasTag(requestedTags, "work") && hasTag(candidateTags, "work")) {
+            continue;
+        }
+        if (!hasTag(requestedTags, "alternate") && (hasTag(candidateTags, "alternate") || hasTag(candidateTags, "alternateex"))) {
+            continue;
+        }
+        if (!hasTag(requestedTags, "gold") && hasTag(candidateTags, "gold")) {
+            continue;
+        }
+        if (!hasTag(requestedTags, "lumber") && hasTag(candidateTags, "lumber")) {
+            continue;
+        }
+
         SequenceSelectionScore candidateScore;
         candidateScore.exactRequested = candidateTags == requestedTags;
         candidateScore.matchRank = ComputeRequestedSecondaryTagMatchRank(requestedTags, candidateTags);

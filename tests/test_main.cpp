@@ -523,6 +523,9 @@ bool TestHeroTokensAndReviveFormula();
 bool TestSacrificeSummonsShade();
 bool TestSpells28FactoryCoverage();
 bool TestSpells28OrderIds();
+bool TestHarvestAnimationCarryState();
+bool TestHarvestReturnsCarriedBeforeSwitchingResource();
+bool TestLumberHarvestReturnsPartialWhenNoTreesRemain();
 bool TestEntangleGoldMinePaysFromParent();
 bool TestEntangleConstruction();
 bool TestOverlayedMinePaysParent();
@@ -740,6 +743,20 @@ bool TestSpellTargetWidgets();
 bool TestUnitIllusionFlag();
 bool TestEffectZRidesFlyHeight();
 bool TestPortraitPathRule();
+bool TestAuditFoodCapConstructingBuilding();
+bool TestAuditPlayerHeroMaintenance();
+bool TestAuditTransportCargoDeathCleanup();
+bool TestAuditMoveSpeedDriftAndClamp();
+bool TestAuditAOEAlliedFiltering();
+bool TestAuditStateFlagsBuffCounter();
+bool TestAuditBuffStackReplaceAndStunRefresh();
+bool TestAuditMorphLifeManaRatio();
+bool TestAuditItemHealthManaRegen();
+bool TestAuditFogSightOcclusionAndShared();
+bool TestAuditLightningShieldFriendlyDamage();
+bool TestAuditCreateItemValidation();
+bool TestAuditPropulsionWindowDegrees();
+bool TestAuditSequenceGoldLumberFilter();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1258,6 +1275,9 @@ int main(int argc, char** argv) {
         {"Sacrifice summons shade", TestSacrificeSummonsShade},
         {"Spells28 factory coverage", TestSpells28FactoryCoverage},
         {"Spells28 order ids", TestSpells28OrderIds},
+        {"Harvest animation carry state", TestHarvestAnimationCarryState},
+        {"Harvest returns before resource switch", TestHarvestReturnsCarriedBeforeSwitchingResource},
+        {"Lumber returns partial when no trees remain", TestLumberHarvestReturnsPartialWhenNoTreesRemain},
         {"Entangle gold mine pays from parent", TestEntangleGoldMinePaysFromParent},
         {"Entangle construction", TestEntangleConstruction},
         {"Overlayed mine pays parent", TestOverlayedMinePaysParent},
@@ -1475,6 +1495,20 @@ int main(int argc, char** argv) {
         {"Unit illusion flag", TestUnitIllusionFlag},
         {"Effect Z rides fly height", TestEffectZRidesFlyHeight},
         {"Portrait path rule", TestPortraitPathRule},
+        {"Audit food cap constructing building", TestAuditFoodCapConstructingBuilding},
+        {"Audit player hero maintenance", TestAuditPlayerHeroMaintenance},
+        {"Audit transport cargo death cleanup", TestAuditTransportCargoDeathCleanup},
+        {"Audit move speed drift and clamp", TestAuditMoveSpeedDriftAndClamp},
+        {"Audit aoe allied filtering", TestAuditAOEAlliedFiltering},
+        {"Audit state flags buff counter", TestAuditStateFlagsBuffCounter},
+        {"Audit buff stack replace and stun refresh", TestAuditBuffStackReplaceAndStunRefresh},
+        {"Audit morph life mana ratio", TestAuditMorphLifeManaRatio},
+        {"Audit item health mana regen", TestAuditItemHealthManaRegen},
+        {"Audit fog sight occlusion and shared", TestAuditFogSightOcclusionAndShared},
+        {"Audit lightning shield friendly damage", TestAuditLightningShieldFriendlyDamage},
+        {"Audit create item validation", TestAuditCreateItemValidation},
+        {"Audit propulsion window degrees", TestAuditPropulsionWindowDegrees},
+        {"Audit sequence gold lumber filter", TestAuditSequenceGoldLumberFilter},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

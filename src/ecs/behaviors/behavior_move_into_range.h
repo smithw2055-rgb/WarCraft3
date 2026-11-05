@@ -7,6 +7,7 @@
 // Previously each file inlined its own distance math; these inline helpers
 // give them a single tested implementation without a new behavior class.
 #include <cmath>
+#include <algorithm>
 
 class CSimulation;
 class CUnit;

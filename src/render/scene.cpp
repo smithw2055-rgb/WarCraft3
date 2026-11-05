@@ -72,8 +72,9 @@ static std::string NormalizeModelPathWithExtension(const std::string& path) {
 }
 
 static Vec3 TransformInstanceLocalPoint(const PlacedModel& inst, const Vec3& localPosition) {
-    const float c = std::cos(inst.renderAngle);
-    const float s = std::sin(inst.renderAngle);
+    const float radians = inst.renderAngle * 3.14159265358979323846f / 180.0f;
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
     const float lx = localPosition.x * inst.scale[0];
     const float ly = localPosition.y * inst.scale[1];
     const float lz = localPosition.z * inst.scale[2];
@@ -1192,16 +1193,9 @@ bool SceneManager::IntersectInstanceRayWithCollision(int index, const picking::P
     }
     else {
         const float scale = (inst->scale[0] + inst->scale[1] + inst->scale[2]) / 3.0f;
-        const float c = std::cos(inst->renderAngle);
-        const float s = std::sin(inst->renderAngle);
-        modelMatrix.m[0] = c * scale;
-        modelMatrix.m[2] = -s * scale;
-        modelMatrix.m[5] = scale;
-        modelMatrix.m[8] = s * scale;
-        modelMatrix.m[10] = c * scale;
-        modelMatrix.m[12] = inst->renderPos[0];
-        modelMatrix.m[13] = inst->renderPos[1];
-        modelMatrix.m[14] = inst->renderPos[2];
+        modelMatrix = MakeSceneInstanceMatrix(inst->renderPos[0], inst->renderPos[1],
+                                              inst->renderPos[2], inst->renderAngle,
+                                              scale, scale, scale);
     }
 
     return inst->viewer->IntersectRayWithCollision(ray, modelMatrix, outT);
@@ -1269,6 +1263,7 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
         }
 
         if (inst->visible && inst->viewer) {
+            inst->viewer->SetInstanceMatrix(BuildInstanceModelMatrix(*inst));
             if (updatedViewers.insert(inst->viewer).second) {
                 inst->viewer->Update(dt, view);
                 for (const MdxEventEffect& effect : inst->viewer->GetResolvedEventEffects()) {
@@ -1363,13 +1358,10 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
         auto* inst = instances_[index];
         if (!debugRenderKind_.empty() && inst->debugKind != debugRenderKind_) continue;
         if (inst->visible && inst->viewer) {
-            if (inst->useCustomModelMatrix) {
-                inst->viewer->RenderWithModelMatrix(inst->customModelMatrix, view, proj, inst->player);
-            } else {
-                Vec3 p = {inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
-                float s = (inst->scale[0] + inst->scale[1] + inst->scale[2]) / 3.0f;
-                inst->viewer->RenderAt(p, view, proj, s, inst->player, inst->renderAngle);
-            }
+            const Mat4 model = inst->useCustomModelMatrix
+                ? inst->customModelMatrix
+                : BuildInstanceModelMatrix(*inst);
+            inst->viewer->RenderWithModelMatrix(model, view, proj, inst->player);
         }
     }
     // Procedural lightning bolts (JASS AddLightning*) on top.

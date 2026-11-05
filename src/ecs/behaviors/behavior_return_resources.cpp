@@ -244,7 +244,7 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
             const float speed = unit_->GetSpeed() * simulation.GetSimStepTime();
             if (wdist <= std::max(1.0f, speed)) {
                 waypoints_.pop_front();
-                propelling_ = false;
+                propelling_ = true;
             } else {
                 if (!unit_->TurnTowardPoint(wp.first, wp.second)) {
                     propelling_ = false;

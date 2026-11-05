@@ -112,6 +112,7 @@ add_executable(warsmash_tests
     test_jass_unimplemented.cpp
     test_jass_p0.cpp
     test_map_smoke.cpp
+    test_audit_fixes.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
     ../src/map/w3i.cpp
@@ -179,6 +180,7 @@ add_executable(warsmash_tests
     ../src/data/slk_merge.cpp
     ../src/data/upgradedata.cpp
     ../src/ecs/widget.cpp
+    ../src/ecs/animation_state.cpp
     ../src/ecs/unit.cpp
     ../src/ecs/fog_state.cpp
     ../src/ecs/unit_type.cpp

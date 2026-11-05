@@ -53,8 +53,13 @@ public:
     bool IsPathingEnabled() const { return pathingEnabled_; }
     void SetPathingEnabled(bool v) { pathingEnabled_ = v; }
     PathingGridMovementType GetMovementType() const { return movementType_; }
-    float GetSpeed() const { return speed_; }
-    void SetSpeed(int s) { speed_ = s; }
+    bool IsFlying() const { return movementType_ == PathingGridMovementType::FLY; }
+    float GetSpeed() const;
+    void SetSpeed(int s);
+    int GetBaseSpeed() const { return baseSpeed_; }
+    void AddBonusSpeed(int v) { bonusSpeed_ += v; }
+    void AddSpeedModifier(War3ID id, float percent) { speedModifiers_[id] = percent; }
+    void RemoveSpeedModifier(War3ID id) { speedModifiers_.erase(id); }
     bool TurnTowardPoint(float targetX, float targetY);
 
     // Position (override from CWidget)
@@ -247,7 +252,7 @@ public:
     // Current behavior
     CBehavior* GetCurrentBehavior() const { return currentBehavior_; }
     void SetCurrentBehavior(std::unique_ptr<CBehavior> behavior);
-    void IssueOrder(std::unique_ptr<COrder> order);
+    void IssueOrder(std::unique_ptr<COrder> order, bool queue = false);
     void ClearOrders();
     void Stop(CSimulation& simulation);
     // Last issued order id (ref GetUnitCurrentOrder); 0 when none issued.
@@ -508,7 +513,11 @@ private:
     float facing_;
 
     // Stats
-    int speed_;
+    int speed_ = 0;
+    int baseSpeed_ = 0;
+    int bonusSpeed_ = 0;
+    float auraMoveSpeedPercent_ = 0.0f;
+    std::unordered_map<War3ID, float> speedModifiers_;
     int baseMaxLife_;
     int baseMaxMana_;
     float mana_;

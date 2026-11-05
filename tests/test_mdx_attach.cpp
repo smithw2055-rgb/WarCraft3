@@ -151,26 +151,25 @@ bool TestAttachMatrixFollowsBoneRotation() {
     Mat4 mat;
     Vec3 loc;
     TEST_ASSERT(animator.GetAttachmentWorldMatrixYUp("hand", mat, loc));
-    // MDX pivot (10,20,30) rotated -90 deg about Z (left-handed) ->
-    // (20,-10,30), Y-up mapped to (20,30,10).
-    TEST_NEAR(loc.x, 20.0f, 1e-2f);
+    // MDX pivot (10,20,30) rotated +90 deg about Z ->
+    // (-20,10,30), Y-up mapped to (-20,30,-10).
+    TEST_NEAR(loc.x, -20.0f, 1e-2f);
     TEST_NEAR(loc.y, 30.0f, 1e-2f);
-    TEST_NEAR(loc.z, 10.0f, 1e-2f);
+    TEST_NEAR(loc.z, -10.0f, 1e-2f);
     // Still a pure rotation: orthonormal columns...
     TEST_NEAR(ColLen(mat, 0), 1.0f, 1e-3f);
     TEST_NEAR(ColLen(mat, 1), 1.0f, 1e-3f);
     TEST_NEAR(ColLen(mat, 2), 1.0f, 1e-3f);
     TEST_NEAR(ColDot(mat, 0, 1), 0.0f, 1e-3f);
     TEST_NEAR(ColDot(mat, 0, 2), 0.0f, 1e-3f);
-    // ...turned with the bone: MDX X lands on Y-up (0,0,1), MDX Y on
-    // (0,1,0), MDX Z on (-1,0,0).
+    // ...turned with the bone
     TEST_NEAR(mat.m[0], 0.0f, 1e-3f);
     TEST_NEAR(mat.m[1], 0.0f, 1e-3f);
-    TEST_NEAR(mat.m[2], 1.0f, 1e-3f);
+    TEST_NEAR(mat.m[2], -1.0f, 1e-3f);
     TEST_NEAR(mat.m[4], 0.0f, 1e-3f);
     TEST_NEAR(mat.m[5], 1.0f, 1e-3f);
     TEST_NEAR(mat.m[6], 0.0f, 1e-3f);
-    TEST_NEAR(mat.m[8], -1.0f, 1e-3f);
+    TEST_NEAR(mat.m[8], 1.0f, 1e-3f);
     TEST_NEAR(mat.m[9], 0.0f, 1e-3f);
     TEST_NEAR(mat.m[10], 0.0f, 1e-3f);
     return true;

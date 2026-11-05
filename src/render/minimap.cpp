@@ -1,6 +1,7 @@
 #include "minimap.h"
 #include "renderer.h"
 #include "textured_terrain.h"
+#include "math.h"
 #include "asset/TileSet.h"
 #include "asset/BLP.h"
 #include "asset/MipChain.h"
@@ -51,7 +52,7 @@ static bool DecodeImageFile(const std::vector<uint8_t>& fileData, int& outW, int
 
 static bool UploadTexture(sg_image& texture, sg_view& textureView, int width, int height,
                           const std::vector<uint8_t>& pixels) {
-    if (width <= 0 || height <= 0 || pixels.empty()) return false;
+    if (width <= 0 || height <= 0 || pixels.size() < (size_t)width * height * 4) return false;
     if (texture.id) {
         sg_destroy_image(texture);
         texture = {0};
@@ -61,22 +62,19 @@ static bool UploadTexture(sg_image& texture, sg_view& textureView, int width, in
         textureView = {0};
     }
 
-    // Full generated chain: the minimap sampler is mipmapped (zoomed-out
-    // overviews minify aggressively); a bare level 0 is incomplete.
-    MipChain chain = BuildMipChain(width, height, pixels.data());
-    if (chain.levels.empty()) return false;
     sg_image_desc imgd = {};
     imgd.type = SG_IMAGETYPE_2D;
     imgd.width = width;
     imgd.height = height;
     imgd.pixel_format = SG_PIXELFORMAT_RGBA8;
-    imgd.num_mipmaps = (int)chain.levels.size();
-    for (size_t i = 0; i < chain.levels.size() && i < SG_MAX_MIPMAPS; ++i) {
-        imgd.data.mip_levels[i].ptr = chain.levels[i].pixels.data();
-        imgd.data.mip_levels[i].size = chain.levels[i].pixels.size();
-    }
+    imgd.num_mipmaps = 1;
+    imgd.data.mip_levels[0].ptr = pixels.data();
+    imgd.data.mip_levels[0].size = (size_t)width * height * 4;
     texture = sg_make_image(&imgd);
-    if (!texture.id) return false;
+    if (sg_query_image_state(texture) != SG_RESOURCESTATE_VALID) {
+        texture = {0};
+        return false;
+    }
 
     sg_view_desc vd = {};
     vd.texture.image = texture;
@@ -93,7 +91,9 @@ Minimap::~Minimap() {
     if (fogView_.id) sg_destroy_view(fogView_);
     if (shader_.id) sg_destroy_shader(shader_);
     if (pipeline_.id) sg_destroy_pipeline(pipeline_);
+    if (linePipeline_.id) sg_destroy_pipeline(linePipeline_);
     if (vbo_.id) sg_destroy_buffer(vbo_);
+    if (lineVbo_.id) sg_destroy_buffer(lineVbo_);
     if (ibo_.id) sg_destroy_buffer(ibo_);
     if (sampler_.id) sg_destroy_sampler(sampler_);
 }
@@ -217,6 +217,18 @@ void Minimap::InitShader() {
     ibd.data.ptr = idxData;
     ibd.data.size = sizeof(idxData);
     ibo_ = sg_make_buffer(&ibd);
+
+    // Line pipeline and VBO for frustum trapezoid
+    sg_pipeline_desc lpd = pd;
+    lpd.primitive_type = SG_PRIMITIVETYPE_LINES;
+    lpd.index_type = SG_INDEXTYPE_NONE;
+    linePipeline_ = sg_make_pipeline(&lpd);
+
+    sg_buffer_desc lbd = {};
+    lbd.usage.vertex_buffer = true;
+    lbd.usage.stream_update = true;
+    lbd.size = 8 * 4 * sizeof(float);
+    lineVbo_ = sg_make_buffer(&lbd);
 }
 
 void Minimap::Generate(const TexturedTerrain& terrain, const TileSet& tileset,
@@ -239,11 +251,18 @@ void Minimap::Generate(const TexturedTerrain& terrain, const TileSet& tileset,
         int imageW = 0, imageH = 0;
         std::vector<uint8_t> imagePixels;
         if ((mpq->ReadFile("war3mapMap.tga", fileData) || mpq->ReadFile("war3mapMap.blp", fileData))
-            && DecodeImageFile(fileData, imageW, imageH, imagePixels)
-            && UploadTexture(texture_, textureView_, imageW, imageH, imagePixels)) {
-            texW_ = (float)imageW;
-            texH_ = (float)imageH;
-            return;
+            && DecodeImageFile(fileData, imageW, imageH, imagePixels)) {
+            for (size_t i = 3; i < imagePixels.size(); i += 4) {
+                imagePixels[i] = 255;
+            }
+            if (UploadTexture(texture_, textureView_, imageW, imageH, imagePixels)) {
+                texW_ = (float)imageW;
+                texH_ = (float)imageH;
+                if (screenW_ > 0.0f && screenH_ > 0.0f) {
+                    SetScreenRect(screenX_, screenY_, screenW_, screenH_);
+                }
+                return;
+            }
         }
     }
 
@@ -339,6 +358,9 @@ void Minimap::Generate(const TexturedTerrain& terrain, const TileSet& tileset,
     }
 
     UploadTexture(texture_, textureView_, texW, texH, pixels);
+    if (screenW_ > 0.0f && screenH_ > 0.0f) {
+        SetScreenRect(screenX_, screenY_, screenW_, screenH_);
+    }
 }
 
 void Minimap::SetScreenRect(float x, float y, float w, float h) {
@@ -431,10 +453,10 @@ void Minimap::Render(int winW, int winH, float camX, float camZ,
     VSUniforms vsUniforms = {};
     vsUniforms.screenSize[0] = (float)winW;
     vsUniforms.screenSize[1] = (float)winH;
-    vsUniforms.offset[0] = screenX_;
-    vsUniforms.offset[1] = screenY_;
-    vsUniforms.scale[0] = screenW_;
-    vsUniforms.scale[1] = screenH_;
+    vsUniforms.offset[0] = (filledW_ > 0.0f) ? filledX_ : screenX_;
+    vsUniforms.offset[1] = (filledH_ > 0.0f) ? filledY_ : screenY_;
+    vsUniforms.scale[0] = (filledW_ > 0.0f) ? filledW_ : screenW_;
+    vsUniforms.scale[1] = (filledH_ > 0.0f) ? filledH_ : screenH_;
 
     float fsUniforms[5] = {
         1.0f, 1.0f, 1.0f, 1.0f,
@@ -476,6 +498,10 @@ void Minimap::Render(int winW, int winH, float camX, float camZ,
     }
 
     auto drawMarker = [&](float screenX, float screenY, float sizePixels, uint32_t rgba) {
+        if (screenX < filledX_ - sizePixels || screenX > filledX_ + filledW_ + sizePixels ||
+            screenY < filledY_ - sizePixels || screenY > filledY_ + filledH_ + sizePixels) {
+            return;
+        }
         VSUniforms markerVs = vsUniforms;
         markerVs.offset[0] = screenX - sizePixels * 0.5f;
         markerVs.offset[1] = screenY - sizePixels * 0.5f;
@@ -507,7 +533,84 @@ void Minimap::Render(int winW, int winH, float camX, float camZ,
     float camSX = 0.0f;
     float camSY = 0.0f;
     WorldToScreen(camX, camZ, winW, winH, &camSX, &camSY);
-    drawMarker(camSX, camSY, 6.0f, 0xFFFFFFFFu);
+
+    // Ground-projected camera view frustum trapezoid (matching Warcraft 3 retail minimap)
+    if (camDist > 10.0f && fov > 1.0f) {
+        float cx = camDist * std::cos(camPitch) * std::sin(camYaw);
+        float cy = camDist * std::sin(camPitch);
+        float cz = camDist * std::cos(camPitch) * std::cos(camYaw);
+        Vec3 eye = {camX + cx, std::max(50.0f, cy), camZ + cz};
+        Vec3 target = {camX, 0.0f, camZ};
+        Vec3 fwd = Normalize(target - eye);
+        Vec3 right = Normalize(Cross(fwd, Vec3{0, 1, 0}));
+        Vec3 up = Cross(right, fwd);
+
+        float fovRad = fov * 3.14159265f / 180.0f;
+        float tanHalfY = std::tan(fovRad * 0.5f);
+        float tanHalfX = tanHalfY * (aspect > 0.0f ? aspect : 1.333f);
+
+        Vec3 rays[4] = {
+            Normalize(fwd + up * tanHalfY - right * tanHalfX), // 0: Far-Left
+            Normalize(fwd + up * tanHalfY + right * tanHalfX), // 1: Far-Right
+            Normalize(fwd - up * tanHalfY + right * tanHalfX), // 2: Near-Right
+            Normalize(fwd - up * tanHalfY - right * tanHalfX)  // 3: Near-Left
+        };
+
+        float cornersSX[4] = {};
+        float cornersSY[4] = {};
+        const float maxGroundDist = camDist * 2.5f;
+
+        for (int i = 0; i < 4; ++i) {
+            float t = maxGroundDist;
+            if (rays[i].y < -0.01f) {
+                t = std::min(maxGroundDist, -eye.y / rays[i].y);
+            }
+            float gx = eye.x + rays[i].x * t;
+            float gz = eye.z + rays[i].z * t;
+            WorldToScreen(gx, gz, winW, winH, &cornersSX[i], &cornersSY[i]);
+            cornersSX[i] = std::clamp(cornersSX[i], filledX_, filledX_ + filledW_);
+            cornersSY[i] = std::clamp(cornersSY[i], filledY_, filledY_ + filledH_);
+        }
+
+        // Single draw call for camera view frustum trapezoid (4 line segments = 8 vertices)
+        if (lineVbo_.id && linePipeline_.id) {
+            float lineVerts[32] = {
+                cornersSX[0], cornersSY[0], 0.0f, 0.0f,
+                cornersSX[1], cornersSY[1], 0.0f, 0.0f,
+                cornersSX[1], cornersSY[1], 0.0f, 0.0f,
+                cornersSX[2], cornersSY[2], 0.0f, 0.0f,
+                cornersSX[2], cornersSY[2], 0.0f, 0.0f,
+                cornersSX[3], cornersSY[3], 0.0f, 0.0f,
+                cornersSX[3], cornersSY[3], 0.0f, 0.0f,
+                cornersSX[0], cornersSY[0], 0.0f, 0.0f,
+            };
+            sg_update_buffer(lineVbo_, sg_range{lineVerts, sizeof(lineVerts)});
+
+            sg_apply_pipeline(linePipeline_);
+            sg_bindings lbind = {};
+            lbind.vertex_buffers[0] = lineVbo_;
+            lbind.views[0] = textureView_;
+            lbind.samplers[0] = sampler_;
+            sg_apply_bindings(&lbind);
+
+            VSUniforms lvs = vsUniforms;
+            lvs.offset[0] = 0.0f;
+            lvs.offset[1] = 0.0f;
+            lvs.scale[0] = 1.0f;
+            lvs.scale[1] = 1.0f;
+            sg_apply_uniforms(0, SG_RANGE(lvs));
+
+            float lfs[5] = {1.0f, 1.0f, 1.0f, 1.0f, 0.0f};
+            sg_apply_uniforms(1, SG_RANGE(lfs));
+            sg_draw(0, 8, 1);
+
+            // Re-bind quad pipeline for marker drawing
+            sg_apply_pipeline(pipeline_);
+            sg_apply_bindings(&bind);
+        }
+    }
+
+    drawMarker(camSX, camSY, 4.0f, 0xFFFFFFFFu);
 
     for (const auto& marker : markers_) {
         float sx = 0.0f;

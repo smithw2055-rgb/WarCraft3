@@ -35,6 +35,8 @@ public:
                        float yawRadians = 0.0f, float alpha = 1.0f, bool depthTest = true);
     void RenderWithModelMatrix(const Mat4& model, const Mat4& view, const Mat4& proj, int player = 0,
                                float alpha = 1.0f, bool depthTest = true);
+    void SetInstanceMatrix(const Mat4& model);
+    void SetWorldOffset(const Vec3& offset);
 
     const std::string& GetName() const { return name_; }
     bool IsValid() const { return !batches_.empty(); }
@@ -104,6 +106,9 @@ public:
 
     static void InitSharedShader();
     static void ReleaseSharedShader();
+    static void SetSharedLighting(const Vec3& sunDir, const Vec3& sunColor, float sunIntensity,
+                                  const Vec3& ambientColor, float ambientIntensity);
+    static void SetSharedFog(bool enabled, const float color[3], float start, float end);
 
 private:
     struct VertexStatic {
@@ -187,8 +192,18 @@ private:
     static sg_pipeline sharedOverlaySkinnedAdditivePipeline_;
     static sg_pipeline sharedOverlaySkinnedAddAlphaPipeline_;
     static sg_sampler sharedSampler_;
+    static sg_sampler sharedNearestSampler_;
     static sg_image sharedWhiteTexture_;
     static sg_view sharedWhiteTextureView_;
+    static Vec3 sharedSunDir_;
+    static Vec3 sharedSunColor_;
+    static float sharedSunIntensity_;
+    static Vec3 sharedAmbientColor_;
+    static float sharedAmbientIntensity_;
+    static bool sharedFogEnabled_;
+    static float sharedFogColor_[3];
+    static float sharedFogStart_;
+    static float sharedFogEnd_;
     sg_shader shader_ = {0};
     sg_pipeline pipeline_ = {0};
     std::vector<Batch> batches_;

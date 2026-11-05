@@ -255,6 +255,21 @@ float TextRenderer::MeasureText(const char* text, float size) const {
     float scale = size / fontSize_;
     float x = 0;
     while (*text) {
+        if (*text == '|' && *(text + 1)) {
+            char code = *(text + 1);
+            if (code == 'c' || code == 'C') {
+                if (std::strlen(text) >= 10) {
+                    text += 10;
+                    continue;
+                }
+            } else if (code == 'r' || code == 'R') {
+                text += 2;
+                continue;
+            } else if (code == 'n' || code == 'N') {
+                text += 2;
+                continue;
+            }
+        }
         unsigned char ch = (unsigned char)*text;
         if (ch >= 32 && ch <= 126) {
             const auto& g = glyphs_[ch - 32];
@@ -276,8 +291,49 @@ void TextRenderer::RenderText(UiRenderer& r, float x, float y, const char* text,
     float scale = size / fontSize_;
     float baselineY = y + ascender_ * scale;
     float posX = x;
+    uint32_t curColor = color;
+
+    auto hexNibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    auto parseHexByte = [&](const char* p) -> int {
+        int h = hexNibble(p[0]);
+        int l = hexNibble(p[1]);
+        if (h < 0 || l < 0) return -1;
+        return (h << 4) | l;
+    };
 
     while (*text) {
+        if (*text == '|' && *(text + 1)) {
+            char code = *(text + 1);
+            if (code == 'n' || code == 'N') {
+                posX = x;
+                baselineY += lineHeight_ * scale;
+                text += 2;
+                continue;
+            }
+            if (code == 'r' || code == 'R') {
+                curColor = color;
+                text += 2;
+                continue;
+            }
+            if (code == 'c' || code == 'C') {
+                if (std::strlen(text) >= 10) {
+                    int a = parseHexByte(text + 2);
+                    int r_ = parseHexByte(text + 4);
+                    int g = parseHexByte(text + 6);
+                    int b = parseHexByte(text + 8);
+                    if (a >= 0 && r_ >= 0 && g >= 0 && b >= 0) {
+                        curColor = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r_;
+                        text += 10;
+                        continue;
+                    }
+                }
+            }
+        }
         unsigned char ch = (unsigned char)*text;
         if (ch == '\n') {
             posX = x;
@@ -297,7 +353,7 @@ void TextRenderer::RenderText(UiRenderer& r, float x, float y, const char* text,
             float qw = g.bw * scale;
             float qh = g.bh * scale;
             r.DrawTexturedQuad(qx, qy, qw, qh, atlasTex_,
-                                g.tx0, g.ty0, g.tx1, g.ty1, color);
+                                g.tx0, g.ty0, g.tx1, g.ty1, curColor);
         }
         posX += g.ax * scale;
         text++;

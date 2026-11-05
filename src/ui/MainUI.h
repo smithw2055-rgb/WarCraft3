@@ -276,9 +276,11 @@ public:
     bool IsCommandOrderEnabled(int orderId) const;
     bool InvokeCommandOrderForDiagnostics(int orderId);
     ScreenRect GetMinimapRect() const;
+    void SetExternalMinimapVisible(bool visible);
     ScreenRect GetPortraitRect() const;
     int HitMultiSelection(float x, float y) const;
     int HitInventorySlot(float x, float y) const;
+    int HitBuffSlot(float x, float y) const;
 
 private:
     enum class CommandClickMode : uint8_t {
@@ -372,6 +374,7 @@ private:
     std::vector<MultiSelectUnitInfo> multiSelectionUnits_;
     bool selectionBoxVisible_ = false;
     ScreenRect selectionBoxRect_;
+    bool altDown_ = false;
 
     ChatConsoleFrame* chatConsole_ = nullptr;
 

@@ -4,6 +4,28 @@
 #include <iostream>
 #include <algorithm>
 
+static float ResolveFontHeight(const FrameDefinition& def, float defaultFdfH = 0.014f) {
+    if (def.HasField("FontHeight")) {
+        return def.GetFloat("FontHeight", defaultFdfH);
+    }
+    for (const char* k : { "FrameFont", "Font", "ButtonFont" }) {
+        auto it = def.fontFields.find(k);
+        if (it != def.fontFields.end() && it->second.size > 0.0f) {
+            return it->second.size;
+        }
+    }
+    return defaultFdfH;
+}
+
+static bool HasFontHeight(const FrameDefinition& def) {
+    if (def.HasField("FontHeight")) return true;
+    for (const char* k : { "FrameFont", "Font", "ButtonFont" }) {
+        auto it = def.fontFields.find(k);
+        if (it != def.fontFields.end() && it->second.size > 0.0f) return true;
+    }
+    return false;
+}
+
 FrameBuilder::FrameBuilder(GameUI& gui, MpqManager* mpq, TextRenderer* textRenderer)
     : gui_(&gui), mpq_(mpq), textRenderer_(textRenderer) {
     if (mpq_) {
@@ -111,8 +133,13 @@ UIFrame* FrameBuilder::ConstructFrame(const FrameDefinition& def, UIFrame* paren
     // Add to parent if not already parented
     if (parent) {
         frame->SetParent(parent);
-        if (auto* parentSimple = dynamic_cast<SimpleFrame*>(parent)) {
-            parentSimple->AddChild(frame);
+        UIFrame* p = parent;
+        while (p) {
+            if (auto* parentSimple = dynamic_cast<SimpleFrame*>(p)) {
+                parentSimple->AddChild(frame);
+                break;
+            }
+            p = p->GetParent();
         }
     }
 
@@ -163,11 +190,6 @@ UIFrame* FrameBuilder::ConstructFrame(const FrameDefinition& def, UIFrame* paren
                     child->SetAllPoints();
                     check->SetCheckBoxDisabledCheckHighlight(child);
                 }
-            }
-            auto* frameSimple = dynamic_cast<SimpleFrame*>(frame);
-            if (!frameSimple) {
-                auto* container = new SimpleFrame(def.name + "_container", frame);
-                container->AddChild(child);
             }
         }
     }
@@ -306,6 +328,11 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
             std::string text = DecorateText(def.GetString("Text", ""));
             if (txtFrame) txtFrame->SetText(text);
         }
+        if (HasFontHeight(def) && txtFrame) {
+            float fH = ResolveFontHeight(def, 0.014f);
+            float fontPx = (fH < 1.0f) ? (fH * cvtH) : fH;
+            txtFrame->SetFontSize(fontPx);
+        }
     }
     else if (type == "SPRITE2") {
         frame = new SpriteFrame(def.name, parent);
@@ -366,10 +393,11 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
         }
 
         // Font size (FDF units -> pixels, ref GameUI.generateFont).
-        if (def.HasField("FontHeight")) {
-            float fontSize = def.GetFloat("FontHeight", 14.0f);
+        if (HasFontHeight(def)) {
+            float fH = ResolveFontHeight(def, 0.014f);
+            float fontPx = (fH < 1.0f) ? (fH * cvtH) : fH;
             auto* btnFrame = dynamic_cast<ButtonFrame*>(frame);
-            if (btnFrame) btnFrame->SetFontSize(fontSize * cvtH);
+            if (btnFrame) btnFrame->SetFontSize(fontPx);
         }
     }
     else if (type == "TEXT" || def.frameClass == FrameClass::String) {
@@ -383,10 +411,11 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
             if (txtFrame) txtFrame->SetText(text);
         }
 
-        if (def.HasField("FontHeight")) {
-            float fontSize = def.GetFloat("FontHeight", 14.0f);
+        if (HasFontHeight(def)) {
+            float fH = ResolveFontHeight(def, 0.014f);
+            float fontPx = (fH < 1.0f) ? (fH * cvtH) : fH;
             auto* txtFrame = dynamic_cast<TextFrame*>(frame);
-            if (txtFrame) txtFrame->SetFontSize(fontSize);
+            if (txtFrame) txtFrame->SetFontSize(fontPx);
         }
     }
     else if (type == "CHECKBOX" || type == "GLUECHECKBOX") {
@@ -537,8 +566,9 @@ void FrameBuilder::ApplyProperties(UIFrame* frame, const FrameDefinition& def) {
             text->SetColor(c);
         }
         float fontPx = 14.0f;
-        if (def.HasField("FontHeight")) {
-            fontPx = def.GetFloat("FontHeight", 14.0f) * cvtH;
+        if (HasFontHeight(def)) {
+            float fH = ResolveFontHeight(def, 0.014f);
+            fontPx = (fH < 1.0f) ? (fH * cvtH) : fH;
             text->SetFontSize(fontPx);
         }
         if (!def.HasField("Height")) {

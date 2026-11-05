@@ -25,7 +25,7 @@ CAbilityHero* FindHeroAbility(CUnit* unit) {
 } // namespace
 
 bool IsCarriableHero(CUnit* unit, const CSimulation& sim) {
-    if (!unit || unit->IsDead() || unit->IsHidden()) return false;
+    if (!unit || unit->IsHidden()) return false;
     const CUnitType* type = unit->GetUnitType();
     if (!type || !type->IsHero()) return false;
     CPlayer* owner = sim.GetPlayer(unit->GetPlayerIndex());

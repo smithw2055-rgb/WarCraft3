@@ -16,6 +16,8 @@
 
 sg_shader MdxParticleSystem::sharedParticleShader_ = {0};
 sg_pipeline MdxParticleSystem::sharedParticlePipeline_ = {0};
+sg_pipeline MdxParticleSystem::sharedAdditivePipeline_ = {0};
+sg_pipeline MdxParticleSystem::sharedModulatePipeline_ = {0};
 sg_buffer MdxParticleSystem::sharedQuadBuffer_ = {0};
 sg_buffer MdxParticleSystem::sharedIndexBuffer_ = {0};
 
@@ -66,6 +68,14 @@ static Vec3 TransformPoint(const Mat4& matrix, const Vec3& point) {
         matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
         matrix.m[1] * point.x + matrix.m[5] * point.y + matrix.m[9] * point.z + matrix.m[13],
         matrix.m[2] * point.x + matrix.m[6] * point.y + matrix.m[10] * point.z + matrix.m[14]
+    };
+}
+
+static Vec3 TransformDirection(const Mat4& matrix, const Vec3& dir) {
+    return Vec3{
+        matrix.m[0] * dir.x + matrix.m[4] * dir.y + matrix.m[8] * dir.z,
+        matrix.m[1] * dir.x + matrix.m[5] * dir.y + matrix.m[9] * dir.z,
+        matrix.m[2] * dir.x + matrix.m[6] * dir.y + matrix.m[10] * dir.z
     };
 }
 
@@ -250,13 +260,19 @@ void MdxParticleSystem::EmitParticle(ParticleEmitterState& state, const MdxParti
         p.maxLife = data.lifeSpan;
         p.size = data.segmentScaling[0];
 
-        // Random texture cell
+        // Starting texture cell (start of interval or 0)
         const unsigned columns = std::max(1u, data.columns);
         const unsigned rows = std::max(1u, data.rows);
-        float col = (float)((int)(dist01_(rng_) * columns));
-        float row = (float)((int)(dist01_(rng_) * rows));
-        p.texRow = row;
-        p.texCol = col;
+        const unsigned totalCells = rows * columns;
+        if (totalCells > 1) {
+            unsigned startFrame = (data.headIntervals[0][1] > data.headIntervals[0][0])
+                ? data.headIntervals[0][0] : 0u;
+            p.texCol = (float)(startFrame % columns);
+            p.texRow = (float)(startFrame / columns);
+        } else {
+            p.texCol = 0.0f;
+            p.texRow = 0.0f;
+        }
 
         // Starting color
         p.color = Vec4{data.segmentColors[0][0], data.segmentColors[0][1],
@@ -300,6 +316,23 @@ void MdxParticleSystem::UpdateParticle(Particle& p, float dt, const MdxParticleE
 
     // Size
     p.size = data.segmentScaling[idx0] + (data.segmentScaling[idx1] - data.segmentScaling[idx0]) * localT;
+
+    // Advance flipbook frame based on normalized age
+    const unsigned columns = std::max(1u, data.columns);
+    const unsigned rows = std::max(1u, data.rows);
+    const unsigned totalCells = rows * columns;
+    if (totalCells > 1) {
+        unsigned startFrame = 0;
+        unsigned endFrame = totalCells - 1;
+        if (data.headIntervals[0][1] > data.headIntervals[0][0]) {
+            startFrame = data.headIntervals[0][0];
+            endFrame = std::min(data.headIntervals[0][1], totalCells - 1);
+        }
+        int span = (int)(endFrame - startFrame + 1);
+        int frameIdx = (int)startFrame + std::clamp((int)(t * span), 0, span - 1);
+        p.texCol = (float)(frameIdx % columns);
+        p.texRow = (float)(frameIdx / columns);
+    }
 }
 
 void MdxParticleSystem::Update(float dt, const Vec3& worldOffset) {
@@ -337,14 +370,20 @@ void MdxParticleSystem::Update(float dt, const Vec3& worldOffset, const MdxModel
             && animator->GetObjectWorldTransformYUp(data.objectId, emitterTransform);
         const bool modelSpace = (data.flags & 0x80000) != 0;
 
-        // Apply emitter node transform and instance world offset to newly emitted particles.
+        // Apply emitter node transform and instance transform to newly emitted particles.
         for (size_t i = oldCount; i < particles.size(); i++) {
             if (hasEmitterTransform && !modelSpace) {
                 particles[i].position = TransformPoint(emitterTransform, particles[i].position);
+                particles[i].velocity = TransformDirection(emitterTransform, particles[i].velocity);
             }
-            particles[i].position.x += worldOffset_.x;
-            particles[i].position.y += worldOffset_.y;
-            particles[i].position.z += worldOffset_.z;
+            if (hasInstanceMatrix_) {
+                particles[i].position = TransformPoint(instanceMatrix_, particles[i].position);
+                particles[i].velocity = TransformDirection(instanceMatrix_, particles[i].velocity);
+            } else {
+                particles[i].position.x += worldOffset_.x;
+                particles[i].position.y += worldOffset_.y;
+                particles[i].position.z += worldOffset_.z;
+            }
         }
 
         // Update existing particles
@@ -377,7 +416,7 @@ void MdxParticleSystem::Update(float dt, const Vec3& worldOffset, const MdxModel
                     p.position.x, p.position.y, p.position.z,
                     p.size,
                     p.color.x, p.color.y, p.color.z, p.color.w,
-                    p.texRow, p.texCol
+                    p.texCol, p.texRow
                 };
             }
             sg_update_buffer(state.instanceBuffer,
@@ -425,9 +464,16 @@ void MdxParticleSystem::Render(const Mat4& view, const Mat4& proj) {
         vsU.texCellW = 1.0f / (float)data.columns;
         vsU.texCellH = 1.0f / (float)data.rows;
 
-        sg_apply_pipeline(sharedParticlePipeline_);
+        sg_pipeline pipeline = sharedParticlePipeline_;
+        if (state.emitterData) {
+            if (state.emitterData->filterMode == 1) { // Additive (SRC_ALPHA, ONE)
+                if (sharedAdditivePipeline_.id) pipeline = sharedAdditivePipeline_;
+            } else if (state.emitterData->filterMode == 2) { // Modulate (DST_COLOR, ZERO)
+                if (sharedModulatePipeline_.id) pipeline = sharedModulatePipeline_;
+            }
+        }
+        sg_apply_pipeline(pipeline);
         sg_apply_uniforms(0, sg_rng(vsU));
-
 
         sg_bindings bind = {};
         bind.vertex_buffers[0] = sharedQuadBuffer_;
@@ -482,8 +528,8 @@ void MdxParticleSystem::InitSharedParticleResources() {
                 vec3 worldPos = aPos + uCamRight.xyz * aQuad.x * aSize + uCamUp.xyz * aQuad.y * aSize;
                 gl_Position = uVP * vec4(worldPos, 1.0);
                 vColor = aColor;
-                vUV = vec2(aTexCoord.x + (aQuad.x + 0.5) * uTexCellW,
-                           aTexCoord.y + (aQuad.y + 0.5) * uTexCellH);
+                vUV = vec2((aTexCoord.x + aQuad.x + 0.5) * uTexCellW,
+                           (aTexCoord.y + aQuad.y + 0.5) * uTexCellH);
             }
         )";
         const char* fragSrc = R"(
@@ -504,9 +550,6 @@ void MdxParticleSystem::InitSharedParticleResources() {
         sd.fragment_func.source = fragSrc;
 
         // VS uniform block: mat4 uVP (64) + vec3 uCamRight (12) + vec3 uCamUp (12) + float TexCellW (4) + float TexCellH (4) = 96
-        // But std140 alignment: vec3 takes 12 bytes in vec4-aligned block
-        // Actually in sokol with SG_UNIFORMLAYOUT_NATIVE, it packs sequentially
-        // 64 + 3*4 + 3*4 + 4 + 4 = 92 bytes. Round to 96 for alignment.
         sd.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
         sd.uniform_blocks[0].size = 104;
         sd.uniform_blocks[0].layout = SG_UNIFORMLAYOUT_NATIVE;
@@ -570,7 +613,7 @@ void MdxParticleSystem::InitSharedParticleResources() {
         sharedIndexBuffer_ = sg_make_buffer(&ibd);
     }
 
-    // ---- Particle pipeline ----
+    // ---- Particle pipelines ----
     if (!sharedParticlePipeline_.id && sharedParticleShader_.id) {
         sg_pipeline_desc pd = {};
         pd.shader = sharedParticleShader_;
@@ -597,12 +640,24 @@ void MdxParticleSystem::InitSharedParticleResources() {
         pd.layout.attrs[4] = {1, 32, SG_VERTEXFORMAT_FLOAT2};          // aTexCoord (buffer 1, offset 32)
 
         sharedParticlePipeline_ = sg_make_pipeline(&pd);
+
+        // Additive pipeline (SRC_ALPHA, ONE) - standard for WC3 fire/spells/auras
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedAdditivePipeline_ = sg_make_pipeline(&pd);
+
+        // Modulate pipeline (DST_COLOR, ZERO)
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_DST_COLOR;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ZERO;
+        sharedModulatePipeline_ = sg_make_pipeline(&pd);
     }
 }
 
 void MdxParticleSystem::ReleaseSharedParticleResources() {
     if (sharedQuadBuffer_.id) { sg_destroy_buffer(sharedQuadBuffer_); sharedQuadBuffer_ = {0}; }
     if (sharedIndexBuffer_.id) { sg_destroy_buffer(sharedIndexBuffer_); sharedIndexBuffer_ = {0}; }
+    if (sharedModulatePipeline_.id) { sg_destroy_pipeline(sharedModulatePipeline_); sharedModulatePipeline_ = {0}; }
+    if (sharedAdditivePipeline_.id) { sg_destroy_pipeline(sharedAdditivePipeline_); sharedAdditivePipeline_ = {0}; }
     if (sharedParticlePipeline_.id) { sg_destroy_pipeline(sharedParticlePipeline_); sharedParticlePipeline_ = {0}; }
     if (sharedParticleShader_.id) { sg_destroy_shader(sharedParticleShader_); sharedParticleShader_ = {0}; }
 }

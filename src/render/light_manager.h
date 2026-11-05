@@ -51,4 +51,5 @@ private:
     sg_image lightTexture_ = {0};
     sg_sampler lightSampler_ = {0};
     bool needsUpload_ = false;
+    int uploadedHeight_ = 0;
 };

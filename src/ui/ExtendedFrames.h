@@ -36,7 +36,7 @@ public:
     }
 
     UIFrame* OnMouseUp(float sx, float sy, int btn) override {
-        if (btn == 0 && pressed_ && enabled_) {
+        if (btn == 0 && pressed_ && enabled_ && bounds_.Contains(sx, sy)) {
             checked_ = !checked_;
         }
         return ButtonFrame::OnMouseUp(sx, sy, btn);

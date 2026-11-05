@@ -112,7 +112,8 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
     if (targetUnit) {
         CMineAccess mine = MineAccessOf(targetUnit);
         if (mine.ok() && goldCapacity_ > 0 && mine.Gold() > 0) {
-            if (carriedAmount_ > 0 && carriedType_ == CResourceType::GOLD) {
+            if (carriedAmount_ > 0 && carriedType_ != CResourceType::NONE) {
+                lastTargetHandle_ = target->GetHandleId();
                 auto* behavior = new CBehaviorReturnResources();
                 behavior->SetUnit(caster);
                 behavior->SetHarvestAbility(this);
@@ -144,8 +145,8 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
         if (destructableData) {
             const auto* destructableType = destructableData->GetDestructable(targetDestructable->GetTypeId());
             if (destructableType && destructableType->isTree && lumberCapacity_ > 0) {
-                if (carriedAmount_ > 0 && carriedType_ == CResourceType::LUMBER
-                    && carriedAmount_ >= lumberCapacity_) {
+                if (carriedAmount_ > 0 && carriedType_ != CResourceType::NONE) {
+                    lastTargetHandle_ = target->GetHandleId();
                     auto* behavior = new CBehaviorReturnResources();
                     behavior->SetUnit(caster);
                     behavior->SetHarvestAbility(this);

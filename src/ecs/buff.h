@@ -37,8 +37,10 @@ public:
     float GetDuration() const { return duration_; }
     float GetRemaining() const { return remaining_; }
     bool IsExpired() const { return remaining_ <= 0; }
+    void SetDuration(float v) { duration_ = v; }
     void SetRemaining(float v) { remaining_ = v; }
     void RefreshDuration() { remaining_ = duration_; }
+    virtual void OnRefresh(CSimulation& game, CUnit* target, const CBuff& newBuff);
     // Resistant Skin quarters a negative buff before it is applied.
     void ScaleDuration(float factor) {
         if (factor < 0.0f) factor = 0.0f;

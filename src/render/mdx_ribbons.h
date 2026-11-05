@@ -19,6 +19,7 @@ struct RibbonSegment {
     float age = 0.0f;
     float life = 1.0f;
     float color[3] = {1, 1, 1};
+    float initialAlpha = 1.0f;
     float alpha = 1.0f;
     int slot = 0;
 };
@@ -34,6 +35,7 @@ struct RibbonEmitterState {
     sg_buffer indexBuffer = {0};
     int vertexCapacity = 0;
     int indexCapacity = 0;
+    int filterMode = 0;
 };
 
 class MdxRibbonSystem {
@@ -54,6 +56,12 @@ public:
     void Render(const Mat4& view, const Mat4& proj);
     void SetWorldOffset(const Vec3& offset) { worldOffset_ = offset; }
     const Vec3& GetWorldOffset() const { return worldOffset_; }
+    void SetInstanceMatrix(const Mat4& m) {
+        instanceMatrix_ = m;
+        hasInstanceMatrix_ = true;
+        worldOffset_ = Vec3{m.m[12], m.m[13], m.m[14]};
+    }
+    const Mat4& GetInstanceMatrix() const { return instanceMatrix_; }
     void Destroy();
 
     size_t GetSegmentCount() const;
@@ -77,7 +85,11 @@ private:
 
     std::vector<RibbonEmitterState> emitters_;
     Vec3 worldOffset_ = {0, 0, 0};
+    Mat4 instanceMatrix_ = Mat4::Identity();
+    bool hasInstanceMatrix_ = false;
 
     static sg_shader sharedRibbonShader_;
     static sg_pipeline sharedRibbonPipeline_;
+    static sg_pipeline sharedAdditivePipeline_;
+    static sg_pipeline sharedModulatePipeline_;
 };

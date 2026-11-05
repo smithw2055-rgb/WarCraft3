@@ -5,6 +5,7 @@
 #include "item.h"
 #include "handle_id.h"
 #include "ability.h"
+#include "ability_factory.h"
 #include "abilities/ability_attack.h"
 #include "abilities/ability_move.h"
 #include "abilities/ability_hero.h"
@@ -35,6 +36,9 @@ CSimulation::CSimulation() {
     worldCollision_ = std::make_unique<CWorldCollision>();
     pathfindingProcessor_ = std::make_unique<CPathfindingProcessor>();
     pathfindingProcessor_->SetWorldCollision(worldCollision_.get());
+    fogSystem_.SetOcclusionChecker([this](float fromX, float fromY, float toX, float toY, bool isFlying) -> bool {
+        return IsLineOfSightBlocked(fromX, fromY, toX, toY, isFlying);
+    });
 }
 
 CSimulation::~CSimulation() = default;
@@ -194,12 +198,29 @@ void CSimulation::UpdateFogSight() {
         src.x = unit->GetX();
         src.y = unit->GetY();
         src.radius = (float)radius;
+        src.isFlying = unit->IsFlying();
         sightScratch_.push_back(src);
         for (int other : unit->SharedVisionPlayers()) {
             if (other == src.player || other < 0 || other >= CFogSystem::kMaxPlayers) continue;
             CFogSightSource shared = src;
             shared.player = other;
             sightScratch_.push_back(shared);
+        }
+        if (const CPlayer* owner = GetPlayer(src.player)) {
+            for (size_t otherIdx = 0; otherIdx < players_.size() && otherIdx < (size_t)CFogSystem::kMaxPlayers; ++otherIdx) {
+                if ((int)otherIdx == src.player) continue;
+                const auto& otherPlayer = players_[otherIdx];
+                if (!otherPlayer) continue;
+                if (owner->HasAlliance(*otherPlayer, CAllianceType::SHARED_VISION) ||
+                    owner->HasAlliance(*otherPlayer, CAllianceType::VISION)) {
+                    const auto& sv = unit->SharedVisionPlayers();
+                    if (std::find(sv.begin(), sv.end(), (int)otherIdx) == sv.end()) {
+                        CFogSightSource shared = src;
+                        shared.player = (int)otherIdx;
+                        sightScratch_.push_back(shared);
+                    }
+                }
+            }
         }
     }
     fogSystem_.UpdateSight(sightScratch_.data(), (int)sightScratch_.size());
@@ -392,25 +413,78 @@ bool CSimulation::CheckHighlandMiss(CUnit* attacker, const CWidget* target, bool
     return false;
 }
 
+bool CSimulation::IsLineOfSightBlocked(float fromX, float fromY, float toX, float toY, bool isFlying) const {
+    if (isFlying) return false;
+
+    // 1. Terrain cliff level check: low ground cannot see onto higher cliff
+    const int fromCliff = GetTerrainHeight(fromX, fromY);
+    const int toCliff = GetTerrainHeight(toX, toY);
+    if (fromCliff != 999 && toCliff != 999 && toCliff > fromCliff) {
+        return true;
+    }
+
+    if (!pathfindingProcessor_ || !pathfindingProcessor_->HasPathingMap()) {
+        return false;
+    }
+    const WpmData* wpm = pathfindingProcessor_->GetPathingMap();
+    if (!wpm) return false;
+
+    const float dx = toX - fromX;
+    const float dy = toY - fromY;
+    const float distSq = dx * dx + dy * dy;
+    constexpr float kStep = 32.0f; // WPM cell size
+    if (distSq <= kStep * kStep) {
+        return false;
+    }
+
+    const float dist = std::sqrt(distSq);
+    const int numSteps = std::max(1, static_cast<int>(dist / kStep));
+    const float invSteps = 1.0f / static_cast<float>(numSteps);
+
+    for (int step = 1; step < numSteps; ++step) {
+        const float t = static_cast<float>(step) * invSteps;
+        const float sx = fromX + t * dx;
+        const float sy = fromY + t * dy;
+
+        if (fromCliff != 999 && terrainMap_) {
+            const int sampleCliff = GetTerrainHeight(sx, sy);
+            if (sampleCliff != 999 && sampleCliff > fromCliff) {
+                return true; // Intermediate higher ground blocks vision
+            }
+        }
+
+        const int cx = pathfindingProcessor_->WorldToCellX(sx);
+        const int cy = pathfindingProcessor_->WorldToCellY(sy);
+        if (cx >= 0 && cx < wpm->width && cy >= 0 && cy < wpm->height) {
+            if (wpm->pathing[static_cast<size_t>(cy) * static_cast<size_t>(wpm->width) + static_cast<size_t>(cx)] & WpmData::BLOCKVISION) {
+                return true; // Intermediate tree or vision blocker
+            }
+        }
+    }
+
+    return false;
+}
+
+void CSimulation::InstallUnitHooks(CUnit* ptr) {
+    if (!ptr) return;
+    const int handle = ptr->GetHandleId();
+    ptr->SetOrderIssuedHook([this, handle](int orderId, int targetKind, float x, float y, int targetHandle) {
+        (void)targetKind;
+        if (unitOrderCallback_) {
+            unitOrderCallback_(handle, orderId, targetHandle, x, y);
+        }
+    });
+    ptr->SetUnitLoadedHook([this, handle](int passengerHandle) {
+        if (unitLoadedCallback_) {
+            unitLoadedCallback_(handle, passengerHandle);
+        }
+    });
+}
+
 CUnit* CSimulation::AdoptUnit(std::unique_ptr<CUnit> unit) {
     if (!unit) return nullptr;
     CUnit* ptr = unit.get();
-    // Every order issued on this unit (JASS/UI/AI/net all call
-    // CUnit::IssueOrder directly) flows into the sim order callback:
-    // command log lives in IssueUnitOrder, JASS issued-order trigger
-    // events live behind unitOrderCallback_.
-    const int adoptedHandle = ptr->GetHandleId();
-    ptr->SetOrderIssuedHook([this, adoptedHandle](int orderId, int targetKind, float x, float y, int targetHandle) {
-        (void)targetKind;
-        if (unitOrderCallback_) {
-            unitOrderCallback_(adoptedHandle, orderId, targetHandle, x, y);
-        }
-    });
-    ptr->SetUnitLoadedHook([this, adoptedHandle](int passengerHandle) {
-        if (unitLoadedCallback_) {
-            unitLoadedCallback_(adoptedHandle, passengerHandle);
-        }
-    });
+    InstallUnitHooks(ptr);
     unitMap_[ptr->GetHandleId()] = std::move(unit);
     newUnits_.push_back(ptr);
     ptr->RegeneratePathingInstance(*this);
@@ -609,6 +683,10 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
 
     CUnit* ptr = unit.get();
 
+    // Attach default abilities from the unit type (spells, passives, auras, transports, etc.)
+    AbilityFactory::AddDefaultAbilities(*this, ptr, unitType->GetAbilityList());
+    InstallUnitHooks(ptr);
+
     unitMap_[handleId] = std::move(unit);
     newUnits_.push_back(ptr);
     // Retail setupCreatedUnit: buildings blit their pathTex footprint now
@@ -652,6 +730,10 @@ CDestructable* CSimulation::GetDestructable(int handleId) const {
 }
 
 CItem* CSimulation::CreateItem(War3ID typeId, float x, float y) {
+    if (typeId.value == 0) return nullptr;
+    if (itemData_ && !itemData_->HasItem(typeId)) {
+        return nullptr;
+    }
     int handleId = handleIdAlloc_.CreateId();
     auto item = std::make_unique<CItem>(handleId, typeId, x, y);
     ApplyItemTypeData(*item, *this);
@@ -706,14 +788,24 @@ void CSimulation::AddPlayer(std::unique_ptr<CPlayer> player) {
 
 void CSimulation::AdvanceGameTime(float dt) {
     if (timeOfDaySuspended_) return;
-    float dayLength = gameplayConstants_.gameDayLength;
-    gameTimeOfDay_ += dt * timeOfDayScale_;
-    if (gameTimeOfDay_ >= dayLength) gameTimeOfDay_ -= dayLength;
+    // gameTimeOfDay_ is kept in game hours (0..gameDayHours), matching the
+    // JASS GetTimeOfDay/SetTimeOfDay contract. GameDayLength is the real
+    // seconds a full day takes, so convert the wall-clock step to hours.
+    const float gameHours = gameplayConstants_.gameDayHours > 0.0f
+        ? gameplayConstants_.gameDayHours : 24.0f;
+    const float dayLength = gameplayConstants_.gameDayLength > 0.0f
+        ? gameplayConstants_.gameDayLength : gameHours;
+    const float hoursPerSecond = gameHours / dayLength;
 
-    float gameHours = gameplayConstants_.gameDayHours;
-    float timeOfDay = (gameTimeOfDay_ / dayLength) * gameHours;
-    daytime_ = (timeOfDay >= gameplayConstants_.dawnTimeGameHours)
-            && (timeOfDay < gameplayConstants_.duskTimeGameHours);
+    gameTimeOfDay_ += dt * timeOfDayScale_ * hoursPerSecond;
+    if (gameTimeOfDay_ >= gameHours) {
+        gameTimeOfDay_ = std::fmod(gameTimeOfDay_, gameHours);
+    } else if (gameTimeOfDay_ < 0.0f) {
+        gameTimeOfDay_ = std::fmod(gameTimeOfDay_, gameHours) + gameHours;
+    }
+
+    daytime_ = (gameTimeOfDay_ >= gameplayConstants_.dawnTimeGameHours)
+            && (gameTimeOfDay_ < gameplayConstants_.duskTimeGameHours);
 }
 
 void CSimulation::AddPostUpdateCallback(std::function<void()> cb) {
@@ -739,6 +831,9 @@ void CSimulation::ProcessUnitRemovals() {
         if (wasActiveUnit) {
             if (CPlayer* player = GetPlayer(unit->GetPlayerIndex())) {
                 player->RemoveUnit(unit);
+                if (unit->IsHero()) {
+                    player->RemoveHero(unit);
+                }
                 // Ref removal path: live removals drop the unlock (the dead
                 // already dropped it on death, heroes keep theirs).
                 if (!unit->IsDead()) {
@@ -746,6 +841,9 @@ void CSimulation::ProcessUnitRemovals() {
                 }
                 if (unit->GetFoodUsed() > 0) {
                     player->SetFoodUsed(std::max(0, player->GetFoodUsed() - unit->GetFoodUsed()));
+                }
+                if (unit->IsBuilding() && unit->GetFoodMade() > 0 && !unit->IsConstructing() && !unit->IsDead()) {
+                    player->AddFoodCap(-unit->GetFoodMade());
                 }
             }
         }
@@ -765,11 +863,17 @@ void CSimulation::ProcessNewUnits() {
         CPlayer* player = GetPlayer(unit->GetPlayerIndex());
         if (player) {
             player->AddUnit(unit);
+            if (unit->IsHero()) {
+                player->AddHero(unit);
+            }
             // Ref createUnit: every entering unit unlocks its type for
             // techtree requirements (possession, not research history).
             player->AddTechUnlocked(*this, unit->GetTypeId());
             if (unit->GetFoodUsed() > 0) {
                 player->SetFoodUsed(player->GetFoodUsed() + unit->GetFoodUsed());
+            }
+            if (unit->IsBuilding() && unit->GetFoodMade() > 0 && !unit->IsConstructing()) {
+                player->AddFoodCap(unit->GetFoodMade());
             }
         }
     }

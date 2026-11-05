@@ -1,9 +1,9 @@
 #pragma once
-#include "UIFrame.h"
+#include "SimpleFrame.h"
 #include "../asset/Texture.h"
 #include <memory>
 
-class BackdropFrame : public UIFrame {
+class BackdropFrame : public SimpleFrame {
 public:
     // Corner/edge mask bits (ref BackdropCornerFlags in warsmash_ref).
     enum Corner : uint8_t {

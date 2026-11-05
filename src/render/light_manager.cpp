@@ -129,9 +129,25 @@ void LightManager::Update() {
         row[15] = light.ambientIntensity;
     }
 
-    // Destroy old texture if exists
+    // The light texture is updated in place (dynamic_update) so the
+    // terrain's cached view stays valid across day/night changes. Only
+    // re-create when the light count changes.
+    const bool canUpdateInPlace =
+        uploadedHeight_ == height &&
+        sg_query_image_state(lightTexture_) == SG_RESOURCESTATE_VALID;
+
+    sg_image_data data = {};
+    data.mip_levels[0].ptr = texData.data();
+    data.mip_levels[0].size = texData.size() * sizeof(float);
+
+    if (canUpdateInPlace) {
+        sg_update_image(lightTexture_, &data);
+        return;
+    }
+
     if (sg_query_image_state(lightTexture_) == SG_RESOURCESTATE_VALID)
         sg_destroy_image(lightTexture_);
+    lightTexture_ = {0};
 
     sg_image_desc desc = {};
     desc.type = SG_IMAGETYPE_2D;
@@ -139,15 +155,17 @@ void LightManager::Update() {
     desc.height = height;
     desc.pixel_format = SG_PIXELFORMAT_RGBA32F;
     desc.num_mipmaps = 1;
-    desc.data.mip_levels[0].ptr = texData.data();
-    desc.data.mip_levels[0].size = texData.size() * sizeof(float);
-    desc.usage.immutable = true;
+    desc.data = data;
+    desc.usage.immutable = false;
+    desc.usage.dynamic_update = true;
     lightTexture_ = sg_make_image(&desc);
 
     if (sg_query_image_state(lightTexture_) != SG_RESOURCESTATE_VALID) {
         std::cerr << "LightManager: failed to create light texture" << std::endl;
         lightTexture_ = {0};
+        uploadedHeight_ = 0;
     } else {
+        uploadedHeight_ = height;
         std::cout << "LightManager: uploaded " << height << " lights"
                   << " (tex=" << lightTexture_.id << ")" << std::endl;
     }

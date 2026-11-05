@@ -30,7 +30,9 @@ bool TestInstanceMatrixIdentity() {
 }
 
 bool TestInstanceMatrixRotation() {
-    const Mat4 m = MakeSceneInstanceMatrix(0, 0, 0, kHalfPi, 1, 1, 1);
+    // Instance angles are degrees (unit facing / map object angles); the
+    // matrix boundary converts to radians.
+    const Mat4 m = MakeSceneInstanceMatrix(0, 0, 0, 90.0f, 1, 1, 1);
     // Same entries the render path produced inline before the refactor.
     TEST_NEAR(m.m[0], 0.0f, 1e-6f);
     TEST_NEAR(m.m[2], -1.0f, 1e-6f);

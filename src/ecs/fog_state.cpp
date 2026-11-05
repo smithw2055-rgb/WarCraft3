@@ -163,6 +163,9 @@ void CFogSystem::UpdateSight(const CFogSightSource* sources, int count) {
                 const float dx = cx - src.x;
                 const float dy = cy - src.y;
                 if (dx * dx + dy * dy <= r2) {
+                    if (occlusionChecker_ && occlusionChecker_(src.x, src.y, cx, cy, src.isFlying)) {
+                        continue;
+                    }
                     const size_t idx = base + (size_t)row * gridW_ + col;
                     visible_[idx] = 1;
                     explored_[idx] = 1;

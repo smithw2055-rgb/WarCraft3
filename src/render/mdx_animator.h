@@ -103,7 +103,7 @@ public:
 
     // Bone matrices for skinning
     const std::vector<Mat4>& GetBoneMatrices() const { return boneMatrices_; }
-    sg_image GetBoneTexture() const { return boneTexture_; }
+    sg_image GetBoneTexture();
     int GetBoneCount() const { return boneCount_; }
     bool HasAnimations() const { return boneCount_ > 0; }
 
@@ -144,12 +144,19 @@ private:
     const std::vector<std::array<float,3>>* pivotPoints_ = nullptr;
     float elapsedMs_ = 0.0f;
     float blendTime_ = 0.0f;
-    float blendLeft_ = 0.0f;
     float blendDuration_ = 0.0f;
-    std::vector<Mat4> blendFrom_;
+    float blendLeft_ = 0.0f;
+    struct NodePose {
+        Vec3 translation;
+        Vec4 rotation;
+        Vec3 scale;
+    };
+    std::vector<NodePose> blendFromPoses_;
 
     SequenceState sequenceState_;
     sg_image boneTexture_ = {0};
+    int boneTexWidth_ = 0;
+    int boneTexHeight_ = 0;
     bool needsBoneUpload_ = false;
     Vec3 cameraForward_ = {0, 0, -1};
 };

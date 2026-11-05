@@ -100,6 +100,14 @@ const CBehaviorBuild* GetBuildBehavior(const CUnit* unit);
 const CBehaviorRepair* GetRepairBehavior(const CUnit* unit);
 const CBehaviorSpell* GetSpellBehavior(const CUnit* unit);
 
+// Resolve the animation mode from live unit/behavior/carry state.
+UnitVisualAnimationMode ResolveUnitVisualAnimationMode(
+    const CUnit* unit,
+    bool isMoving,
+    CBehaviorCategory behaviorCategory,
+    CResourceType carriedType,
+    int gameTurnTick);
+
 // Visual playback (use SplatMetadataStore for selection-circle/uberSplat animation speeds;
 // CSimulation for decay timing; scriptPropertyTags for per-unit scripted animation tags).
 void PlayReadyVisualForUnit(CUnit* unit,

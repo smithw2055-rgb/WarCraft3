@@ -1,7 +1,7 @@
 #include "BackdropFrame.h"
 
 BackdropFrame::BackdropFrame(const std::string& name, UIFrame* parent)
-    : UIFrame(name, parent) {}
+    : SimpleFrame(name, parent) {}
 
 void BackdropFrame::SetBackgroundInsets(float l, float b, float r, float t) {
     insetL_ = l; insetB_ = b; insetR_ = r; insetT_ = t;
@@ -35,6 +35,9 @@ void BackdropFrame::Render(UiRenderer& ren) {
         }
     }
     RenderEdges(ren);
+
+    // Render any children hosted inside this backdrop
+    SimpleFrame::Render(ren);
 }
 
 uint8_t BackdropFrame::ParseCornerFlags(const std::string& text) {

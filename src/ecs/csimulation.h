@@ -147,6 +147,8 @@ public:
     // ChanceToMiss. Rolls the sim stream; no-op (no RNG consumed) on flat
     // ground, vs non-units, or for non-attacks.
     bool CheckHighlandMiss(CUnit* attacker, const CWidget* target, bool isAttack);
+    // Line-of-sight obstruction check (cliff height and WPM vision blocker checks).
+    bool IsLineOfSightBlocked(float fromX, float fromY, float toX, float toY, bool isFlying = false) const;
 
     // Water deformation toggle (ref SetWaterDeforms). The water mesh
     // adds a traveling wave while this is true.
@@ -247,6 +249,7 @@ public:
     // Takes ownership of an externally constructed unit (tests, editor).
     // Visible to lookups immediately, joins units_ on the next Update.
     CUnit* AdoptUnit(std::unique_ptr<CUnit> unit);
+    void InstallUnitHooks(CUnit* unit);
 
     // Callbacks
     void AddPostUpdateCallback(std::function<void()> cb);

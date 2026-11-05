@@ -461,10 +461,13 @@ void TexturedTerrain::BuildGroundGPU(const W3EMap& map) {
     // Samplers
     nearestSampler_ = MakeSampler(false);
     linearSampler_ = MakeSampler(true);
-    // Sampler: linear min/mag, forced base level only (max_lod=0) for stable terrain
+    // Sampler: linear min/mag, forced base level only (max_lod=0.0001f, nearest mipmap) for stable terrain
     sg_sampler_desc bsd = {};
-    bsd.min_filter = SG_FILTER_LINEAR; bsd.mag_filter = SG_FILTER_LINEAR; bsd.mipmap_filter = SG_FILTER_LINEAR;
-    bsd.max_lod = 0.0f;
+    bsd.min_filter = SG_FILTER_LINEAR;
+    bsd.mag_filter = SG_FILTER_LINEAR;
+    bsd.mipmap_filter = SG_FILTER_NEAREST;
+    bsd.min_lod = 0.0f;
+    bsd.max_lod = 0.0001f;
     bsd.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
     bsd.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
     bsd.wrap_w = SG_WRAP_CLAMP_TO_EDGE;
@@ -963,8 +966,8 @@ void TexturedTerrain::Render(const Mat4& view, const Mat4& proj, float time) {
         bind.samplers[1] = nearestSampler_;
         bind.samplers[2] = nonFilterSampler_;  // integer texture → non-filtering
         bind.samplers[3] = terrainLightSampler;
-        // Trilinear mipmap sampler for ground texture arrays
-        bind.samplers[4] = linearSampler_;
+        // Base level sampler (max_lod=0, clamp-to-edge) for ground texture arrays to eliminate seam bleeding
+        bind.samplers[4] = baseLevelSampler_.id ? baseLevelSampler_ : linearSampler_;
         bind.samplers[5] = linearSampler_;
         bind.samplers[6] = linearSampler_;
 
@@ -1183,7 +1186,7 @@ void TexturedTerrain::Render(const Mat4& view, const Mat4& proj, float time) {
             bind.samplers[3] = linearSampler_;
             bind.samplers[4] = linearSampler_;
             bind.samplers[5] = nonFilterSampler_;
-            bind.samplers[6] = linearSampler_;
+            bind.samplers[6] = baseLevelSampler_.id ? baseLevelSampler_ : linearSampler_;
             if (hasSuspiciousBoundView("cliff", bind, 6 + groundTexCount)) {
                 continue;
             }
@@ -1847,20 +1850,16 @@ void TexturedTerrain::BuildCliffsFromMdx(const W3EMap& map) {
         }
     }
 
-    for (int i = 0; i < w - 1; i++) {
-        for (int j = 0; j < h - 1; j++) {
-            const int idx = j * w + i;
-            if (map.tiles[idx].IsRamp() && !cornerExtra_[idx].romp) {
-                cornerExtra_[idx].hideCliff = false;
-            }
+    int tileW = columns_ - 1, tileH = rows_ - 1;
+    for (int y = 0; y < tileH; ++y) {
+        for (int x = 0; x < tileW; ++x) {
+            int idx = y * tileW + x;
+            getTextureVariations(map, x, y, groundTextureList_, idx * 4);
         }
     }
 
     for (const auto& inst : cliffInstances_) {
         if (inst.gridX < 0 || inst.gridY < 0 || inst.gridX >= (w - 1) || inst.gridY >= (h - 1)) {
-            continue;
-        }
-        if (isCornerRampEntrance(map, inst.gridX, inst.gridY)) {
             continue;
         }
         const int tileIndex = ((inst.gridY * (w - 1)) + inst.gridX) * 4 + 3;

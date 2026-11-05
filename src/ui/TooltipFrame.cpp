@@ -55,12 +55,12 @@ void TooltipFrame::Render(UiRenderer& r) {
     if (!visible_ || !textRenderer_) return;
 
     // Background
-    r.DrawQuad(bounds_.x, bounds_.y, bounds_.w, bounds_.h, 0xE0111122);
+    r.DrawQuad(bounds_.x, bounds_.y, bounds_.w, bounds_.h, 0xEE101018);
     // Border
-    r.DrawQuad(bounds_.x, bounds_.y, bounds_.w, 1, 0xCC4488FF);
-    r.DrawQuad(bounds_.x, bounds_.y + bounds_.h - 1, bounds_.w, 1, 0xCC4488FF);
-    r.DrawQuad(bounds_.x, bounds_.y, 1, bounds_.h, 0xCC4488FF);
-    r.DrawQuad(bounds_.x + bounds_.w - 1, bounds_.y, 1, bounds_.h, 0xCC4488FF);
+    r.DrawQuad(bounds_.x, bounds_.y, bounds_.w, 1, 0xCC6A5A2A);
+    r.DrawQuad(bounds_.x, bounds_.y + bounds_.h - 1, bounds_.w, 1, 0xCC6A5A2A);
+    r.DrawQuad(bounds_.x, bounds_.y, 1, bounds_.h, 0xCC6A5A2A);
+    r.DrawQuad(bounds_.x + bounds_.w - 1, bounds_.y, 1, bounds_.h, 0xCC6A5A2A);
 
     float curY = bounds_.y + pad_;
 

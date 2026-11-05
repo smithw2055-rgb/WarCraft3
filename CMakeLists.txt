@@ -197,6 +197,7 @@ set(SOURCES
     src/render/splat_metadata.cpp
     src/ecs/unit_text_utils.cpp
     src/ecs/animation_utils.cpp
+    src/ecs/animation_state.cpp
     # ===== New ECS / Data Layer =====
     src/data/gameplay_constants.cpp
     src/data/combat_types.cpp

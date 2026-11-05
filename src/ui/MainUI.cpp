@@ -86,11 +86,10 @@ std::string CleanWar3TooltipText(const std::string& value) {
 }
 
 std::string BuildCommandTooltipText(const std::string& title, const std::string& detail) {
-    std::string result = CleanWar3TooltipText(title);
-    std::string cleanedDetail = CleanWar3TooltipText(detail);
-    if (!cleanedDetail.empty()) {
+    std::string result = title;
+    if (!detail.empty()) {
         if (!result.empty()) result += "\n";
-        result += cleanedDetail;
+        result += detail;
     }
     return result;
 }
@@ -771,6 +770,13 @@ void MainUI::UpdateBuffState() {
 bool MainUI::HandleEvent(const sapp_event* ev) {
     if (!ev) return false;
 
+    altDown_ = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
+    if (ev->type == SAPP_EVENTTYPE_KEY_DOWN && (ev->key_code == SAPP_KEYCODE_LEFT_ALT || ev->key_code == SAPP_KEYCODE_RIGHT_ALT)) {
+        altDown_ = true;
+    } else if (ev->type == SAPP_EVENTTYPE_KEY_UP && (ev->key_code == SAPP_KEYCODE_LEFT_ALT || ev->key_code == SAPP_KEYCODE_RIGHT_ALT)) {
+        altDown_ = false;
+    }
+
     // Retail right-click on an autocastable command button toggles autocast
     // (ref CAutocastAbility setAutoCastOn/Off). Consumed here so the click
     // never falls through to a world SMART order.
@@ -885,9 +891,25 @@ bool MainUI::HandleEvent(const sapp_event* ev) {
         if (hoveredCommand >= 0 && !commandSlots_[hoveredCommand].tooltip.empty()) {
             const CommandSlot& slot = commandSlots_[hoveredCommand];
             ShowTooltip(slot.tooltip, ev->mouse_x, ev->mouse_y, slot.resourceCosts);
-        } else if (ev->mouse_y >= (float)sapp_height() * 0.73f || ev->mouse_y <= 40.0f) {
-            if (tooltipActive_ || !pendingTooltipText_.empty()) {
-                HideTooltip();
+        } else {
+            int invSlot = hudHost_->HitInventorySlot(ev->mouse_x, ev->mouse_y);
+            if (invSlot >= 0 && invSlot < (int)inventoryItems_.size() && inventoryItems_[invSlot].occupied && !inventoryItems_[invSlot].label.empty()) {
+                ShowTooltip(inventoryItems_[invSlot].label, ev->mouse_x, ev->mouse_y);
+            } else {
+                int buffSlot = hudHost_->HitBuffSlot(ev->mouse_x, ev->mouse_y);
+                if (buffSlot >= 0 && buffSlot < (int)selectedBuffs_.size() && !selectedBuffs_[buffSlot].name.empty()) {
+                    std::string tip = selectedBuffs_[buffSlot].name;
+                    if (selectedBuffs_[buffSlot].remaining > 0.0f) {
+                        char remBuf[32];
+                        std::snprintf(remBuf, sizeof(remBuf), " (%.1fs)", selectedBuffs_[buffSlot].remaining);
+                        tip += remBuf;
+                    }
+                    ShowTooltip(tip, ev->mouse_x, ev->mouse_y);
+                } else if (ev->mouse_y >= (float)sapp_height() * 0.73f || ev->mouse_y <= 40.0f) {
+                    if (tooltipActive_ || !pendingTooltipText_.empty()) {
+                        HideTooltip();
+                    }
+                }
             }
         }
     }
@@ -1215,38 +1237,32 @@ void MainUI::RenderOverlays(UiRenderer& r) {
     if (!overlayData_) return;
 
     for (const auto& info : *overlayData_) {
-        if (!info.isAlive || !info.isSelected) continue;
+        if (!info.isAlive) continue;
+        if (!info.isSelected && !altDown_) continue;
 
         float sx = info.screenX;
         float sy = info.screenY;
 
-
-        float barW = 48.0f;
-        float barH = 6.0f;
+        float barW = 46.0f;
+        float barH = 5.0f;
         float barX = sx - barW * 0.5f;
         float barY = sy;
 
-        r.DrawQuad(barX, barY, barW, barH, 0xCC111111);
+        r.DrawQuad(barX, barY, barW, barH, 0xCC000000);
 
         float hpRatio = std::clamp(info.hpRatio, 0.0f, 1.0f);
         if (hpRatio > 0.01f) {
-            uint32_t hpColor = 0xFF1FD655;
+            uint32_t hpColor;
+            if (hpRatio > 0.5f) {
+                float t = (hpRatio - 0.5f) * 2.0f;
+                uint8_t red = (uint8_t)((1.0f - t) * 255.0f);
+                hpColor = 0xFF000000 | (red << 16) | (0xFF << 8);
+            } else {
+                float t = hpRatio * 2.0f;
+                uint8_t green = (uint8_t)(t * 255.0f);
+                hpColor = 0xFF000000 | (0xFF << 16) | (green << 8);
+            }
             r.DrawQuad(barX + 1, barY + 1, (barW - 2) * hpRatio, barH - 2, hpColor);
-        }
-
-        float mpRatio = std::clamp(info.mpRatio, 0.0f, 1.0f);
-        if (mpRatio > 0.01f) {
-            float mpBarY = barY - barH - 1;
-            r.DrawQuad(barX, mpBarY, barW, barH, 0xCC111111);
-            r.DrawQuad(barX + 1, mpBarY + 1, (barW - 2) * mpRatio, barH - 2, 0xFF4488FF);
-        }
-
-        if (textRenderer_.IsValid() && !info.name.empty()) {
-            float nameSize = 11.0f;
-            float nameW = textRenderer_.MeasureText(info.name.c_str(), nameSize);
-            float nameX = sx - nameW * 0.5f;
-            float nameY = barY + barH + 1;
-            textRenderer_.RenderText(r, nameX, nameY, info.name.c_str(), 0xFFCCCCCC, nameSize);
         }
     }
 
@@ -1965,6 +1981,10 @@ ScreenRect MainUI::GetMinimapRect() const {
     return hudHost_ ? hudHost_->GetMinimapRect() : ScreenRect{};
 }
 
+void MainUI::SetExternalMinimapVisible(bool visible) {
+    if (hudHost_) hudHost_->SetExternalMinimapVisible(visible);
+}
+
 ScreenRect MainUI::GetPortraitRect() const {
     return hudHost_ ? hudHost_->GetPortraitRect() : ScreenRect{};
 }
@@ -1979,6 +1999,10 @@ int MainUI::HitQueueSlot(float x, float y) const {
 
 int MainUI::HitInventorySlot(float x, float y) const {
     return hudHost_ ? hudHost_->HitInventorySlot(x, y) : -1;
+}
+
+int MainUI::HitBuffSlot(float x, float y) const {
+    return hudHost_ ? hudHost_->HitBuffSlot(x, y) : -1;
 }
 
 std::string MainUI::GetIconUri(const std::string& path) const {

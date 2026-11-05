@@ -60,18 +60,19 @@ void ButtonFrame::Render(UiRenderer& r) {
     }
 }
 
-UIFrame* ButtonFrame::OnMouseDown(float /*sx*/, float /*sy*/, int btn) {
-    if (!enabled_ || btn != 0) return this;
+UIFrame* ButtonFrame::OnMouseDown(float sx, float sy, int btn) {
+    if (!enabled_ || btn != 0 || !bounds_.Contains(sx, sy)) return nullptr;
     pressed_ = true;
     return this;
 }
 
-UIFrame* ButtonFrame::OnMouseUp(float /*sx*/, float /*sy*/, int btn) {
+UIFrame* ButtonFrame::OnMouseUp(float sx, float sy, int btn) {
     if (btn != 0) return this;
-    if (pressed_ && enabled_ && onClick_) {
+    bool wasPressed = pressed_;
+    pressed_ = false;
+    if (wasPressed && enabled_ && bounds_.Contains(sx, sy) && onClick_) {
         onClick_();
     }
-    pressed_ = false;
     return this;
 }
 

@@ -181,7 +181,7 @@ bool CBehaviorMove::MoveTowardWaypoint(CSimulation& simulation) {
                          "remaining=" + std::to_string(waypoints_.size() - 1));
         }
         waypoints_.pop_front();
-        propelling_ = false;
+        propelling_ = !waypoints_.empty();
 
         // Check if all waypoints done
         if (waypoints_.empty()) return true; // arrived at final target

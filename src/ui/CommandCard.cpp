@@ -46,14 +46,16 @@ void CommandCardIcon::Render(UiRenderer& r) {
     }
 }
 
-UIFrame* CommandCardIcon::OnMouseDown(float /*sx*/, float /*sy*/, int /*btn*/) {
+UIFrame* CommandCardIcon::OnMouseDown(float sx, float sy, int /*btn*/) {
+    if (!enabled_ || !bounds_.Contains(sx, sy)) return nullptr;
     pressed_ = true;
     return this;
 }
 
-UIFrame* CommandCardIcon::OnMouseUp(float /*sx*/, float /*sy*/, int btn) {
+UIFrame* CommandCardIcon::OnMouseUp(float sx, float sy, int btn) {
+    bool wasPressed = pressed_;
     pressed_ = false;
-    if (onClick_ && enabled_) {
+    if (wasPressed && onClick_ && enabled_ && bounds_.Contains(sx, sy)) {
         onClick_(orderId_, btn == 1);
     }
     return this;

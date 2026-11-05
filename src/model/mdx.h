@@ -251,6 +251,7 @@ struct MdxMaterial {
 struct MdxTextureRef {
     int replaceableId = 0;
     std::string path;
+    uint32_t flags = 0;
 };
 
 // ---- Texture animation (TXAN) ----

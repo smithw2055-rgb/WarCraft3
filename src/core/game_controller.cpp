@@ -909,20 +909,15 @@ void PrintJassStaticDiagnosticsForVm(const char* phase, const JassVM& vm) {
     PrintTopJassStaticEntries("unsupported_native_decl", unsupportedNativeDecls, 25);
 }
 
-void PlayResolvedUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController* g) {
+void PlayResolvedUnitAnimation(CUnit* unit,
+                               MdxViewer* viewer,
+                               GameController* g,
+                               animation_utils::UnitVisualAnimationMode mode) {
     if (!unit || !viewer) return;
 
     const int handleId = unit->GetHandleId();
     auto& splatMeta = g->GetSplatMeta();
     const auto* scriptTags = &g->simUnitAnimationPropertyTags;
-
-    auto GetSplatMetaFn = [&](const CUnit& u) -> const SplatMetadataStore::UnitRenderSplatMeta* {
-        return splatMeta.GetUnitRenderSplatMeta(u);
-    };
-
-    CResourceType carriedType = g->simUnitVisualResourceTags.count(handleId)
-        ? g->simUnitVisualResourceTags[handleId] : CResourceType::NONE;
-    CBehaviorCategory behaviorCategory = unit_text_utils::GetUnitCurrentBehaviorCategory(unit);
 
     // If script requested a specific animation, use it
     ApplyPendingUnitAnimation(handleId, viewer, g);
@@ -952,75 +947,112 @@ void PlayResolvedUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController* g
         g->simUnitScriptedAnimations.erase(scriptIt);
     }
 
-    // Death / decay
-    auto modeIt = g->simUnitVisualAnimationModes.find(handleId);
-    if (modeIt != g->simUnitVisualAnimationModes.end()) {
-        auto mode = modeIt->second;
-        if (mode == animation_utils::UnitVisualAnimationMode::DEAD ||
-            mode == animation_utils::UnitVisualAnimationMode::CORPSE ||
-            mode == animation_utils::UnitVisualAnimationMode::BONE_CORPSE ||
-            mode == animation_utils::UnitVisualAnimationMode::DISSIPATE) {
+    const CBehaviorCategory behaviorCategory =
+        unit_text_utils::GetUnitCurrentBehaviorCategory(unit);
+    const CResourceType carriedType =
+        unit_text_utils::GetUnitCarriedResourceType(unit);
+
+    switch (mode) {
+        case animation_utils::UnitVisualAnimationMode::DEAD:
+        case animation_utils::UnitVisualAnimationMode::CORPSE:
+        case animation_utils::UnitVisualAnimationMode::BONE_CORPSE:
+        case animation_utils::UnitVisualAnimationMode::DISSIPATE:
             animation_utils::PlayDeathVisualForUnit(unit, viewer, mode, g->GetSimulation());
             return;
-        }
-    }
-
-    // Spell
-    if (auto* spell = animation_utils::GetSpellBehavior(unit)) {
-        if (spell->IsCasting() || spell->IsBackswing()) {
-            animation_utils::PlaySpellVisualForUnit(unit, viewer, scriptTags);
+        case animation_utils::UnitVisualAnimationMode::CONSTRUCT: {
+            const auto lastModeIt = g->simUnitVisualAnimationModes.find(handleId);
+            if (lastModeIt == g->simUnitVisualAnimationModes.end()
+                || lastModeIt->second != animation_utils::UnitVisualAnimationMode::CONSTRUCT) {
+                viewer->PlayBirthThenStandSequence();
+            }
+            float buildRatio = 0.0f;
+            if (const auto* unitType = unit->GetUnitType()) {
+                const float buildTime = static_cast<float>(unitType->GetBuildTime());
+                if (buildTime > 0.0f) {
+                    buildRatio = unit->GetConstructionProgress() / buildTime;
+                }
+            }
+            viewer->SetCurrentSequenceFrameByRatio(std::clamp(buildRatio, 0.0f, 1.0f));
             return;
         }
-    }
-
-    // Building construction (no dedicated method; use stand and set construction flag)
-    if (g->simUnitVisualConstructionStates.count(handleId)) {
-        viewer->PlayStandSequence();
-        return;
-    }
-
-    // Determine if moving
-    bool isMoving = animation_utils::ComputeUnitVisualIsMoving(unit, g->simUnitVisualLastPositions);
-    bool wasMoving = g->simUnitVisualMovingStates.count(handleId) && g->simUnitVisualMovingStates[handleId];
-    bool justStopped = !isMoving && wasMoving;
-
-    if (isMoving) {
-        bool playedWalk = false;
-        bool hasWorkTag = false;
-        auto propTags = g->simUnitVisualPropertyTags.count(handleId)
-            ? g->simUnitVisualPropertyTags[handleId] : std::vector<std::string>{};
-        auto scriptTagsVec = g->simUnitAnimationPropertyTags.count(handleId)
-            ? g->simUnitAnimationPropertyTags[handleId] : std::vector<std::string>{};
-        for (const auto& t : propTags) if (t == "work") hasWorkTag = true;
-        for (const auto& t : scriptTagsVec) if (t == "work") hasWorkTag = true;
-
-        if (hasWorkTag) {
-            playedWalk = animation_utils::PlayWalkWorkVisualForUnit(unit, viewer, behaviorCategory, carriedType,
-                                                                     splatMeta, scriptTags);
+        case animation_utils::UnitVisualAnimationMode::READY:
+            animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::NONE, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::READY_GOLD:
+            animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::GOLD, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::READY_LUMBER:
+            animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::LUMBER, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WALK:
+            animation_utils::PlayWalkVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::NONE, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WALK_GOLD:
+            animation_utils::PlayWalkVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::GOLD, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WALK_LUMBER:
+            animation_utils::PlayWalkVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::LUMBER, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WALK_WORK:
+            animation_utils::PlayWalkWorkVisualForUnit(unit, viewer, behaviorCategory,
+                carriedType, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WORK:
+            animation_utils::PlayWorkVisualForUnit(unit, viewer, behaviorCategory,
+                carriedType, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::SPELL:
+            if (!animation_utils::PlaySpellVisualForUnit(unit, viewer, scriptTags)) {
+                animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                    carriedType, splatMeta, scriptTags);
+            }
+            return;
+        case animation_utils::UnitVisualAnimationMode::ATTACK: {
+            const int currentTick = g->GetSimulation().GetGameTurnTick();
+            const auto* attackBehavior = animation_utils::GetAttackBehavior(unit);
+            const int behaviorAttackStartTick =
+                attackBehavior ? attackBehavior->GetAttackAnimationStartTick() : -1;
+            const float behaviorAttackDuration =
+                attackBehavior ? attackBehavior->GetAttackAnimationDuration() : 0.0f;
+            const auto lastAttackIt = g->simUnitVisualLastAttackAnimationTicks.find(handleId);
+            const int lastAttackTick = (lastAttackIt != g->simUnitVisualLastAttackAnimationTicks.end())
+                ? lastAttackIt->second
+                : std::numeric_limits<int>::min();
+            const bool shouldStartAttackAnimation = attackBehavior
+                && attackBehavior->IsAttackAnimationActive(currentTick)
+                && behaviorAttackStartTick >= 0
+                && behaviorAttackStartTick != lastAttackTick;
+            if (shouldStartAttackAnimation) {
+                const auto attackTags = animation_utils::BuildContextualAnimationTags(
+                    unit, scriptTags, CResourceType::NONE);
+                if (viewer->PlayAttackSequenceWithTagsAndDuration(
+                        attackTags, behaviorAttackDuration)) {
+                    g->simUnitVisualLastAttackAnimationTicks[handleId] =
+                        behaviorAttackStartTick;
+                }
+                else {
+                    animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                        carriedType, splatMeta, scriptTags);
+                }
+            }
+            else if (!attackBehavior || !attackBehavior->IsAttackAnimationActive(currentTick)) {
+                if (!viewer->IsPlayingSequenceWithToken("stand")
+                    || viewer->IsCurrentSequenceFinished()) {
+                    animation_utils::PlayReadyVisualForUnit(unit, viewer,
+                        CBehaviorCategory::ATTACK, carriedType, splatMeta, scriptTags);
+                }
+            }
+            return;
         }
-        if (!playedWalk) {
-            animation_utils::PlayWalkVisualForUnit(unit, viewer, behaviorCategory, carriedType,
-                                                    splatMeta, scriptTags);
-        }
-    } else {
-        bool isWorking = false;
-        auto propTags = g->simUnitVisualPropertyTags.count(handleId)
-            ? g->simUnitVisualPropertyTags[handleId] : std::vector<std::string>{};
-        auto scriptTagsVec = g->simUnitAnimationPropertyTags.count(handleId)
-            ? g->simUnitAnimationPropertyTags[handleId] : std::vector<std::string>{};
-        for (const auto& t : propTags) if (t == "work") isWorking = true;
-        for (const auto& t : scriptTagsVec) if (t == "work") isWorking = true;
-
-        if (isWorking) {
-            animation_utils::PlayWorkVisualForUnit(unit, viewer, behaviorCategory, carriedType,
-                                                    splatMeta, scriptTags);
-        } else {
-            animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory, carriedType,
-                                                     splatMeta, scriptTags);
-        }
+        default:
+            return;
     }
-
-    g->simUnitVisualMovingStates[handleId] = isMoving;
 }
 
 void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController* g) {
@@ -1041,15 +1073,58 @@ void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController*
         g->simUnitVisualLastPositions[handleId] = {unit->GetX(), unit->GetY()};
     }
 
-    // Re-evaluate animation if state changed
-    bool isMoving = animation_utils::ComputeUnitVisualIsMoving(unit, g->simUnitVisualLastPositions);
-    bool wasMoving = g->simUnitVisualMovingStates.count(handleId) && g->simUnitVisualMovingStates[handleId];
+    // Re-evaluate animation from live behavior, work, and carried-resource
+    // state rather than only position changes.
+    const bool isMoving = animation_utils::ComputeUnitVisualIsMoving(
+        unit, g->simUnitVisualLastPositions);
+    const bool wasMoving = g->simUnitVisualMovingStates.count(handleId)
+        && g->simUnitVisualMovingStates[handleId];
+    const CBehaviorCategory behaviorCategory =
+        unit_text_utils::GetUnitCurrentBehaviorCategory(unit);
+    const CResourceType carriedType =
+        unit_text_utils::GetUnitCarriedResourceType(unit);
+    const std::vector<std::string> currentPropertyTags =
+        animation_utils::CollectUnitAnimationPropertyTags(
+            unit, &g->simUnitAnimationPropertyTags);
 
-    bool needsResolve = (isMoving != wasMoving);
-    if (g->simUnitPendingAnimations.count(handleId)) needsResolve = true;
+    const auto lastModeIt = g->simUnitVisualAnimationModes.find(handleId);
+    const auto lastMode = (lastModeIt != g->simUnitVisualAnimationModes.end())
+        ? lastModeIt->second
+        : animation_utils::UnitVisualAnimationMode::NONE;
+
+    const auto lastPropertyTagsIt = g->simUnitVisualPropertyTags.find(handleId);
+    const bool propertyTagsChanged = (lastPropertyTagsIt == g->simUnitVisualPropertyTags.end())
+        || (lastPropertyTagsIt->second != currentPropertyTags);
+
+    const auto lastResourceIt = g->simUnitVisualResourceTags.find(handleId);
+    const bool resourceChanged = (lastResourceIt == g->simUnitVisualResourceTags.end())
+        || (lastResourceIt->second != carriedType);
+
+    const auto resolvedMode = animation_utils::ResolveUnitVisualAnimationMode(
+        unit, isMoving, behaviorCategory, carriedType,
+        g->GetSimulation().GetGameTurnTick());
+    const bool shouldRefreshAttack =
+        resolvedMode == animation_utils::UnitVisualAnimationMode::ATTACK
+        && viewer->IsCurrentSequenceFinished();
+
+    bool needsResolve = (isMoving != wasMoving)
+        || (resolvedMode != lastMode)
+        || propertyTagsChanged
+        || resourceChanged
+        || shouldRefreshAttack
+        || (g->simUnitPendingAnimations.count(handleId) != 0);
 
     if (needsResolve) {
-        PlayResolvedUnitAnimation(unit, viewer, g);
+        PlayResolvedUnitAnimation(unit, viewer, g, resolvedMode);
+    }
+
+    g->simUnitVisualConstructionStates[handleId] = unit->IsConstructing();
+    g->simUnitVisualResourceTags[handleId] = carriedType;
+    g->simUnitVisualPropertyTags[handleId] = currentPropertyTags;
+    g->simUnitVisualAnimationModes[handleId] = resolvedMode;
+    g->simUnitVisualMovingStates[handleId] = isMoving;
+    if (resolvedMode != animation_utils::UnitVisualAnimationMode::ATTACK) {
+        g->simUnitVisualLastAttackAnimationTicks.erase(handleId);
     }
 
     // Handle queued animations
@@ -2651,29 +2726,13 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
             CUnit* hovered = PickSimulationUnitAtScreenPoint(mousePosX_, mousePosY_, view, proj, screenW, screenH, -1, false, false);
             if (hovered && !hovered->IsDead() && !hovered->IsHidden()) {
                 hoveredUnitHandle_ = hovered->GetHandleId();
-                std::string hoverText;
-                if (hovered->GetUnitType() && (hovered->GetUnitType()->GetTypeId() == War3ID("ngol") || hovered->GetAbility(War3ID("Agld")))) {
-                    int gold = 13500;
-                    if (auto* gm = dynamic_cast<CAbilityGoldMine*>(hovered->GetAbility(War3ID("Agld")))) {
-                        gold = gm->GetGold();
-                    }
-                    hoverText = "Gold Mine\nGold: " + std::to_string(gold);
-                } else if (hovered->GetUnitType()) {
-                    hoverText = hovered->GetUnitType()->GetName();
-                }
-                if (!hoverText.empty()) {
-                    ui_.ShowTooltip(hoverText, mousePosX_, mousePosY_, HudResourceCosts{});
-                }
             } else {
-                if (hoveredUnitHandle_ >= 0) ui_.HideTooltip();
                 hoveredUnitHandle_ = -1;
             }
         } else {
-            if (hoveredUnitHandle_ >= 0) ui_.HideTooltip();
             hoveredUnitHandle_ = -1;
         }
     } else {
-        if (hoveredUnitHandle_ >= 0) ui_.HideTooltip();
         hoveredUnitHandle_ = -1;
     }
 
@@ -3741,6 +3800,7 @@ void GameController::Render(int screenW, int screenH) {
     }
 
     if (!hideHud_) {
+        ui_.SetExternalMinimapVisible(showMinimap && minimap_.IsValid());
         CollectUnitOverlays(screenW, screenH);
         CollectTextTagOverlays(screenW, screenH);
         SyncLeaderboard();
@@ -3774,6 +3834,7 @@ void GameController::RenderUiOnly(int screenW, int screenH) {
     sg_apply_viewport(0, 0, screenW, screenH, true);
     sg_apply_scissor_rect(0, 0, screenW, screenH, true);
 
+    ui_.SetExternalMinimapVisible(false);
     ui_.RenderHudOnly();
 
     CaptureScreenshotIfNeeded(screenW, screenH);

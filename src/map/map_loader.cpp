@@ -328,8 +328,10 @@ void MapLoader::LoadDoodadsAndDestructibles(const std::string& mapPath) {
                     }
                 }
             }
+            // DOO stores object angles in radians; the scene takes degrees.
+            const float doodadAngleDegrees = d.angle * 180.0f / 3.14159265358979323846f;
             if (loadRenderAssets_ &&
-                scene_.AddDoodad(d.id, d.pos, d.angle, d.scale, d.variation, d.flags, d.life, d.skinId))
+                scene_.AddDoodad(d.id, d.pos, doodadAngleDegrees, d.scale, d.variation, d.flags, d.life, d.skinId))
                 doodAdded++;
         }
         if (doodAdded > 0) std::cout << "  Doodads: " << doodAdded << " rendered" << std::endl;
@@ -369,9 +371,12 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
                 id = resolved;
             }
         }
+        // units.doo stores facing in radians; simulation facing and the
+        // scene both use degrees.
+        const float unitAngleDegrees = u.angle * 180.0f / 3.14159265358979323846f;
         CUnit* simUnit = nullptr;
         if (unitData_.HasUnitType(id)) {
-            simUnit = sim_.CreateUnit(id, u.player, u.pos[0], u.pos[1], u.angle);
+            simUnit = sim_.CreateUnit(id, u.player, u.pos[0], u.pos[1], unitAngleDegrees);
             if (simUnit) {
                 unitLoadResult_.simCreated++;
                 UnitVisualSeed seed;
@@ -456,7 +461,7 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
                         unitLoadResult_.itemRegistered++;
                     }
                 }
-                const int visualIndex = scene_.AddItem(u.id, u.pos, u.angle, u.scale, u.flags, u.skinId);
+                const int visualIndex = scene_.AddItem(u.id, u.pos, unitAngleDegrees, u.scale, u.flags, u.skinId);
                 if (visualIndex >= 0) {
                     unitLoadResult_.visualCreated++;
                     if (itemHandleId >= 0) {
@@ -471,7 +476,7 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
                         itemVisualSeeds_.push_back(seed);
                     }
                 }
-            } else if (scene_.AddUnit(u.id, u.pos, u.angle, u.scale, u.player, u.hitpoints, u.flags, u.skinId) >= 0) {
+            } else if (scene_.AddUnit(u.id, u.pos, unitAngleDegrees, u.scale, u.player, u.hitpoints, u.flags, u.skinId) >= 0) {
                 unitLoadResult_.visualCreated++;
             }
         }

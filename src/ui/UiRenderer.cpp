@@ -2,6 +2,8 @@
 #include "../render/renderer.h"
 #include <cstring>
 #include <cstdio>
+#include <cmath>
+#include <algorithm>
 
 UiRenderer::UiRenderer() {
     verts_.resize(MAX_VERTS);
@@ -289,6 +291,44 @@ void UiRenderer::DrawTransposedQuad(float x, float y, float w, float h,
     verts_[vi + 3] = { x + w, y,     su0, sv1, color };
 
     quadCount_++;
+}
+
+void UiRenderer::DrawCooldownSweep(float x, float y, float w, float h, float progress, uint32_t color) {
+    if (progress <= 0.001f) return;
+    progress = std::min(1.0f, progress);
+
+    if (whiteTex_.id != currentTex_.id) {
+        Flush();
+        currentTex_ = whiteTex_;
+    }
+
+    float cx = x + w * 0.5f;
+    float cy = y + h * 0.5f;
+    float r = std::sqrt(w * w + h * h) * 0.55f;
+
+    const float startAngle = -1.5707963f; // 12 o'clock
+    const float sweepAngle = progress * 6.2831853f; // clockwise
+    const int segments = std::max(6, (int)(progress * 32.0f));
+
+    for (int i = 0; i < segments; ++i) {
+        if (quadCount_ >= MAX_QUADS) {
+            Flush();
+        }
+        float a0 = startAngle + (float)i / (float)segments * sweepAngle;
+        float a1 = startAngle + (float)(i + 1) / (float)segments * sweepAngle;
+
+        float p0x = std::clamp(cx + std::cos(a0) * r, x, x + w);
+        float p0y = std::clamp(cy + std::sin(a0) * r, y, y + h);
+        float p1x = std::clamp(cx + std::cos(a1) * r, x, x + w);
+        float p1y = std::clamp(cy + std::sin(a1) * r, y, y + h);
+
+        int vi = quadCount_ * 4;
+        verts_[vi + 0] = { cx,  cy,  0.5f, 0.5f, color };
+        verts_[vi + 1] = { p0x, p0y, 0.5f, 0.5f, color };
+        verts_[vi + 2] = { p1x, p1y, 0.5f, 0.5f, color };
+        verts_[vi + 3] = { p1x, p1y, 0.5f, 0.5f, color };
+        quadCount_++;
+    }
 }
 
 void UiRenderer::EndFrame() {

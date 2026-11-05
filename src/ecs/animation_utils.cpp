@@ -75,120 +75,6 @@ std::vector<std::string> ExtractAnimationSecondaryTags(const std::string& proper
     return tags;
 }
 
-void AppendUniqueAnimationTag(std::vector<std::string>& tags, std::string tag) {
-    if (tag.empty()) {
-        return;
-    }
-    std::transform(tag.begin(), tag.end(), tag.begin(), [](unsigned char c) {
-        return (char)std::tolower(c);
-    });
-    if (std::find(tags.begin(), tags.end(), tag) == tags.end()) {
-        tags.push_back(std::move(tag));
-    }
-}
-
-bool IsUnitWorkingFromPassiveState(const CUnit* unit) {
-    if (!unit) {
-        return false;
-    }
-    if (const auto* queueAbility = dynamic_cast<const CAbilityQueue*>(unit->GetAbility(War3ID("Aque")))) {
-        if (queueAbility->GetQueueCount() > 0) {
-            return true;
-        }
-    }
-    if (const auto* goldMineAbility = dynamic_cast<const CAbilityGoldMine*>(unit->GetAbility(War3ID("Agld")))) {
-        if (goldMineAbility->GetActiveMinerCount() > 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-std::vector<std::string> CollectUnitAnimationPropertyTags(
-    const CUnit* unit,
-    const std::unordered_map<int, std::vector<std::string>>* scriptPropertyTags) {
-    std::vector<std::string> tags;
-    if (!unit) {
-        return tags;
-    }
-
-    if (const auto* unitType = unit->GetUnitType()) {
-        for (const std::string& tag : unitType->GetRequiredAnimationTags()) {
-            AppendUniqueAnimationTag(tags, tag);
-        }
-    }
-
-    if (scriptPropertyTags) {
-        const auto scriptIt = scriptPropertyTags->find(unit->GetHandleId());
-        if (scriptIt != scriptPropertyTags->end()) {
-            for (const std::string& tag : scriptIt->second) {
-                AppendUniqueAnimationTag(tags, tag);
-            }
-        }
-    }
-
-    if (IsUnitWorkingFromPassiveState(unit)) {
-        AppendUniqueAnimationTag(tags, "work");
-    }
-
-    return tags;
-}
-
-std::vector<std::string> BuildContextualAnimationTags(
-    const CUnit* unit,
-    const std::unordered_map<int, std::vector<std::string>>* scriptPropertyTags,
-    CResourceType carriedType,
-    std::initializer_list<const char*> extraTags) {
-    std::vector<std::string> tags = CollectUnitAnimationPropertyTags(unit, scriptPropertyTags);
-    for (const char* extraTag : extraTags) {
-        if (extraTag && extraTag[0]) {
-            AppendUniqueAnimationTag(tags, extraTag);
-        }
-    }
-    switch (carriedType) {
-        case CResourceType::GOLD:
-            AppendUniqueAnimationTag(tags, "gold");
-            break;
-        case CResourceType::LUMBER:
-            AppendUniqueAnimationTag(tags, "lumber");
-            break;
-        default:
-            break;
-    }
-    return tags;
-}
-
-const CBehaviorHarvest* GetHarvestBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorHarvest*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorAttack* GetAttackBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorAttack*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorMove* GetMoveBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorMove*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorFollow* GetFollowBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorFollow*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorPatrol* GetPatrolBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorPatrol*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorAttackMove* GetAttackMoveBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorAttackMove*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorReturnResources* GetReturnResourcesBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorReturnResources*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorBuild* GetBuildBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorBuild*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorRepair* GetRepairBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorRepair*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorSpell* GetSpellBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorSpell*>(unit->GetCurrentBehavior()) : nullptr;
-}
-
 void PlayReadyVisualForUnit(CUnit* unit,
                             MdxViewer* viewer,
                             CBehaviorCategory behaviorCategory,
@@ -200,6 +86,9 @@ void PlayReadyVisualForUnit(CUnit* unit,
     }
 
     auto tags = BuildContextualAnimationTags(unit, scriptPropertyTags, carriedType);
+    if (IsUnitWorkingFromPassiveState(unit)) {
+        AppendUniqueAnimationTag(tags, "work");
+    }
     const bool preferReady = behaviorCategory == CBehaviorCategory::ATTACK
         || behaviorCategory == CBehaviorCategory::ATTACK_MOVE
         || behaviorCategory == CBehaviorCategory::HOLD_POSITION;
@@ -274,12 +163,12 @@ bool PlayWalkWorkVisualForUnit(CUnit* unit,
                                 CResourceType carriedType,
                                 const SplatMetadataStore& splatMeta,
                                 const std::unordered_map<int, std::vector<std::string>>* scriptPropertyTags) {
+    (void)behaviorCategory;
     if (!unit || !viewer) {
         return false;
     }
-
     const float movementSpeed = unit->GetSpeed();
-    auto workWalkTags = BuildContextualAnimationTags(unit, scriptPropertyTags, carriedType, {"work"});
+    auto tags = BuildContextualAnimationTags(unit, scriptPropertyTags, carriedType, {"work"});
 
     float animationMoveSpeed = 0.0f;
     const float animationScale = std::max(0.001f, viewer->GetAnimationSpeedScale());
@@ -289,7 +178,7 @@ bool PlayWalkWorkVisualForUnit(CUnit* unit,
         if (walkSpeed > 0.0f && runSpeed > walkSpeed) {
             const float midpoint = (walkSpeed + runSpeed) * 0.5f;
             if (movementSpeed >= midpoint) {
-                AppendUniqueAnimationTag(workWalkTags, "fast");
+                AppendUniqueAnimationTag(tags, "fast");
                 animationMoveSpeed = runSpeed;
             }
             else {
@@ -306,15 +195,16 @@ bool PlayWalkWorkVisualForUnit(CUnit* unit,
 
     if (animationMoveSpeed > 0.0f && movementSpeed > 0.0f) {
         const float speedRatio = std::clamp(movementSpeed / animationMoveSpeed, 0.1f, 4.0f);
-        if (viewer->PlayWalkSequenceWithTagsAtSpeedRatio(workWalkTags, speedRatio)) {
+        if (viewer->PlayWalkSequenceWithTagsAtSpeedRatio(tags, speedRatio)) {
             return true;
         }
-    }
-    else if (viewer->PlayWalkSequenceWithTagsAtSpeed(workWalkTags, movementSpeed)) {
-        return true;
+        return viewer->PlayWalkSequenceAtSpeedRatio(speedRatio);
     }
 
-    return PlayWalkVisualForUnit(unit, viewer, behaviorCategory, carriedType, splatMeta, scriptPropertyTags);
+    if (viewer->PlayWalkSequenceWithTagsAtSpeed(tags, movementSpeed)) {
+        return true;
+    }
+    return viewer->PlayWalkSequenceAtSpeed(movementSpeed);
 }
 
 bool PlayWorkVisualForUnit(CUnit* unit,

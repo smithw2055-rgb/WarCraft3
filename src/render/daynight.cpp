@@ -1,6 +1,7 @@
 #include "daynight.h"
 #include "textured_terrain.h"
 #include "renderer.h"
+#include "mdx_viewer.h"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
@@ -59,32 +60,47 @@ void DayNightCycle::Compute(float time) {
     // Sun intensity: full when above horizon, dim below
     float aboveHorizon = std::clamp((elevation + 0.2f) / 1.2f, 0.0f, 1.0f);
 
-    // Sun color: warm white at noon, orange at sunrise/sunset
+    // Sun color: warm white at noon, orange at sunrise/sunset (intensity controlled by sunIntensity_)
     float noonFactor = std::clamp(1.0f - std::abs(elevation - 1.0f) * 2.0f, 0.0f, 1.0f);
     float sunriseFactor = 1.0f - noonFactor;
 
-    sunColor_[0] = (1.0f * noonFactor + 1.0f * sunriseFactor) * aboveHorizon;
-    sunColor_[1] = (1.0f * noonFactor + 0.6f * sunriseFactor) * aboveHorizon;
-    sunColor_[2] = (0.9f * noonFactor + 0.3f * sunriseFactor) * aboveHorizon;
+    sunColor_[0] = 1.0f * noonFactor + 1.0f * sunriseFactor;
+    sunColor_[1] = 1.0f * noonFactor + 0.6f * sunriseFactor;
+    sunColor_[2] = 0.9f * noonFactor + 0.3f * sunriseFactor;
 
-    sunIntensity_ = 1.0f * aboveHorizon;
+    if (aboveHorizon > 0.05f) {
+        sunIntensity_ = aboveHorizon;
+    } else {
+        // Cold blue moonlight from above with adequate directional intensity
+        sunDirX_ = -0.35f;
+        sunDirY_ = 0.85f;
+        sunDirZ_ = 0.40f;
+        float moonLen = std::sqrt(sunDirX_ * sunDirX_ + sunDirY_ * sunDirY_ + sunDirZ_ * sunDirZ_);
+        if (moonLen > 0.0001f) {
+            sunDirX_ /= moonLen; sunDirY_ /= moonLen; sunDirZ_ /= moonLen;
+        }
+        sunColor_[0] = 0.55f;
+        sunColor_[1] = 0.65f;
+        sunColor_[2] = 0.90f;
+        sunIntensity_ = 0.35f;
+    }
 
-    // Ambient light: brighter during day, dimmer at night
-    ambientIntensity_ = 0.2f + 0.4f * aboveHorizon;
+    // Ambient light: higher baseline to prevent pitch black silhouettes at night
+    ambientIntensity_ = 0.55f + 0.45f * aboveHorizon;
 
-    // Ambient color: warm during day, cool twilight, dark blue at night
+    // Ambient color: warm during day, cool twilight, dark blue moonlight at night
     if (aboveHorizon > 0.5f) {
         // Day
-        ambientColor_[0] = 0.4f; ambientColor_[1] = 0.4f; ambientColor_[2] = 0.5f;
+        ambientColor_[0] = 0.45f; ambientColor_[1] = 0.45f; ambientColor_[2] = 0.52f;
     } else if (aboveHorizon > 0.1f) {
         // Twilight
         float twilight = (aboveHorizon - 0.1f) / 0.4f;
-        ambientColor_[0] = 0.2f + 0.2f * twilight;
-        ambientColor_[1] = 0.15f + 0.25f * twilight;
-        ambientColor_[2] = 0.3f + 0.2f * twilight;
+        ambientColor_[0] = 0.30f + 0.15f * twilight;
+        ambientColor_[1] = 0.28f + 0.17f * twilight;
+        ambientColor_[2] = 0.42f + 0.10f * twilight;
     } else {
-        // Night
-        ambientColor_[0] = 0.05f; ambientColor_[1] = 0.05f; ambientColor_[2] = 0.15f;
+        // Night (ambientColor * ambientIntensity ~ 0.165, 0.192, 0.302)
+        ambientColor_[0] = 0.30f; ambientColor_[1] = 0.35f; ambientColor_[2] = 0.55f;
     }
 
     // Fog color: matches sky
@@ -159,13 +175,27 @@ void DayNightCycle::Apply(TexturedTerrain& terrain) {
     }
 
     lm.SetLights(lights);
+    // Upload the new light rows now so the terrain pass this frame sees the
+    // updated sun/ambient (the texture is updated in place; its view is
+    // stable, so no re-bind is needed).
+    lm.Update();
+
+    MdxViewer::SetSharedLighting(
+        Vec3{sunDirX_, sunDirY_, sunDirZ_},
+        Vec3{sunColor_[0], sunColor_[1], sunColor_[2]},
+        sunIntensity_,
+        Vec3{ambientColor_[0], ambientColor_[1], ambientColor_[2]},
+        ambientIntensity_
+    );
 
     // Update terrain fog: map terrain-fog overrides the sky fog when set.
     if (mapFogEnabled_) {
         const float far = mapFogEnd_ / (1.0f + mapFogDensity_);
         terrain.SetFog(mapFogColor_, mapFogStart_, far);
+        MdxViewer::SetSharedFog(true, mapFogColor_, mapFogStart_, far);
     } else {
         terrain.SetFog(fogColor_, 4000.0f, 12000.0f);
+        MdxViewer::SetSharedFog(enabled_, fogColor_, 4000.0f, 12000.0f);
     }
 
     // Update renderer clear color (sky)

@@ -64,7 +64,9 @@ private:
     sg_view fogView_ = {0};
     sg_shader shader_ = {0};
     sg_pipeline pipeline_ = {0};
+    sg_pipeline linePipeline_ = {0};
     sg_buffer vbo_ = {0}, ibo_ = {0};
+    sg_buffer lineVbo_ = {0};
     sg_sampler sampler_ = {0};
 
     // Screen position (bottom-left, pixels)

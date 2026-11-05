@@ -177,12 +177,12 @@ bool TestHeroCarryFilters() {
     sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
     sim.AddPlayer(std::make_unique<CPlayer>(1, "AI", CMapControl::COMPUTER));
 
-    // Dead hero stays behind.
+    // Dead hero can be carried over in campaign cache.
     CUnit* dead = BuildHero(sim, 711, 0);
     dead->SetLife(sim, 0.0f);
     TEST_ASSERT(dead->IsDead());
-    TEST_ASSERT(!IsCarriableHero(dead, sim));
-    TEST_ASSERT(SnapshotHero(dead, sim).typeId.value == 0);
+    TEST_ASSERT(IsCarriableHero(dead, sim));
+    TEST_ASSERT(SnapshotHero(dead, sim).typeId.value == War3ID("Hamg").value);
 
     // Computer-owned hero stays behind.
     CUnit* aiHero = BuildHero(sim, 712, 1);

@@ -223,7 +223,7 @@ void MeleeAIController::DiscoverPlan() {
 CUnit* MeleeAIController::FindTownHall() const {
     if (!sim_) return nullptr;
     for (CUnit* unit : sim_->GetUnits()) {
-        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        if (!unit || unit->IsDead() || unit->IsConstructing() || unit->GetPlayerIndex() != playerIndex_) continue;
         if (plan_.townHall.value != 0) {
             if (unit->GetTypeId() == plan_.townHall) return unit;
         } else if (unit->GetUnitType() && unit->GetUnitType()->IsBuilding() &&
@@ -348,11 +348,20 @@ CDestructable* MeleeAIController::FindNearestTree(float x, float y) const {
 
 CUnit* MeleeAIController::FindIdleProduction(const War3ID& buildingType) const {
     if (!sim_ || buildingType.value == 0) return nullptr;
+    CUnit* bestAvailable = nullptr;
     for (CUnit* unit : sim_->GetUnits()) {
-        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
-        if (unit->GetTypeId() == buildingType) return unit;
+        if (!unit || unit->IsDead() || unit->IsConstructing() || unit->GetPlayerIndex() != playerIndex_) continue;
+        if (unit->GetTypeId() == buildingType) {
+            auto* queue = dynamic_cast<CAbilityQueue*>(unit->GetAbility(War3ID("Aque")));
+            if (!queue || queue->GetQueueCount() == 0) {
+                return unit; // completely idle!
+            }
+            if (queue->GetQueueCount() < CAbilityQueue::MAX_QUEUE && !bestAvailable) {
+                bestAvailable = unit; // has room in queue
+            }
+        }
     }
-    return nullptr;
+    return bestAvailable;
 }
 
 int MeleeAIController::CountWorkers() const {
@@ -393,7 +402,7 @@ std::vector<CUnit*> MeleeAIController::FindOwnedHalls() const {
     std::vector<CUnit*> halls;
     if (!sim_ || plan_.townHall.value == 0) return halls;
     for (CUnit* unit : sim_->GetUnits()) {
-        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        if (!unit || unit->IsDead() || unit->IsConstructing() || unit->GetPlayerIndex() != playerIndex_) continue;
         if (unit->GetTypeId() == plan_.townHall) halls.push_back(unit);
     }
     return halls;
@@ -440,7 +449,7 @@ CUnit* MeleeAIController::FindDeadHero() const {
 CUnit* MeleeAIController::FindAltar() const {
     if (!sim_ || plan_.altar.value == 0) return nullptr;
     for (CUnit* unit : sim_->GetUnits()) {
-        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        if (!unit || unit->IsDead() || unit->IsConstructing() || unit->GetPlayerIndex() != playerIndex_) continue;
         if (unit->GetTypeId() == plan_.altar) return unit;
     }
     return nullptr;
@@ -761,7 +770,7 @@ bool MeleeAIController::TryResearchUpgrades() {
     const int reserve = difficulty_ == AIDifficulty::EASY ? 400
         : difficulty_ == AIDifficulty::INSANE ? 0 : 150;
     for (CUnit* unit : sim_->GetUnits()) {
-        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        if (!unit || unit->IsDead() || unit->IsConstructing() || unit->GetPlayerIndex() != playerIndex_) continue;
         for (CAbility* ability : unit->GetAbilities()) {
             auto* queue = dynamic_cast<CAbilityQueue*>(ability);
             // Idle production only: research shares the train FIFO, so a

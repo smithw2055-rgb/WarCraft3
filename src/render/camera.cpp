@@ -60,7 +60,7 @@ Vec3 OrbitCamera::GetPosition() const {
     float cx = distance_ * std::cos(pitch_) * std::sin(yaw_);
     float cy = distance_ * std::sin(pitch_);
     float cz = distance_ * std::cos(pitch_) * std::cos(yaw_);
-    return {target_.x + cx + noiseOffset_.x, target_.y + cy + 800.0f + noiseOffset_.y,
+    return {target_.x + cx + noiseOffset_.x, target_.y + cy + noiseOffset_.y,
             target_.z + cz + noiseOffset_.z};
 }
 

@@ -58,10 +58,14 @@ void ApplyOne(CSimulation& game, CUnit* unit, const CItemBonus& bonus, int sign)
             unit->AddBonusMaxMana(v);
             break;
         case CItemBonusType::MOVE_SPEED:
-            unit->SetSpeed(unit->GetSpeed() + v);
+            unit->AddBonusSpeed(v);
             break;
         case CItemBonusType::LIFE_REGEN:
+            unit->AddBonusLifeRegen((float)v);
+            break;
         case CItemBonusType::MANA_REGEN:
+            unit->AddBonusManaRegen((float)v);
+            break;
         case CItemBonusType::SIGHT_RADIUS:
             // No supporting unit fields yet; explicitly unhandled (was silent default).
             break;

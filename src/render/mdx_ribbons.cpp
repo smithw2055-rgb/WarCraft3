@@ -51,6 +51,14 @@ Vec3 TransformPointYUp(const Mat4& matrix, const Vec3& point) {
     };
 }
 
+Vec3 TransformPoint(const Mat4& matrix, const Vec3& point) {
+    return Vec3{
+        matrix.m[0] * point.x + matrix.m[4] * point.y + matrix.m[8] * point.z + matrix.m[12],
+        matrix.m[1] * point.x + matrix.m[5] * point.y + matrix.m[9] * point.z + matrix.m[13],
+        matrix.m[2] * point.x + matrix.m[6] * point.y + matrix.m[10] * point.z + matrix.m[14]
+    };
+}
+
 sg_image LoadRibbonTex(MpqManager* mpq, const std::string& path) {
     if (!mpq || path.empty()) return {0};
     std::vector<uint8_t> data;
@@ -97,6 +105,8 @@ sg_image LoadRibbonTex(MpqManager* mpq, const std::string& path) {
 
 sg_shader MdxRibbonSystem::sharedRibbonShader_ = {0};
 sg_pipeline MdxRibbonSystem::sharedRibbonPipeline_ = {0};
+sg_pipeline MdxRibbonSystem::sharedAdditivePipeline_ = {0};
+sg_pipeline MdxRibbonSystem::sharedModulatePipeline_ = {0};
 
 MdxRibbonSystem::MdxRibbonSystem() {}
 MdxRibbonSystem::~MdxRibbonSystem() { Destroy(); }
@@ -133,6 +143,12 @@ void MdxRibbonSystem::Init(const MdxModel& model, MpqManager* mpq) {
     for (auto& rb : model.ribbonEmitters) {
         RibbonEmitterState state;
         state.emitterData = &rb;
+        if (rb.materialId >= 0 && rb.materialId < (int)model.materials.size()) {
+            const auto& mat = model.materials[(size_t)rb.materialId];
+            if (!mat.layers.empty()) {
+                state.filterMode = mat.layers[0].filterMode;
+            }
+        }
         if (glActive && mpq && rb.textureSlot >= 0 && rb.textureSlot < (int)model.textures.size()) {
             auto& texRef = model.textures[(size_t)rb.textureSlot];
             sg_image texHandle = {0};
@@ -204,12 +220,17 @@ void MdxRibbonSystem::EmitSegment(RibbonEmitterState& state, const MdxModel* mod
     Vec3 belowLocal = {pivot.x, pivot.y - heightBelow, pivot.z};
     Vec3 above = TransformPointYUp(world, aboveLocal);
     Vec3 below = TransformPointYUp(world, belowLocal);
-    above.x += worldOffset_.x;
-    above.y += worldOffset_.y;
-    above.z += worldOffset_.z;
-    below.x += worldOffset_.x;
-    below.y += worldOffset_.y;
-    below.z += worldOffset_.z;
+    if (hasInstanceMatrix_) {
+        above = TransformPoint(instanceMatrix_, above);
+        below = TransformPoint(instanceMatrix_, below);
+    } else {
+        above.x += worldOffset_.x;
+        above.y += worldOffset_.y;
+        above.z += worldOffset_.z;
+        below.x += worldOffset_.x;
+        below.y += worldOffset_.y;
+        below.z += worldOffset_.z;
+    }
 
     RibbonSegment seg;
     seg.above[0] = above.x;
@@ -223,6 +244,7 @@ void MdxRibbonSystem::EmitSegment(RibbonEmitterState& state, const MdxModel* mod
     seg.color[0] = color[0];
     seg.color[1] = color[1];
     seg.color[2] = color[2];
+    seg.initialAlpha = alpha;
     seg.alpha = alpha;
     seg.slot = slot;
     if ((int)state.segments.size() >= kMaxSegmentsPerEmitter) {
@@ -258,21 +280,18 @@ void MdxRibbonSystem::Update(float dt, const Vec3& worldOffset, const MdxModel* 
             }
         }
 
-        // Age live segments; resample color/alpha/slot; gravity sinks verts.
+        // Age live segments; fade alpha over lifetime; gravity sinks verts.
         for (auto it = state.segments.begin(); it != state.segments.end();) {
             it->age += dt;
             if (it->age >= it->life) {
                 it = state.segments.erase(it);
                 continue;
             }
-            const float gravityDrop = data.gravity * dt * dt;
+            const float gravityDrop = data.gravity * dt;
             it->above[1] -= gravityDrop;
             it->below[1] -= gravityDrop;
-            it->color[0] = color[0];
-            it->color[1] = color[1];
-            it->color[2] = color[2];
-            it->alpha = alpha;
-            it->slot = slot;
+            const float fade = it->life > 0.0f ? std::clamp(1.0f - (it->age / it->life), 0.0f, 1.0f) : 1.0f;
+            it->alpha = it->initialAlpha * fade;
             ++it;
         }
 
@@ -369,7 +388,13 @@ void MdxRibbonSystem::Render(const Mat4& view, const Mat4& proj) {
         if (sg_query_view_state(state.textureView) != SG_RESOURCESTATE_VALID) continue;
         if (sg_query_sampler_state(state.sampler) != SG_RESOURCESTATE_VALID) continue;
 
-        sg_apply_pipeline(sharedRibbonPipeline_);
+        sg_pipeline pipeline = sharedRibbonPipeline_;
+        if (state.filterMode == 3 || state.filterMode == 4) { // Additive / AddAlpha
+            if (sharedAdditivePipeline_.id) pipeline = sharedAdditivePipeline_;
+        } else if (state.filterMode == 5 || state.filterMode == 6) { // Modulate / Modulate 2x
+            if (sharedModulatePipeline_.id) pipeline = sharedModulatePipeline_;
+        }
+        sg_apply_pipeline(pipeline);
         sg_apply_uniforms(0, sg_rng(vsU));
 
         sg_bindings bind = {};
@@ -483,10 +508,28 @@ void MdxRibbonSystem::InitSharedRibbonResources() {
         pd.layout.attrs[2] = {0, 20, SG_VERTEXFORMAT_FLOAT4};
 
         sharedRibbonPipeline_ = sg_make_pipeline(&pd);
+
+        // Additive pipeline (SRC_ALPHA, ONE) - standard for weapon trails
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+        sharedAdditivePipeline_ = sg_make_pipeline(&pd);
+
+        // Modulate pipeline (DST_COLOR, ZERO)
+        pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_DST_COLOR;
+        pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ZERO;
+        sharedModulatePipeline_ = sg_make_pipeline(&pd);
     }
 }
 
 void MdxRibbonSystem::ReleaseSharedRibbonResources() {
+    if (sharedModulatePipeline_.id) {
+        sg_destroy_pipeline(sharedModulatePipeline_);
+        sharedModulatePipeline_ = {0};
+    }
+    if (sharedAdditivePipeline_.id) {
+        sg_destroy_pipeline(sharedAdditivePipeline_);
+        sharedAdditivePipeline_ = {0};
+    }
     if (sharedRibbonPipeline_.id) {
         sg_destroy_pipeline(sharedRibbonPipeline_);
         sharedRibbonPipeline_ = {0};

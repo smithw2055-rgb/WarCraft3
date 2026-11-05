@@ -217,7 +217,8 @@ bool TestLightningShieldZaps() {
     const float foeBefore = foe->GetLife();
     for (int i = 0; i < 30; i++) sim.Update(); // shield ticks land
     TEST_ASSERT(foe->GetLife() < foeBefore);
-    TEST_ASSERT(ally->GetLife() == ally->GetMaxLife());
+    // In WC3 lightning shield damages all adjacent units including allies (friendly fire)
+    TEST_ASSERT(ally->GetLife() < ally->GetMaxLife());
     TEST_ASSERT(far->GetLife() == far->GetMaxLife());
     TEST_ASSERT(bearer->GetLife() == bearer->GetMaxLife());
     return true;

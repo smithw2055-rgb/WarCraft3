@@ -683,7 +683,7 @@ void ConsoleHUD::Layout(GameUI& gui, ConsoleHudRefs& refs, int screenW, int scre
             }
         }
         if (refs.inventoryTitleFrame) {
-            const float tw = ConvertX(screenW, 0.071f), th = ConvertX(screenW, 0.01125f);
+            const float tw = ConvertX(screenW, 0.071f), th = ConvertY(screenH, 0.01125f);
             Place(refs.inventoryTitleFrame, barX + ConvertX(screenW, 0.004f),
                   barY - ConvertY(screenH, 0.0165625f), tw, th);
         }

@@ -29,6 +29,19 @@ void CBuff::OnRemove(CSimulation& game, CUnit* target) {
     (void)game; (void)target;
 }
 
+void CBuff::OnRefresh(CSimulation& game, CUnit* target, const CBuff& newBuff) {
+    (void)game;
+    (void)target;
+    if (newBuff.GetDuration() > duration_) {
+        duration_ = newBuff.GetDuration();
+    }
+    if (newBuff.GetRemaining() > remaining_) {
+        remaining_ = newBuff.GetRemaining();
+    } else {
+        RefreshDuration();
+    }
+}
+
 void CBuff::OnTick(CSimulation& game, CUnit* target) {
     (void)game; (void)target;
     if (suspended_) return;

@@ -109,6 +109,7 @@ CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
     , unitType_(unitType), typeId_(typeId), playerIndex_(playerIndex)
     , facing_(facing)
     , speed_(unitType->GetSpeed())
+    , baseSpeed_(unitType->GetSpeed())
     , baseMaxLife_(unitType->GetMaxLife())
     , baseMaxMana_(unitType->GetManaMaximum())
     , maxMana_(unitType->GetManaMaximum())
@@ -124,6 +125,22 @@ CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
     flyHeight_ = unitType->GetDefaultFlyingHeight();
     foodUsed_ = unitType->GetFoodUsed();
     foodMade_ = unitType->GetFoodMade();
+}
+
+float CUnit::GetSpeed() const {
+    if (baseSpeed_ <= 0) return 0.0f;
+    float base = (float)baseSpeed_ + (float)bonusSpeed_;
+    float percent = auraMoveSpeedPercent_;
+    for (const auto& [id, mod] : speedModifiers_) {
+        percent += mod;
+    }
+    float finalSpeed = base * (1.0f + percent);
+    return std::clamp(finalSpeed, 150.0f, 522.0f);
+}
+
+void CUnit::SetSpeed(int s) {
+    baseSpeed_ = s;
+    speed_ = s;
 }
 
 void CUnit::SetPosition(float x, float y) {
@@ -223,7 +240,7 @@ void CUnit::MorphTo(CUnitType* form, War3ID formId) {
         morphed_ = true;
         originalType_ = unitType_;
         originalTypeId_ = typeId_;
-        savedSpeed_ = speed_;
+        savedSpeed_ = baseSpeed_;
         savedBaseMaxLife_ = baseMaxLife_;
         savedBaseMaxMana_ = baseMaxMana_;
         savedDefense_ = currentDefense_;
@@ -233,11 +250,17 @@ void CUnit::MorphTo(CUnitType* form, War3ID formId) {
         savedBuilding_ = isBuilding_;
         savedFlyHeight_ = GetFlyHeight();
     }
+    const float oldMaxLife = maxLife_;
+    const float oldMaxMana = (float)maxMana_;
+    const float lifeRatio = (oldMaxLife > 0.0f) ? (life_ / oldMaxLife) : 1.0f;
+    const float manaRatio = (oldMaxMana > 0.0f) ? (mana_ / oldMaxMana) : 1.0f;
+
     // Attacks read unitType_ live, so the form's arsenal (and model,
     // render-side) applies immediately. Hero/ability state is untouched.
     unitType_ = form;
     typeId_ = formId;
-    speed_ = form->GetSpeed();
+    baseSpeed_ = form->GetSpeed();
+    speed_ = baseSpeed_;
     baseMaxLife_ = form->GetMaxLife();
     baseMaxMana_ = form->GetManaMaximum();
     currentDefense_ = form->GetDefense();
@@ -248,14 +271,22 @@ void CUnit::MorphTo(CUnitType* form, War3ID formId) {
     SetFlyHeight(form->GetDefaultFlyingHeight());
     RefreshMaxLifeTotal();
     RefreshMaxManaTotal();
+    life_ = std::clamp(lifeRatio * maxLife_, 1.0f, maxLife_);
+    mana_ = std::clamp(manaRatio * (float)maxMana_, 0.0f, (float)maxMana_);
 }
 
 void CUnit::Unmorph() {
     if (!morphed_) return;
     morphed_ = false;
+    const float oldMaxLife = maxLife_;
+    const float oldMaxMana = (float)maxMana_;
+    const float lifeRatio = (oldMaxLife > 0.0f) ? (life_ / oldMaxLife) : 1.0f;
+    const float manaRatio = (oldMaxMana > 0.0f) ? (mana_ / oldMaxMana) : 1.0f;
+
     unitType_ = originalType_;
     typeId_ = originalTypeId_;
-    speed_ = savedSpeed_;
+    baseSpeed_ = savedSpeed_;
+    speed_ = baseSpeed_;
     baseMaxLife_ = savedBaseMaxLife_;
     baseMaxMana_ = savedBaseMaxMana_;
     currentDefense_ = savedDefense_;
@@ -266,6 +297,8 @@ void CUnit::Unmorph() {
     SetFlyHeight(savedFlyHeight_);
     RefreshMaxLifeTotal();
     RefreshMaxManaTotal();
+    life_ = std::clamp(lifeRatio * maxLife_, 1.0f, maxLife_);
+    mana_ = std::clamp(manaRatio * (float)maxMana_, 0.0f, (float)maxMana_);
 }
 
 void CUnit::SetAttackModifier(int attackIndex, War3ID installer,
@@ -390,10 +423,13 @@ bool CUnit::TurnTowardPoint(float targetX, float targetY) {
     float propulsionWindow = 60.0f;
     if (unitType_) {
         float eff = GetEffectivePropWindow();
-        if (eff > 0.0f) propulsionWindow = eff;
+        if (eff > 0.0f) {
+            propulsionWindow = (eff <= 3.15f) ? (eff * 180.0f / kPi) : eff;
+        }
     } else if (propWindow_ > 0.0f) {
-        propulsionWindow = propWindow_;
+        propulsionWindow = (propWindow_ <= 3.15f) ? (propWindow_ * 180.0f / kPi) : propWindow_;
     }
+    propulsionWindow = std::max(propulsionWindow, 60.0f);
 
     return absDelta <= propulsionWindow;
 }
@@ -515,11 +551,18 @@ void CUnit::AddBuff(std::unique_ptr<CBuff> buff, CSimulation& game) {
                 existing->GetCasterHandleId() != buff->GetCasterHandleId()) {
                 continue;
             }
-            // Stack or refresh
+            // REPLACE, stack, or refresh
+            if (existing->GetStackType() == CBuffStackType::REPLACE ||
+                buff->GetStackType() == CBuffStackType::REPLACE) {
+                existing->OnRemove(game, this);
+                buff->OnApply(game, this);
+                existing = std::move(buff);
+                return;
+            }
             if (existing->GetStackType() == CBuffStackType::STACK) {
                 existing->AddStack();
             } else {
-                existing->RefreshDuration();
+                existing->OnRefresh(game, this, *buff);
             }
             return;
         }
@@ -870,13 +913,9 @@ void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {    auto key 
         }
         case CAuraEffectType::MOVE_SPEED: {
             if (percent) {
-                const float oldFactor = 1.0f + applied;
-                const float newFactor = have ? (1.0f + best) : 1.0f;
-                if (oldFactor != 0.0f && oldFactor != 1.0f) {
-                    SetSpeed((int)(GetSpeed() / oldFactor));
-                }
-                if (newFactor != 1.0f) {
-                    SetSpeed((int)(GetSpeed() * newFactor));
+                const float newFactor = have ? best : 0.0f;
+                auraMoveSpeedPercent_ = newFactor;
+                if (have) {
                     auraApplied_[key] = best;
                 } else {
                     auraApplied_.erase(key);
@@ -884,8 +923,8 @@ void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {    auto key 
             } else {
                 const int oldFlat = (int)applied;
                 const int newFlat = have ? (int)best : 0;
-                if (oldFlat != 0) SetSpeed(GetSpeed() - oldFlat);
-                if (newFlat != 0) SetSpeed(GetSpeed() + newFlat);
+                if (oldFlat != 0) bonusSpeed_ -= oldFlat;
+                if (newFlat != 0) bonusSpeed_ += newFlat;
                 if (newFlat != 0) auraApplied_[key] = (float)newFlat;
                 else auraApplied_.erase(key);
             }
@@ -1102,8 +1141,11 @@ bool CUnit::CanBeTargetedBy(CSimulation& simulation, CUnit* source,
     return CWidget::CanBeTargetedBy(simulation, source, targetsAllowed);
 }
 
-void CUnit::IssueOrder(std::unique_ptr<COrder> order) {
+void CUnit::IssueOrder(std::unique_ptr<COrder> order, bool queue) {
     if (!order) return;
+    if (!queue) {
+        while (!orderQueue_.empty()) orderQueue_.pop();
+    }
     lastOrderId_ = order->GetOrderId();
     const int targetKind = (int)order->GetTargetKind();
     float x = 0.0f, y = 0.0f;
@@ -1287,7 +1329,9 @@ bool CUnit::Update(CSimulation& simulation) {
             // player.setUnitFoodMade/Used(this, 0)).
             if (CPlayer* player = simulation.GetPlayer(GetPlayerIndex())) {
                 if (foodMade_ != 0) {
-                    player->SetFoodCap(std::max(0, player->GetFoodCap() - foodMade_));
+                    if (!IsConstructing()) {
+                        player->SetFoodCap(std::max(0, player->GetFoodCap() - foodMade_));
+                    }
                     foodMade_ = 0;
                 }
                 const int used = GetFoodUsed();
@@ -1300,11 +1344,20 @@ bool CUnit::Update(CSimulation& simulation) {
             // items materialize at the corpse on the death tick.
             DropDeathItems(simulation);
             // Cargo goes down with the transport (WC3 rule).
-            for (auto* passenger : cargoUnits_) {
-                if (passenger && !passenger->IsDead()) {
-                    passenger->Damage(simulation, nullptr, false, false,
-                                      CAttackType::CHAOS, CDamageType::NORMAL,
-                                      "", 1e9f, 0);
+            auto passengers = std::move(cargoUnits_);
+            cargoUnits_.clear();
+            const float dropX = GetX();
+            const float dropY = GetY();
+            for (auto* passenger : passengers) {
+                if (passenger) {
+                    passenger->loadedAboard_ = false;
+                    passenger->SetHidden(false);
+                    passenger->SetPosition(dropX, dropY);
+                    if (!passenger->IsDead()) {
+                        passenger->Damage(simulation, nullptr, false, false,
+                                          CAttackType::CHAOS, CDamageType::NORMAL,
+                                          "", 1e9f, 0);
+                    }
                 }
             }
             // Notify abilities of death
@@ -1401,15 +1454,18 @@ bool CUnit::Update(CSimulation& simulation) {
         while (orderQueue_.size() > 1) orderQueue_.pop();
     }
     if (currentBehavior_) {
-        bool done = currentBehavior_->Update(simulation);
-        if (done) {
-            currentBehavior_->End(simulation);
-            if (currentBehavior_ == ownedCurrentBehavior_.get()) {
-                ownedCurrentBehavior_.reset();
+        CBehavior* active = currentBehavior_;
+        bool done = active->Update(simulation);
+        if (done && currentBehavior_ == active) {
+            active->End(simulation);
+            if (currentBehavior_ == active) {
+                if (currentBehavior_ == ownedCurrentBehavior_.get()) {
+                    ownedCurrentBehavior_.reset();
+                }
+                currentBehavior_ = nullptr;
+                // Try to get next behavior from order queue
+                PollNextOrderBehavior(simulation);
             }
-            currentBehavior_ = nullptr;
-            // Try to get next behavior from order queue
-            PollNextOrderBehavior(simulation);
         }
     } else if (!orderQueue_.empty()) {
         PollNextOrderBehavior(simulation);
@@ -1773,9 +1829,14 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
             const float splash = actualDamage * cleave->GetSplashFraction();
             const float radius = cleave->GetSplashRadius();
             if (splash > 0) {
+                CPlayer* srcPlayer = simulation.GetPlayer(source->GetPlayerIndex());
                 for (auto* unit : simulation.GetUnits()) {
                     if (!unit || unit->IsDead() || unit == this || unit == source) continue;
-                    if (unit->GetPlayerIndex() == source->GetPlayerIndex()) continue;
+                    CPlayer* tgtPlayer = simulation.GetPlayer(unit->GetPlayerIndex());
+                    const bool isAlly = (unit->GetPlayerIndex() == source->GetPlayerIndex()) ||
+                        (srcPlayer && tgtPlayer && (srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::ALLIED) ||
+                                                    srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::PASSIVE)));
+                    if (isAlly) continue;
                     const float dx = unit->GetX() - GetX();
                     const float dy = unit->GetY() - GetY();
                     if (dx * dx + dy * dy <= radius * radius) {
@@ -1806,9 +1867,14 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
         if (auto* pulv = dynamic_cast<CAbilityPulverize*>(source->GetAbility(War3ID("Awar")))) {
             if (simulation.SimRand01() < pulv->GetChance()) {
                 const float radius = pulv->GetRadius();
+                CPlayer* srcPlayer = simulation.GetPlayer(source->GetPlayerIndex());
                 for (auto* unit : simulation.GetUnits()) {
                     if (!unit || unit->IsDead() || unit == this || unit == source) continue;
-                    if (unit->GetPlayerIndex() == source->GetPlayerIndex()) continue;
+                    CPlayer* tgtPlayer = simulation.GetPlayer(unit->GetPlayerIndex());
+                    const bool isAlly = (unit->GetPlayerIndex() == source->GetPlayerIndex()) ||
+                        (srcPlayer && tgtPlayer && (srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::ALLIED) ||
+                                                    srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::PASSIVE)));
+                    if (isAlly) continue;
                     const float dx = unit->GetX() - GetX();
                     const float dy = unit->GetY() - GetY();
                     if (dx * dx + dy * dy <= radius * radius) {
@@ -1975,21 +2041,6 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
     if (!order) return;
     int orderId = order->GetOrderId();
 
-    // Fire order event callback
-    auto& orderCb = simulation.GetUnitOrderCallback();
-    if (orderCb) {
-        int targetHandle = -1;
-        float ox = 0, oy = 0;
-        if (auto* widgetOrder = dynamic_cast<COrderTargetWidget*>(order.get())) {
-            auto* tgt = widgetOrder->GetTarget();
-            if (tgt) targetHandle = tgt->GetHandleId();
-        } else if (auto* pointOrder = dynamic_cast<COrderTargetPoint*>(order.get())) {
-            ox = pointOrder->GetX();
-            oy = pointOrder->GetY();
-        }
-        orderCb(handleId_, orderId, targetHandle, ox, oy);
-    }
-
     auto tryAbilityRange = [&](bool movementPass) -> bool {
         for (auto* ab : abilities_) {
             if (!ab || ab->IsDisabled()) continue;
@@ -2003,6 +2054,9 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
                         return true;
                     }
                     newBehavior = ab->Begin(simulation, this, orderId, widgetOrder->GetTarget());
+                    if (!newBehavior) {
+                        return true;
+                    }
                 }
             } else if (auto* pointOrder = dynamic_cast<COrderTargetPoint*>(order.get())) {
                 if (ab->CheckCanTargetPoint(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY())) {
@@ -2010,6 +2064,9 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
                         return true;
                     }
                     newBehavior = ab->Begin(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY());
+                    if (!newBehavior) {
+                        return true;
+                    }
                 }
             } else if (dynamic_cast<COrderNoTarget*>(order.get())) {
                 if (ab->CheckCanTargetNoTarget(simulation, this, orderId)) {
@@ -2017,6 +2074,9 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
                         return true;
                     }
                     newBehavior = ab->BeginNoTarget(simulation, this, orderId);
+                    if (!newBehavior) {
+                        return true;
+                    }
                 }
             }
 
@@ -2075,17 +2135,21 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
         }
     }
 
-    // No ability handled this order - fallback to stop
-    auto behavior = std::make_unique<CBehaviorStop>();
-    behavior->SetUnit(this);
-    behavior->Begin(simulation);
-    ownedCurrentBehavior_ = std::move(behavior);
-    currentBehavior_ = ownedCurrentBehavior_.get();
-    std::ostringstream oss;
-    oss << "[MoveDebug] dispatch_fallback"
-        << " unit=" << handleId_
-        << " type=" << typeId_.ToString()
-        << " order=" << orderId
-        << " behavior=STOP";
-    MoveDebugLogLine(oss.str());
+    // If explicit stop / hold position or preemptive targeted/smart order was unhandled:
+    if (orderId == OrderIds::STOP || orderId == OrderIds::HOLD_POSITION ||
+        dynamic_cast<COrderTargetPoint*>(order.get()) ||
+        dynamic_cast<COrderTargetWidget*>(order.get())) {
+        auto behavior = std::make_unique<CBehaviorStop>();
+        behavior->SetUnit(this);
+        behavior->Begin(simulation);
+        ownedCurrentBehavior_ = std::move(behavior);
+        currentBehavior_ = ownedCurrentBehavior_.get();
+        std::ostringstream oss;
+        oss << "[MoveDebug] dispatch_stop"
+            << " unit=" << handleId_
+            << " type=" << typeId_.ToString()
+            << " order=" << orderId
+            << " behavior=STOP";
+        MoveDebugLogLine(oss.str());
+    }
 }

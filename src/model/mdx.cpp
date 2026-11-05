@@ -1,5 +1,6 @@
 #include "mdx.h"
 #include <cstring>
+#include <cmath>
 #include <iostream>
 #include <algorithm>
 #include <cassert>
@@ -331,7 +332,7 @@ bool MdxLoad(const uint8_t* data, size_t size, MdxModel& out) {
             for (int i = 0; i < count; i++) {
                 out.textures[i].replaceableId = (int)r.u32();
                 out.textures[i].path = r.readStr(260);
-                r.skip(4); // wrapFlags
+                out.textures[i].flags = r.u32();
             }
             break;
         }
@@ -1020,6 +1021,42 @@ struct SampleHelper {
     }
 };
 
+static void SlerpQuatComponents(const float* a, const float* b, float t, MdxInterpolation interp, float* out) {
+    float qAx = a[0], qAy = a[1], qAz = a[2], qAw = a[3];
+    float qBx = b[0], qBy = b[1], qBz = b[2], qBw = b[3];
+    if (interp == MdxInterpolation::None) {
+        out[0] = qAx; out[1] = qAy; out[2] = qAz; out[3] = qAw;
+        return;
+    }
+    float dot = qAx * qBx + qAy * qBy + qAz * qBz + qAw * qBw;
+    if (dot < 0.0f) {
+        dot = -dot;
+        qBx = -qBx; qBy = -qBy; qBz = -qBz; qBw = -qBw;
+    }
+    float s0, s1;
+    if (dot > 0.9995f) {
+        s0 = 1.0f - t;
+        s1 = t;
+    } else {
+        float theta_0 = std::acos(std::clamp(dot, -1.0f, 1.0f));
+        float theta = theta_0 * t;
+        float sin_theta = std::sin(theta);
+        float sin_theta_0 = std::sin(theta_0);
+        s0 = std::cos(theta) - dot * sin_theta / sin_theta_0;
+        s1 = sin_theta / sin_theta_0;
+    }
+    float rx = qAx * s0 + qBx * s1;
+    float ry = qAy * s0 + qBy * s1;
+    float rz = qAz * s0 + qBz * s1;
+    float rw = qAw * s0 + qBw * s1;
+    float len = std::sqrt(rx * rx + ry * ry + rz * rz + rw * rw);
+    if (len > 1e-7f) {
+        out[0] = rx / len; out[1] = ry / len; out[2] = rz / len; out[3] = rw / len;
+    } else {
+        out[0] = 0.0f; out[1] = 0.0f; out[2] = 0.0f; out[3] = 1.0f;
+    }
+}
+
 bool MdxSampleTimeline(const MdxTimeline& tl, uint32_t frame, float* out, int elemCount, float defaultVal) {
     if (!out || tl.frames.empty() || elemCount < 1) return false;
 
@@ -1058,6 +1095,11 @@ bool MdxSampleTimeline(const MdxTimeline& tl, uint32_t frame, float* out, int el
     float t = 0;
     if (keyA != keyB && tl.frames[keyB] != tl.frames[keyA]) {
         t = (float)(frame - tl.frames[keyA]) / (float)(tl.frames[keyB] - tl.frames[keyA]);
+    }
+
+    if (elemCount == 4 && tl.tag == 0x4B475254) { // TAG_KGRT
+        SlerpQuatComponents(&tl.values[(size_t)keyA * 4], &tl.values[(size_t)keyB * 4], t, tl.interpolationType, out);
+        return true;
     }
 
     const bool needsTangents = tl.interpolationType == MdxInterpolation::Hermite
@@ -1123,6 +1165,11 @@ static bool MdxSampleGlobalTimelineLooped(const MdxTimeline& tl, uint32_t frame,
         || tl.interpolationType == MdxInterpolation::Bezier;
     const bool hasTangents = !needsTangents
         || (tl.inTans.size() >= valuesNeeded && tl.outTans.size() >= valuesNeeded);
+
+    if (elemCount == 4 && tl.tag == 0x4B475254) { // TAG_KGRT
+        SlerpQuatComponents(&tl.values[(size_t)keyA * 4], &tl.values[(size_t)keyB * 4], t, tl.interpolationType, out);
+        return true;
+    }
 
     for (int i = 0; i < elemCount; i++) {
         out[i] = SampleHelper::interpValue(

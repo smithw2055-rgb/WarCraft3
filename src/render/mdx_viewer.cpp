@@ -45,18 +45,11 @@ static bool IsSuspiciousViewHandle(sg_view view) {
     if (!view.id) {
         return false;
     }
-    const uint32_t slot = view.id & 0xFFFFu;
-    return (slot == 0u) || (slot > 2048u);
+    return sg_query_view_state(view) != SG_RESOURCESTATE_VALID;
 }
 
-static void SafeDestroyViewHandle(sg_view& view, const char* owner) {
+static void SafeDestroyViewHandle(sg_view& view, const char* /*owner*/) {
     if (!view.id) {
-        return;
-    }
-    if (IsSuspiciousViewHandle(view)) {
-        std::fprintf(stderr, "MdxViewer: skipped suspicious view destroy owner=%s id=0x%08x\n",
-            owner, view.id);
-        view = {0};
         return;
     }
     if (sg_query_view_state(view) == SG_RESOURCESTATE_VALID) {
@@ -728,8 +721,39 @@ sg_pipeline MdxViewer::sharedOverlaySkinnedBlendPipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlaySkinnedAdditivePipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlaySkinnedAddAlphaPipeline_ = {0};
 sg_sampler MdxViewer::sharedSampler_ = {0};
+sg_sampler MdxViewer::sharedNearestSampler_ = {0};
 sg_image MdxViewer::sharedWhiteTexture_ = {0};
 sg_view MdxViewer::sharedWhiteTextureView_ = {0};
+Vec3 MdxViewer::sharedSunDir_ = {0.5f, 1.0f, 0.3f};
+Vec3 MdxViewer::sharedSunColor_ = {1.0f, 1.0f, 0.9f};
+float MdxViewer::sharedSunIntensity_ = 1.0f;
+Vec3 MdxViewer::sharedAmbientColor_ = {0.4f, 0.4f, 0.5f};
+float MdxViewer::sharedAmbientIntensity_ = 0.5f;
+bool MdxViewer::sharedFogEnabled_ = false;
+float MdxViewer::sharedFogColor_[3] = {0.78f, 0.84f, 0.94f};
+float MdxViewer::sharedFogStart_ = 12000.0f;
+float MdxViewer::sharedFogEnd_ = 65000.0f;
+
+void MdxViewer::SetSharedLighting(const Vec3& sunDir, const Vec3& sunColor, float sunIntensity,
+                                  const Vec3& ambientColor, float ambientIntensity) {
+    float len = std::sqrt(sunDir.x * sunDir.x + sunDir.y * sunDir.y + sunDir.z * sunDir.z);
+    sharedSunDir_ = len > 0.0001f ? Vec3{sunDir.x / len, sunDir.y / len, sunDir.z / len} : Vec3{0.5f, 1.0f, 0.3f};
+    sharedSunColor_ = sunColor;
+    sharedSunIntensity_ = std::max(0.0f, sunIntensity);
+    sharedAmbientColor_ = ambientColor;
+    sharedAmbientIntensity_ = std::max(0.0f, ambientIntensity);
+}
+
+void MdxViewer::SetSharedFog(bool enabled, const float color[3], float start, float end) {
+    sharedFogEnabled_ = enabled;
+    if (color) {
+        sharedFogColor_[0] = color[0];
+        sharedFogColor_[1] = color[1];
+        sharedFogColor_[2] = color[2];
+    }
+    sharedFogStart_ = start;
+    sharedFogEnd_ = end;
+}
 
 void MdxViewer::DebugLogState(const char* tag) const {
     if (!MdxLoadTraceEnabled()) {
@@ -777,9 +801,19 @@ void MdxViewer::InitSharedShader() {
     smpDesc.min_filter = SG_FILTER_LINEAR;
     smpDesc.mag_filter = SG_FILTER_LINEAR;
     smpDesc.mipmap_filter = SG_FILTER_LINEAR;
-    smpDesc.wrap_u = SG_WRAP_REPEAT;
-    smpDesc.wrap_v = SG_WRAP_REPEAT;
+    smpDesc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+    smpDesc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
     sharedSampler_ = sg_make_sampler(&smpDesc);
+
+    if (!sharedNearestSampler_.id) {
+        sg_sampler_desc nearestDesc = {};
+        nearestDesc.min_filter = SG_FILTER_NEAREST;
+        nearestDesc.mag_filter = SG_FILTER_NEAREST;
+        nearestDesc.mipmap_filter = (sg_filter)0;
+        nearestDesc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+        nearestDesc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+        sharedNearestSampler_ = sg_make_sampler(&nearestDesc);
+    }
 
     const uint32_t whitePixel = 0xFFFFFFFFu;
     sg_image_desc whiteDesc = {};
@@ -826,14 +860,19 @@ void MdxViewer::InitSharedShader() {
             uniform vec4 uTexFlags;
             uniform vec4 uFogColor;
             uniform vec4 uFogParams;
+            uniform vec4 uSunDir;
+            uniform vec4 uSunColor;
+            uniform vec4 uAmbientColor;
             vec2 quat_transform(vec2 q, vec2 v) {
                 vec2 uv = vec2(-q.x * v.y, q.x * v.x);
                 vec2 uuv = vec2(-q.x * uv.y, q.x * uv.x);
                 return v + 2.0 * (uv * q.y + uuv);
             }
             void main() {
-                vec3 light = normalize(vec3(0.5, 1.0, 0.3));
-                float diff = max(abs(dot(normalize(vNorm), light)), 0.35);
+                vec3 N = normalize(vNorm);
+                vec3 L = normalize(uSunDir.xyz);
+                float NdotL = (uAmbientColor.w > 0.5) ? abs(dot(N, L)) : max(dot(N, L), 0.0);
+                vec3 light = (uSunDir.w > 0.5) ? vec3(1.0) : (uAmbientColor.rgb + uSunColor.rgb * NdotL);
                 vec4 color = uDebugColor;
                 vec2 uv = vUV;
                 uv += uUvTransRot.xy;
@@ -842,8 +881,8 @@ void MdxViewer::InitSharedShader() {
                 if (uTexFlags.x > 0.5) color = texture(uTexture, uv) * uDebugColor;
                 if (uTexFlags.y == 1.0 && color.a < 0.75) discard;
                 if (uTexFlags.y >= 5.0 && color.a < 0.02) discard;
-                FragColor = vec4(color.rgb * diff, color.a);
-                if (uFogParams.x > 0.5) {
+                FragColor = vec4(color.rgb * light, color.a);
+                if (uSunColor.w < 0.5 && uFogParams.x > 0.5) {
                     float fogAmount = clamp(((1.0 / gl_FragCoord.w) - uFogParams.y) / (uFogParams.z - uFogParams.y), 0.0, 1.0);
                     FragColor.rgb = FragColor.rgb * (1.0 - fogAmount) + uFogColor.rgb * fogAmount;
                 }
@@ -864,7 +903,7 @@ void MdxViewer::InitSharedShader() {
         sd.uniform_blocks[0].glsl_uniforms[1].array_count = 1;
         sd.uniform_blocks[0].glsl_uniforms[1].glsl_name = "uModel";
         sd.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
-        sd.uniform_blocks[1].size = 80;
+        sd.uniform_blocks[1].size = 128;
         sd.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_NATIVE;
         sd.uniform_blocks[1].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[0].array_count = 1;
@@ -881,6 +920,15 @@ void MdxViewer::InitSharedShader() {
         sd.uniform_blocks[1].glsl_uniforms[4].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[4].array_count = 1;
         sd.uniform_blocks[1].glsl_uniforms[4].glsl_name = "uFogParams";
+        sd.uniform_blocks[1].glsl_uniforms[5].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[5].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[5].glsl_name = "uSunDir";
+        sd.uniform_blocks[1].glsl_uniforms[6].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[6].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[6].glsl_name = "uSunColor";
+        sd.uniform_blocks[1].glsl_uniforms[7].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[7].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[7].glsl_name = "uAmbientColor";
         sd.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
         sd.views[0].texture.image_type = SG_IMAGETYPE_2D;
         sd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
@@ -952,14 +1000,19 @@ void MdxViewer::InitSharedShader() {
             uniform vec4 uTexFlags;
             uniform vec4 uFogColor;
             uniform vec4 uFogParams;
+            uniform vec4 uSunDir;
+            uniform vec4 uSunColor;
+            uniform vec4 uAmbientColor;
             vec2 quat_transform(vec2 q, vec2 v) {
                 vec2 uv = vec2(-q.x * v.y, q.x * v.x);
                 vec2 uuv = vec2(-q.x * uv.y, q.x * uv.x);
                 return v + 2.0 * (uv * q.y + uuv);
             }
             void main() {
-                vec3 light = normalize(vec3(0.5, 1.0, 0.3));
-                float diff = max(abs(dot(normalize(vNorm), light)), 0.35);
+                vec3 N = normalize(vNorm);
+                vec3 L = normalize(uSunDir.xyz);
+                float NdotL = (uAmbientColor.w > 0.5) ? abs(dot(N, L)) : max(dot(N, L), 0.0);
+                vec3 light = (uSunDir.w > 0.5) ? vec3(1.0) : (uAmbientColor.rgb + uSunColor.rgb * NdotL);
                 vec4 color = uDebugColor;
                 vec2 uv = vUV;
                 uv += uUvTransRot.xy;
@@ -968,8 +1021,8 @@ void MdxViewer::InitSharedShader() {
                 if (uTexFlags.x > 0.5) color = texture(uTexture, uv) * uDebugColor;
                 if (uTexFlags.y == 1.0 && color.a < 0.75) discard;
                 if (uTexFlags.y >= 5.0 && color.a < 0.02) discard;
-                FragColor = vec4(color.rgb * diff, color.a);
-                if (uFogParams.x > 0.5) {
+                FragColor = vec4(color.rgb * light, color.a);
+                if (uSunColor.w < 0.5 && uFogParams.x > 0.5) {
                     float fogAmount = clamp(((1.0 / gl_FragCoord.w) - uFogParams.y) / (uFogParams.z - uFogParams.y), 0.0, 1.0);
                     FragColor.rgb = FragColor.rgb * (1.0 - fogAmount) + uFogColor.rgb * fogAmount;
                 }
@@ -996,7 +1049,7 @@ void MdxViewer::InitSharedShader() {
         sd.uniform_blocks[0].glsl_uniforms[2].glsl_name = "uBoneCount";
 
         sd.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
-        sd.uniform_blocks[1].size = 80;
+        sd.uniform_blocks[1].size = 128;
         sd.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_NATIVE;
         sd.uniform_blocks[1].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[0].array_count = 1;
@@ -1013,13 +1066,22 @@ void MdxViewer::InitSharedShader() {
         sd.uniform_blocks[1].glsl_uniforms[4].type = SG_UNIFORMTYPE_FLOAT4;
         sd.uniform_blocks[1].glsl_uniforms[4].array_count = 1;
         sd.uniform_blocks[1].glsl_uniforms[4].glsl_name = "uFogParams";
+        sd.uniform_blocks[1].glsl_uniforms[5].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[5].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[5].glsl_name = "uSunDir";
+        sd.uniform_blocks[1].glsl_uniforms[6].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[6].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[6].glsl_name = "uSunColor";
+        sd.uniform_blocks[1].glsl_uniforms[7].type = SG_UNIFORMTYPE_FLOAT4;
+        sd.uniform_blocks[1].glsl_uniforms[7].array_count = 1;
+        sd.uniform_blocks[1].glsl_uniforms[7].glsl_name = "uAmbientColor";
 
         // Bone texture (VS, slot 1)
         sd.views[0].texture.stage = SG_SHADERSTAGE_VERTEX;
         sd.views[0].texture.image_type = SG_IMAGETYPE_2D;
-        sd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+        sd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_UNFILTERABLE_FLOAT;
         sd.samplers[0].stage = SG_SHADERSTAGE_VERTEX;
-        sd.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+        sd.samplers[0].sampler_type = SG_SAMPLERTYPE_NONFILTERING;
         sd.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_VERTEX;
         sd.texture_sampler_pairs[0].glsl_name = "uBoneTexture";
         sd.texture_sampler_pairs[0].view_slot = 0;
@@ -1175,6 +1237,7 @@ void MdxViewer::ReleaseSharedShader() {
     if (sharedWhiteTextureView_.id) sg_destroy_view(sharedWhiteTextureView_);
     if (sharedWhiteTexture_.id) sg_destroy_image(sharedWhiteTexture_);
     if (sharedSampler_.id) sg_destroy_sampler(sharedSampler_);
+    if (sharedNearestSampler_.id) sg_destroy_sampler(sharedNearestSampler_);
     sharedShader_ = {0}; sharedPipeline_ = {0}; sharedNoDepthWritePipeline_ = {0}; sharedBlendPipeline_ = {0};
     sharedAdditivePipeline_ = {0}; sharedAddAlphaPipeline_ = {0};
     sharedOverlayPipeline_ = {0}; sharedOverlayBlendPipeline_ = {0};
@@ -1184,6 +1247,7 @@ void MdxViewer::ReleaseSharedShader() {
     sharedOverlaySkinnedPipeline_ = {0}; sharedOverlaySkinnedBlendPipeline_ = {0};
     sharedOverlaySkinnedAdditivePipeline_ = {0}; sharedOverlaySkinnedAddAlphaPipeline_ = {0};
     sharedSampler_ = {0};
+    sharedNearestSampler_ = {0};
     sharedWhiteTexture_ = {0};
     sharedWhiteTextureView_ = {0};
 }
@@ -1342,8 +1406,24 @@ bool MdxViewer::ShareModelResourcesFrom(const MdxViewer& other) {
         UpdateAnimatedStates();
     }
 
-    // Particle systems stay disabled for now; each runtime instance owns only animation state.
-    hasParticles_ = false;
+    if (other.hasParticles_ && modelSource_
+        && (!modelSource_->particleEmitters2.empty() || !modelSource_->particleEmittersPopcorn.empty())) {
+        particles_.Init(*modelSource_, mpq_);
+        hasParticles_ = true;
+    } else {
+        hasParticles_ = false;
+    }
+
+    if (other.hasRibbons_ && modelSource_ && !modelSource_->ribbonEmitters.empty()) {
+        ribbons_.Init(*modelSource_, mpq_);
+        hasRibbons_ = true;
+    } else {
+        hasRibbons_ = false;
+    }
+
+    hasParticleEmitter1_ = other.hasParticleEmitter1_;
+    particleEmitter1States_ = other.particleEmitter1States_;
+    particleEmitter1Spawns_.clear();
     return true;
 }
 
@@ -1745,6 +1825,13 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
                     }
                     batch.replaceableId = replaceableId;
                     batch.replaceablePath = replaceablePath;
+                    uint32_t texFlags = (textureId >= 0 && textureId < (int)sourceModel.textures.size())
+                        ? sourceModel.textures[textureId].flags : 0;
+                    const bool isCliff = cliffMode || replaceableId == 11;
+                    bool wrapU = !isCliff && ((texFlags & 0x1) != 0);
+                    bool wrapV = !isCliff && ((texFlags & 0x2) != 0);
+                    smp.wrap_u = wrapU ? SG_WRAP_REPEAT : SG_WRAP_CLAMP_TO_EDGE;
+                    smp.wrap_v = wrapV ? SG_WRAP_REPEAT : SG_WRAP_CLAMP_TO_EDGE;
                     batch.sampler = sg_make_sampler(&smp);
                     batch.materialId = geo.materialId;
                     batch.geosetIndex = gi;
@@ -1770,7 +1857,14 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
                     float my = geo.vertices[i*3+1];
                     float mz = geo.vertices[i*3+2];
                     if (cliffMode) {
-                        verts[i].px = my;  verts[i].py = mz;  verts[i].pz = -mx;
+                        auto snapCliff = [](float v) -> float {
+                            float nearest128 = std::round(v / 128.0f) * 128.0f;
+                            if (std::fabs(v - nearest128) <= 0.5f) {
+                                return nearest128;
+                            }
+                            return v;
+                        };
+                        verts[i].px = snapCliff(my);  verts[i].py = snapCliff(mz);  verts[i].pz = snapCliff(-mx);
                         float nnx = geo.normals.empty() ? 0 : geo.normals[i*3];
                         float nny = geo.normals.empty() ? 0 : geo.normals[i*3+1];
                         float nnz = geo.normals.empty() ? 0 : geo.normals[i*3+2];
@@ -1840,6 +1934,13 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
                 }
                 batch.replaceableId = replaceableId;
                 batch.replaceablePath = replaceablePath;
+                uint32_t texFlags = (textureId >= 0 && textureId < (int)sourceModel.textures.size())
+                    ? sourceModel.textures[textureId].flags : 0;
+                const bool isCliff = cliffMode || replaceableId == 11;
+                bool wrapU = !isCliff && ((texFlags & 0x1) != 0);
+                bool wrapV = !isCliff && ((texFlags & 0x2) != 0);
+                smp.wrap_u = wrapU ? SG_WRAP_REPEAT : SG_WRAP_CLAMP_TO_EDGE;
+                smp.wrap_v = wrapV ? SG_WRAP_REPEAT : SG_WRAP_CLAMP_TO_EDGE;
                 batch.sampler = sg_make_sampler(&smp);
                 batch.skinned = false;
                 batch.materialId = geo.materialId;
@@ -1893,7 +1994,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
         hasParticleEmitter1_ = true;
     }
 
-    if (enableParticles && !sourceModel.particleEmitters2.empty()) {
+    if (enableParticles && (!sourceModel.particleEmitters2.empty() || !sourceModel.particleEmittersPopcorn.empty())) {
         particles_.Init(sourceModel, mpq);
         particles_.SetWorldOffset(Vec3{0.0f, 0.0f, 0.0f});
         hasParticles_ = true;
@@ -2237,18 +2338,20 @@ bool MdxViewer::SetSequencePreservingWalk(int sequenceIndex, bool loop, float sp
     }
 
     const bool nextIsWalk = SequenceHasPrimaryToken(modelSource_->sequences[(size_t)sequenceIndex], "walk");
-    if (currentSequenceIsWalk_ && !nextIsWalk) {
+    if (currentSequenceIsWalk_) {
         lastWalkSequenceProgress_ = animator_.GetSequenceProgress();
     }
+    const int prevSeq = animator_.GetCurrentSequence();
 
     const bool played = animator_.SetSequence(sequenceIndex, loop, speed);
     if (!played) {
         return false;
     }
 
-    if (nextIsWalk && !currentSequenceIsWalk_ && lastWalkSequenceProgress_ >= 0.0f) {
-        animator_.SetFrameByRatio(std::clamp(lastWalkSequenceProgress_, 0.0f, 1.0f));
+    if (nextIsWalk && prevSeq != sequenceIndex && lastWalkSequenceProgress_ > 0.0f && lastWalkSequenceProgress_ < 1.0f) {
+        animator_.SetFrameByRatio(lastWalkSequenceProgress_);
     }
+
     currentSequenceIsWalk_ = nextIsWalk;
     return true;
 }
@@ -2596,8 +2699,13 @@ void MdxViewer::UpdateAnimatedStates() {
             state.color[1] = geosetAnim.color[1];
             state.color[2] = geosetAnim.color[2];
 
+            bool hasKGAO = false;
+            bool sampledKGAO = false;
             float sampled[4] = {};
             for (const auto& timeline : geosetAnim.timelines) {
+                if (timeline.tag == TAG_KGAO) {
+                    hasKGAO = true;
+                }
                 if (!timelineAppliesToCurrentSequence(timeline)) {
                     continue;
                 }
@@ -2605,11 +2713,28 @@ void MdxViewer::UpdateAnimatedStates() {
                     && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, sampled, 1,
                                               geosetAnim.alpha, currentSequence)) {
                     state.alpha = sampled[0];
+                    sampledKGAO = true;
                 }
                 else if (timeline.tag == TAG_KGAC
                     && SampleTimelineForModel(timeline, modelSource_, frame, elapsedMs_, sampled, 3,
                                               1.0f, currentSequence)) {
                     MdxConvertAnimatedColorBgrToRgb(sampled, state.color);
+                }
+            }
+            if (hasKGAO && !sampledKGAO) {
+                bool hasPositiveKey = false;
+                bool hasZeroKey = false;
+                for (const auto& timeline : geosetAnim.timelines) {
+                    if (timeline.tag != TAG_KGAO) continue;
+                    for (float v : timeline.values) {
+                        if (v > 0.001f) hasPositiveKey = true;
+                        else hasZeroKey = true;
+                    }
+                }
+                if (hasPositiveKey && !hasZeroKey) {
+                    state.alpha = 0.0f;
+                } else {
+                    state.alpha = geosetAnim.alpha;
                 }
             }
             break;
@@ -2707,10 +2832,6 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
         return image.id && sg_query_image_state(image) == SG_RESOURCESTATE_VALID;
     };
     auto isValidView = [](sg_view viewHandle) {
-        if (viewHandle.id && ((viewHandle.id & 0xFFFFu) >= 4096u)) {
-            std::fprintf(stderr, "MdxViewer suspicious view handle: 0x%08x\n", viewHandle.id);
-            return false;
-        }
         return viewHandle.id && sg_query_view_state(viewHandle) == SG_RESOURCESTATE_VALID;
     };
     auto isValidSampler = [](sg_sampler samplerHandle) {
@@ -2726,8 +2847,17 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
     const bool currentSequenceIsDecay = SequenceNameContains(currentSequenceName, "decay")
         || SequenceNameContains(currentSequenceName, "corpse");
     auto shouldRenderBatchForCurrentSequence = [&](const Batch& batch) {
-        if (modelSource_ && !modelSource_->geosetAnims.empty()) {
-            return true;
+        if (modelSource_) {
+            bool hasGeosetAnim = false;
+            for (const auto& ga : modelSource_->geosetAnims) {
+                if (ga.geosetId == batch.geosetIndex) {
+                    hasGeosetAnim = true;
+                    break;
+                }
+            }
+            if (hasGeosetAnim) {
+                return true;
+            }
         }
         if ((batch.sequenceHintMask & BatchSequenceHint_Birth) != 0 && !currentSequenceIsBirth) {
             return false;
@@ -2750,6 +2880,9 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
         float texFlags[4];
         float fogColor[4];
         float fogParams[4];
+        float sunDir[4];
+        float sunColor[4];
+        float ambientColor[4];
     };
 
     VSBlock vsU; std::memcpy(vsU.MVP, mvp.Data(), 64); std::memcpy(vsU.Model, model.Data(), 64);
@@ -2767,21 +2900,23 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
     fsU.texFlags[1] = 0.0f;
     fsU.texFlags[2] = 1.0f;
     fsU.texFlags[3] = 1.0f;
-    fsU.fogColor[0] = fogColor_[0];
-    fsU.fogColor[1] = fogColor_[1];
-    fsU.fogColor[2] = fogColor_[2];
+
+    const bool useFog = fogEnabled_ || sharedFogEnabled_;
+    const float* activeFogColor = fogEnabled_ ? fogColor_ : sharedFogColor_;
+    const float activeFogStart = fogEnabled_ ? fogStart_ : sharedFogStart_;
+    const float activeFogEnd = fogEnabled_ ? fogEnd_ : sharedFogEnd_;
+
+    fsU.fogColor[0] = activeFogColor[0];
+    fsU.fogColor[1] = activeFogColor[1];
+    fsU.fogColor[2] = activeFogColor[2];
     fsU.fogColor[3] = 1.0f;
-    fsU.fogParams[0] = fogEnabled_ ? 1.0f : 0.0f;
-    fsU.fogParams[1] = fogStart_;
-    fsU.fogParams[2] = fogEnd_;
+    fsU.fogParams[0] = useFog ? 1.0f : 0.0f;
+    fsU.fogParams[1] = activeFogStart;
+    fsU.fogParams[2] = activeFogEnd;
     fsU.fogParams[3] = 0.0f;
     const uint32_t currentFrame = initializedAnimator_ ? animator_.GetCurrentFrame() : 0;
     const int currentSequenceIndex = initializedAnimator_ ? animator_.GetCurrentSequence() : -1;
 
-    sg_sampler linearSmp = {0};
-    sg_sampler_desc smpDesc = {};
-    smpDesc.min_filter = SG_FILTER_LINEAR;
-    smpDesc.mag_filter = SG_FILTER_LINEAR;
     const sg_view fallbackTexView = isValidView(sharedWhiteTextureView_) ? sharedWhiteTextureView_ : sg_view{0};
     const sg_sampler fallbackSampler = isValidSampler(sharedSampler_) ? sharedSampler_ : sg_sampler{0};
 
@@ -2902,11 +3037,33 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
         fsU.color[1] = geosetColorG;
         fsU.color[2] = geosetColorB;
         fsU.color[3] = alpha * layerAlpha * geosetAlpha;
+        if (fsU.color[3] <= 0.001f) {
+            continue;
+        }
         const bool alphaBlend = batch.filterMode == 2;
         const bool additiveBlend = batch.filterMode == 3;
         const bool addAlphaBlend = batch.filterMode == 4;
         const bool depthEnabled = depthTest && ((batch.layerFlags & 0x40) == 0);
         const bool noDepthWrite = (batch.layerFlags & 0x80) != 0;
+
+        const bool isUnshaded = (batch.layerFlags & 0x1) != 0;
+        const bool isUnfogged = (batch.layerFlags & 0x2) != 0;
+        const bool isTwoSided = (batch.layerFlags & 0x10) != 0;
+
+        fsU.sunDir[0] = sharedSunDir_.x;
+        fsU.sunDir[1] = sharedSunDir_.y;
+        fsU.sunDir[2] = sharedSunDir_.z;
+        fsU.sunDir[3] = isUnshaded ? 1.0f : 0.0f;
+
+        fsU.sunColor[0] = sharedSunColor_.x * sharedSunIntensity_;
+        fsU.sunColor[1] = sharedSunColor_.y * sharedSunIntensity_;
+        fsU.sunColor[2] = sharedSunColor_.z * sharedSunIntensity_;
+        fsU.sunColor[3] = isUnfogged ? 1.0f : 0.0f;
+
+        fsU.ambientColor[0] = sharedAmbientColor_.x * sharedAmbientIntensity_;
+        fsU.ambientColor[1] = sharedAmbientColor_.y * sharedAmbientIntensity_;
+        fsU.ambientColor[2] = sharedAmbientColor_.z * sharedAmbientIntensity_;
+        fsU.ambientColor[3] = isTwoSided ? 1.0f : 0.0f;
 
         if (batch.skinned && sharedSkinnedShader_.id && sharedSkinnedPipeline_.id) {
             sg_image boneTex = animator_.GetBoneTexture();
@@ -2941,7 +3098,6 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
             sg_bindings bind = {};
             bind.vertex_buffers[0] = batch.vbo;
             bind.index_buffer = batch.ebo;
-            if (!linearSmp.id) linearSmp = sg_make_sampler(&smpDesc);
             if (boneTex.id != cachedBoneTexId_) {
                 if (cachedBoneView_.id) sg_destroy_view(cachedBoneView_);
                 sg_view_desc vd = {};
@@ -2949,14 +3105,14 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
                 cachedBoneView_ = sg_make_view(&vd);
                 cachedBoneTexId_ = boneTex.id;
             }
-            if (!isValidView(cachedBoneView_) || !isValidSampler(linearSmp)) {
+            if (!isValidView(cachedBoneView_) || !isValidSampler(sharedNearestSampler_)) {
                 continue;
             }
             bind.views[0] = cachedBoneView_;
-            bind.samplers[0] = linearSmp;
+            bind.samplers[0] = sharedNearestSampler_;
             // Diffuse texture (FS slot 1)
             bind.views[1] = texView;
-            bind.samplers[1] = diffuseSampler.id ? diffuseSampler : linearSmp;
+            bind.samplers[1] = diffuseSampler.id ? diffuseSampler : fallbackSampler;
             sg_apply_bindings(&bind);
             sg_draw(0, batch.indexCount, 1);
             ++submittedBatches;
@@ -2991,7 +3147,7 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
             bind.vertex_buffers[0] = batch.vbo;
             bind.index_buffer = batch.ebo;
             bind.views[0] = texView;
-            bind.samplers[0] = diffuseSampler;
+            bind.samplers[0] = diffuseSampler.id ? diffuseSampler : fallbackSampler;
             if (!isValidView(bind.views[0]) || !isValidSampler(bind.samplers[0])) {
                 ++skippedInvalidTexture;
                 continue;
@@ -3001,14 +3157,31 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
             ++submittedBatches;
         }
     }
-    if (linearSmp.id) sg_destroy_sampler(linearSmp);
 
     if (hasParticles_) {
-        particles_.SetWorldOffset(Vec3{model.m[12], model.m[13], model.m[14]});
+        particles_.SetInstanceMatrix(model);
         particles_.Render(view, proj);
     }
     if (hasRibbons_) {
-        ribbons_.SetWorldOffset(Vec3{model.m[12], model.m[13], model.m[14]});
+        ribbons_.SetInstanceMatrix(model);
         ribbons_.Render(view, proj);
+    }
+}
+
+void MdxViewer::SetInstanceMatrix(const Mat4& model) {
+    if (hasParticles_) {
+        particles_.SetInstanceMatrix(model);
+    }
+    if (hasRibbons_) {
+        ribbons_.SetInstanceMatrix(model);
+    }
+}
+
+void MdxViewer::SetWorldOffset(const Vec3& offset) {
+    if (hasParticles_) {
+        particles_.SetWorldOffset(offset);
+    }
+    if (hasRibbons_) {
+        ribbons_.SetWorldOffset(offset);
     }
 }

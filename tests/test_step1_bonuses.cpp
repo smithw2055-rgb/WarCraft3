@@ -106,7 +106,8 @@ bool TestSlowAndBloodlustRestoreSpeed() {
     CSimulation sim;
     CUnit slowed(5, MakeTestType(false, War3ID("hfoo")), 0, War3ID("hfoo"), 0, 0, 0);
     slowed.AddBuff(std::make_unique<CBuffSlow>(10.0f, 0.5f), sim);
-    TEST_ASSERT(slowed.GetSpeed() == 100);
+    // In WC3, MinUnitSpeed clamps movement speed to 150.0f
+    TEST_ASSERT(slowed.GetSpeed() == 150);
     slowed.RemoveBuff(War3ID("Bslo"), sim);
     TEST_ASSERT(slowed.GetSpeed() == 200);
 

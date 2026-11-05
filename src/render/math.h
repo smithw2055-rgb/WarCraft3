@@ -88,13 +88,13 @@ struct Mat4 {
         float yy = y * y2, yz = y * z2, zz = z * z2;
         float wx = w * x2, wy = w * y2, wz = w * z2;
         r.Elements[0][0] = 1.0f - (yy + zz);
-        r.Elements[1][0] = xy + wz;
-        r.Elements[2][0] = xz - wy;
-        r.Elements[0][1] = xy - wz;
+        r.Elements[0][1] = xy + wz;
+        r.Elements[0][2] = xz - wy;
+        r.Elements[1][0] = xy - wz;
         r.Elements[1][1] = 1.0f - (xx + zz);
-        r.Elements[2][1] = yz + wx;
-        r.Elements[0][2] = xz + wy;
-        r.Elements[1][2] = yz - wx;
+        r.Elements[1][2] = yz + wx;
+        r.Elements[2][0] = xz + wy;
+        r.Elements[2][1] = yz - wx;
         r.Elements[2][2] = 1.0f - (xx + yy);
         return Mat4(r);
     }

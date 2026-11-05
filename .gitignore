@@ -1,5 +1,5 @@
 build*
-out/
+out*/
 terrain_analysis/
 *.obj
 *.exe
@@ -15,12 +15,7 @@ logs
 third_party/
 vcpkg*
 resources*
-warsmash_ref/
-# Derived UI extraction caches (regenerable via tools/extract_ui_assets)
-assets/ui/cache/
-assets/ui/generated/
-assets/noesis/cache/
-assets/cliff_splats/*.png
-# Local backups / planning notes
-CMakeLists.txt.backup
-CMakeLists.txt.simple
+assets*
+warsmash_ref*
+Save*
+ 

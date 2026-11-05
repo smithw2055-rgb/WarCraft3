@@ -1070,8 +1070,8 @@ void FdfHudHost::SetInventory(const std::vector<HudInventoryItem>& items, int ca
 void FdfHudHost::SetPortraitIcon(const std::string& iconUri) { portraitIconUri_ = iconUri; }
 
 void FdfHudHost::SetBuffs(const std::vector<HudBuffItem>& buffs) {
-    buffCount_ = std::min<int>((int)buffs.size(), 8);
-    for (int i = 0; i < 8; ++i) {
+    buffCount_ = std::min<int>((int)buffs.size(), 10);
+    for (int i = 0; i < 10; ++i) {
         buffStates_[i] = i < (int)buffs.size() ? buffs[i] : HudBuffItem{};
     }
     // Empty buff slots stay hidden (ref Java, which only shows live icons).
@@ -1136,26 +1136,45 @@ void FdfHudHost::DrawConsoleChrome() {
         }
         if (st.active) r.DrawQuad(rc.x, rc.y, rc.w, 3, 0xFF40C040);
         if (st.autocastActive) {
-            const uint32_t gold = 0xFFFFF040;
-            // Border outline around command slot
-            r.DrawQuad(rc.x - 1, rc.y - 1, rc.w + 2, 2, gold);
-            r.DrawQuad(rc.x - 1, rc.y + rc.h - 1, rc.w + 2, 2, gold);
-            r.DrawQuad(rc.x - 1, rc.y - 1, 2, rc.h + 2, gold);
-            r.DrawQuad(rc.x + rc.w - 1, rc.y - 1, 2, rc.h + 2, gold);
-            // Thick corner brackets (matching WC3 Autocast corners)
-            const float cLen = 7.0f;
-            r.DrawQuad(rc.x - 2, rc.y - 2, cLen, 3, gold);
-            r.DrawQuad(rc.x - 2, rc.y - 2, 3, cLen, gold);
-            r.DrawQuad(rc.x + rc.w + 2 - cLen, rc.y - 2, cLen, 3, gold);
-            r.DrawQuad(rc.x + rc.w - 1, rc.y - 2, 3, cLen, gold);
-            r.DrawQuad(rc.x - 2, rc.y + rc.h - 1, cLen, 3, gold);
-            r.DrawQuad(rc.x - 2, rc.y + rc.h + 1 - cLen, 3, cLen, gold);
-            r.DrawQuad(rc.x + rc.w + 2 - cLen, rc.y + rc.h - 1, cLen, 3, gold);
-            r.DrawQuad(rc.x + rc.w - 1, rc.y + rc.h + 1 - cLen, 3, cLen, gold);
+            const uint32_t goldBright = 0xFFFFF040;
+            // Base border outline around command slot
+            r.DrawQuad(rc.x - 1, rc.y - 1, rc.w + 2, 1, 0xFF806010);
+            r.DrawQuad(rc.x - 1, rc.y + rc.h, rc.w + 2, 1, 0xFF806010);
+            r.DrawQuad(rc.x - 1, rc.y - 1, 1, rc.h + 2, 0xFF806010);
+            r.DrawQuad(rc.x + rc.w, rc.y - 1, 1, rc.h + 2, 0xFF806010);
+
+            // 4 animated circulating beads rotating clockwise around the perimeter (Warcraft 3 retail effect)
+            const float peri = (rc.w + rc.h) * 2.0f;
+            const float speed = 45.0f;
+            float baseOffset = std::fmod((float)(uiClock_ * speed), peri);
+
+            auto drawBeadAtDistance = [&](float dist) {
+                while (dist < 0.0f) dist += peri;
+                dist = std::fmod(dist, peri);
+                float bx = rc.x, by = rc.y;
+                if (dist < rc.w) {
+                    bx = rc.x + dist;
+                    by = rc.y - 1;
+                } else if (dist < rc.w + rc.h) {
+                    bx = rc.x + rc.w;
+                    by = rc.y + (dist - rc.w);
+                } else if (dist < rc.w * 2.0f + rc.h) {
+                    bx = rc.x + rc.w - (dist - (rc.w + rc.h));
+                    by = rc.y + rc.h;
+                } else {
+                    bx = rc.x - 1;
+                    by = rc.y + rc.h - (dist - (rc.w * 2.0f + rc.h));
+                }
+                r.DrawQuad(bx - 2, by - 2, 5, 5, goldBright);
+            };
+
+            for (int b = 0; b < 4; ++b) {
+                drawBeadAtDistance(baseOffset + (float)b * (peri * 0.25f));
+            }
         }
         if (st.cooldownMax > 0 && st.cooldownRemaining > 0) {
             float f = std::min(1.0f, st.cooldownRemaining / st.cooldownMax);
-            r.DrawQuad(rc.x, rc.y, rc.w, rc.h * f, 0xAA000000);
+            r.DrawCooldownSweep(rc.x, rc.y, rc.w, rc.h, f, 0xBB000000);
         }
         if (st.numberOverlay >= 0)
             DrawText(rc.x + 4, rc.y + rc.h - 16, std::to_string(st.numberOverlay), 0xFFFFFF00, 12);
@@ -1247,10 +1266,20 @@ void FdfHudHost::DrawConsoleChrome() {
             }
         }
     }
-    for (int i = 0; i < buffCount_; ++i) {
-        char name[32];
-        std::snprintf(name, sizeof(name), "BuffButton%d", i);
-        UiRect b = FrameBounds(name, UiRect{});
+    for (int i = 0; i < buffCount_ && i < (int)buffStates_.size(); ++i) {
+        UiRect b{};
+        if (i < (int)consoleRefs_.buffButtons.size() && consoleRefs_.buffButtons[i]) {
+            b = consoleRefs_.buffButtons[i]->GetBounds();
+        }
+        if (b.w <= 0) {
+            char name[32];
+            std::snprintf(name, sizeof(name), "SmashBuffStatusBarIcon%d", i);
+            b = FrameBounds(name, UiRect{});
+            if (b.w <= 0) {
+                std::snprintf(name, sizeof(name), "BuffButton%d", i);
+                b = FrameBounds(name, UiRect{});
+            }
+        }
         if (b.w <= 0) continue;
         r.DrawQuad(b.x, b.y, b.w, b.h, buffStates_[i].positive ? 0xFF2A4A2A : 0xFF4A2A2A);
         if (auto icon = ResolveIcon(buffStates_[i].iconUri)) {
@@ -1262,9 +1291,21 @@ void FdfHudHost::DrawConsoleChrome() {
         const ScreenRect& rc = multiSelectRects_[i];
         if (rc.w <= 0) continue;
         const auto& ms = multiSelectStates_[i];
-        r.DrawQuad(rc.x, rc.y, rc.w, rc.h, ms.handleId == multiSelectPrimaryHandle_ ? 0xFF3E5A3E : 0xFF2A2A38);
-        r.DrawQuad(rc.x + 3, rc.y + 3, rc.w - 6, 5, 0xFF108010);
-        r.DrawQuad(rc.x + 3, rc.y + 3, (rc.w - 6) * ms.hpRatio, 5, 0xFF30D030);
+        r.DrawQuad(rc.x, rc.y, rc.w, rc.h, ms.handleId == multiSelectPrimaryHandle_ ? 0xFF5A7A5A : 0xFF2A2A38);
+        if (auto icon = ResolveIcon(ms.icon)) {
+            if (icon->IsValid()) {
+                r.DrawTexturedQuad(rc.x + 1, rc.y + 1, rc.w - 2, rc.h - 2, icon->GetImage());
+            }
+        }
+        float barH = 3.0f;
+        float barY = rc.y + rc.h - (ms.mpRatio > 0.0f ? (barH * 2.0f + 2.0f) : (barH + 1.0f));
+        r.DrawQuad(rc.x + 1, barY, rc.w - 2, barH, 0xFF104010);
+        r.DrawQuad(rc.x + 1, barY, (rc.w - 2) * std::clamp(ms.hpRatio, 0.0f, 1.0f), barH, 0xFF30D030);
+        if (ms.mpRatio > 0.0f) {
+            float mpBarY = rc.y + rc.h - barH - 1.0f;
+            r.DrawQuad(rc.x + 1, mpBarY, rc.w - 2, barH, 0xFF102050);
+            r.DrawQuad(rc.x + 1, mpBarY, (rc.w - 2) * std::clamp(ms.mpRatio, 0.0f, 1.0f), barH, 0xFF3080F0);
+        }
     }
 }
 
@@ -1387,11 +1428,54 @@ void FdfHudHost::LayoutDialogFrame(UIFrame* dialog) {
     root_->PositionBounds(gui_);
 }
 
+static std::string WrapTooltipText(const std::string& input, float maxWidth, const TextRenderer* tr, float fontSize) {
+    if (input.empty()) return "";
+    std::string result;
+    std::string currentLine;
+    float currentLineWidth = 0.0f;
+    size_t i = 0;
+    while (i < input.size()) {
+        if (input[i] == '\n') {
+            result += currentLine;
+            result += '\n';
+            currentLine.clear();
+            currentLineWidth = 0.0f;
+            i++;
+            continue;
+        }
+        size_t nextSpace = input.find_first_of(" \t\n", i);
+        if (nextSpace == std::string::npos) nextSpace = input.size();
+        std::string word = input.substr(i, nextSpace - i);
+        float wordW = tr && tr->IsValid() ? tr->MeasureText(word.c_str(), fontSize) : ((float)word.size() * 7.5f);
+        float spaceW = tr && tr->IsValid() ? tr->MeasureText(" ", fontSize) : 7.0f;
+
+        if (!currentLine.empty()) {
+            if (currentLineWidth + spaceW + wordW > maxWidth) {
+                result += currentLine;
+                result += '\n';
+                currentLine = word;
+                currentLineWidth = wordW;
+            } else {
+                currentLine += " ";
+                currentLine += word;
+                currentLineWidth += spaceW + wordW;
+            }
+        } else {
+            currentLine = word;
+            currentLineWidth = wordW;
+        }
+        i = nextSpace;
+        while (i < input.size() && (input[i] == ' ' || input[i] == '\t')) {
+            i++;
+        }
+    }
+    if (!currentLine.empty()) {
+        result += currentLine;
+    }
+    return result;
+}
+
 void FdfHudHost::LayoutTooltipFrame() {
-    // FDF-driven tooltip (ref MeleeUI tooltipFrame + SmashToolTipText/
-    // SmashUberTipText + SmashToolTipIconResource rows): split the pending
-    // text into title/detail, bind into the retail frames, and place the
-    // tooltip near the cursor with a text-sized rect.
     UIFrame* tip = consoleRefs_.tooltipFrame
         ? consoleRefs_.tooltipFrame
         : FindFrame("SmashToolTip");
@@ -1405,21 +1489,22 @@ void FdfHudHost::LayoutTooltipFrame() {
         title = tooltipValue_.substr(0, nl);
         uber = tooltipValue_.substr(nl + 1);
     }
-    if (consoleRefs_.tooltipText) consoleRefs_.tooltipText->SetText(title);
-    else BindText("SmashToolTipText", title);
-    if (consoleRefs_.uberTipText) consoleRefs_.uberTipText->SetText(uber);
-    else BindText("SmashUberTipText", uber);
-    // Size: rough text measure (13px font) + padding + cost row.
-    const int lines = 1 + (int)std::count(tooltipValue_.begin(), tooltipValue_.end(), '\n');
-    float maxPartLen = 0.0f;
-    for (const auto& part : {title, uber}) {
-        maxPartLen = std::max(maxPartLen, (float)part.size());
-    }
     const bool hasCosts = tooltipCosts_.gold > 0 || tooltipCosts_.lumber > 0 ||
         tooltipCosts_.food > 0 || tooltipCosts_.mana > 0;
-    float w = hasCosts ? std::max(220.0f, std::min(360.0f, 16.0f + maxPartLen * 7.0f))
-                       : std::max(80.0f, std::min(320.0f, 16.0f + maxPartLen * 7.5f));
-    float h = 12.0f + (float)lines * 15.0f + (hasCosts ? 22.0f : 6.0f);
+    const float maxTextW = hasCosts ? 280.0f : 260.0f;
+    std::string wrappedUber = WrapTooltipText(uber, maxTextW, textRenderer_.IsValid() ? &textRenderer_ : nullptr, 12.0f);
+    if (consoleRefs_.tooltipText) consoleRefs_.tooltipText->SetText(title);
+    else BindText("SmashToolTipText", title);
+    if (consoleRefs_.uberTipText) consoleRefs_.uberTipText->SetText(wrappedUber);
+    else BindText("SmashUberTipText", wrappedUber);
+
+    int lines = 1 + (int)std::count(title.begin(), title.end(), '\n');
+    if (!wrappedUber.empty()) {
+        lines += 1 + (int)std::count(wrappedUber.begin(), wrappedUber.end(), '\n');
+    }
+    float titleW = textRenderer_.IsValid() ? textRenderer_.MeasureText(title.c_str(), 13.0f) : ((float)title.size() * 8.0f);
+    float w = std::max(hasCosts ? 220.0f : 120.0f, std::min(340.0f, std::max(titleW + 24.0f, maxTextW + 24.0f)));
+    float h = 14.0f + (float)lines * 16.0f + (hasCosts ? 24.0f : 8.0f);
     float x = std::min(std::max(4.0f, tooltipX_ + 16.0f), (float)width_ - w - 4.0f);
     float y = std::min(std::max(4.0f, tooltipY_ - h - 12.0f), (float)height_ - h - 4.0f);
     // Same snap-back guard as LayoutDialogFrame: SmashToolTip has no FDF
@@ -1464,10 +1549,26 @@ void FdfHudHost::DrawTooltip() {
         return;
     }
     if (!tooltipVisible_ || tooltipValue_.empty()) return;
-    UiRect b = FrameBounds("TooltipBackdrop", UiRect{tooltipX_ - 140, tooltipY_ - 170, 280, 150});
+    std::string title = tooltipValue_;
+    std::string uber;
+    if (auto nl = tooltipValue_.find('\n'); nl != std::string::npos) {
+        title = tooltipValue_.substr(0, nl);
+        uber = tooltipValue_.substr(nl + 1);
+    }
+    std::string wrappedUber = WrapTooltipText(uber, 280.0f, textRenderer_.IsValid() ? &textRenderer_ : nullptr, 12.0f);
+    std::string fullText = title;
+    if (!wrappedUber.empty()) fullText += "\n" + wrappedUber;
+    int lines = 1 + (int)std::count(fullText.begin(), fullText.end(), '\n');
+    const bool hasCosts = tooltipCosts_.gold > 0 || tooltipCosts_.lumber > 0 ||
+        tooltipCosts_.food > 0 || tooltipCosts_.mana > 0;
+    float w = 296.0f;
+    float h = 16.0f + (float)lines * 16.0f + (hasCosts ? 24.0f : 8.0f);
+    float x = std::min(std::max(4.0f, tooltipX_ + 16.0f), (float)width_ - w - 4.0f);
+    float y = std::min(std::max(4.0f, tooltipY_ - h - 12.0f), (float)height_ - h - 4.0f);
+    UiRect b = {x, y, w, h};
     gui_.renderer.DrawQuad(b.x, b.y, b.w, b.h, 0xEE101018);
     gui_.renderer.DrawQuad(b.x, b.y, b.w, 1, 0xFF6A5A2A);
-    DrawText(b.x + 8, b.y + 8, tooltipValue_, 0xFFFFE080, 13);
+    DrawText(b.x + 8, b.y + 8, fullText, 0xFFFFE080, 13);
     // Ability cost row (ref SmashToolTipIconResource frames): icon + value
     // per nonzero cost, laid out left to right under the text.
     float cx = b.x + 8;
@@ -1577,8 +1678,32 @@ void FdfHudHost::Render() {
         const float sideH = gui_.ConvertY(0.176f);
         const float centerH = gui_.ConvertY(0.125f);
 
+        // Draw an opaque backing quad minus a rectangular hole, so an
+        // externally rendered surface (the live minimap) drawn earlier isn't
+        // covered.
+        auto drawBackingMinusHole = [&](float x, float y, float w, float h,
+                                        const ScreenRect& hole) {
+            if (hole.w <= 0.0f || hole.h <= 0.0f) {
+                gui_.renderer.DrawQuad(x, y, w, h, 0xFF000000);
+                return;
+            }
+            const float hx0 = std::max(x, hole.x);
+            const float hy0 = std::max(y, hole.y);
+            const float hx1 = std::min(x + w, hole.x + hole.w);
+            const float hy1 = std::min(y + h, hole.y + hole.h);
+            if (hx1 <= hx0 || hy1 <= hy0) {
+                gui_.renderer.DrawQuad(x, y, w, h, 0xFF000000);
+                return;
+            }
+            if (hy0 > y) gui_.renderer.DrawQuad(x, y, w, hy0 - y, 0xFF000000);
+            if (hy1 < y + h) gui_.renderer.DrawQuad(x, hy1, w, (y + h) - hy1, 0xFF000000);
+            if (hx0 > x) gui_.renderer.DrawQuad(x, hy0, hx0 - x, hy1 - hy0, 0xFF000000);
+            if (hx1 < x + w) gui_.renderer.DrawQuad(hx1, hy0, (x + w) - hx1, hy1 - hy0, 0xFF000000);
+        };
+
         // Left tower / minimap backing
-        gui_.renderer.DrawQuad(0.0f, H - sideH, leftTowerW, sideH, 0xFF000000);
+        drawBackingMinusHole(0.0f, H - sideH, leftTowerW, sideH,
+                             externalMinimapVisible_ ? minimapRect_ : ScreenRect{});
         // Center wall cutouts backing (portrait arch, info panel, inventory below battlements/beam)
         gui_.renderer.DrawQuad(leftTowerW, H - centerH, rightTowerX - leftTowerW, centerH, 0xFF000000);
         // Right tower / command buttons backing
@@ -1685,6 +1810,16 @@ int FdfHudHost::HitInventorySlot(float x, float y) const {
     if (!inventoryAvailable_) return -1;
     for (int i = 0; i < 6 && i < inventoryCapacity_; ++i) {
         if (inventoryStates_[i].occupied && inventoryRects_[i].Contains(x, y)) return i;
+    }
+    return -1;
+}
+
+int FdfHudHost::HitBuffSlot(float x, float y) const {
+    for (int i = 0; i < buffCount_ && i < (int)buffStates_.size(); ++i) {
+        if (i < (int)consoleRefs_.buffButtons.size() && consoleRefs_.buffButtons[i] && consoleRefs_.buffButtons[i]->IsVisible()) {
+            UiRect b = consoleRefs_.buffButtons[i]->GetBounds();
+            if (b.Contains(x, y)) return i;
+        }
     }
     return -1;
 }

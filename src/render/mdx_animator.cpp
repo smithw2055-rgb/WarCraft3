@@ -22,6 +22,8 @@ static const uint32_t NODE_DONT_INHERIT_TRANSLATION = 0x1;
 static const uint32_t NODE_DONT_INHERIT_SCALING = 0x2;
 static const uint32_t NODE_DONT_INHERIT_ROTATION = 0x4;
 static const uint32_t NODE_BILLBOARDED = 0x8;
+static const uint32_t NODE_BILLBOARDED_LOCK_X = 0x10;
+static const uint32_t NODE_BILLBOARDED_LOCK_Y = 0x20;
 static const uint32_t NODE_BILLBOARDED_LOCK_Z = 0x40;
 static constexpr bool kMdxAnimatorVerboseLog = false;
 
@@ -71,6 +73,28 @@ static Mat4 RotateY(float radians) {
     return r;
 }
 
+static Mat4 RotateX(float radians) {
+    Mat4 r = Mat4::Identity();
+    float c = std::cos(radians);
+    float s = std::sin(radians);
+    r.m[5] = c;
+    r.m[6] = s;
+    r.m[9] = -s;
+    r.m[10] = c;
+    return r;
+}
+
+static Mat4 RotateZ(float radians) {
+    Mat4 r = Mat4::Identity();
+    float c = std::cos(radians);
+    float s = std::sin(radians);
+    r.m[0] = c;
+    r.m[1] = s;
+    r.m[4] = -s;
+    r.m[5] = c;
+    return r;
+}
+
 static Vec4 NormalizeQuat(const Vec4& q) {
     if (!IsFiniteVec4(q)) {
         return {0,0,0,1};
@@ -78,6 +102,35 @@ static Vec4 NormalizeQuat(const Vec4& q) {
     float len = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
     if (!std::isfinite(len) || len < 1e-7f) return {0,0,0,1};
     return {q.x / len, q.y / len, q.z / len, q.w / len};
+}
+
+static Vec4 SlerpQuat(const Vec4& q1, const Vec4& q2In, float t) {
+    Vec4 q2 = q2In;
+    float dot = q1.x * q2.x + q1.y * q2.y + q1.z * q2.z + q1.w * q2.w;
+    if (dot < 0.0f) {
+        dot = -dot;
+        q2 = {-q2.x, -q2.y, -q2.z, -q2.w};
+    }
+    if (dot > 0.9995f) {
+        return NormalizeQuat({
+            q1.x + (q2.x - q1.x) * t,
+            q1.y + (q2.y - q1.y) * t,
+            q1.z + (q2.z - q1.z) * t,
+            q1.w + (q2.w - q1.w) * t
+        });
+    }
+    float theta_0 = std::acos(std::clamp(dot, -1.0f, 1.0f));
+    float theta = theta_0 * t;
+    float sin_theta = std::sin(theta);
+    float sin_theta_0 = std::sin(theta_0);
+    float s0 = std::cos(theta) - dot * sin_theta / sin_theta_0;
+    float s1 = sin_theta / sin_theta_0;
+    return NormalizeQuat({
+        q1.x * s0 + q2.x * s1,
+        q1.y * s0 + q2.y * s1,
+        q1.z * s0 + q2.z * s1,
+        q1.w * s0 + q2.w * s1
+    });
 }
 
 static Vec4 MulQuat(const Vec4& a, const Vec4& b) {
@@ -208,6 +261,16 @@ static bool sampleGlobalTimelineLooped(const MdxTimeline& timeline, uint32_t fra
         ? 0.0f
         : ((float)((int64_t)frame - (int64_t)startFrame) / (float)timeBetweenFrames);
 
+    if (elemCount == 4 && timeline.tag == TAG_KGRT) {
+        Vec4 qA = {timeline.values[(size_t)keyA * 4 + 0], timeline.values[(size_t)keyA * 4 + 1],
+                   timeline.values[(size_t)keyA * 4 + 2], timeline.values[(size_t)keyA * 4 + 3]};
+        Vec4 qB = {timeline.values[(size_t)keyB * 4 + 0], timeline.values[(size_t)keyB * 4 + 1],
+                   timeline.values[(size_t)keyB * 4 + 2], timeline.values[(size_t)keyB * 4 + 3]};
+        Vec4 q = (timeline.interpolationType == MdxInterpolation::None) ? qA : SlerpQuat(qA, qB, t);
+        out[0] = q.x; out[1] = q.y; out[2] = q.z; out[3] = q.w;
+        return true;
+    }
+
     for (int elem = 0; elem < elemCount; ++elem) {
         out[elem] = interpolateTimelineValue(timeline, elem, elemCount, keyA, keyB, t);
     }
@@ -269,6 +332,42 @@ static bool sampleTimelineForAnimator(const MdxTimeline& timeline,
             out[elem] = defaultVal;
         }
         return false;
+    }
+
+    if (elemCount == 4 && timeline.tag == TAG_KGRT) {
+        if (sequenceTimeline.frames.size() == 1 || sequenceFrame <= sequenceTimeline.frames.front()) {
+            out[0] = sequenceTimeline.values[0];
+            out[1] = sequenceTimeline.values[1];
+            out[2] = sequenceTimeline.values[2];
+            out[3] = sequenceTimeline.values[3];
+            return true;
+        }
+        if (sequenceFrame >= sequenceTimeline.frames.back()) {
+            size_t lastIdx = sequenceTimeline.frames.size() - 1;
+            out[0] = sequenceTimeline.values[lastIdx * 4 + 0];
+            out[1] = sequenceTimeline.values[lastIdx * 4 + 1];
+            out[2] = sequenceTimeline.values[lastIdx * 4 + 2];
+            out[3] = sequenceTimeline.values[lastIdx * 4 + 3];
+            return true;
+        }
+        size_t keyA = 0, keyB = 1;
+        for (size_t i = 1; i < sequenceTimeline.frames.size(); ++i) {
+            if (sequenceTimeline.frames[i] > sequenceFrame) {
+                keyA = i - 1;
+                keyB = i;
+                break;
+            }
+        }
+        uint32_t fA = sequenceTimeline.frames[keyA];
+        uint32_t fB = sequenceTimeline.frames[keyB];
+        float t = (fB > fA) ? ((float)(sequenceFrame - fA) / (float)(fB - fA)) : 0.0f;
+        Vec4 qA = {sequenceTimeline.values[keyA * 4 + 0], sequenceTimeline.values[keyA * 4 + 1],
+                   sequenceTimeline.values[keyA * 4 + 2], sequenceTimeline.values[keyA * 4 + 3]};
+        Vec4 qB = {sequenceTimeline.values[keyB * 4 + 0], sequenceTimeline.values[keyB * 4 + 1],
+                   sequenceTimeline.values[keyB * 4 + 2], sequenceTimeline.values[keyB * 4 + 3]};
+        Vec4 q = (sequenceTimeline.interpolationType == MdxInterpolation::None) ? qA : SlerpQuat(qA, qB, t);
+        out[0] = q.x; out[1] = q.y; out[2] = q.z; out[3] = q.w;
+        return true;
     }
 
     return MdxSampleTimeline(sequenceTimeline, sequenceFrame, out, elemCount, defaultVal);
@@ -746,9 +845,12 @@ bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
         sequenceState_.speed = speed;
         return true;
     }
-    std::vector<Mat4> previous;
-    if (blendTime_ > 0.0f && sequenceState_.sequenceIndex >= 0 && !boneMatrices_.empty()) {
-        previous = boneMatrices_;
+    std::vector<NodePose> previous;
+    if (blendTime_ > 0.0f && sequenceState_.sequenceIndex >= 0 && !nodes_.empty()) {
+        previous.reserve(nodes_.size());
+        for (const auto& n : nodes_) {
+            previous.push_back({n.localTranslation, n.localRotation, n.localScale});
+        }
     }
     const auto& seq = (*sequences_)[index];
     sequenceState_.sequenceIndex = index;
@@ -758,34 +860,41 @@ bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
     sequenceState_.loop = loop;
     sequenceState_.finished = false;
     ResetEventEmitters();
-    if (!nodes_.empty()) {
-        SampleAnimations(sequenceState_.currentFrame);
-        needsBoneUpload_ = true;
-        UpdateSkeleton();
-    }
-    if (!previous.empty() && previous.size() == boneMatrices_.size()) {
-        blendFrom_ = std::move(previous);
+    if (!previous.empty() && previous.size() == nodes_.size()) {
+        blendFromPoses_ = std::move(previous);
         blendDuration_ = blendTime_;
         blendLeft_ = blendTime_;
-        ApplyBlend();
     } else {
         blendLeft_ = 0.0f;
-        blendFrom_.clear();
+        blendFromPoses_.clear();
+    }
+    if (!nodes_.empty()) {
+        SampleAnimations(sequenceState_.currentFrame);
+        if (blendLeft_ > 0.0f) {
+            ApplyBlend();
+        }
+        needsBoneUpload_ = true;
+        UpdateSkeleton();
     }
     return true;
 }
 
 void MdxAnimator::ApplyBlend() {
-    if (blendLeft_ <= 0.0f || blendDuration_ <= 0.0f || blendFrom_.size() != boneMatrices_.size()) return;
+    if (blendLeft_ <= 0.0f || blendDuration_ <= 0.0f || blendFromPoses_.size() != nodes_.size()) return;
     const float t = std::clamp(1.0f - blendLeft_ / blendDuration_, 0.0f, 1.0f);
-    for (size_t i = 0; i < boneMatrices_.size(); ++i) {
-        Mat4 mixed;
-        for (int k = 0; k < 16; ++k) {
-            mixed.m[k] = blendFrom_[i].m[k] * (1.0f - t) + boneMatrices_[i].m[k] * t;
-        }
-        boneMatrices_[i] = mixed;
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        nodes_[i].localTranslation = {
+            blendFromPoses_[i].translation.x * (1.0f - t) + nodes_[i].localTranslation.x * t,
+            blendFromPoses_[i].translation.y * (1.0f - t) + nodes_[i].localTranslation.y * t,
+            blendFromPoses_[i].translation.z * (1.0f - t) + nodes_[i].localTranslation.z * t
+        };
+        nodes_[i].localRotation = SlerpQuat(blendFromPoses_[i].rotation, nodes_[i].localRotation, t);
+        nodes_[i].localScale = {
+            blendFromPoses_[i].scale.x * (1.0f - t) + nodes_[i].localScale.x * t,
+            blendFromPoses_[i].scale.y * (1.0f - t) + nodes_[i].localScale.y * t,
+            blendFromPoses_[i].scale.z * (1.0f - t) + nodes_[i].localScale.z * t
+        };
     }
-    needsBoneUpload_ = true;
 }
 
 int MdxAnimator::FindSequence(const std::string& name) const {
@@ -880,12 +989,12 @@ void MdxAnimator::Update(float dt) {
 
     if (!nodes_.empty()) {
         SampleAnimations(sequenceState_.currentFrame);
-        needsBoneUpload_ = true;
-        UpdateSkeleton();
         if (blendLeft_ > 0.0f) {
             blendLeft_ = std::max(0.0f, blendLeft_ - dt);
             ApplyBlend();
         }
+        needsBoneUpload_ = true;
+        UpdateSkeleton();
     }
     UpdateEventEmitters();
 }
@@ -1094,16 +1203,43 @@ void MdxAnimator::UpdateSkeleton() {
         if (node.boneIndex >= 0 && node.boneIndex < boneCount_) {
             Mat4 yup;
             ConvertMatrixToYUp(local, yup);
-            if (node.flags & (NODE_BILLBOARDED | NODE_BILLBOARDED_LOCK_Z)) {
+            const uint32_t billboardFlags = node.flags & (NODE_BILLBOARDED | NODE_BILLBOARDED_LOCK_X
+                                                        | NODE_BILLBOARDED_LOCK_Y | NODE_BILLBOARDED_LOCK_Z);
+            if (billboardFlags != 0) {
                 Vec3 cam = cameraForward_;
-                cam.y = 0.0f;
                 float camLen2 = Dot(cam, cam);
                 if (camLen2 > 1e-6f) {
                     cam = Normalize(cam);
-                    float yaw = std::atan2(-cam.x, -cam.z);
-                    Vec3 pos = {yup.m[12], yup.m[13], yup.m[14]};
+                    float hLen = std::sqrt(cam.x * cam.x + cam.z * cam.z);
+                    float yaw = (hLen > 1e-6f) ? std::atan2(-cam.x, -cam.z) : 0.0f;
+                    float pitch = std::atan2(cam.y, hLen);
+
+                    Mat4 rot = Mat4::Identity();
+                    if (billboardFlags & NODE_BILLBOARDED_LOCK_Z) {
+                        rot = RotateY(yaw);
+                    } else if (billboardFlags & NODE_BILLBOARDED_LOCK_X) {
+                        rot = RotateX(pitch);
+                    } else if (billboardFlags & NODE_BILLBOARDED_LOCK_Y) {
+                        float roll = std::atan2(cam.x, -cam.y);
+                        rot = RotateZ(roll);
+                    } else {
+                        rot = RotateY(yaw) * RotateX(pitch);
+                    }
+
+                    Vec3 pivot = {0, 0, 0};
+                    if (node.pivotIndex >= 0 && pivotPoints_ && node.pivotIndex < (int)pivotPoints_->size()) {
+                        const auto& mdxPivot = (*pivotPoints_)[(size_t)node.pivotIndex];
+                        pivot = {mdxPivot[0], mdxPivot[1], mdxPivot[2]};
+                    }
+                    const Vec3 mdxPivotPos{
+                        local.m[0] * pivot.x + local.m[4] * pivot.y + local.m[8] * pivot.z + local.m[12],
+                        local.m[1] * pivot.x + local.m[5] * pivot.y + local.m[9] * pivot.z + local.m[13],
+                        local.m[2] * pivot.x + local.m[6] * pivot.y + local.m[10] * pivot.z + local.m[14]
+                    };
+                    Vec3 pos = {mdxPivotPos.x, mdxPivotPos.z, -mdxPivotPos.y};
+
                     Mat4 billboard = Mat4::Translate(pos.x, pos.y, pos.z)
-                                   * RotateY(yaw)
+                                   * rot
                                    * Mat4::Translate(-pos.x, -pos.y, -pos.z);
                     yup = billboard * yup;
                 }
@@ -1112,9 +1248,16 @@ void MdxAnimator::UpdateSkeleton() {
         }
     }
     MdxAnimatorLog( "MdxAnimator::UpdateSkeleton matrices ready\n");
-    UploadBoneTexture();
+    needsBoneUpload_ = true;
     MdxAnimatorLog( "MdxAnimator::UpdateSkeleton end\n");
     MdxAnimatorFlush();
+}
+
+sg_image MdxAnimator::GetBoneTexture() {
+    if (needsBoneUpload_) {
+        UploadBoneTexture();
+    }
+    return boneTexture_;
 }
 
 void MdxAnimator::UploadBoneTexture() {
@@ -1137,8 +1280,19 @@ void MdxAnimator::UploadBoneTexture() {
         }
     }
 
-    if (sg_query_image_state(boneTexture_) == SG_RESOURCESTATE_VALID)
+    const size_t byteSize = (size_t)texWidth * 4 * sizeof(float);
+    if (boneTexture_.id && sg_query_image_state(boneTexture_) == SG_RESOURCESTATE_VALID
+        && boneTexWidth_ == texWidth && boneTexHeight_ == 1) {
+        sg_image_data data = {};
+        data.mip_levels[0].ptr = texData.data();
+        data.mip_levels[0].size = byteSize;
+        sg_update_image(boneTexture_, &data);
+        return;
+    }
+
+    if (boneTexture_.id && sg_query_image_state(boneTexture_) == SG_RESOURCESTATE_VALID) {
         sg_destroy_image(boneTexture_);
+    }
 
     sg_image_desc desc = {};
     desc.type = SG_IMAGETYPE_2D;
@@ -1146,13 +1300,20 @@ void MdxAnimator::UploadBoneTexture() {
     desc.height = 1;
     desc.pixel_format = SG_PIXELFORMAT_RGBA32F;
     desc.num_mipmaps = 1;
-    desc.data.mip_levels[0].ptr = texData.data();
-    desc.data.mip_levels[0].size = (size_t)texWidth * 4 * sizeof(float);
-    desc.usage.immutable = true;
+    desc.usage.stream_update = true;
     boneTexture_ = sg_make_image(&desc);
+    boneTexWidth_ = texWidth;
+    boneTexHeight_ = 1;
 
-    if (sg_query_image_state(boneTexture_) != SG_RESOURCESTATE_VALID) {
+    if (sg_query_image_state(boneTexture_) == SG_RESOURCESTATE_VALID) {
+        sg_image_data data = {};
+        data.mip_levels[0].ptr = texData.data();
+        data.mip_levels[0].size = byteSize;
+        sg_update_image(boneTexture_, &data);
+    } else {
         std::cerr << "MdxAnimator: bone texture upload failed" << std::endl;
         boneTexture_ = {0};
+        boneTexWidth_ = 0;
+        boneTexHeight_ = 0;
     }
 }

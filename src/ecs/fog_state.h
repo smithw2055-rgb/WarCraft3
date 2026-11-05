@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 // Fog states use the common.j ConvertFogState ordinals
@@ -43,6 +44,7 @@ struct CFogOverride {
 struct CFogSightSource {
     int player = -1;
     float x = 0, y = 0, radius = 0;
+    bool isFlying = false;
 };
 
 // ============================================================
@@ -102,10 +104,16 @@ public:
     // Bumped on every mutation; the renderer re-uploads on change.
     uint64_t Version() const { return version_; }
 
+    // Line of sight occlusion checker (returns true if LoS between from and to is blocked).
+    using FogOcclusionChecker = std::function<bool(float fromX, float fromY, float toX, float toY, bool isFlying)>;
+    void SetOcclusionChecker(FogOcclusionChecker checker) { occlusionChecker_ = std::move(checker); }
+    const FogOcclusionChecker& GetOcclusionChecker() const { return occlusionChecker_; }
+
 private:
     bool ScriptedState(int player, float x, float y, CFogState& out) const;
     int CellIndex(int player, float x, float y) const;
 
+    FogOcclusionChecker occlusionChecker_;
     std::vector<CFogModifier> modifiers_;
     std::vector<CFogOverride> overrides_;
     int nextId_ = 1;

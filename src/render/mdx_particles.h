@@ -17,8 +17,8 @@ struct Particle {
     float maxLife;
     float size;
     Vec4 color;
-    float texRow;
     float texCol;
+    float texRow;
 };
 
 struct ParticleEmitterState {
@@ -45,7 +45,7 @@ public:
         float posX, posY, posZ;
         float size;
         float colorR, colorG, colorB, colorA;
-        float texRow, texCol;
+        float texCol, texRow;
     };
 
     void Init(const MdxModel& model, class MpqManager* mpq);
@@ -55,6 +55,12 @@ public:
     void Render(const Mat4& view, const Mat4& proj);
     void SetWorldOffset(const Vec3& offset) { worldOffset_ = offset; }
     const Vec3& GetWorldOffset() const { return worldOffset_; }
+    void SetInstanceMatrix(const Mat4& m) {
+        instanceMatrix_ = m;
+        hasInstanceMatrix_ = true;
+        worldOffset_ = Vec3{m.m[12], m.m[13], m.m[14]};
+    }
+    const Mat4& GetInstanceMatrix() const { return instanceMatrix_; }
     void Destroy();
 
     int GetParticleCount() const;
@@ -81,10 +87,14 @@ private:
     // Static shared resources
     static sg_shader sharedParticleShader_;
     static sg_pipeline sharedParticlePipeline_;
+    static sg_pipeline sharedAdditivePipeline_;
+    static sg_pipeline sharedModulatePipeline_;
     static sg_buffer sharedQuadBuffer_;
     static sg_buffer sharedIndexBuffer_;
 
     std::mt19937 rng_;
     std::uniform_real_distribution<float> dist01_;
     Vec3 worldOffset_ = {0, 0, 0};
+    Mat4 instanceMatrix_ = Mat4::Identity();
+    bool hasInstanceMatrix_ = false;
 };

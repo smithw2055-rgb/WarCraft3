@@ -198,10 +198,8 @@ CAbilityChangeTimeOfDay::CAbilityChangeTimeOfDay(int handleId)
 
 void CAbilityChangeTimeOfDay::DoEffect(CSimulation& game, CUnit* caster) {
     (void)caster;
-    const CGameplayConstants& constants = game.GetGameplayConstants();
-    const float hours = std::max(constants.gameDayHours, 1.0f);
     const float clockHours = (float)hour_ + (float)minute_ / 60.0f;
-    game.SetGameTimeOfDay(clockHours / hours * constants.gameDayLength);
+    game.SetGameTimeOfDay(clockHours);
 }
 
 void CAbilityChangeTimeOfDay::ApplyEffectData(const CAbilityDefFull& def, int level) {

@@ -113,6 +113,7 @@ public:
 
     void OnApply(CSimulation& game, CUnit* target) override;
     void OnRemove(CSimulation& game, CUnit* target) override;
+    void OnRefresh(CSimulation& game, CUnit* target, const CBuff& newBuff) override;
     CBuff* Clone() const override;
 };
 

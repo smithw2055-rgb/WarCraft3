@@ -102,6 +102,10 @@ public:
     void ClearGameMessages() { gameMessages_.clear(); }
     void SetPressedMinimapButton(int index);
     void ActivateMinimapButton(int index);
+    // The 3D scene pass draws the live minimap into minimapRect_ before the
+    // HUD chrome; when true the console backing skips that rect so it isn't
+    // painted over with opaque black.
+    void SetExternalMinimapVisible(bool visible) { externalMinimapVisible_ = visible; }
     void SetMultiSelection(const std::vector<MultiSelectUnitInfo>& units, int primaryHandle);
     void SetQueue(const std::vector<HudQueueItem>& items, float progressRatio);
     void SetInventory(const std::vector<HudInventoryItem>& items, int capacity, bool available);
@@ -142,6 +146,7 @@ public:
     int HitMultiSelection(float x, float y) const;
     int HitQueueSlot(float x, float y) const;
     int HitInventorySlot(float x, float y) const;
+    int HitBuffSlot(float x, float y) const;
 
 private:
     // ---- layout (ref MeleeUI.java console construction) ----
@@ -282,13 +287,14 @@ private:
     int inventoryCapacity_ = 0;
     std::string portraitIconUri_;
     std::string portraitModelPath_;
-    std::array<HudBuffItem, 8> buffStates_{};
+    std::array<HudBuffItem, 10> buffStates_{};
     int buffCount_ = 0;
     std::array<MultiSelectUnitInfo, 12> multiSelectStates_{};
     std::array<bool, 12> multiSelectVisible_{};
     std::array<ScreenRect, 12> multiSelectRects_{};
     int multiSelectPrimaryHandle_ = -1;
     ScreenRect minimapRect_;
+    bool externalMinimapVisible_ = false;
     ScreenRect portraitRect_;
 
     // ---- game menu state ----

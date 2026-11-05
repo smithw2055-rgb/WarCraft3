@@ -31,6 +31,7 @@ public:
                             sg_image tex, float su0=0, float sv0=0,
                             float su1=1, float sv1=1,
                             uint32_t color=0xFFFFFFFF);
+    void DrawCooldownSweep(float x, float y, float w, float h, float progress, uint32_t color=0xAA000000);
 
     sg_image GetWhiteTexture() const { return whiteTex_; }
     sg_view GetOrCreateView(sg_image img);

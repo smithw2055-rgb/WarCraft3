@@ -39,12 +39,15 @@ struct PlacedModel {
 
 // Instance transform convention (Y-rotation + translation, per-axis
 // scale): the single place that defines how pos/angle/scale become a
-// model matrix. Render and effect attachment share it exactly; picking
-// uses an averaged-scale approximation of the same convention.
+// model matrix. Angle is in degrees (matching unit facing / map object
+// angles); only this boundary converts to radians for the matrix.
+// Render and effect attachment share it exactly; picking uses an
+// averaged-scale approximation of the same convention.
 inline Mat4 MakeSceneInstanceMatrix(float x, float y, float z, float angle,
                                     float sx, float sy, float sz) {
-    const float c = std::cos(angle);
-    const float s = std::sin(angle);
+    const float radians = angle * 3.14159265358979323846f / 180.0f;
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
     Mat4 m = Mat4::Identity();
     m.m[0] = c * sx;
     m.m[2] = -s * sx;
