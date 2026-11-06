@@ -117,7 +117,11 @@ add_executable(warsmash_tests
     test_phase2_modernization.cpp
     test_phase3_modernization.cpp
     test_phase4_modernization.cpp
+    test_phase5_modernization.cpp
     ../src/render/render_server.cpp
+    ../src/render/scene.cpp
+    ../src/render/mdx_viewer.cpp
+    ../src/render/mdx_particles.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
     ../src/map/w3i.cpp
@@ -132,6 +136,7 @@ add_executable(warsmash_tests
     ../src/asset/Texture.cpp
     ../src/asset/stb_image.cpp
     ../src/core/map_path_resolver.cpp
+    ../src/core/job_system.cpp
     ../src/model/mdx.cpp
     ../src/model/mdl.cpp
     ../src/render/mdx_animator.cpp
@@ -172,10 +177,12 @@ add_executable(warsmash_tests
     ../src/resource/mpq_storm.cpp
     ../src/resource/casc.cpp
     ../src/resource/slk.cpp
+    ../src/resource/resource_server.cpp
     ../src/map/wpm.cpp
     ../src/map/wts.cpp
     ../src/map/object_mods.cpp
     ../src/audio/AudioSystem.cpp
+    ../src/audio/audio_server.cpp
     ../src/audio/UnitSoundset.cpp
     ../src/audio/AckSoundBank.cpp
     ../src/audio/MidiFile.cpp

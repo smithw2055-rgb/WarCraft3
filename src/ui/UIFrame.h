@@ -1,6 +1,7 @@
 #pragma once
 #include "UiRenderer.h"
 #include "UiTypes.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -30,6 +31,16 @@ public:
     float ConvertY(float fdfY) const { return (fdfY / 0.6f) * (float)screenH; }
     // For simple name-based lookup (used by SetPoint resolution)
     std::unordered_map<std::string, UIFrame*> frameRegistry;
+
+    // Stage D1 Modernization: Layout dirty-flag telemetry
+    uint64_t GetLayoutPassCount() const { return layoutPassCount_; }
+    void IncrementLayoutPassCount() { layoutPassCount_++; }
+    void ResetLayoutPassCount() { layoutPassCount_ = 0; }
+
+private:
+    int lastLayoutW_ = -1;
+    int lastLayoutH_ = -1;
+    uint64_t layoutPassCount_ = 0;
 };
 
 struct FramePointAssign {
@@ -47,10 +58,35 @@ public:
     virtual void Render(UiRenderer& r);
     virtual void PositionBounds(GameUI& gui);
 
+    // Stage D1 Modernization: Godot Control-style SceneTree child management & Z-index
+    virtual void AddChild(UIFrame* child);
+    virtual void RemoveChild(UIFrame* child);
+    const std::vector<UIFrame*>& GetChildren() const { return children_; }
+
+    int GetZOrder() const { return zOrder_; }
+    void SetZOrder(int z);
+
+    bool IsLayoutDirty() const { return layoutDirty_; }
+    void MarkLayoutDirty();
+    void ClearLayoutDirty() { layoutDirty_ = false; }
+    uint64_t GetLayoutComputeCount() const { return layoutComputeCount_; }
+
     void SetAllPoints();
     void SetAllPoints(float inset);
-    void SetWidth(float w) { assignedW_ = w; bounds_.w = w; }
-    void SetHeight(float h) { assignedH_ = h; bounds_.h = h; }
+    void SetWidth(float w) {
+        if (assignedW_ != w || bounds_.w != w) {
+            assignedW_ = w;
+            bounds_.w = w;
+            MarkLayoutDirty();
+        }
+    }
+    void SetHeight(float h) {
+        if (assignedH_ != h || bounds_.h != h) {
+            assignedH_ = h;
+            bounds_.h = h;
+            MarkLayoutDirty();
+        }
+    }
     float GetWidth() const { return bounds_.w; }
     float GetHeight() const { return bounds_.h; }
     float GetFrameX(FramePoint pt) const;
@@ -59,6 +95,10 @@ public:
     void SetFrameY(FramePoint pt, float y);
     void AddSetPoint(FramePoint myPt, const std::string& other, FramePoint otherPt, float ox, float oy);
     void AddAnchor(FramePoint pt, float ox, float oy);
+    void ClearAllPoints() {
+        assignments_.clear();
+        MarkLayoutDirty();
+    }
 
     void SetVisible(bool v) { visible_ = v; }
     bool IsVisible() const { return visible_; }
@@ -66,23 +106,55 @@ public:
     // default to their parent's top-left (ref Java, where position-less
     // children stay at the parent origin instead of the viewport origin).
     // Explicitly placed code frames never set this.
-    void SetDefaultToParent(bool v) { defaultToParent_ = v; }
+    void SetDefaultToParent(bool v) {
+        if (defaultToParent_ != v) {
+            defaultToParent_ = v;
+            MarkLayoutDirty();
+        }
+    }
 
     virtual UIFrame* HitTest(float sx, float sy);
     virtual UIFrame* OnMouseDown(float sx, float sy, int btn);
     virtual UIFrame* OnMouseUp(float sx, float sy, int btn);
 
-    void SetPosition(float x, float y) { bounds_.x = x; bounds_.y = y; }
-    void SetSize(float w, float h) { bounds_.w = w; bounds_.h = h; assignedW_ = w; assignedH_ = h; }
+    void SetPosition(float x, float y) {
+        if (bounds_.x != x || bounds_.y != y) {
+            bounds_.x = x;
+            bounds_.y = y;
+            MarkLayoutDirty();
+        }
+    }
+    void SetSize(float w, float h) {
+        if (bounds_.w != w || bounds_.h != h || assignedW_ != w || assignedH_ != h) {
+            bounds_.w = w;
+            bounds_.h = h;
+            assignedW_ = w;
+            assignedH_ = h;
+            MarkLayoutDirty();
+        }
+    }
     void SetName(const std::string& n) { name_ = n; }
     const std::string& GetName() const { return name_; }
     UIFrame* GetParent() const { return parent_; }
-    void SetParent(UIFrame* p) { parent_ = p; }
+    void SetParent(UIFrame* p) {
+        if (parent_ != p) {
+            parent_ = p;
+            MarkLayoutDirty();
+        }
+    }
     UiRect GetBounds() const { return bounds_; }
 
 protected:
+    void SortChildrenByZOrderIfNeeded();
+    void ComputeSelfPositionBounds(GameUI& gui);
+
     std::string name_;
     UIFrame* parent_ = nullptr;
+    std::vector<UIFrame*> children_;
+    int zOrder_ = 0;
+    bool childrenZOrderDirty_ = false;
+    bool layoutDirty_ = true;
+    uint64_t layoutComputeCount_ = 0;
     bool visible_ = true;
     bool defaultToParent_ = false;
     UiRect bounds_;

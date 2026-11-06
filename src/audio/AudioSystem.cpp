@@ -2,6 +2,7 @@
 #include "audio/MidiFile.h"
 #include "audio/MidiSynth.h"
 #include "../resource/mpq_storm.h"
+#include "../resource/resource_server.h"
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "third_party/miniaudio/miniaudio.h"
@@ -49,11 +50,14 @@ void AudioSystem::Shutdown() {
 }
 
 bool AudioSystem::LoadSound(const std::string& name, const std::string& mpqPath, MpqManager* mpq) {
-    if (!mpq) return false;
     if (soundCache_.find(name) != soundCache_.end()) return true;
 
     std::vector<uint8_t> buf;
-    if (!mpq->ReadFile(mpqPath, buf) || buf.empty()) {
+    bool loaded = resource::ResourceServer::Instance().ReadRawBytes(mpqPath, buf);
+    if (!loaded && mpq) {
+        loaded = mpq->ReadFile(mpqPath, buf);
+    }
+    if (!loaded || buf.empty()) {
         std::cerr << "AudioSystem: failed to load '" << mpqPath << "'" << std::endl;
         return false;
     }
@@ -197,7 +201,24 @@ int AudioSystem::Play3DEx(const std::string& name, float x, float y, float z, fl
 
 int AudioSystem::Play3DPathEx(const std::string& mpqPath, float x, float y, float z, float volume,
                                float pitch, float minDist, float maxDist) {
-    if (!engine_ || mpqPath.empty()) return -1;
+    if (mpqPath.empty()) return -1;
+    if (!engine_ && !headlessSimulationEnabled_) return -1;
+
+    audio::AudioVoiceRequest req;
+    req.clipKey = mpqPath;
+    req.bus = (mpqPath.find("Units") != std::string::npos) ? audio::AudioBusId::UnitVoice : audio::AudioBusId::SFX;
+    req.baseVolume = volume;
+    req.pitch = (pitch > 0.0f) ? pitch : 1.0f;
+    req.priority = (req.bus == audio::AudioBusId::UnitVoice) ? 80 : 50;
+    req.spatial.is3D = true;
+    req.spatial.position = Vec3(x, y, z);
+    req.spatial.minDistance = (minDist > 0.0f) ? minDist : 300.0f;
+    req.spatial.maxDistance = (maxDist > 0.0f) ? maxDist : 2400.0f;
+    req.spatial.distanceCutoff = (maxDist > 0.0f) ? maxDist : 3000.0f;
+
+    const int voiceId = audioServer_.SubmitVoice(req);
+    if (voiceId < 0) return -1;
+    if (!engine_) return voiceId;
     auto it = soundCache_.find(mpqPath);
     if (it == soundCache_.end()) {
         if (!LoadSound(mpqPath, mpqPath, mpq_)) return -1;
@@ -234,12 +255,14 @@ void AudioSystem::StopAll() {
 }
 
 void AudioSystem::SetListenerPosition(float x, float y, float z) {
+    audioServer_.SetListenerPosition(Vec3(x, y, z));
     if (!engine_) return;
     ma_engine_listener_set_position(engine_, 0, x, y, z);
 }
 
 void AudioSystem::SetListenerOrientation(float forwardX, float forwardY, float forwardZ,
                                            float upX, float upY, float upZ) {
+    audioServer_.SetListenerOrientation(Vec3(forwardX, forwardY, forwardZ), Vec3(upX, upY, upZ));
     if (!engine_) return;
     ma_engine_listener_set_direction(engine_, 0, forwardX, forwardY, forwardZ);
     ma_engine_listener_set_world_up(engine_, 0, upX, upY, upZ);
@@ -461,10 +484,12 @@ bool AudioSystem::IsMidiAmbientPlaying(const std::string& mpqPath) const {
 
 void AudioSystem::SetMasterVolume(float vol) {
     masterVolume_ = std::clamp(vol, 0.0f, 1.0f);
+    audioServer_.SetBusVolumeLinear(audio::AudioBusId::Master, masterVolume_);
     if (engine_) ma_engine_set_volume(engine_, masterVolume_);
 }
 
-void AudioSystem::Update() {
+void AudioSystem::Update(float dt) {
+    audioServer_.Update(dt);
     for (int i = (int)activeSounds_.size() - 1; i >= 0; i--) {
         if (activeSounds_[i].isMusic) continue;
         if (!ma_sound_is_playing(activeSounds_[i].sound)) {

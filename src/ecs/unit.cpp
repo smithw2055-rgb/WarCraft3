@@ -124,6 +124,39 @@ CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
     foodMade_ = unitType->GetFoodMade();
 }
 
+CUnit::~CUnit() {
+    if (!registry_) {
+        DetachedRegistry().DestroyEntity(handleId_);
+    }
+}
+
+SimEcsRegistry& CUnit::DetachedRegistry() {
+    static SimEcsRegistry s_detached;
+    return s_detached;
+}
+
+void CUnit::BindRegistry(SimEcsRegistry* registry) {
+    if (registry_ == registry) return;
+    SimEcsRegistry& oldReg = ActiveRegistry();
+    SimEcsRegistry& newReg = registry ? *registry : DetachedRegistry();
+    if (&oldReg != &newReg) {
+        auto migrate = [&](auto tag) {
+            using CompT = decltype(tag);
+            if (auto* existing = oldReg.TryGet<CompT>(handleId_)) {
+                newReg.Emplace<CompT>(handleId_, std::move(*existing));
+                oldReg.Remove<CompT>(handleId_);
+            }
+        };
+        migrate(UnitConstructionComponent{});
+        migrate(UnitCargoComponent{});
+        migrate(UnitMorphComponent{});
+        migrate(UnitStructureNavComponent{});
+        migrate(UnitVisualComponent{});
+        migrate(UnitCorpseDropComponent{});
+    }
+    registry_ = registry;
+}
+
 float CUnit::GetSpeed() const {
     return attrs_.ComputeEffectiveSpeed();
 }
@@ -153,20 +186,20 @@ void CUnit::RegeneratePathingInstance(CSimulation& game) {
     SetPosition(ux, uy);
     auto* pf = game.GetPathfinding();
     if (!pf || !pf->HasPathingMap()) return;
-    structureNavComp_.pathingStampId = pf->GetPathingMap()->StampFootprint(ux, uy, 270, img, false);
+    StructureNavComp().pathingStampId = pf->GetPathingMap()->StampFootprint(ux, uy, 270, img, false);
 }
 
 void CUnit::KillPathingInstance(CSimulation& game) {
-    if (structureNavComp_.pathingStampId < 0) return;
+    if (StructureNavComp().pathingStampId < 0) return;
     if (auto* pf = game.GetPathfinding()) {
-        if (pf->HasPathingMap()) pf->GetPathingMap()->UnstampFootprint(structureNavComp_.pathingStampId);
+        if (pf->HasPathingMap()) pf->GetPathingMap()->UnstampFootprint(StructureNavComp().pathingStampId);
     }
-    structureNavComp_.pathingStampId = -1;
+    StructureNavComp().pathingStampId = -1;
 }
 
 void CUnit::DropDeathItems(CSimulation& game) {
-    if (corpseDropComp_.deathDrops.empty()) return;
-    for (const auto& drop : corpseDropComp_.deathDrops) {
+    if (CorpseDropComp().deathDrops.empty()) return;
+    for (const auto& drop : CorpseDropComp().deathDrops) {
         if (drop.itemId.value == 0 || drop.chancePercent <= 0) continue;
         if (drop.chancePercent < 100 &&
             game.SimRand01() * 100.0f >= (float)drop.chancePercent) {
@@ -179,10 +212,10 @@ void CUnit::DropDeathItems(CSimulation& game) {
 }
 
 void CUnit::PopoutWorker(CSimulation& game) {
-    const int workerHandle = constructionComp_.workerHandleId;
-    const bool inside = constructionComp_.workerInside;
-    constructionComp_.workerHandleId = -1;
-    constructionComp_.workerInside = false;
+    const int workerHandle = ConstructionComp().workerHandleId;
+    const bool inside = ConstructionComp().workerInside;
+    ConstructionComp().workerHandleId = -1;
+    ConstructionComp().workerInside = false;
     // Undead/human builders stay outside (inside=false); nothing to pop.
     if (workerHandle < 0 || !inside) return;
     CUnit* worker = game.GetUnit(workerHandle);
@@ -192,7 +225,7 @@ void CUnit::PopoutWorker(CSimulation& game) {
     worker->SetPaused(false);
     // Step out beside the ruin (ref nudgeAround -> setPointAndCheckUnstuck).
     worker->SetPositionAndCheckUnstuck(GetX(), GetY(), game);
-    if (constructionComp_.constructionConsumesWorker) {
+    if (ConstructionComp().constructionConsumesWorker) {
         // Night-elf wisps were zeroed at build start (see
         // CBehaviorBuild::CreateBuilding); give their food back (ref
         // popoutWorker restores worker type foodUsed to its player).
@@ -209,7 +242,7 @@ void CUnit::PopoutWorker(CSimulation& game) {
             }
         }
     }
-    constructionComp_.constructionConsumesWorker = false;
+    ConstructionComp().constructionConsumesWorker = false;
 }
 
 void CUnit::RefreshMaxLifeTotal() {
@@ -224,19 +257,19 @@ void CUnit::RefreshMaxManaTotal() {
 
 void CUnit::MorphTo(CUnitType* form, War3ID formId) {
     if (!form) return;
-    if (!morphComp_.morphed) {
-        morphComp_.morphed = true;
-        morphComp_.originalType = unitType_;
-        morphComp_.originalTypeId = typeId_;
-        morphComp_.savedSpeed = attrs_.GetBaseSpeed();
-        morphComp_.savedBaseMaxLife = attrs_.GetBaseMaxLife();
-        morphComp_.savedBaseMaxMana = attrs_.GetBaseMaxMana();
-        morphComp_.savedDefense = attrs_.GetCurrentDefense();
-        morphComp_.savedTurnRate = turnRate_;
-        morphComp_.savedMovementType = movementType_;
-        morphComp_.savedCollisionSize = collisionSize_;
-        morphComp_.savedBuilding = isBuilding_;
-        morphComp_.savedFlyHeight = GetFlyHeight();
+    if (!MorphComp().morphed) {
+        MorphComp().morphed = true;
+        MorphComp().originalType = unitType_;
+        MorphComp().originalTypeId = typeId_;
+        MorphComp().savedSpeed = attrs_.GetBaseSpeed();
+        MorphComp().savedBaseMaxLife = attrs_.GetBaseMaxLife();
+        MorphComp().savedBaseMaxMana = attrs_.GetBaseMaxMana();
+        MorphComp().savedDefense = attrs_.GetCurrentDefense();
+        MorphComp().savedTurnRate = turnRate_;
+        MorphComp().savedMovementType = movementType_;
+        MorphComp().savedCollisionSize = collisionSize_;
+        MorphComp().savedBuilding = isBuilding_;
+        MorphComp().savedFlyHeight = GetFlyHeight();
     }
     const float oldMaxLife = maxLife_;
     const float oldMaxMana = (float)maxMana_;
@@ -262,25 +295,25 @@ void CUnit::MorphTo(CUnitType* form, War3ID formId) {
 }
 
 void CUnit::Unmorph() {
-    if (!morphComp_.morphed) return;
-    morphComp_.morphed = false;
+    if (!MorphComp().morphed) return;
+    MorphComp().morphed = false;
     const float oldMaxLife = maxLife_;
     const float oldMaxMana = (float)maxMana_;
     const float lifeRatio = (oldMaxLife > 0.0f) ? (life_ / oldMaxLife) : 1.0f;
     const float manaRatio = (oldMaxMana > 0.0f) ? (mana_ / oldMaxMana) : 1.0f;
 
-    unitType_ = morphComp_.originalType;
-    typeId_ = morphComp_.originalTypeId;
-    attrs_.SetBaseSpeed(morphComp_.savedSpeed);
-    speed_ = morphComp_.savedSpeed;
-    attrs_.SetBaseMaxLife(morphComp_.savedBaseMaxLife);
-    attrs_.SetBaseMaxMana(morphComp_.savedBaseMaxMana);
-    attrs_.SetCurrentDefense(morphComp_.savedDefense);
-    turnRate_ = morphComp_.savedTurnRate;
-    movementType_ = morphComp_.savedMovementType;
-    collisionSize_ = morphComp_.savedCollisionSize;
-    isBuilding_ = morphComp_.savedBuilding;
-    SetFlyHeight(morphComp_.savedFlyHeight);
+    unitType_ = MorphComp().originalType;
+    typeId_ = MorphComp().originalTypeId;
+    attrs_.SetBaseSpeed(MorphComp().savedSpeed);
+    speed_ = MorphComp().savedSpeed;
+    attrs_.SetBaseMaxLife(MorphComp().savedBaseMaxLife);
+    attrs_.SetBaseMaxMana(MorphComp().savedBaseMaxMana);
+    attrs_.SetCurrentDefense(MorphComp().savedDefense);
+    turnRate_ = MorphComp().savedTurnRate;
+    movementType_ = MorphComp().savedMovementType;
+    collisionSize_ = MorphComp().savedCollisionSize;
+    isBuilding_ = MorphComp().savedBuilding;
+    SetFlyHeight(MorphComp().savedFlyHeight);
     RefreshMaxLifeTotal();
     RefreshMaxManaTotal();
     life_ = std::clamp(lifeRatio * maxLife_, 1.0f, maxLife_);
@@ -801,12 +834,12 @@ void CUnit::SetCurrentBehavior(std::unique_ptr<CBehavior> behavior) {
 
 bool CUnit::LoadUnit(CUnit* passenger) {
     if (!passenger || passenger == this || passenger->IsDead()) return false;
-    for (auto* loaded : cargoComp_.cargoUnits) {
+    for (auto* loaded : CargoComp().cargoUnits) {
         if (loaded == passenger) return true; // already aboard
     }
-    passenger->cargoComp_.loadedAboard = true;
+    passenger->CargoComp().loadedAboard = true;
     passenger->SetHidden(true);
-    cargoComp_.cargoUnits.push_back(passenger);
+    CargoComp().cargoUnits.push_back(passenger);
     if (unitLoadedHook_) {
         unitLoadedHook_(passenger->GetHandleId());
     }
@@ -815,17 +848,17 @@ bool CUnit::LoadUnit(CUnit* passenger) {
 
 void CUnit::UnloadUnitAt(CUnit* passenger, float x, float y) {
     if (!passenger) return;
-    auto it = std::find(cargoComp_.cargoUnits.begin(), cargoComp_.cargoUnits.end(), passenger);
-    if (it == cargoComp_.cargoUnits.end()) return;
-    cargoComp_.cargoUnits.erase(it);
-    passenger->cargoComp_.loadedAboard = false;
+    auto it = std::find(CargoComp().cargoUnits.begin(), CargoComp().cargoUnits.end(), passenger);
+    if (it == CargoComp().cargoUnits.end()) return;
+    CargoComp().cargoUnits.erase(it);
+    passenger->CargoComp().loadedAboard = false;
     passenger->SetHidden(false);
     passenger->SetPosition(x, y);
 }
 
 bool CUnit::CanBeTargetedBy(CSimulation& simulation, CUnit* source,
                             const std::vector<CTargetType>& targetsAllowed) const {
-    if (cargoComp_.loadedAboard) return false; // hidden cargo can't be targeted
+    if (CargoComp().loadedAboard) return false; // hidden cargo can't be targeted
     return CWidget::CanBeTargetedBy(simulation, source, targetsAllowed);
 }
 
@@ -914,9 +947,9 @@ bool CUnit::HasQueuedOrders() const {
 }
 
 void CUnit::Revive(CSimulation& game, float x, float y) {
-    corpseDropComp_.corpse = false;
-    corpseDropComp_.boneCorpse = false;
-    corpseDropComp_.deathTurnTick = 0;
+    CorpseDropComp().corpse = false;
+    CorpseDropComp().boneCorpse = false;
+    CorpseDropComp().deathTurnTick = 0;
     hidden_ = false;
     SetPosition(x, y);
     RefreshMaxLifeTotal();
@@ -924,7 +957,7 @@ void CUnit::Revive(CSimulation& game, float x, float y) {
     SetLife(game, GetMaxLife());
     // Buildings never revive via heroes, but a restored structure needs
     // its footprint back (ref pathingInstance lifecycle).
-    if (IsBuilding() && structureNavComp_.pathingStampId < 0) RegeneratePathingInstance(game);
+    if (IsBuilding() && StructureNavComp().pathingStampId < 0) RegeneratePathingInstance(game);
     // Mana intentionally preserved (reincarnation spends it pre-revive).
 }
 
@@ -964,10 +997,10 @@ float CUnit::GetEndingDecayTime(const CSimulation& simulation) const {
 bool CUnit::Update(CSimulation& simulation) {
     if (IsDead()) {
         const int currentTick = simulation.GetGameTurnTick();
-        if (corpseDropComp_.deathTurnTick == 0) {
-            corpseDropComp_.deathTurnTick = currentTick;
-            corpseDropComp_.corpse = false;
-            corpseDropComp_.boneCorpse = false;
+        if (CorpseDropComp().deathTurnTick == 0) {
+            CorpseDropComp().deathTurnTick = currentTick;
+            CorpseDropComp().corpse = false;
+            CorpseDropComp().boneCorpse = false;
             // Retail death clears the building footprint (ref killPathingInstance).
             KillPathingInstance(simulation);
             // The fallen drop their orders with their behavior (ref kill:
@@ -998,9 +1031,9 @@ bool CUnit::Update(CSimulation& simulation) {
                             CFogArea::Circle(GetX(), GetY(), gc.dyingRevealRadius);
                         fog->AddTimedModifier(GetPlayerIndex(), area,
                                               CFogState::VISIBLE, gc.fogFlashTime);
-                        if (corpseDropComp_.deathKillerPlayer >= 0 &&
-                            corpseDropComp_.deathKillerPlayer != GetPlayerIndex()) {
-                            fog->AddTimedModifier(corpseDropComp_.deathKillerPlayer, area,
+                        if (CorpseDropComp().deathKillerPlayer >= 0 &&
+                            CorpseDropComp().deathKillerPlayer != GetPlayerIndex()) {
+                            fog->AddTimedModifier(CorpseDropComp().deathKillerPlayer, area,
                                                   CFogState::VISIBLE, gc.fogFlashTime);
                         }
                     }
@@ -1032,13 +1065,13 @@ bool CUnit::Update(CSimulation& simulation) {
             // items materialize at the corpse on the death tick.
             DropDeathItems(simulation);
             // Cargo goes down with the transport (WC3 rule).
-            auto passengers = std::move(cargoComp_.cargoUnits);
-            cargoComp_.cargoUnits.clear();
+            auto passengers = std::move(CargoComp().cargoUnits);
+            CargoComp().cargoUnits.clear();
             const float dropX = GetX();
             const float dropY = GetY();
             for (auto* passenger : passengers) {
                 if (passenger) {
-                    passenger->cargoComp_.loadedAboard = false;
+                    passenger->CargoComp().loadedAboard = false;
                     passenger->SetHidden(false);
                     passenger->SetPosition(dropX, dropY);
                     if (!passenger->IsDead()) {
@@ -1060,21 +1093,21 @@ bool CUnit::Update(CSimulation& simulation) {
             return false;
         }
 
-        if (corpseDropComp_.decaySuspended) return false;
+        if (CorpseDropComp().decaySuspended) return false;
 
-        if (!corpseDropComp_.corpse) {
+        if (!CorpseDropComp().corpse) {
             const int deathTicks = std::max(1, (int)std::ceil(unitType_->GetDeathTime() / simulation.GetSimStepTime()));
-            if ((currentTick - corpseDropComp_.deathTurnTick) > deathTicks) {
-                corpseDropComp_.corpse = true;
+            if ((currentTick - CorpseDropComp().deathTurnTick) > deathTicks) {
+                CorpseDropComp().corpse = true;
                 if (!unitType_->CanRaise()) {
-                    corpseDropComp_.boneCorpse = true;
+                    CorpseDropComp().boneCorpse = true;
                 }
                 if (!IsHero() && !unitType_->CanDecay()) {
                     return true;
                 }
-                corpseDropComp_.deathTurnTick = currentTick;
+                CorpseDropComp().deathTurnTick = currentTick;
                 // Decay begins (retail EVENT_UNIT_DECAY); one-shot by
-                // construction (corpseDropComp_.corpse flips, this branch never reruns).
+                // construction (CorpseDropComp().corpse flips, this branch never reruns).
                 if (auto& decayCb = simulation.GetUnitDecayCallback()) {
                     decayCb(handleId_);
                 }
@@ -1082,19 +1115,19 @@ bool CUnit::Update(CSimulation& simulation) {
             return false;
         }
 
-        if (!corpseDropComp_.boneCorpse) {
+        if (!CorpseDropComp().boneCorpse) {
             const int decayTicks = std::max(1, (int)std::ceil(
                 simulation.GetGameplayConstants().decayTime / simulation.GetSimStepTime()));
-            if ((currentTick - corpseDropComp_.deathTurnTick) > decayTicks) {
-                corpseDropComp_.boneCorpse = true;
-                corpseDropComp_.deathTurnTick = currentTick;
+            if ((currentTick - CorpseDropComp().deathTurnTick) > decayTicks) {
+                CorpseDropComp().boneCorpse = true;
+                CorpseDropComp().deathTurnTick = currentTick;
             }
             return false;
         }
 
         const int endingDecayTicks = std::max(1, (int)std::ceil(
             GetEndingDecayTime(simulation) / simulation.GetSimStepTime()));
-        if ((currentTick - corpseDropComp_.deathTurnTick) > endingDecayTicks) {
+        if ((currentTick - CorpseDropComp().deathTurnTick) > endingDecayTicks) {
             if (IsHero()) {
                 hidden_ = true;
                 return false;
@@ -1162,7 +1195,7 @@ bool CUnit::Update(CSimulation& simulation) {
     }
 
     // Cargo rides along with the transport.
-    for (auto* passenger : cargoComp_.cargoUnits) {
+    for (auto* passenger : CargoComp().cargoUnits) {
         if (passenger) passenger->SetPosition(x_, y_);
     }
 
@@ -1586,7 +1619,7 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
     if (oldLife > 0 && life_ <= 0) {
         // Killer side-channel for the death tick (ref kill(source): killer
         // gets its own death-vision reveal next to the owner's).
-        corpseDropComp_.deathKillerPlayer = source ? source->GetPlayerIndex() : -1;
+        CorpseDropComp().deathKillerPlayer = source ? source->GetPlayerIndex() : -1;
         AwardBountyAndXP(simulation, source);
         auto& deathCb = simulation.GetUnitDeathCallback();
         int srcHandle = source ? source->GetHandleId() : -1;

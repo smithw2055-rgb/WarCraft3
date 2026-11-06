@@ -19,6 +19,14 @@ enum class SimCombatTextKind : uint8_t {
 // each other.
 // ============================================================
 struct SimEventBus {
+    // Lifecycle signals (Phase 5 Modernization: Signal-driven Presentation)
+    // (unitHandle)
+    Signal<int> onUnitSpawned;
+    // (unitHandle)
+    Signal<int> onUnitRemoved;
+    // (itemHandle)
+    Signal<int> onItemSpawned;
+
     // (unitHandle, killerHandle, ownerPlayerIndex)
     Signal<int, int, int> onUnitDeath;
     // (unitHandle, sourceHandle, damageAmount)

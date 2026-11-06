@@ -3,6 +3,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include "audio/audio_server.h"
 
 struct ma_engine;
 struct ma_sound;
@@ -65,7 +66,13 @@ public:
     void SetMasterVolume(float vol);
     float GetMasterVolume() const { return masterVolume_; }
 
-    void Update();
+    // Stage I: Access integrated AudioServer (mixing buses, 3D spatialization, voice stealing)
+    audio::AudioServer& GetAudioServer() { return audioServer_; }
+    const audio::AudioServer& GetAudioServer() const { return audioServer_; }
+    void SetHeadlessSimulationEnabled(bool enabled) { headlessSimulationEnabled_ = enabled; }
+    bool IsHeadlessSimulationEnabled() const { return headlessSimulationEnabled_; }
+
+    void Update(float dt = 0.016f);
 
 private:
     struct ActiveSound {
@@ -96,6 +103,8 @@ private:
     std::unordered_map<std::string, std::vector<uint8_t>> midiCache_;
     MpqManager* mpq_ = nullptr;
     bool initialized_ = false;
+    bool headlessSimulationEnabled_ = false;
+    audio::AudioServer audioServer_;
 
     int playFromSource(SoundSource& src, float volume, float x, float y, float z, bool is3D);
     int playFromSourceEx(SoundSource& src, float volume, float x, float y, float z, bool is3D,

@@ -153,6 +153,27 @@ struct ABSpellDescriptor {
         War3ID code, War3ID summonUnitType, War3ID buffAlias,
         int defaultCount, float defaultDuration, float cooldown, int manaCost,
         int countDataIdx = 1);
+
+    // Stage D2 Modernization: Expanded Data-Driven Spell Archetypes
+    static ABSpellDescriptor MakeTargetHealOrUndeadDamage(
+        War3ID code, float defaultHealAmount, float undeadDamageRatio,
+        float range, float cooldown, int manaCost, CDamageType dmgType = CDamageType::DIVINE);
+
+    static ABSpellDescriptor MakeSelfInvulnerableBuff(
+        War3ID code, float defaultDuration, float cooldown, int manaCost);
+
+    static ABSpellDescriptor MakePointWaveAreaDamage(
+        War3ID code, int defaultWaves, float defaultDamagePerWave, float defaultRadius,
+        float range, float cooldown, int manaCost, CDamageType dmgType = CDamageType::COLD);
+
+    static ABSpellDescriptor MakeTargetChainBounceDamage(
+        War3ID code, float defaultInitialDamage, int defaultTargets, float damageDecayPerBounce,
+        float bounceRadius, float range, float cooldown, int manaCost,
+        CDamageType dmgType = CDamageType::LIGHTNING);
+
+    static ABSpellDescriptor MakeAreaHealAndDispel(
+        War3ID code, float defaultRadius, float defaultHealAmount, bool stripNegativeBuffs,
+        float range, float cooldown, int manaCost);
 };
 
 // War3ID-keyed registry of effect chains and data-driven spell descriptors.
@@ -165,6 +186,8 @@ public:
     void RegisterDescriptor(ABSpellDescriptor desc);
     const ABSpellDescriptor* FindDescriptor(War3ID alias) const;
     bool Unregister(War3ID alias);
+    size_t DescriptorCount() const { return descriptors_.size(); }
+    void RegisterStandardCanonicalDescriptors();
 
 private:
     std::unordered_map<uint32_t, ABEffectChain> chains_; // keyed by War3ID::value

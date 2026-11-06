@@ -9,6 +9,7 @@
 #include "render/mdx_prem_particles.h"
 #include "render/mdx_skinning.h"
 #include "render/picking.h"
+#include "render/render_server.h"
 #include "resource/mpq_storm.h"
 #include <string>
 #include <vector>
@@ -35,11 +36,27 @@ public:
                        float yawRadians = 0.0f, float alpha = 1.0f, bool depthTest = true);
     void RenderWithModelMatrix(const Mat4& model, const Mat4& view, const Mat4& proj, int player = 0,
                                float alpha = 1.0f, bool depthTest = true);
+
+    // Stage F2: True Hardware GPU Instancing (`sg_draw(0, indexCount, instanceCount)`)
+    // Renders all instances in a RenderBatchGroup in a single instanced draw call per submesh,
+    // sampling per-instance bone matrices from the shared 2D BonePaletteAtlas.
+    int RenderInstancedBatch(const std::vector<render::InstanceGpuPayload>& instances,
+                             const render::BonePaletteAtlas* boneAtlas,
+                             const Mat4& view,
+                             const Mat4& proj,
+                             int defaultPlayer = 0,
+                             bool depthTest = true);
+    int GetInstancedBatchCallCount() const { return instancedBatchCallCount_; }
+    int GetLastInstancedElementCount() const { return lastInstancedElementCount_; }
+
     void SetInstanceMatrix(const Mat4& model);
     void SetWorldOffset(const Vec3& offset);
 
     const std::string& GetName() const { return name_; }
     bool IsValid() const { return !batches_.empty(); }
+    int GetBatchCount() const { return (int)batches_.size(); }
+    int GetPrimaryFilterMode() const { return batches_.empty() ? 0 : batches_[0].filterMode; }
+    int GetPrimaryLayerFlags() const { return batches_.empty() ? 0 : batches_[0].layerFlags; }
     const Vec3& GetBoundsCenter() const { return center_; }
     float GetBoundsRadius() const { return radius_; }
     bool HasCollisionShapes() const { return modelSource_ && !modelSource_->collisionShapes.empty(); }
@@ -191,6 +208,19 @@ private:
     static sg_pipeline sharedOverlaySkinnedBlendPipeline_;
     static sg_pipeline sharedOverlaySkinnedAdditivePipeline_;
     static sg_pipeline sharedOverlaySkinnedAddAlphaPipeline_;
+    // Stage F2: Hardware Instanced Shaders, Pipelines, Stream Instance Buffer & Shared Bone Atlas
+    static sg_shader sharedInstancedShader_;
+    static sg_pipeline sharedInstancedPipeline_;
+    static sg_pipeline sharedInstancedBlendPipeline_;
+    static sg_shader sharedSkinnedInstancedShader_;
+    static sg_pipeline sharedSkinnedInstancedPipeline_;
+    static sg_pipeline sharedSkinnedInstancedBlendPipeline_;
+    static sg_buffer sharedInstanceBuffer_;
+    static size_t sharedInstanceBufferCapacity_;
+    static sg_image sharedBoneAtlasTexture_;
+    static sg_view sharedBoneAtlasView_;
+    static int sharedBoneAtlasWidth_;
+    static int sharedBoneAtlasHeight_;
     static sg_sampler sharedSampler_;
     static sg_sampler sharedNearestSampler_;
     static sg_image sharedWhiteTexture_;
@@ -255,4 +285,6 @@ private:
     float fogStart_ = 12000.0f;
     float fogEnd_ = 65000.0f;
     MdxViewer* sharedSource_ = nullptr;
+    int instancedBatchCallCount_ = 0;
+    int lastInstancedElementCount_ = 0;
 };

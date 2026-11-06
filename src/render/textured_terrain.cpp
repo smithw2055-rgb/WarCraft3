@@ -1,3 +1,4 @@
+#include "render/render_server.h"
 #include "textured_terrain.h"
 // Keep this TU easy to touch when validating GPU-handle initialization fixes.
 #include "shader.h"
@@ -1163,10 +1164,26 @@ void TexturedTerrain::Render(const Mat4& view, const Mat4& proj, float time) {
             return cellX >= 0 && cellY >= 0 && cellX < (columns_ - 1) && cellY < (rows_ - 1);
         };
 
+        lastVisibleCliffs_ = 0;
+        lastCulledCliffs_ = 0;
+        const render::Frustum cliffFrustum = render::Frustum::FromViewProj(mvp);
         for (const auto& inst : cliffInstanceData_) {
             if (inst.meshIndex < 0 || inst.meshIndex >= (int)cliffMeshes_.size()) continue;
             const auto& mesh = cliffMeshes_[inst.meshIndex];
             if (!mesh.vbo.id || !mesh.ebo.id) continue;
+            // Stage H2: Cull off-screen cliff meshes via 6-plane AABB test
+            const float worldX0 = centerOffsetX_ + (float)(inst.gridX - 1) * 128.0f;
+            const float worldX1 = centerOffsetX_ + (float)(inst.gridX + 2) * 128.0f;
+            const float worldZ0 = -(centerOffsetY_ + (float)(inst.gridY + 2) * 128.0f);
+            const float worldZ1 = -(centerOffsetY_ + (float)(inst.gridY - 1) * 128.0f);
+            const float baseY = inst.layerBase * 128.0f;
+            const Vec3 cliffMin(worldX0, baseY + mesh.minLocalZ - 64.0f, std::min(worldZ0, worldZ1));
+            const Vec3 cliffMax(worldX1, baseY + mesh.maxLocalZ + 64.0f, std::max(worldZ0, worldZ1));
+            if (!cliffFrustum.TestAABB(cliffMin, cliffMax)) {
+                ++lastCulledCliffs_;
+                continue;
+            }
+            ++lastVisibleCliffs_;
 
             sg_bindings bind = {};
             bind.vertex_buffers[0] = mesh.vbo;

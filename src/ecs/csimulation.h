@@ -7,6 +7,8 @@
 #include "ecs/fwd.h"
 #include "ecs/sim_events.h"
 #include "ecs/ecs_registry.h"
+#include "ecs/spatial_grid.h"
+#include "ecs/sim_systems.h"
 #include "ecs/fog_state.h"
 #include "ecs/lockstep.h"
 #include "ecs/unit.h"
@@ -35,9 +37,20 @@ public:
     SimEventBus& Events() { return events_; }
     const SimEventBus& Events() const { return events_; }
 
-    // Sparse-Set ECS Component Registry access (Phase 3 modernization)
+    // Sparse-Set ECS Component Registry access (Phase 3 & 5 modernization)
     SimEcsRegistry& Registry() { return ecsRegistry_; }
     const SimEcsRegistry& Registry() const { return ecsRegistry_; }
+
+    // Spatial Hash Grid access (Phase 5 Stage C modernization)
+    SpatialHashGrid& SpatialGrid() { return spatialGrid_; }
+    const SpatialHashGrid& SpatialGrid() const { return spatialGrid_; }
+    std::vector<CUnit*> QueryUnitsInRadius(float x, float y, float radius) const {
+        return spatialGrid_.QueryRadius(x, y, radius, true);
+    }
+
+    // Modular Simulation System Pipeline access (Phase 5 Stage C modernization)
+    SimulationSystemPipeline& SystemPipeline() { return systemPipeline_; }
+    const SimulationSystemPipeline& SystemPipeline() const { return systemPipeline_; }
 
     // System registration
     void SetUnitData(CUnitData* data) { unitData_ = data; }
@@ -419,6 +432,7 @@ public:
     }
 
 private:
+    void RegisterBuiltInSystems();
     void ProcessUnitRemovals();
     void ProcessNewUnits();
     void ResolveUnitSeparation();
@@ -485,8 +499,10 @@ private:
     AudioSystem* audio_ = nullptr;
     HandleIdAllocator handleIdAlloc_;
 
-    // Post-update callbacks & central multicast EventBus
+    // Post-update callbacks, central multicast EventBus, Sparse-Set ECS & Spatial Grid
     std::vector<std::function<void()>> postUpdateCallbacks_;
     SimEventBus events_;
     SimEcsRegistry ecsRegistry_;
+    SpatialHashGrid spatialGrid_{256.0f};
+    SimulationSystemPipeline systemPipeline_;
 };

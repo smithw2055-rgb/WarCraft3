@@ -7,18 +7,33 @@
 bool GameUI::Init(int w, int h) {
     screenW = w;
     screenH = h;
+    lastLayoutW_ = w;
+    lastLayoutH_ = h;
     return renderer.Init(w, h);
 }
 
 void GameUI::Update(int w, int h) {
-    screenW = w;
-    screenH = h;
+    if (screenW != w || screenH != h) {
+        screenW = w;
+        screenH = h;
+        if (rootFrame) {
+            rootFrame->MarkLayoutDirty();
+        }
+    }
 }
 
 void GameUI::Render() {
     renderer.BeginFrame(screenW, screenH);
     if (rootFrame && rootFrame->IsVisible()) {
-        rootFrame->PositionBounds(*this);
+        if (lastLayoutW_ != screenW || lastLayoutH_ != screenH) {
+            rootFrame->MarkLayoutDirty();
+            lastLayoutW_ = screenW;
+            lastLayoutH_ = screenH;
+        }
+        if (rootFrame->IsLayoutDirty()) {
+            rootFrame->PositionBounds(*this);
+            layoutPassCount_++;
+        }
         rootFrame->Render(renderer);
     }
     renderer.EndFrame();
@@ -44,7 +59,70 @@ static const FramePointAssign* FindAssign(const std::unordered_map<FramePoint, F
 UIFrame::UIFrame(const std::string& name, UIFrame* parent)
     : name_(name), parent_(parent) {}
 
-void UIFrame::Render(UiRenderer& /*r*/) {}
+void UIFrame::AddChild(UIFrame* child) {
+    if (!child || child == this) return;
+    if (child->parent_ && child->parent_ != this) {
+        child->parent_->RemoveChild(child);
+    }
+    if (std::find(children_.begin(), children_.end(), child) == children_.end()) {
+        children_.push_back(child);
+        childrenZOrderDirty_ = true;
+    }
+    child->parent_ = this;
+    child->MarkLayoutDirty();
+}
+
+void UIFrame::RemoveChild(UIFrame* child) {
+    auto it = std::find(children_.begin(), children_.end(), child);
+    if (it != children_.end()) {
+        children_.erase(it);
+        MarkLayoutDirty();
+    }
+}
+
+void UIFrame::SetZOrder(int z) {
+    if (zOrder_ == z) return;
+    zOrder_ = z;
+    if (parent_) {
+        parent_->childrenZOrderDirty_ = true;
+    }
+}
+
+void UIFrame::SortChildrenByZOrderIfNeeded() {
+    if (!childrenZOrderDirty_) return;
+    std::stable_sort(children_.begin(), children_.end(),
+        [](const UIFrame* a, const UIFrame* b) {
+            int za = a ? a->GetZOrder() : 0;
+            int zb = b ? b->GetZOrder() : 0;
+            return za < zb;
+        });
+    childrenZOrderDirty_ = false;
+}
+
+void UIFrame::MarkLayoutDirty() {
+    layoutDirty_ = true;
+    for (auto* c : children_) {
+        if (c && !c->layoutDirty_) {
+            c->MarkLayoutDirty();
+        }
+    }
+    // Also mark ancestor chain dirty so rootFrame->IsLayoutDirty() detects deep changes
+    UIFrame* p = parent_;
+    while (p) {
+        p->layoutDirty_ = true;
+        p = p->parent_;
+    }
+}
+
+void UIFrame::Render(UiRenderer& r) {
+    if (!visible_) return;
+    SortChildrenByZOrderIfNeeded();
+    for (auto* c : children_) {
+        if (c && c->IsVisible()) {
+            c->Render(r);
+        }
+    }
+}
 
 void UIFrame::SetAllPoints() {
     auto add = [&](FramePoint p) {
@@ -53,6 +131,7 @@ void UIFrame::SetAllPoints() {
     add(FramePoint::TOPLEFT); add(FramePoint::TOP); add(FramePoint::TOPRIGHT);
     add(FramePoint::LEFT); add(FramePoint::CENTER); add(FramePoint::RIGHT);
     add(FramePoint::BOTTOMLEFT); add(FramePoint::BOTTOM); add(FramePoint::BOTTOMRIGHT);
+    MarkLayoutDirty();
 }
 
 void UIFrame::SetAllPoints(float inset) {
@@ -66,13 +145,16 @@ void UIFrame::SetAllPoints(float inset) {
     assignments_[FramePoint::TOPRIGHT]   = { FramePoint::TOPRIGHT, "", FramePoint::TOPRIGHT, -inset, inset };
     assignments_[FramePoint::TOP]        = { FramePoint::TOP, "", FramePoint::TOP, 0, inset };
     assignments_[FramePoint::CENTER]     = { FramePoint::CENTER, "", FramePoint::CENTER, 0, 0 };
+    MarkLayoutDirty();
 }
 
 void UIFrame::AddSetPoint(FramePoint myPt, const std::string& other, FramePoint otherPt, float ox, float oy) {
     assignments_[myPt] = { myPt, other, otherPt, ox, oy };
+    MarkLayoutDirty();
 }
 void UIFrame::AddAnchor(FramePoint pt, float ox, float oy) {
     assignments_[pt] = { pt, "", pt, ox, oy };
+    MarkLayoutDirty();
 }
 
 float UIFrame::GetFrameX(FramePoint pt) const {
@@ -128,6 +210,7 @@ void UIFrame::SetFrameX(FramePoint pt, float x) {
             break;
         default: break;
     }
+    MarkLayoutDirty();
 }
 
 void UIFrame::SetFrameY(FramePoint pt, float y) {
@@ -147,9 +230,11 @@ void UIFrame::SetFrameY(FramePoint pt, float y) {
             break;
         default: break;
     }
+    MarkLayoutDirty();
 }
 
-void UIFrame::PositionBounds(GameUI& gui) {
+void UIFrame::ComputeSelfPositionBounds(GameUI& gui) {
+    layoutComputeCount_++;
     if (!parent_) return;
 
     auto lp = FindAssign(assignments_, kLeftPrio, 3);
@@ -216,10 +301,49 @@ void UIFrame::PositionBounds(GameUI& gui) {
     }
 }
 
-UIFrame* UIFrame::HitTest(float sx, float sy) {
-    if (!visible_) return nullptr;
-    return bounds_.Contains(sx, sy) ? this : nullptr;
+void UIFrame::PositionBounds(GameUI& gui) {
+    if (!visible_) return;
+    ComputeSelfPositionBounds(gui);
+    SortChildrenByZOrderIfNeeded();
+    for (auto* c : children_) {
+        if (c) c->PositionBounds(gui);
+    }
+    layoutDirty_ = false;
 }
 
-UIFrame* UIFrame::OnMouseDown(float /*sx*/, float /*sy*/, int /*btn*/) { return this; }
-UIFrame* UIFrame::OnMouseUp(float /*sx*/, float /*sy*/, int /*btn*/) { return this; }
+UIFrame* UIFrame::HitTest(float sx, float sy) {
+    if (!visible_ || !bounds_.Contains(sx, sy)) return nullptr;
+    SortChildrenByZOrderIfNeeded();
+    for (int i = (int)children_.size() - 1; i >= 0; --i) {
+        if (children_[i]) {
+            if (auto* hit = children_[i]->HitTest(sx, sy)) {
+                return hit;
+            }
+        }
+    }
+    return this;
+}
+
+UIFrame* UIFrame::OnMouseDown(float sx, float sy, int btn) {
+    SortChildrenByZOrderIfNeeded();
+    for (int i = (int)children_.size() - 1; i >= 0; --i) {
+        if (children_[i]) {
+            if (auto* hit = children_[i]->HitTest(sx, sy)) {
+                return hit->OnMouseDown(sx, sy, btn);
+            }
+        }
+    }
+    return this;
+}
+
+UIFrame* UIFrame::OnMouseUp(float sx, float sy, int btn) {
+    SortChildrenByZOrderIfNeeded();
+    for (int i = (int)children_.size() - 1; i >= 0; --i) {
+        if (children_[i]) {
+            if (auto* hit = children_[i]->HitTest(sx, sy)) {
+                return hit->OnMouseUp(sx, sy, btn);
+            }
+        }
+    }
+    return this;
+}

@@ -767,6 +767,22 @@ bool TestSparseSetEcsRegistryAndUnitComponents();
 bool TestJassBytecodeCompilerAndIndexedLocals();
 bool TestRenderServerMaterialsAndFrustumCulling();
 bool TestRenderServerInstancingAndSimulationInterpolation();
+bool TestPhase5TrueEcsComponentPooling();
+bool TestPhase5SpatialGridAndSystemPipeline();
+bool TestPhase5UnitPresentationSystemSignals();
+bool TestPhase5StageASceneRenderServerClosedLoop();
+bool TestPhase5StageDUiSceneTreeAndDirtyLayout();
+bool TestPhase5StageDDataDrivenSpellConsolidation();
+bool TestPhase6StageEResourceServerCachingAndVfsUri();
+bool TestPhase6StageEResourceServerAsyncPreloadAndGc();
+bool TestPhase6StageFBonePaletteAtlasPacking();
+bool TestPhase6StageFHardwareInstancedBatchExecution();
+bool TestPhase6StageGJobSystemParallelForAndTaskGraph();
+bool TestPhase6StageGParallelSkeletonUpdateAndFrustumCulling();
+bool TestPhase6StageHStaticSpatialChunkHierarchyCulling();
+bool TestPhase6StageHSceneManagerDoodadChunkAcceleration();
+bool TestPhase6StageIAudioServerBusHierarchyAnd3DSpatialization();
+bool TestPhase6StageIAudioPolyphonyVoiceStealingAndSimEvents();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1529,6 +1545,22 @@ int main(int argc, char** argv) {
         {"Phase3 JassVM bytecode compiler and indexed local slots", TestJassBytecodeCompilerAndIndexedLocals},
         {"Phase4 RenderServer materials and frustum culling", TestRenderServerMaterialsAndFrustumCulling},
         {"Phase4 RenderServer GPU instancing and simulation interpolation", TestRenderServerInstancingAndSimulationInterpolation},
+        {"Phase5 Stage C True ECS SparseComponentPool storage", TestPhase5TrueEcsComponentPooling},
+        {"Phase5 Stage C SpatialHashGrid and SimulationSystemPipeline", TestPhase5SpatialGridAndSystemPipeline},
+        {"Phase5 Stage B UnitPresentationSystem and SimEventBus cleanup", TestPhase5UnitPresentationSystemSignals},
+        {"Phase5 Stage A SceneManager RenderServer and Interpolation closed-loop", TestPhase5StageASceneRenderServerClosedLoop},
+        {"Phase5 Stage D1 UIFrame SceneTree Z-Order and dirty-flag layout", TestPhase5StageDUiSceneTreeAndDirtyLayout},
+        {"Phase5 Stage D2 Data-driven ABSpellDescriptor consolidation", TestPhase5StageDDataDrivenSpellConsolidation},
+        {"Phase6 Stage E1 ResourceServer VFS URI and RID caching", TestPhase6StageEResourceServerCachingAndVfsUri},
+        {"Phase6 Stage E2 ResourceServer async preload and ref-count GC", TestPhase6StageEResourceServerAsyncPreloadAndGc},
+        {"Phase6 Stage F1 BonePaletteAtlas 2D RGBA32F packing and sampling", TestPhase6StageFBonePaletteAtlasPacking},
+        {"Phase6 Stage F2 Hardware instanced batch execution and bone atlas", TestPhase6StageFHardwareInstancedBatchExecution},
+        {"Phase6 Stage G1 JobSystem WorkerThreadPool and ParallelFor", TestPhase6StageGJobSystemParallelForAndTaskGraph},
+        {"Phase6 Stage G2 Parallel skeleton update and frustum culling", TestPhase6StageGParallelSkeletonUpdateAndFrustumCulling},
+        {"Phase6 Stage H1 StaticSpatialChunkGrid 3-state AABB hierarchy culling", TestPhase6StageHStaticSpatialChunkHierarchyCulling},
+        {"Phase6 Stage H2 SceneManager doodad chunk acceleration and visibility sync", TestPhase6StageHSceneManagerDoodadChunkAcceleration},
+        {"Phase6 Stage I1 AudioServer bus hierarchy ducking and 3D spatialization", TestPhase6StageIAudioServerBusHierarchyAnd3DSpatialization},
+        {"Phase6 Stage I2 AudioServer polyphony voice stealing and SimEventBus bridge", TestPhase6StageIAudioPolyphonyVoiceStealingAndSimEvents},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

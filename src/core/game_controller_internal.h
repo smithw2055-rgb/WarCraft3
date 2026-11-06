@@ -1136,15 +1136,27 @@ inline void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameCont
         }
     }
 
-    // Sync position/rotation/scale via SceneManager
+    // Sync interpolated position/rotation/scale/tint via SceneManager & RenderInterpolationBuffer
+    render::RenderTransformSnapshot interpSnap;
+    const bool hasInterp = g->GetPresentation().SampleInterpolatedUnit(handleId, interpSnap);
+    const float sampleX = hasInterp ? interpSnap.position.x : unit->GetX();
+    const float sampleY = hasInterp ? interpSnap.position.z : unit->GetY();
+    const float sampleFacing = hasInterp ? interpSnap.facingDeg : unit->GetFacing();
+
     float visualHeight = unit_selection_geom::ComputeUnitVisualHeight(
         *unit, g->GetTexturedTerrain().IsValid(),
         [&](float x, float z) { return g->GetTexturedTerrain().GetGroundHeight(x, z); });
+    if (hasInterp) {
+        const float groundH = g->GetTexturedTerrain().IsValid()
+            ? g->GetTexturedTerrain().GetGroundHeight(sampleX, sampleY)
+            : 0.0f;
+        visualHeight = groundH + interpSnap.flyHeight;
+    }
     {
-        float pos[3] = {unit->GetX(), visualHeight, unit->GetY()};
+        float pos[3] = {sampleX, visualHeight, sampleY};
         auto vit = g->simUnitToVisualIdx.find(handleId);
         if (vit != g->simUnitToVisualIdx.end()) {
-            g->GetScene().UpdateInstancePosition(vit->second, pos, unit->GetFacing());
+            g->GetScene().UpdateInstancePosition(vit->second, pos, sampleFacing);
             // Script scale (SetUnitScale) multiplies the seed scale; refresh
             // every frame so mid-game changes apply (cheap idempotent write).
             float seedScale[3] = {1.0f, 1.0f, 1.0f};
@@ -1154,9 +1166,19 @@ inline void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameCont
                 seedScale[1] = seedIt->second.scale[1];
                 seedScale[2] = seedIt->second.scale[2];
             }
-            const float s = unit->GetScale();
+            const float s = hasInterp ? interpSnap.scale.x : unit->GetScale();
             const float scale[3] = {seedScale[0] * s, seedScale[1] * s, seedScale[2] * s};
             g->GetScene().SetInstanceScale(vit->second, scale);
+
+            int vr = 255, vg = 255, vb = 255, va = 255;
+            unit->GetVertexColor(vr, vg, vb, va);
+            g->GetScene().SetInstanceVertexColor(
+                vit->second,
+                hasInterp ? interpSnap.vertexColor.x : (vr / 255.0f),
+                hasInterp ? interpSnap.vertexColor.y : (vg / 255.0f),
+                hasInterp ? interpSnap.vertexColor.z : (vb / 255.0f),
+                hasInterp ? interpSnap.vertexColor.w : (va / 255.0f)
+            );
         }
     }
 }

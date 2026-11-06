@@ -258,6 +258,205 @@ ABSpellDescriptor ABSpellDescriptor::MakeSummonTimed(
     return d;
 }
 
+ABSpellDescriptor ABSpellDescriptor::MakeTargetHealOrUndeadDamage(
+    War3ID code, float defaultHealAmount, float undeadDamageRatio,
+    float range, float cooldown, int manaCost, CDamageType dmgType) {
+    ABSpellDescriptor d;
+    d.code = code;
+    d.targetType = 1; // TARGET_UNIT
+    d.defaultRange = range;
+    d.defaultCooldown = cooldown;
+    d.defaultManaCost = manaCost;
+    d.defaultData[0] = defaultHealAmount;
+    d.onEffect = [undeadDamageRatio, dmgType](
+                     const ABSpellEffectContext& ctx, CSimulation& game,
+                     CUnit* caster, CWidget* target, bool, float, float) {
+        const float amount = ctx.data[0];
+        ABEffectChain smite;
+        smite.Add(std::make_unique<ABActionDamageTarget>(
+            amount * undeadDamageRatio, CAttackType::NORMAL, dmgType, true));
+        ABEffectChain mend;
+        mend.Add(std::make_unique<ABActionHealTarget>(amount));
+        ABActionIf branch(std::make_shared<ABCondTargetUndead>(), std::move(smite), std::move(mend));
+        branch.Run(game, caster, target, false, 0.0f, 0.0f);
+    };
+    return d;
+}
+
+ABSpellDescriptor ABSpellDescriptor::MakeSelfInvulnerableBuff(
+    War3ID code, float defaultDuration, float cooldown, int manaCost) {
+    ABSpellDescriptor d;
+    d.code = code;
+    d.targetType = 0; // NO_TARGET
+    d.defaultRange = 0.0f;
+    d.defaultCooldown = cooldown;
+    d.defaultManaCost = manaCost;
+    d.defaultDuration = defaultDuration;
+    d.onEffect = [](const ABSpellEffectContext& ctx, CSimulation& game,
+                    CUnit* caster, CWidget*, bool, float, float) {
+        if (!caster) return;
+        const float dur = ctx.duration > 0.0f ? ctx.duration : 15.0f;
+        ABActionAddBuffTarget shield([dur]() { return std::make_unique<CBuffDivineShield>(dur); });
+        shield.Run(game, caster, caster, false, 0.0f, 0.0f);
+    };
+    return d;
+}
+
+ABSpellDescriptor ABSpellDescriptor::MakePointWaveAreaDamage(
+    War3ID code, int defaultWaves, float defaultDamagePerWave, float defaultRadius,
+    float range, float cooldown, int manaCost, CDamageType dmgType) {
+    ABSpellDescriptor d;
+    d.code = code;
+    d.targetType = 2; // TARGET_POINT
+    d.defaultRange = range;
+    d.defaultCooldown = cooldown;
+    d.defaultManaCost = manaCost;
+    d.defaultArea = defaultRadius;
+    d.defaultData[0] = static_cast<float>(defaultWaves);
+    d.defaultData[1] = defaultDamagePerWave;
+    d.onEffect = [defaultWaves, defaultDamagePerWave, defaultRadius, dmgType](
+                     const ABSpellEffectContext& ctx, CSimulation& game,
+                     CUnit* caster, CWidget* target, bool hasPoint, float x, float y) {
+        const int waves = std::max(1, ctx.data[0] > 0.0f ? static_cast<int>(ctx.data[0]) : defaultWaves);
+        const float dmg = ctx.data[1] > 0.0f ? ctx.data[1] : defaultDamagePerWave;
+        const float rad = ctx.area > 0.0f ? ctx.area : defaultRadius;
+        float cx = x, cy = y;
+        if (target) {
+            cx = target->GetX();
+            cy = target->GetY();
+        } else if (!hasPoint && caster) {
+            cx = caster->GetX();
+            cy = caster->GetY();
+        }
+        for (int w = 0; w < waves; ++w) {
+            ABEffectChain perUnit;
+            perUnit.Add(std::make_unique<ABActionDamageTarget>(dmg, CAttackType::SPELLS, dmgType));
+            ABActionForEachInRange shard(rad, std::move(perUnit));
+            shard.Run(game, caster, nullptr, true, cx, cy);
+        }
+    };
+    return d;
+}
+
+ABSpellDescriptor ABSpellDescriptor::MakeTargetChainBounceDamage(
+    War3ID code, float defaultInitialDamage, int defaultTargets, float damageDecayPerBounce,
+    float bounceRadius, float range, float cooldown, int manaCost, CDamageType dmgType) {
+    ABSpellDescriptor d;
+    d.code = code;
+    d.targetType = 1; // TARGET_UNIT
+    d.defaultRange = range;
+    d.defaultCooldown = cooldown;
+    d.defaultManaCost = manaCost;
+    d.defaultArea = bounceRadius;
+    d.defaultData[0] = defaultInitialDamage;
+    d.defaultData[1] = static_cast<float>(defaultTargets);
+    d.defaultData[2] = damageDecayPerBounce;
+    d.onEffect = [defaultInitialDamage, defaultTargets, damageDecayPerBounce, bounceRadius, dmgType](
+                     const ABSpellEffectContext& ctx, CSimulation& game,
+                     CUnit* caster, CWidget* target, bool, float, float) {
+        auto* firstUnit = dynamic_cast<CUnit*>(target);
+        if (!firstUnit || firstUnit->IsDead()) return;
+
+        float curDmg = ctx.data[0] > 0.0f ? ctx.data[0] : defaultInitialDamage;
+        const int maxBounces = std::max(1, ctx.data[1] > 0.0f ? static_cast<int>(ctx.data[1]) : defaultTargets);
+        const float decay = (ctx.data[2] > 0.0f && ctx.data[2] < 1.0f) ? ctx.data[2] : damageDecayPerBounce;
+        const float searchRad = ctx.area > 0.0f ? ctx.area : bounceRadius;
+        const float searchRadSq = searchRad * searchRad;
+
+        std::unordered_set<int> hitHandles;
+        CUnit* current = firstUnit;
+        for (int i = 0; i < maxBounces && current; ++i) {
+            hitHandles.insert(current->GetHandleId());
+            current->Damage(game, caster, false, false, CAttackType::SPELLS, dmgType, "", curDmg, 0.0f);
+            curDmg *= (1.0f - decay);
+
+            // Find nearest unhit living enemy within bounceRadius
+            CUnit* nextTarget = nullptr;
+            float bestDistSq = searchRadSq;
+            for (CUnit* cand : game.GetUnits()) {
+                if (!cand || cand->IsDead() || cand == caster) continue;
+                if (hitHandles.count(cand->GetHandleId())) continue;
+                if (caster && cand->GetPlayerIndex() == caster->GetPlayerIndex()) continue;
+                const float dx = cand->GetX() - current->GetX();
+                const float dy = cand->GetY() - current->GetY();
+                const float d2 = dx * dx + dy * dy;
+                if (d2 <= bestDistSq) {
+                    bestDistSq = d2;
+                    nextTarget = cand;
+                }
+            }
+            current = nextTarget;
+        }
+    };
+    return d;
+}
+
+ABSpellDescriptor ABSpellDescriptor::MakeAreaHealAndDispel(
+    War3ID code, float defaultRadius, float defaultHealAmount, bool stripNegativeBuffs,
+    float range, float cooldown, int manaCost) {
+    ABSpellDescriptor d;
+    d.code = code;
+    d.targetType = range > 0.0f ? 2 : 0; // POINT if ranged, NO_TARGET if self-centered
+    d.defaultRange = range;
+    d.defaultCooldown = cooldown;
+    d.defaultManaCost = manaCost;
+    d.defaultArea = defaultRadius;
+    d.defaultData[0] = defaultHealAmount;
+    d.onEffect = [defaultRadius, defaultHealAmount, stripNegativeBuffs](
+                     const ABSpellEffectContext& ctx, CSimulation& game,
+                     CUnit* caster, CWidget* target, bool hasPoint, float x, float y) {
+        float cx = x, cy = y;
+        if (target) {
+            cx = target->GetX();
+            cy = target->GetY();
+        } else if (!hasPoint && caster) {
+            cx = caster->GetX();
+            cy = caster->GetY();
+        }
+        const float rad = ctx.area > 0.0f ? ctx.area : defaultRadius;
+        const float heal = ctx.data[0] > 0.0f ? ctx.data[0] : defaultHealAmount;
+        const float rSq = rad * rad;
+
+        for (CUnit* u : game.GetUnits()) {
+            if (!u || u->IsDead()) continue;
+            if (caster && u->GetPlayerIndex() != caster->GetPlayerIndex()) continue;
+            const float dx = u->GetX() - cx;
+            const float dy = u->GetY() - cy;
+            if (dx * dx + dy * dy <= rSq) {
+                if (heal > 0.0f) {
+                    u->SetLife(game, std::min(u->GetMaxLife(), u->GetLife() + heal));
+                }
+                if (stripNegativeBuffs) {
+                    u->RemoveBuffsIf(game, false, true, false, true);
+                }
+            }
+        }
+    };
+    return d;
+}
+
+void AbilityBuilderRegistry::RegisterStandardCanonicalDescriptors() {
+    // Consolidates standard Warcraft 3 spell archetypes into declarative descriptors:
+    RegisterDescriptor(ABSpellDescriptor::MakePointWaveAreaDamage(
+        War3ID("AHbz"), 6, 30.0f, 200.0f, 800.0f, 6.0f, 75, CDamageType::COLD));
+    RegisterDescriptor(ABSpellDescriptor::MakeTargetHealOrUndeadDamage(
+        War3ID("AHhb"), 200.0f, 0.5f, 600.0f, 5.0f, 65, CDamageType::DIVINE));
+    RegisterDescriptor(ABSpellDescriptor::MakeSelfInvulnerableBuff(
+        War3ID("AHds"), 15.0f, 35.0f, 25));
+    RegisterDescriptor(ABSpellDescriptor::MakeAreaDamageAndSlow(
+        War3ID("AHtc"), 250.0f, 60.0f, 0.50f, 5.0f, 6.0f, 90, CDamageType::SONIC));
+    RegisterDescriptor(ABSpellDescriptor::MakeMissileDamageAndStun(
+        War3ID("AHtb"), 100.0f, 5.0f, 800.0f, 600.0f, 9.0f, 75, CDamageType::LIGHTNING));
+    RegisterDescriptor(ABSpellDescriptor::MakeAreaDamageAndStun(
+        War3ID("AOws"), 250.0f, 25.0f, 3.0f, 6.0f, 90, CDamageType::SONIC));
+    RegisterDescriptor(ABSpellDescriptor::MakeTargetChainBounceDamage(
+        War3ID("AOcl"), 85.0f, 4, 0.15f, 500.0f, 700.0f, 9.0f, 120, CDamageType::LIGHTNING));
+    RegisterDescriptor(ABSpellDescriptor::MakeSummonTimed(
+        War3ID("AHwe"), War3ID("hwat"), War3ID("BTLF"), 1, 60.0f, 20.0f, 125, 1));
+    RegisterDescriptor(ABSpellDescriptor::MakeAreaHealAndDispel(
+        War3ID("AIha"), 500.0f, 150.0f, true, 0.0f, 20.0f, 0));
+}
+
 CUnit* SummonTimedUnit(CSimulation& game, CUnit* caster, War3ID typeId,
                        War3ID buffAlias, float x, float y, float facing,
                        float duration) {

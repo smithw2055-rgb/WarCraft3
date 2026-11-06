@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/job_system.h"
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"
 #include "render/scene.h"
@@ -97,10 +98,6 @@ static FrustumPlane MakeNormalizedPlane(float a, float b, float c, float d) {
 
 Frustum Frustum::FromViewProj(const Mat4& vp) {
     // Mat4 is column-major: vp.m[col * 4 + row]
-    // Row 0: m[0], m[4], m[8],  m[12]
-    // Row 1: m[1], m[5], m[9],  m[13]
-    // Row 2: m[2], m[6], m[10], m[14]
-    // Row 3: m[3], m[7], m[11], m[15]
     const float r0x = vp.m[0], r0y = vp.m[4], r0z = vp.m[8],  r0w = vp.m[12];
     const float r1x = vp.m[1], r1y = vp.m[5], r1z = vp.m[9],  r1w = vp.m[13];
     const float r2x = vp.m[2], r2y = vp.m[6], r2z = vp.m[10], r2w = vp.m[14];
@@ -126,18 +123,31 @@ bool Frustum::TestSphere(const Vec3& center, float radius) const {
 }
 
 bool Frustum::TestAABB(const Vec3& minCorner, const Vec3& maxCorner) const {
+    return ClassifyAABB(minCorner, maxCorner) != Containment::Outside;
+}
+
+Frustum::Containment Frustum::ClassifyAABB(const Vec3& minCorner, const Vec3& maxCorner) const {
+    bool allInside = true;
     for (int i = 0; i < kPlaneCount; ++i) {
         const FrustumPlane& p = planes_[i];
-        Vec3 positiveVertex(
+        const Vec3 positiveVertex(
             p.normal.x >= 0.0f ? maxCorner.x : minCorner.x,
             p.normal.y >= 0.0f ? maxCorner.y : minCorner.y,
             p.normal.z >= 0.0f ? maxCorner.z : minCorner.z
         );
         if (p.SignedDistance(positiveVertex) < 0.0f) {
-            return false;
+            return Containment::Outside;
+        }
+        const Vec3 negativeVertex(
+            p.normal.x >= 0.0f ? minCorner.x : maxCorner.x,
+            p.normal.y >= 0.0f ? minCorner.y : maxCorner.y,
+            p.normal.z >= 0.0f ? minCorner.z : maxCorner.z
+        );
+        if (p.SignedDistance(negativeVertex) < 0.0f) {
+            allInside = false;
         }
     }
-    return true;
+    return allInside ? Containment::Inside : Containment::Intersecting;
 }
 
 // ============================================================================
@@ -259,7 +269,74 @@ Mat4 RenderInterpolationBuffer::ComputeInterpolatedWorldMatrix(int handleId, flo
 }
 
 // ============================================================================
-// 4. RenderServer Batching, Sorting & Execution
+// 4. BonePaletteAtlas Implementation (Stage F1)
+// ============================================================================
+
+BonePaletteAtlas::BonePaletteAtlas(int maxBonesPerRow) {
+    ResetFrame(maxBonesPerRow);
+}
+
+void BonePaletteAtlas::WriteMatrixAt(int row, int boneIndex, const Mat4& m) {
+    if (row < 0 || row >= activeRowCount_ || boneIndex < 0 || boneIndex >= maxBonesPerRow_) {
+        return;
+    }
+    const size_t rowStrideFloats = static_cast<size_t>(texWidth_) * 4u;
+    const size_t baseOffset = static_cast<size_t>(row) * rowStrideFloats
+                            + static_cast<size_t>(boneIndex) * 16u;
+    for (int i = 0; i < 16; ++i) {
+        texelData_[baseOffset + static_cast<size_t>(i)] = m.m[i];
+    }
+}
+
+void BonePaletteAtlas::ResetFrame(int maxBonesPerRow) {
+    maxBonesPerRow_ = std::max(1, maxBonesPerRow);
+    texWidth_ = maxBonesPerRow_ * 4;
+    activeRowCount_ = 1; // Row 0 is reserved for Identity bind-pose matrices
+    const size_t rowStrideFloats = static_cast<size_t>(texWidth_) * 4u;
+    texelData_.assign(rowStrideFloats, 0.0f);
+    const Mat4 ident = Mat4::Identity();
+    for (int b = 0; b < maxBonesPerRow_; ++b) {
+        WriteMatrixAt(0, b, ident);
+    }
+    dirty_ = true;
+}
+
+int BonePaletteAtlas::AllocateAndPackRow(const std::vector<Mat4>& boneMatrices) {
+    if (boneMatrices.empty()) {
+        return 0;
+    }
+    const int row = activeRowCount_++;
+    const size_t rowStrideFloats = static_cast<size_t>(texWidth_) * 4u;
+    texelData_.resize(static_cast<size_t>(activeRowCount_) * rowStrideFloats, 0.0f);
+
+    const int count = std::min(static_cast<int>(boneMatrices.size()), maxBonesPerRow_);
+    for (int b = 0; b < count; ++b) {
+        WriteMatrixAt(row, b, boneMatrices[static_cast<size_t>(b)]);
+    }
+    const Mat4 ident = Mat4::Identity();
+    for (int b = count; b < maxBonesPerRow_; ++b) {
+        WriteMatrixAt(row, b, ident);
+    }
+    dirty_ = true;
+    return row;
+}
+
+Mat4 BonePaletteAtlas::SampleMatrix(int row, int boneIndex) const {
+    if (row < 0 || row >= activeRowCount_ || boneIndex < 0 || boneIndex >= maxBonesPerRow_) {
+        return Mat4::Identity();
+    }
+    const size_t rowStrideFloats = static_cast<size_t>(texWidth_) * 4u;
+    const size_t baseOffset = static_cast<size_t>(row) * rowStrideFloats
+                            + static_cast<size_t>(boneIndex) * 16u;
+    Mat4 out;
+    for (int i = 0; i < 16; ++i) {
+        out.m[i] = texelData_[baseOffset + static_cast<size_t>(i)];
+    }
+    return out;
+}
+
+// ============================================================================
+// 5. RenderServer Batching, Sorting & Execution
 // ============================================================================
 
 uint32_t RenderServer::RegisterMaterial(const std::string& name, const ShaderMaterial& material) {
@@ -295,7 +372,9 @@ void RenderServer::BeginFrame(const Mat4& view, const Mat4& proj, const Vec3& ca
     visibleItems_.clear();
     opaqueBatches_.clear();
     transparentBatches_.clear();
+    boneAtlas_.ResetFrame();
     stats_ = RenderFrameStats{};
+    stats_.boneAtlasRowsAllocated = boneAtlas_.GetActiveRowCount();
 }
 
 void RenderServer::SubmitItem(const RenderItem& item) {
@@ -308,6 +387,45 @@ void RenderServer::SubmitItem(const RenderItem& item) {
     }
     stats_.visibleItems++;
     visibleItems_.push_back(item);
+}
+
+void RenderServer::SubmitItemsParallel(const std::vector<RenderItem>& items,
+                                       core::JobSystem* jobSystem,
+                                       int minBatchSize) {
+    const int count = static_cast<int>(items.size());
+    if (count <= 0) {
+        return;
+    }
+    stats_.submittedItems += count;
+    stats_.parallelCulledItems += count;
+
+    if (!frustumCullingEnabled_) {
+        stats_.visibleItems += count;
+        visibleItems_.insert(visibleItems_.end(), items.begin(), items.end());
+        return;
+    }
+
+    core::JobSystem& js = jobSystem ? *jobSystem : core::JobSystem::Instance();
+    std::vector<uint8_t> visibleFlags(static_cast<size_t>(count), 0u);
+
+    js.ParallelForRange(count, std::max(1, minBatchSize), [&](int startIdx, int endIdx) {
+        for (int i = startIdx; i < endIdx; ++i) {
+            const RenderItem& it = items[static_cast<size_t>(i)];
+            if (frustum_.TestSphere(it.worldBoundsCenter, it.worldBoundsRadius)) {
+                visibleFlags[static_cast<size_t>(i)] = 1u;
+            }
+        }
+    });
+
+    visibleItems_.reserve(visibleItems_.size() + static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        if (visibleFlags[static_cast<size_t>(i)] != 0u) {
+            stats_.visibleItems++;
+            visibleItems_.push_back(items[static_cast<size_t>(i)]);
+        } else {
+            stats_.culledByFrustum++;
+        }
+    }
 }
 
 void RenderServer::SubmitSimulationUnits(const CSimulation& sim,
@@ -379,7 +497,7 @@ void RenderServer::BuildAndSortBatches() {
         payload.vertexTint = item.properties.vertexTint;
         payload.instanceParams = Vec4(
             static_cast<float>(item.properties.teamColorIndex),
-            item.properties.geosetColorAlpha.w,
+            0.0f, // boneAtlasRow populated during hardware instanced batch execution
             item.properties.animationFrame,
             item.properties.emissiveGain
         );
@@ -472,6 +590,171 @@ void RenderServer::ExecuteBatches(const std::function<void(const RenderBatchGrou
     for (const auto& batch : transparentBatches_) {
         drawCallback(batch);
     }
+    stats_.boneAtlasRowsAllocated = boneAtlas_.GetActiveRowCount();
+}
+
+void RenderServer::RecordHardwareInstancedSubmission(int drawCalls, int instanceCount) {
+    stats_.hardwareInstancedDrawCalls += std::max(0, drawCalls);
+    stats_.hardwareInstancesSubmitted += std::max(0, instanceCount);
+    stats_.boneAtlasRowsAllocated = boneAtlas_.GetActiveRowCount();
+}
+
+
+// ============================================================================
+// 6. StaticSpatialChunkGrid Implementation (Stage H)
+// ============================================================================
+
+void StaticSpatialChunkGrid::Clear(float chunkSize) {
+    if (chunkSize > 1.0f) {
+        chunkSize_ = chunkSize;
+    }
+    totalStaticItems_ = 0;
+    chunks_.clear();
+    chunkIndexByKey_.clear();
+    slotByEntityHandle_.clear();
+}
+
+void StaticSpatialChunkGrid::InsertStaticItem(const RenderItem& item, bool visible) {
+    const int cx = static_cast<int>(std::floor(item.worldBoundsCenter.x / chunkSize_));
+    const int cz = static_cast<int>(std::floor(item.worldBoundsCenter.z / chunkSize_));
+    const uint64_t key = PackChunkCoord(cx, cz);
+
+    const float r = std::max(1.0f, item.worldBoundsRadius);
+    const Vec3 itemMin(
+        item.worldBoundsCenter.x - r,
+        item.worldBoundsCenter.y - r,
+        item.worldBoundsCenter.z - r
+    );
+    const Vec3 itemMax(
+        item.worldBoundsCenter.x + r,
+        item.worldBoundsCenter.y + r,
+        item.worldBoundsCenter.z + r
+    );
+
+    size_t chunkIdx = 0;
+    auto it = chunkIndexByKey_.find(key);
+    if (it == chunkIndexByKey_.end()) {
+        chunkIdx = chunks_.size();
+        chunkIndexByKey_[key] = chunkIdx;
+        StaticSpatialChunk chunk;
+        chunk.chunkX = cx;
+        chunk.chunkZ = cz;
+        chunk.aabbMin = itemMin;
+        chunk.aabbMax = itemMax;
+        chunks_.push_back(std::move(chunk));
+    } else {
+        chunkIdx = it->second;
+        StaticSpatialChunk& chunk = chunks_[chunkIdx];
+        chunk.aabbMin.x = std::min(chunk.aabbMin.x, itemMin.x);
+        chunk.aabbMin.y = std::min(chunk.aabbMin.y, itemMin.y);
+        chunk.aabbMin.z = std::min(chunk.aabbMin.z, itemMin.z);
+        chunk.aabbMax.x = std::max(chunk.aabbMax.x, itemMax.x);
+        chunk.aabbMax.y = std::max(chunk.aabbMax.y, itemMax.y);
+        chunk.aabbMax.z = std::max(chunk.aabbMax.z, itemMax.z);
+    }
+
+    StaticSpatialChunk& chunk = chunks_[chunkIdx];
+    const size_t itemIdx = chunk.items.size();
+    chunk.items.push_back(item);
+    chunk.itemVisible.push_back(visible ? 1u : 0u);
+    slotByEntityHandle_[item.entityHandle] = ItemSlotRef{chunkIdx, itemIdx};
+    ++totalStaticItems_;
+}
+
+bool StaticSpatialChunkGrid::SetStaticItemVisible(int entityHandle, bool visible) {
+    auto it = slotByEntityHandle_.find(entityHandle);
+    if (it == slotByEntityHandle_.end()) {
+        return false;
+    }
+    StaticSpatialChunk& chunk = chunks_[it->second.chunkIndex];
+    chunk.itemVisible[it->second.itemIndex] = visible ? 1u : 0u;
+    return true;
+}
+
+bool StaticSpatialChunkGrid::UpdateStaticItemTint(int entityHandle,
+                                                  const Vec4& vertexTint,
+                                                  bool isTranslucent) {
+    auto it = slotByEntityHandle_.find(entityHandle);
+    if (it == slotByEntityHandle_.end()) {
+        return false;
+    }
+    StaticSpatialChunk& chunk = chunks_[it->second.chunkIndex];
+    RenderItem& item = chunk.items[it->second.itemIndex];
+    item.properties.vertexTint = vertexTint;
+    if (isTranslucent && !item.material.IsTransparent()) {
+        item.material.blendMode = RenderBlendMode::AlphaBlend;
+        item.material.depthState = RenderDepthState::ReadOnly;
+    }
+    return true;
+}
+
+void StaticSpatialChunkGrid::GatherVisibleStaticItems(
+    const Frustum& frustum,
+    bool frustumCullingEnabled,
+    std::vector<RenderItem>& outVisibleItems,
+    RenderFrameStats& inoutStats) const {
+    inoutStats.totalStaticChunks += static_cast<int>(chunks_.size());
+
+    for (const StaticSpatialChunk& chunk : chunks_) {
+        int activeInChunk = 0;
+        for (size_t i = 0; i < chunk.items.size(); ++i) {
+            if (chunk.itemVisible[i] != 0u) {
+                ++activeInChunk;
+            }
+        }
+        if (activeInChunk == 0) {
+            continue;
+        }
+        inoutStats.submittedItems += activeInChunk;
+
+        if (!frustumCullingEnabled) {
+            inoutStats.visibleChunks++;
+            inoutStats.visibleItems += activeInChunk;
+            for (size_t i = 0; i < chunk.items.size(); ++i) {
+                if (chunk.itemVisible[i] != 0u) {
+                    outVisibleItems.push_back(chunk.items[i]);
+                }
+            }
+            continue;
+        }
+
+        const Frustum::Containment containment = frustum.ClassifyAABB(chunk.aabbMin, chunk.aabbMax);
+        if (containment == Frustum::Containment::Outside) {
+            inoutStats.culledChunks++;
+            inoutStats.culledByChunkHierarchy += activeInChunk;
+            inoutStats.culledByFrustum += activeInChunk;
+            continue;
+        }
+
+        inoutStats.visibleChunks++;
+        if (containment == Frustum::Containment::Inside) {
+            inoutStats.fastAcceptedByChunkInside += activeInChunk;
+            inoutStats.visibleItems += activeInChunk;
+            for (size_t i = 0; i < chunk.items.size(); ++i) {
+                if (chunk.itemVisible[i] != 0u) {
+                    outVisibleItems.push_back(chunk.items[i]);
+                }
+            }
+        } else {
+            // Intersecting boundary chunk: test individual items inside this chunk
+            for (size_t i = 0; i < chunk.items.size(); ++i) {
+                if (chunk.itemVisible[i] == 0u) {
+                    continue;
+                }
+                const RenderItem& item = chunk.items[i];
+                if (frustum.TestSphere(item.worldBoundsCenter, item.worldBoundsRadius)) {
+                    inoutStats.visibleItems++;
+                    outVisibleItems.push_back(item);
+                } else {
+                    inoutStats.culledByFrustum++;
+                }
+            }
+        }
+    }
+}
+
+void RenderServer::SubmitStaticChunkGrid(const StaticSpatialChunkGrid& chunkGrid) {
+    chunkGrid.GatherVisibleStaticItems(frustum_, frustumCullingEnabled_, visibleItems_, stats_);
 }
 
 } // namespace render

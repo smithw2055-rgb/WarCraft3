@@ -267,6 +267,9 @@ void GameController::WireJassCallbacks() {
     // Wire all JASS simulation callbacks via unified WireSimulationEvents
     jassNatives_->WireSimulationEvents(simulation_);
 
+    // Bind UnitPresentationSystem to SimEventBus for reactive entity removal cleanup
+    presentation_.BindSimulationEvents(simulation_);
+
     // Subscribe presentation & audio listeners via multicast SimEventBus (Godot Signal style)
     simulation_.Events().onUnitTrained.Connect(
         [this](int /*buildingHandle*/, int trainedHandle) {
@@ -927,14 +930,7 @@ void GameController::SyncAndReconcileVisuals() {
         }
     }
     for (int handleId : removedHandles) {
-        simUnitToVisualIdx.erase(handleId);
-        simUnitVisualRegistrationFailed.erase(handleId);
-        simUnitVisualMovingStates.erase(handleId);
-        simUnitVisualLastPositions.erase(handleId);
-        simUnitPendingAnimations.erase(handleId);
-        simUnitQueuedAnimations.erase(handleId);
-        simUnitVisualPropertyTags.erase(handleId);
-        simUnitAnimationPropertyTags.erase(handleId);
+        presentation_.OnUnitRemoved(handleId, &scene_);
         selectedUnitHandlesSet_.erase(handleId);
         selectedUnitHandles_.erase(
             std::remove(selectedUnitHandles_.begin(), selectedUnitHandles_.end(), handleId),
@@ -951,8 +947,7 @@ void GameController::SyncAndReconcileVisuals() {
         }
     }
     for (int handleId : removedItemHandles) {
-        simItemToVisualIdx.erase(handleId);
-        simItemVisualRegistrationFailed.erase(handleId);
+        presentation_.OnItemRemoved(handleId, &scene_);
     }
 
     SyncFogStaticsVisibility();

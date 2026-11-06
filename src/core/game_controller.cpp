@@ -586,6 +586,12 @@ void GameController::StepSimulation(float dt) {
     }
 
     if (ranSimulationStep) {
+        presentation_.CaptureSimulationTick(simulation_);
+    }
+    presentation_.SetInterpolationAlpha(
+        simStep > 0.0f ? std::clamp(simulationAccumulator_ / simStep, 0.0f, 1.0f) : 1.0f);
+
+    if (ranSimulationStep) {
         if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
             SyncAndReconcileVisuals();
         }

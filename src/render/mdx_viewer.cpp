@@ -720,6 +720,18 @@ sg_pipeline MdxViewer::sharedOverlaySkinnedPipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlaySkinnedBlendPipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlaySkinnedAdditivePipeline_ = {0};
 sg_pipeline MdxViewer::sharedOverlaySkinnedAddAlphaPipeline_ = {0};
+sg_shader MdxViewer::sharedInstancedShader_ = {0};
+sg_pipeline MdxViewer::sharedInstancedPipeline_ = {0};
+sg_pipeline MdxViewer::sharedInstancedBlendPipeline_ = {0};
+sg_shader MdxViewer::sharedSkinnedInstancedShader_ = {0};
+sg_pipeline MdxViewer::sharedSkinnedInstancedPipeline_ = {0};
+sg_pipeline MdxViewer::sharedSkinnedInstancedBlendPipeline_ = {0};
+sg_buffer MdxViewer::sharedInstanceBuffer_ = {0};
+size_t MdxViewer::sharedInstanceBufferCapacity_ = 0;
+sg_image MdxViewer::sharedBoneAtlasTexture_ = {0};
+sg_view MdxViewer::sharedBoneAtlasView_ = {0};
+int MdxViewer::sharedBoneAtlasWidth_ = 0;
+int MdxViewer::sharedBoneAtlasHeight_ = 0;
 sg_sampler MdxViewer::sharedSampler_ = {0};
 sg_sampler MdxViewer::sharedNearestSampler_ = {0};
 sg_image MdxViewer::sharedWhiteTexture_ = {0};
@@ -1211,6 +1223,304 @@ void MdxViewer::InitSharedShader() {
         pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
         sharedOverlaySkinnedAddAlphaPipeline_ = sg_make_pipeline(&pd);
     }
+
+    // ---- Stage F2: Static Hardware Instanced shader & pipeline ----
+    {
+        const char* vertSrc = R"(
+            #version 410 core
+            layout(location = 0) in vec3 aPos;
+            layout(location = 1) in vec3 aNorm;
+            layout(location = 2) in vec2 aUV;
+            layout(location = 8) in vec4 iModelCol0;
+            layout(location = 9) in vec4 iModelCol1;
+            layout(location = 10) in vec4 iModelCol2;
+            layout(location = 11) in vec4 iModelCol3;
+            layout(location = 12) in vec4 iVertexTint;
+            layout(location = 13) in vec4 iInstanceParams;
+            out vec2 vUV;
+            out vec3 vNorm;
+            out vec4 vInstTint;
+            uniform mat4 uViewProj;
+            void main() {
+                mat4 iModel = mat4(iModelCol0, iModelCol1, iModelCol2, iModelCol3);
+                gl_Position = uViewProj * iModel * vec4(aPos, 1.0);
+                vUV = aUV;
+                vNorm = mat3(iModel) * aNorm;
+                vInstTint = iVertexTint;
+            }
+        )";
+        const char* fragSrc = R"(
+            #version 410 core
+            in vec2 vUV;
+            in vec3 vNorm;
+            in vec4 vInstTint;
+            out vec4 FragColor;
+            uniform sampler2D uTexture;
+            uniform vec4 uDebugColor;
+            uniform vec4 uUvTransRot;
+            uniform vec4 uTexFlags;
+            uniform vec4 uFogColor;
+            uniform vec4 uFogParams;
+            uniform vec4 uSunDir;
+            uniform vec4 uSunColor;
+            uniform vec4 uAmbientColor;
+            vec2 quat_transform(vec2 q, vec2 v) {
+                vec2 uv = vec2(-q.x * v.y, q.x * v.x);
+                vec2 uuv = vec2(-q.x * uv.y, q.x * uv.x);
+                return v + 2.0 * (uv * q.y + uuv);
+            }
+            void main() {
+                vec3 N = normalize(vNorm);
+                vec3 L = normalize(uSunDir.xyz);
+                float NdotL = (uAmbientColor.w > 0.5) ? abs(dot(N, L)) : max(dot(N, L), 0.0);
+                vec3 light = (uSunDir.w > 0.5) ? vec3(1.0) : (uAmbientColor.rgb + uSunColor.rgb * NdotL);
+                vec4 baseColor = uDebugColor * vInstTint;
+                vec4 color = baseColor;
+                vec2 uv = vUV;
+                uv += uUvTransRot.xy;
+                uv = quat_transform(uUvTransRot.zw, uv - 0.5) + 0.5;
+                uv = uTexFlags.zw * (uv - 0.5) + 0.5;
+                if (uTexFlags.x > 0.5) color = texture(uTexture, uv) * baseColor;
+                if (uTexFlags.y == 1.0 && color.a < 0.75) discard;
+                if (uTexFlags.y >= 5.0 && color.a < 0.02) discard;
+                FragColor = vec4(color.rgb * light, color.a);
+                if (uSunColor.w < 0.5 && uFogParams.x > 0.5) {
+                    float fogAmount = clamp(((1.0 / gl_FragCoord.w) - uFogParams.y) / (uFogParams.z - uFogParams.y), 0.0, 1.0);
+                    FragColor.rgb = FragColor.rgb * (1.0 - fogAmount) + uFogColor.rgb * fogAmount;
+                }
+                if (FragColor.a < 0.01) discard;
+            }
+        )";
+        sg_shader_desc sd = {};
+        sd.vertex_func.source = vertSrc;
+        sd.fragment_func.source = fragSrc;
+        sd.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
+        sd.uniform_blocks[0].size = 64;
+        sd.uniform_blocks[0].layout = SG_UNIFORMLAYOUT_NATIVE;
+        sd.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_MAT4;
+        sd.uniform_blocks[0].glsl_uniforms[0].array_count = 1;
+        sd.uniform_blocks[0].glsl_uniforms[0].glsl_name = "uViewProj";
+        sd.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
+        sd.uniform_blocks[1].size = 128;
+        sd.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_NATIVE;
+        sd.uniform_blocks[1].glsl_uniforms[0] = {SG_UNIFORMTYPE_FLOAT4, 1, "uDebugColor"};
+        sd.uniform_blocks[1].glsl_uniforms[1] = {SG_UNIFORMTYPE_FLOAT4, 1, "uUvTransRot"};
+        sd.uniform_blocks[1].glsl_uniforms[2] = {SG_UNIFORMTYPE_FLOAT4, 1, "uTexFlags"};
+        sd.uniform_blocks[1].glsl_uniforms[3] = {SG_UNIFORMTYPE_FLOAT4, 1, "uFogColor"};
+        sd.uniform_blocks[1].glsl_uniforms[4] = {SG_UNIFORMTYPE_FLOAT4, 1, "uFogParams"};
+        sd.uniform_blocks[1].glsl_uniforms[5] = {SG_UNIFORMTYPE_FLOAT4, 1, "uSunDir"};
+        sd.uniform_blocks[1].glsl_uniforms[6] = {SG_UNIFORMTYPE_FLOAT4, 1, "uSunColor"};
+        sd.uniform_blocks[1].glsl_uniforms[7] = {SG_UNIFORMTYPE_FLOAT4, 1, "uAmbientColor"};
+        sd.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+        sd.views[0].texture.image_type = SG_IMAGETYPE_2D;
+        sd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+        sd.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+        sd.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+        sd.texture_sampler_pairs[0] = {SG_SHADERSTAGE_FRAGMENT, 0, 0, "uTexture"};
+        sharedInstancedShader_ = sg_make_shader(&sd);
+
+        if (sharedInstancedShader_.id) {
+            sg_pipeline_desc pd = {};
+            pd.shader = sharedInstancedShader_;
+            pd.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+            pd.index_type = SG_INDEXTYPE_UINT32;
+            pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+            pd.depth.write_enabled = true;
+            pd.cull_mode = SG_CULLMODE_NONE;
+            pd.layout.buffers[0].stride = 32;
+            pd.layout.buffers[0].step_func = SG_VERTEXSTEP_PER_VERTEX;
+            pd.layout.buffers[1].stride = sizeof(render::InstanceGpuPayload);
+            pd.layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE;
+            pd.layout.attrs[0] = {0, 0, SG_VERTEXFORMAT_FLOAT3};
+            pd.layout.attrs[1] = {0, 12, SG_VERTEXFORMAT_FLOAT3};
+            pd.layout.attrs[2] = {0, 24, SG_VERTEXFORMAT_FLOAT2};
+            pd.layout.attrs[8]  = {1, 0, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[9]  = {1, 16, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[10] = {1, 32, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[11] = {1, 48, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[12] = {1, 64, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[13] = {1, 80, SG_VERTEXFORMAT_FLOAT4};
+            sharedInstancedPipeline_ = sg_make_pipeline(&pd);
+
+            pd.colors[0].blend.enabled = true;
+            pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            pd.depth.write_enabled = false;
+            sharedInstancedBlendPipeline_ = sg_make_pipeline(&pd);
+        }
+    }
+
+    // ---- Stage F2: Skinned Hardware Instanced shader & pipeline (2D BonePaletteAtlas) ----
+    {
+        const char* vertSrc = R"(
+            #version 410 core
+            layout(location = 0) in vec3 aPos;
+            layout(location = 1) in vec3 aNorm;
+            layout(location = 2) in vec2 aUV;
+            layout(location = 3) in vec4 aBoneIndices0;
+            layout(location = 4) in vec4 aBoneIndices1;
+            layout(location = 5) in vec4 aBoneWeights0;
+            layout(location = 6) in vec4 aBoneWeights1;
+            layout(location = 7) in float aBoneCount;
+            layout(location = 8) in vec4 iModelCol0;
+            layout(location = 9) in vec4 iModelCol1;
+            layout(location = 10) in vec4 iModelCol2;
+            layout(location = 11) in vec4 iModelCol3;
+            layout(location = 12) in vec4 iVertexTint;
+            layout(location = 13) in vec4 iInstanceParams;
+
+            out vec2 vUV;
+            out vec3 vNorm;
+            out vec4 vInstTint;
+            uniform mat4 uViewProj;
+            uniform sampler2D uBoneTexture;
+            uniform int uBoneCount;
+
+            mat4 getBoneMatrix(int idx, int row) {
+                int base = idx * 4;
+                vec4 c0 = texelFetch(uBoneTexture, ivec2(base + 0, row), 0);
+                vec4 c1 = texelFetch(uBoneTexture, ivec2(base + 1, row), 0);
+                vec4 c2 = texelFetch(uBoneTexture, ivec2(base + 2, row), 0);
+                vec4 c3 = texelFetch(uBoneTexture, ivec2(base + 3, row), 0);
+                return mat4(c0, c1, c2, c3);
+            }
+
+            void main() {
+                mat4 iModel = mat4(iModelCol0, iModelCol1, iModelCol2, iModelCol3);
+                int boneRow = max(0, int(iInstanceParams.y + 0.5));
+                vec3 pos = vec3(0.0);
+                vec3 norm = vec3(0.0);
+                int numBones = int(aBoneCount);
+                if (numBones <= 0 || uBoneCount <= 0) {
+                    pos = aPos;
+                    norm = aNorm;
+                } else {
+                    for (int i = 0; i < 8 && i < numBones; i++) {
+                        int bi = i < 4 ? int(aBoneIndices0[i]) : int(aBoneIndices1[i - 4]);
+                        float w = i < 4 ? aBoneWeights0[i] : aBoneWeights1[i - 4];
+                        if (bi >= 0 && bi < uBoneCount) {
+                            mat4 m = getBoneMatrix(bi, boneRow);
+                            pos += (m * vec4(aPos, 1.0)).xyz * w;
+                            norm += (mat3(m) * aNorm) * w;
+                        }
+                    }
+                }
+                gl_Position = uViewProj * iModel * vec4(pos, 1.0);
+                vUV = aUV;
+                vNorm = normalize(mat3(iModel) * norm);
+                vInstTint = iVertexTint;
+            }
+        )";
+        const char* fragSrc = R"(
+            #version 410 core
+            in vec2 vUV;
+            in vec3 vNorm;
+            in vec4 vInstTint;
+            out vec4 FragColor;
+            uniform sampler2D uTexture;
+            uniform vec4 uDebugColor;
+            uniform vec4 uUvTransRot;
+            uniform vec4 uTexFlags;
+            uniform vec4 uFogColor;
+            uniform vec4 uFogParams;
+            uniform vec4 uSunDir;
+            uniform vec4 uSunColor;
+            uniform vec4 uAmbientColor;
+            vec2 quat_transform(vec2 q, vec2 v) {
+                vec2 uv = vec2(-q.x * v.y, q.x * v.x);
+                vec2 uuv = vec2(-q.x * uv.y, q.x * uv.x);
+                return v + 2.0 * (uv * q.y + uuv);
+            }
+            void main() {
+                vec3 N = normalize(vNorm);
+                vec3 L = normalize(uSunDir.xyz);
+                float NdotL = (uAmbientColor.w > 0.5) ? abs(dot(N, L)) : max(dot(N, L), 0.0);
+                vec3 light = (uSunDir.w > 0.5) ? vec3(1.0) : (uAmbientColor.rgb + uSunColor.rgb * NdotL);
+                vec4 baseColor = uDebugColor * vInstTint;
+                vec4 color = baseColor;
+                vec2 uv = vUV;
+                uv += uUvTransRot.xy;
+                uv = quat_transform(uUvTransRot.zw, uv - 0.5) + 0.5;
+                uv = uTexFlags.zw * (uv - 0.5) + 0.5;
+                if (uTexFlags.x > 0.5) color = texture(uTexture, uv) * baseColor;
+                if (uTexFlags.y == 1.0 && color.a < 0.75) discard;
+                if (uTexFlags.y >= 5.0 && color.a < 0.02) discard;
+                FragColor = vec4(color.rgb * light, color.a);
+                if (uSunColor.w < 0.5 && uFogParams.x > 0.5) {
+                    float fogAmount = clamp(((1.0 / gl_FragCoord.w) - uFogParams.y) / (uFogParams.z - uFogParams.y), 0.0, 1.0);
+                    FragColor.rgb = FragColor.rgb * (1.0 - fogAmount) + uFogColor.rgb * fogAmount;
+                }
+                if (FragColor.a < 0.01) discard;
+            }
+        )";
+        sg_shader_desc sd = {};
+        sd.vertex_func.source = vertSrc;
+        sd.fragment_func.source = fragSrc;
+        sd.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
+        sd.uniform_blocks[0].size = 68;
+        sd.uniform_blocks[0].layout = SG_UNIFORMLAYOUT_NATIVE;
+        sd.uniform_blocks[0].glsl_uniforms[0] = {SG_UNIFORMTYPE_MAT4, 1, "uViewProj"};
+        sd.uniform_blocks[0].glsl_uniforms[1] = {SG_UNIFORMTYPE_INT, 1, "uBoneCount"};
+        sd.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
+        sd.uniform_blocks[1].size = 128;
+        sd.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_NATIVE;
+        sd.uniform_blocks[1].glsl_uniforms[0] = {SG_UNIFORMTYPE_FLOAT4, 1, "uDebugColor"};
+        sd.uniform_blocks[1].glsl_uniforms[1] = {SG_UNIFORMTYPE_FLOAT4, 1, "uUvTransRot"};
+        sd.uniform_blocks[1].glsl_uniforms[2] = {SG_UNIFORMTYPE_FLOAT4, 1, "uTexFlags"};
+        sd.uniform_blocks[1].glsl_uniforms[3] = {SG_UNIFORMTYPE_FLOAT4, 1, "uFogColor"};
+        sd.uniform_blocks[1].glsl_uniforms[4] = {SG_UNIFORMTYPE_FLOAT4, 1, "uFogParams"};
+        sd.uniform_blocks[1].glsl_uniforms[5] = {SG_UNIFORMTYPE_FLOAT4, 1, "uSunDir"};
+        sd.uniform_blocks[1].glsl_uniforms[6] = {SG_UNIFORMTYPE_FLOAT4, 1, "uSunColor"};
+        sd.uniform_blocks[1].glsl_uniforms[7] = {SG_UNIFORMTYPE_FLOAT4, 1, "uAmbientColor"};
+        sd.views[0].texture.stage = SG_SHADERSTAGE_VERTEX;
+        sd.views[0].texture.image_type = SG_IMAGETYPE_2D;
+        sd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_UNFILTERABLE_FLOAT;
+        sd.samplers[0].stage = SG_SHADERSTAGE_VERTEX;
+        sd.samplers[0].sampler_type = SG_SAMPLERTYPE_NONFILTERING;
+        sd.texture_sampler_pairs[0] = {SG_SHADERSTAGE_VERTEX, 0, 0, "uBoneTexture"};
+        sd.views[1].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+        sd.views[1].texture.image_type = SG_IMAGETYPE_2D;
+        sd.views[1].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+        sd.samplers[1].stage = SG_SHADERSTAGE_FRAGMENT;
+        sd.samplers[1].sampler_type = SG_SAMPLERTYPE_FILTERING;
+        sd.texture_sampler_pairs[1] = {SG_SHADERSTAGE_FRAGMENT, 1, 1, "uTexture"};
+        sharedSkinnedInstancedShader_ = sg_make_shader(&sd);
+
+        if (sharedSkinnedInstancedShader_.id) {
+            sg_pipeline_desc pd = {};
+            pd.shader = sharedSkinnedInstancedShader_;
+            pd.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+            pd.index_type = SG_INDEXTYPE_UINT32;
+            pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+            pd.depth.write_enabled = true;
+            pd.cull_mode = SG_CULLMODE_NONE;
+            pd.layout.buffers[0].stride = sizeof(MdxSkinnedVertex);
+            pd.layout.buffers[0].step_func = SG_VERTEXSTEP_PER_VERTEX;
+            pd.layout.buffers[1].stride = sizeof(render::InstanceGpuPayload);
+            pd.layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE;
+            pd.layout.attrs[0] = {0, 0, SG_VERTEXFORMAT_FLOAT3};
+            pd.layout.attrs[1] = {0, 12, SG_VERTEXFORMAT_FLOAT3};
+            pd.layout.attrs[2] = {0, 24, SG_VERTEXFORMAT_FLOAT2};
+            pd.layout.attrs[3] = {0, 32, SG_VERTEXFORMAT_UBYTE4};
+            pd.layout.attrs[4] = {0, 36, SG_VERTEXFORMAT_UBYTE4};
+            pd.layout.attrs[5] = {0, 40, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[6] = {0, 56, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[7] = {0, 72, SG_VERTEXFORMAT_FLOAT};
+            pd.layout.attrs[8]  = {1, 0, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[9]  = {1, 16, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[10] = {1, 32, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[11] = {1, 48, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[12] = {1, 64, SG_VERTEXFORMAT_FLOAT4};
+            pd.layout.attrs[13] = {1, 80, SG_VERTEXFORMAT_FLOAT4};
+            sharedSkinnedInstancedPipeline_ = sg_make_pipeline(&pd);
+
+            pd.colors[0].blend.enabled = true;
+            pd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            pd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            pd.depth.write_enabled = false;
+            sharedSkinnedInstancedBlendPipeline_ = sg_make_pipeline(&pd);
+        }
+    }
 }
 
 void MdxViewer::ReleaseSharedShader() {
@@ -1248,6 +1558,20 @@ void MdxViewer::ReleaseSharedShader() {
     sharedOverlaySkinnedAdditivePipeline_ = {0}; sharedOverlaySkinnedAddAlphaPipeline_ = {0};
     sharedSampler_ = {0};
     sharedNearestSampler_ = {0};
+    if (sharedInstancedBlendPipeline_.id) sg_destroy_pipeline(sharedInstancedBlendPipeline_);
+    if (sharedInstancedPipeline_.id) sg_destroy_pipeline(sharedInstancedPipeline_);
+    if (sharedInstancedShader_.id) sg_destroy_shader(sharedInstancedShader_);
+    if (sharedSkinnedInstancedBlendPipeline_.id) sg_destroy_pipeline(sharedSkinnedInstancedBlendPipeline_);
+    if (sharedSkinnedInstancedPipeline_.id) sg_destroy_pipeline(sharedSkinnedInstancedPipeline_);
+    if (sharedSkinnedInstancedShader_.id) sg_destroy_shader(sharedSkinnedInstancedShader_);
+    if (sharedInstanceBuffer_.id) sg_destroy_buffer(sharedInstanceBuffer_);
+    if (sharedBoneAtlasView_.id) sg_destroy_view(sharedBoneAtlasView_);
+    if (sharedBoneAtlasTexture_.id) sg_destroy_image(sharedBoneAtlasTexture_);
+    sharedInstancedShader_ = {0}; sharedInstancedPipeline_ = {0}; sharedInstancedBlendPipeline_ = {0};
+    sharedSkinnedInstancedShader_ = {0}; sharedSkinnedInstancedPipeline_ = {0}; sharedSkinnedInstancedBlendPipeline_ = {0};
+    sharedInstanceBuffer_ = {0}; sharedInstanceBufferCapacity_ = 0;
+    sharedBoneAtlasTexture_ = {0}; sharedBoneAtlasView_ = {0};
+    sharedBoneAtlasWidth_ = 0; sharedBoneAtlasHeight_ = 0;
     sharedWhiteTexture_ = {0};
     sharedWhiteTextureView_ = {0};
 }
@@ -1519,8 +1843,10 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
             sourceModel.helpers.size(), sourceModel.textures.size());
     }
 
-    InitSharedShader();
-    if (!sharedShader_.id || !sharedPipeline_.id) return false;
+    if (Renderer::IsActive()) {
+        InitSharedShader();
+        if (!sharedShader_.id || !sharedPipeline_.id) return false;
+    }
 
     // Many Warcraft III models rely on bones/helpers even without animation sequences.
     // Treat any skeletal hierarchy as needing the animator path so bind-pose transforms
@@ -1662,7 +1988,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
         std::fprintf(stderr, "MdxViewer::Load resolving textures name=%s count=%zu\n",
             name_.c_str(), sourceModel.textures.size());
     }
-    for (size_t ti = 0; ti < sourceModel.textures.size(); ti++) {
+    for (size_t ti = 0; Renderer::IsActive() && ti < sourceModel.textures.size(); ti++) {
         auto& texRef = sourceModel.textures[ti];
         auto& cache = modelTextures_[ti];
         if (!texRef.path.empty()) {
@@ -1832,7 +2158,9 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
                     bool wrapV = !isCliff && ((texFlags & 0x2) != 0);
                     smp.wrap_u = wrapU ? SG_WRAP_REPEAT : SG_WRAP_CLAMP_TO_EDGE;
                     smp.wrap_v = wrapV ? SG_WRAP_REPEAT : SG_WRAP_CLAMP_TO_EDGE;
-                    batch.sampler = sg_make_sampler(&smp);
+                    if (Renderer::IsActive()) {
+                        batch.sampler = sg_make_sampler(&smp);
+                    }
                     batch.materialId = geo.materialId;
                     batch.geosetIndex = gi;
                     batch.materialLayerIndex = pass;
@@ -1941,7 +2269,9 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
                 bool wrapV = !isCliff && ((texFlags & 0x2) != 0);
                 smp.wrap_u = wrapU ? SG_WRAP_REPEAT : SG_WRAP_CLAMP_TO_EDGE;
                 smp.wrap_v = wrapV ? SG_WRAP_REPEAT : SG_WRAP_CLAMP_TO_EDGE;
-                batch.sampler = sg_make_sampler(&smp);
+                if (Renderer::IsActive()) {
+                    batch.sampler = sg_make_sampler(&smp);
+                }
                 batch.skinned = false;
                 batch.materialId = geo.materialId;
                 batch.geosetIndex = gi;
@@ -1959,15 +2289,17 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
                     batch.geosetColor[2] = geosetAnim->color[2];
                 }
 
-                sg_buffer_desc vbd = {};
-                vbd.usage.vertex_buffer = true; vbd.usage.immutable = true;
-                vbd.data.ptr = verts.data(); vbd.data.size = verts.size() * sizeof(VertexStatic);
-                batch.vbo = sg_make_buffer(&vbd);
+                if (Renderer::IsActive()) {
+                    sg_buffer_desc vbd = {};
+                    vbd.usage.vertex_buffer = true; vbd.usage.immutable = true;
+                    vbd.data.ptr = verts.data(); vbd.data.size = verts.size() * sizeof(VertexStatic);
+                    batch.vbo = sg_make_buffer(&vbd);
 
-                sg_buffer_desc ibd = {};
-                ibd.usage.index_buffer = true; ibd.usage.immutable = true;
-                ibd.data.ptr = geo.indices.data(); ibd.data.size = geo.indices.size() * sizeof(unsigned);
-                batch.ebo = sg_make_buffer(&ibd);
+                    sg_buffer_desc ibd = {};
+                    ibd.usage.index_buffer = true; ibd.usage.immutable = true;
+                    ibd.data.ptr = geo.indices.data(); ibd.data.size = geo.indices.size() * sizeof(unsigned);
+                    batch.ebo = sg_make_buffer(&ibd);
+                }
 
                 batches_.push_back(batch);
             }
@@ -2517,15 +2849,17 @@ void MdxViewer::BuildSkinnedBatch(const MdxGeoset& geo, int geosetIdx,
     batch.skinned = true;
     batch.materialId = geo.materialId;
 
-    sg_buffer_desc vbd = {};
-    vbd.usage.vertex_buffer = true; vbd.usage.immutable = true;
-    vbd.data.ptr = verts.data(); vbd.data.size = verts.size() * sizeof(MdxSkinnedVertex);
-    batch.vbo = sg_make_buffer(&vbd);
+    if (Renderer::IsActive()) {
+        sg_buffer_desc vbd = {};
+        vbd.usage.vertex_buffer = true; vbd.usage.immutable = true;
+        vbd.data.ptr = verts.data(); vbd.data.size = verts.size() * sizeof(MdxSkinnedVertex);
+        batch.vbo = sg_make_buffer(&vbd);
 
-    sg_buffer_desc ibd = {};
-    ibd.usage.index_buffer = true; ibd.usage.immutable = true;
-    ibd.data.ptr = geo.indices.data(); ibd.data.size = geo.indices.size() * sizeof(unsigned);
-    batch.ebo = sg_make_buffer(&ibd);
+        sg_buffer_desc ibd = {};
+        ibd.usage.index_buffer = true; ibd.usage.immutable = true;
+        ibd.data.ptr = geo.indices.data(); ibd.data.size = geo.indices.size() * sizeof(unsigned);
+        batch.ebo = sg_make_buffer(&ibd);
+    }
 
     batches_.push_back(batch);
 }
@@ -3184,4 +3518,188 @@ void MdxViewer::SetWorldOffset(const Vec3& offset) {
     if (hasRibbons_) {
         ribbons_.SetWorldOffset(offset);
     }
+}
+
+int MdxViewer::RenderInstancedBatch(const std::vector<render::InstanceGpuPayload>& instances,
+                                    const render::BonePaletteAtlas* boneAtlas,
+                                    const Mat4& view,
+                                    const Mat4& proj,
+                                    int defaultPlayer,
+                                    bool depthTest) {
+    if (instances.empty()) {
+        return 0;
+    }
+    ++instancedBatchCallCount_;
+    lastInstancedElementCount_ = static_cast<int>(instances.size());
+
+    // Headless / test mode: record the hardware instanced draw call count (1 draw call per submesh batch)
+    if (!Renderer::IsActive()) {
+        return std::max(1, static_cast<int>(batches_.size()));
+    }
+    if (batches_.empty()) {
+        return 0;
+    }
+
+    InitSharedShader();
+    const size_t requiredBytes = instances.size() * sizeof(render::InstanceGpuPayload);
+    if (!sharedInstanceBuffer_.id || sharedInstanceBufferCapacity_ < requiredBytes) {
+        if (sharedInstanceBuffer_.id) {
+            sg_destroy_buffer(sharedInstanceBuffer_);
+        }
+        sharedInstanceBufferCapacity_ = std::max(requiredBytes, size_t(256) * sizeof(render::InstanceGpuPayload));
+        sg_buffer_desc ibDesc = {};
+        ibDesc.size = sharedInstanceBufferCapacity_;
+        ibDesc.usage.vertex_buffer = true;
+        ibDesc.usage.stream_update = true;
+        sharedInstanceBuffer_ = sg_make_buffer(&ibDesc);
+    }
+    if (!sharedInstanceBuffer_.id) {
+        return 0;
+    }
+    sg_range instRange = { instances.data(), requiredBytes };
+    sg_update_buffer(sharedInstanceBuffer_, &instRange);
+
+    // Upload or update the shared 2D BonePaletteAtlas RGBA32F texture when dirty
+    if (boneAtlas && boneAtlas->GetActiveRowCount() > 0 && !boneAtlas->GetTexelBuffer().empty()) {
+        const int atlasW = boneAtlas->GetTexWidth();
+        const int atlasH = boneAtlas->GetActiveRowCount();
+        if (!sharedBoneAtlasTexture_.id || sharedBoneAtlasWidth_ != atlasW || sharedBoneAtlasHeight_ != atlasH) {
+            if (sharedBoneAtlasView_.id) {
+                sg_destroy_view(sharedBoneAtlasView_);
+                sharedBoneAtlasView_ = {0};
+            }
+            if (sharedBoneAtlasTexture_.id) {
+                sg_destroy_image(sharedBoneAtlasTexture_);
+                sharedBoneAtlasTexture_ = {0};
+            }
+            sg_image_desc desc = {};
+            desc.type = SG_IMAGETYPE_2D;
+            desc.width = atlasW;
+            desc.height = atlasH;
+            desc.pixel_format = SG_PIXELFORMAT_RGBA32F;
+            desc.num_mipmaps = 1;
+            desc.usage.stream_update = true;
+            sharedBoneAtlasTexture_ = sg_make_image(&desc);
+            if (sg_query_image_state(sharedBoneAtlasTexture_) == SG_RESOURCESTATE_VALID) {
+                sg_view_desc vd = {};
+                vd.texture.image = sharedBoneAtlasTexture_;
+                sharedBoneAtlasView_ = sg_make_view(&vd);
+                sharedBoneAtlasWidth_ = atlasW;
+                sharedBoneAtlasHeight_ = atlasH;
+            }
+        }
+        if (boneAtlas->IsDirty() && sharedBoneAtlasTexture_.id &&
+            sg_query_image_state(sharedBoneAtlasTexture_) == SG_RESOURCESTATE_VALID) {
+            sg_image_data data = {};
+            data.mip_levels[0].ptr = boneAtlas->GetTexelBuffer().data();
+            data.mip_levels[0].size = boneAtlas->GetTexelBuffer().size() * sizeof(float);
+            sg_update_image(sharedBoneAtlasTexture_, &data);
+            boneAtlas->ClearDirty();
+        }
+    }
+
+    const Mat4 viewProj = proj * view;
+    struct VSInstStatic { float ViewProj[16]; };
+    struct VSInstSkinned { float ViewProj[16]; int boneCount; };
+    struct FSBlock {
+        float color[4];
+        float uvTransRot[4];
+        float texFlags[4];
+        float fogColor[4];
+        float fogParams[4];
+        float sunDir[4];
+        float sunColor[4];
+        float ambientColor[4];
+    };
+
+    VSInstStatic vsU = {};
+    std::memcpy(vsU.ViewProj, viewProj.Data(), 64);
+    VSInstSkinned vsUS = {};
+    std::memcpy(vsUS.ViewProj, viewProj.Data(), 64);
+    vsUS.boneCount = initializedAnimator_ ? animator_.GetBoneCount() : 0;
+
+    FSBlock fsU = {};
+    fsU.color[0] = 1.0f; fsU.color[1] = 1.0f; fsU.color[2] = 1.0f; fsU.color[3] = 1.0f;
+    fsU.uvTransRot[3] = 1.0f;
+    fsU.texFlags[2] = 1.0f; fsU.texFlags[3] = 1.0f;
+
+    const bool useFog = fogEnabled_ || sharedFogEnabled_;
+    const float* activeFogColor = fogEnabled_ ? fogColor_ : sharedFogColor_;
+    fsU.fogColor[0] = activeFogColor[0];
+    fsU.fogColor[1] = activeFogColor[1];
+    fsU.fogColor[2] = activeFogColor[2];
+    fsU.fogColor[3] = 1.0f;
+    fsU.fogParams[0] = useFog ? 1.0f : 0.0f;
+    fsU.fogParams[1] = fogEnabled_ ? fogStart_ : sharedFogStart_;
+    fsU.fogParams[2] = fogEnabled_ ? fogEnd_ : sharedFogEnd_;
+
+    int submittedDrawCalls = 0;
+    const int instanceCount = static_cast<int>(instances.size());
+    for (auto& batch : batches_) {
+        if (!batch.vbo.id || !batch.ebo.id || batch.indexCount <= 0) {
+            continue;
+        }
+        sg_view texView = batch.textureView.id ? batch.textureView : sharedWhiteTextureView_;
+        sg_sampler diffuseSampler = batch.sampler.id ? batch.sampler : sharedSampler_;
+        if (batch.replaceableId == 1 || batch.replaceableId == 2) {
+            GetPlayerTexture(batch, defaultPlayer);
+            if (batch.playerTexView.id) {
+                texView = batch.playerTexView;
+            }
+        }
+        fsU.texFlags[0] = batch.hasTexture ? 1.0f : 0.0f;
+        fsU.texFlags[1] = static_cast<float>(batch.filterMode);
+        fsU.color[0] = batch.geosetColor[0];
+        fsU.color[1] = batch.geosetColor[1];
+        fsU.color[2] = batch.geosetColor[2];
+        fsU.color[3] = batch.layerAlpha * batch.geosetAlpha;
+
+        const bool isUnshaded = (batch.layerFlags & 0x1) != 0;
+        const bool isUnfogged = (batch.layerFlags & 0x2) != 0;
+        const bool isTwoSided = (batch.layerFlags & 0x10) != 0;
+        fsU.sunDir[0] = sharedSunDir_.x; fsU.sunDir[1] = sharedSunDir_.y; fsU.sunDir[2] = sharedSunDir_.z;
+        fsU.sunDir[3] = isUnshaded ? 1.0f : 0.0f;
+        fsU.sunColor[0] = sharedSunColor_.x * sharedSunIntensity_;
+        fsU.sunColor[1] = sharedSunColor_.y * sharedSunIntensity_;
+        fsU.sunColor[2] = sharedSunColor_.z * sharedSunIntensity_;
+        fsU.sunColor[3] = isUnfogged ? 1.0f : 0.0f;
+        fsU.ambientColor[0] = sharedAmbientColor_.x * sharedAmbientIntensity_;
+        fsU.ambientColor[1] = sharedAmbientColor_.y * sharedAmbientIntensity_;
+        fsU.ambientColor[2] = sharedAmbientColor_.z * sharedAmbientIntensity_;
+        fsU.ambientColor[3] = isTwoSided ? 1.0f : 0.0f;
+
+        const bool useBlend = (batch.filterMode >= 2) || !depthTest;
+        if (batch.skinned && sharedSkinnedInstancedPipeline_.id && sharedBoneAtlasView_.id) {
+            sg_apply_pipeline(useBlend ? sharedSkinnedInstancedBlendPipeline_ : sharedSkinnedInstancedPipeline_);
+            sg_apply_uniforms(0, sg_rng(vsUS));
+            sg_apply_uniforms(1, sg_rng(fsU));
+
+            sg_bindings bind = {};
+            bind.vertex_buffers[0] = batch.vbo;
+            bind.vertex_buffers[1] = sharedInstanceBuffer_;
+            bind.index_buffer = batch.ebo;
+            bind.views[0] = sharedBoneAtlasView_;
+            bind.samplers[0] = sharedNearestSampler_;
+            bind.views[1] = texView;
+            bind.samplers[1] = diffuseSampler;
+            sg_apply_bindings(&bind);
+            sg_draw(0, batch.indexCount, instanceCount);
+            ++submittedDrawCalls;
+        } else if (sharedInstancedPipeline_.id) {
+            sg_apply_pipeline(useBlend ? sharedInstancedBlendPipeline_ : sharedInstancedPipeline_);
+            sg_apply_uniforms(0, sg_rng(vsU));
+            sg_apply_uniforms(1, sg_rng(fsU));
+
+            sg_bindings bind = {};
+            bind.vertex_buffers[0] = batch.vbo;
+            bind.vertex_buffers[1] = sharedInstanceBuffer_;
+            bind.index_buffer = batch.ebo;
+            bind.views[0] = texView;
+            bind.samplers[0] = diffuseSampler;
+            sg_apply_bindings(&bind);
+            sg_draw(0, batch.indexCount, instanceCount);
+            ++submittedDrawCalls;
+        }
+    }
+    return submittedDrawCalls;
 }

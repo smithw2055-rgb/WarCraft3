@@ -136,6 +136,8 @@ public:
     Vec3 GetCenter() const { return center_; }
     float GetRadius() const { return radius_; }
     const TerrainBuildStats& GetBuildStats() const { return buildStats_; }
+    int GetLastVisibleCliffCount() const { return lastVisibleCliffs_; }
+    int GetLastCulledCliffCount() const { return lastCulledCliffs_; }
 
 private:
     void Release();
@@ -294,4 +296,6 @@ private:
     sg_buffer groundVB_ = {0};
     sg_buffer groundIB_ = {0};
     int groundIndexCount_ = 0;
+    int lastVisibleCliffs_ = 0;
+    int lastCulledCliffs_ = 0;
 };

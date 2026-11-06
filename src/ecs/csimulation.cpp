@@ -39,6 +39,7 @@ CSimulation::CSimulation() {
     fogSystem_.SetOcclusionChecker([this](float fromX, float fromY, float toX, float toY, bool isFlying) -> bool {
         return IsLineOfSightBlocked(fromX, fromY, toX, toY, isFlying);
     });
+    RegisterBuiltInSystems();
 }
 
 CSimulation::~CSimulation() = default;
@@ -122,58 +123,82 @@ static void ApplyItemTypeData(CItem& item, CSimulation& simulation) {
 
 } // namespace
 
+void CSimulation::RegisterBuiltInSystems() {
+    systemPipeline_.RegisterLambda("FogTimerSystem", SimSystemPhase::PreTick,
+        [](CSimulation& sim, float dt) {
+            sim.fogSystem_.Tick(dt);
+        });
+
+    systemPipeline_.RegisterLambda("UnitLogicSystem", SimSystemPhase::UnitLogic,
+        [](CSimulation& sim, float /*dt*/) {
+            for (auto* unit : sim.units_) {
+                if (unit && unit->Update(sim)) {
+                    sim.removedUnits_.push_back(unit);
+                }
+            }
+        });
+
+    systemPipeline_.RegisterLambda("DelayedActionSystem", SimSystemPhase::DelayedActions,
+        [](CSimulation& sim, float dt) {
+            for (auto it = sim.delayedActions_.begin(); it != sim.delayedActions_.end();) {
+                it->secondsLeft -= dt;
+                if (it->secondsLeft <= 0.0f) {
+                    auto fn = std::move(it->fn);
+                    it = sim.delayedActions_.erase(it);
+                    if (fn) fn();
+                } else {
+                    ++it;
+                }
+            }
+        });
+
+    systemPipeline_.RegisterLambda("ProjectileSystem", SimSystemPhase::Projectiles,
+        [](CSimulation& sim, float /*dt*/) {
+            sim.UpdateProjectiles();
+        });
+
+    systemPipeline_.RegisterLambda("HazardSystem", SimSystemPhase::Hazards,
+        [](CSimulation& sim, float /*dt*/) {
+            sim.UpdateHazards();
+        });
+
+    systemPipeline_.RegisterLambda("EntityLifecycleSystem", SimSystemPhase::LifecycleCommit,
+        [](CSimulation& sim, float /*dt*/) {
+            sim.ProcessUnitRemovals();
+            sim.ProcessNewUnits();
+            sim.ProcessDestructableRemovals();
+            sim.ProcessNewDestructables();
+            sim.ProcessItemRemovals();
+            sim.spatialGrid_.Rebuild(sim.units_);
+        });
+
+    systemPipeline_.RegisterLambda("SpatialSeparationSystem", SimSystemPhase::SpatialSeparation,
+        [](CSimulation& sim, float /*dt*/) {
+            sim.ResolveUnitSeparation();
+            sim.spatialGrid_.Rebuild(sim.units_);
+        });
+
+    systemPipeline_.RegisterLambda("FogSightSystem", SimSystemPhase::VisionAndFog,
+        [](CSimulation& sim, float /*dt*/) {
+            if (sim.gameTurnTick_ % CFogSystem::kSightTickPeriod == 0) {
+                sim.UpdateFogSight();
+            }
+        });
+
+    systemPipeline_.RegisterLambda("ClockAndPostCallbackSystem", SimSystemPhase::ClockAndPost,
+        [](CSimulation& sim, float dt) {
+            sim.AdvanceGameTime(dt);
+            for (auto& cb : sim.postUpdateCallbacks_) {
+                cb();
+            }
+            sim.postUpdateCallbacks_.clear();
+        });
+}
+
 void CSimulation::Update() {
     if (paused_) return;
-    fogSystem_.Tick(SIM_STEP_TIME);
-    // Update units (includes regen, behavior processing, death detection)
-    for (auto* unit : units_) {
-        bool shouldRemove = unit->Update(*this);
-        if (shouldRemove) {
-            removedUnits_.push_back(unit);
-        }
-    }
-
-    // Fire delayed script actions whose countdown elapsed.
-    for (auto it = delayedActions_.begin(); it != delayedActions_.end();) {
-        it->secondsLeft -= SIM_STEP_TIME;
-        if (it->secondsLeft <= 0.0f) {
-            auto fn = std::move(it->fn);
-            it = delayedActions_.erase(it);
-            if (fn) fn();
-        } else {
-            ++it;
-        }
-    }
-
-    // Step projectiles after units so just-fired shots move the same tick.
-    UpdateProjectiles();
-    UpdateHazards();
-    // Push stacked units apart so clustered spawns and followers cannot
-    // hard-lock each other's collision checks forever (ref unit separation).
-    ResolveUnitSeparation();
-
-    ProcessUnitRemovals();
-    ProcessNewUnits();
-    ProcessDestructableRemovals();
-    ProcessNewDestructables();
-    ProcessItemRemovals();
-
-    // Fog sight pass on its cadence, after pending units join so freshly
-    // created/adopted units contribute the same tick (deterministic: units
-    // iterate in units_ order, no RNG).
-    if (gameTurnTick_ % CFogSystem::kSightTickPeriod == 0) {
-        UpdateFogSight();
-    }
-
-    // Advance game time
-    AdvanceGameTime(SIM_STEP_TIME);
-
-    // Run post-update callbacks
-    for (auto& cb : postUpdateCallbacks_) {
-        cb();
-    }
-    postUpdateCallbacks_.clear();
-
+    systemPipeline_.ResetStepStats();
+    systemPipeline_.ExecuteAll(*this, SIM_STEP_TIME);
     gameTurnTick_++;
 }
 
@@ -243,12 +268,26 @@ void CSimulation::ResolveUnitSeparation() {
     // so docking (harvest dropoff, repair) stays stable.
     constexpr float kMaxPushPerTick = 6.0f;
     const size_t n = units_.size();
+
+    // Rebuild deterministic SpatialHashGrid before separation
+    spatialGrid_.Rebuild(units_);
+
+    // For large unit counts (> 48), use SpatialHashGrid O(N) neighborhood lookup;
+    // for small unit counts, keep the exact array-order loop.
+    const bool useSpatialBroadphase = (n > 48);
+    std::vector<CUnit*> candidates;
+
     for (size_t i = 0; i < n; ++i) {
         CUnit* a = units_[i];
         if (!a || a->IsDead() || a->IsHidden() || a->IsLoadedAboard()) continue;
         const bool aStatic = a->IsBuilding() || !a->IsPathingEnabled();
-        for (size_t j = i + 1; j < n; ++j) {
-            CUnit* b = units_[j];
+
+        if (useSpatialBroadphase) {
+            spatialGrid_.QueryPotentialColliders(a, candidates);
+        }
+        const size_t innerCount = useSpatialBroadphase ? candidates.size() : (n - (i + 1));
+        for (size_t k = 0; k < innerCount; ++k) {
+            CUnit* b = useSpatialBroadphase ? candidates[k] : units_[i + 1 + k];
             if (!b || b->IsDead() || b->IsHidden() || b->IsLoadedAboard()) continue;
             const bool bStatic = b->IsBuilding() || !b->IsPathingEnabled();
             if (aStatic && bStatic) continue;
@@ -467,6 +506,7 @@ bool CSimulation::IsLineOfSightBlocked(float fromX, float fromY, float toX, floa
 
 void CSimulation::InstallUnitHooks(CUnit* ptr) {
     if (!ptr) return;
+    ptr->BindRegistry(&ecsRegistry_);
     const int handle = ptr->GetHandleId();
     ptr->SetOrderIssuedHook([this, handle](int orderId, int targetKind, float x, float y, int targetHandle) {
         (void)targetKind;
@@ -739,6 +779,7 @@ CItem* CSimulation::CreateItem(War3ID typeId, float x, float y) {
     if (worldCollision_) {
         worldCollision_->AddItem(ptr);
     }
+    events_.onItemSpawned.Emit(handleId);
     return ptr;
 }
 
@@ -844,8 +885,10 @@ void CSimulation::ProcessUnitRemovals() {
             }
         }
 
-        ecsRegistry_.DestroyEntity(unit->GetHandleId());
-        unitMap_.erase(unit->GetHandleId());
+        const int removedHandle = unit->GetHandleId();
+        events_.onUnitRemoved.Emit(removedHandle);
+        ecsRegistry_.DestroyEntity(removedHandle);
+        unitMap_.erase(removedHandle);
     }
     removedUnits_.clear();
 }
@@ -873,6 +916,7 @@ void CSimulation::ProcessNewUnits() {
                 player->AddFoodCap(unit->GetFoodMade());
             }
         }
+        events_.onUnitSpawned.Emit(unit->GetHandleId());
     }
     newUnits_.clear();
 }

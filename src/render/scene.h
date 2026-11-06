@@ -4,11 +4,14 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include "core/job_system.h"
 #include "resource/mpq_storm.h"
+#include "resource/resource_server.h"
 #include "model/mdx.h"
 #include "render/lightning.h"
 #include "render/mdx_viewer.h"
 #include "render/picking.h"
+#include "render/render_server.h"
 
 struct PlacedModel {
     float pos[3] = {};
@@ -16,6 +19,8 @@ struct PlacedModel {
     float angle = 0;
     float renderAngle = 0;
     float scale[3] = {1,1,1};
+    float vertexAlpha = 1.0f;
+    float vertexTint[3] = {1.0f, 1.0f, 1.0f};
     float movementSpeed = 0.0f;
     float turnRate = 0.0f;
     int player = 0;
@@ -32,6 +37,7 @@ struct PlacedModel {
     Vec3 transientVelocity = {0, 0, 0};
     float transientGravity = 0.0f;
     bool useCustomModelMatrix = false;
+    bool isStaticChunked = false;
     Mat4 customModelMatrix = Mat4::Identity();
     std::unique_ptr<MdxViewer> ownedViewer;
     MdxViewer* viewer = nullptr; // shared, not owned
@@ -89,6 +95,13 @@ public:
     int AddUnit(uint32_t war3ID, const float pos[3], float angle, const float scale[3],
                  int player, int hitpoints, int flags, uint32_t skinId = 0,
                  bool playBirthAnimation = false);
+    void RegisterUnitModelPath(uint32_t war3ID, const std::string& modelPath) {
+        unitPaths_[war3ID] = modelPath;
+    }
+    // Register a headless / procedural instance (for tests or placeholder geometry)
+    int AddProceduralInstance(uint32_t war3ID, const float pos[3], float angle,
+                              const float scale[3], int player = 0,
+                              const std::string& kind = "unit", float alpha = 1.0f);
     int AddTransientModelAtScenePosition(const std::string& path, const float pos[3],
                                          float angle, float scale, int player = 0,
                                          float fallbackLifeSeconds = 1.0f);
@@ -110,8 +123,24 @@ public:
     bool UpdateAttachedModel(int index, const Mat4& modelMatrix);
     bool RemoveAttachedModel(int index);
 
-    // Render all placed models
+    // Render all placed models (routed through RenderServer frustum culling & batch sorting)
     void RenderAll(const Mat4& view, const Mat4& proj, float dt);
+
+    // Stage A Modernization: Access integrated RenderServer & per-frame statistics
+    render::RenderServer& GetRenderServer() { return renderServer_; }
+    resource::ResourceServer& GetResourceServer() { return *resourceServer_; }
+    const resource::ResourceServer& GetResourceServer() const { return *resourceServer_; }
+    void SetResourceServer(resource::ResourceServer* rs) { if (rs) resourceServer_ = rs; }
+    const render::RenderServer& GetRenderServer() const { return renderServer_; }
+    const render::RenderFrameStats& GetLastRenderStats() const { return renderServer_.GetStats(); }
+    core::JobSystem& GetJobSystem() { return *jobSystem_; }
+    const core::JobSystem& GetJobSystem() const { return *jobSystem_; }
+    void SetJobSystem(core::JobSystem* js) { if (js) jobSystem_ = js; }
+    int GetLastParallelAnimatedViewerCount() const { return lastParallelAnimatedViewers_; }
+    render::StaticSpatialChunkGrid& GetStaticChunkGrid() { return staticChunkGrid_; }
+    const render::StaticSpatialChunkGrid& GetStaticChunkGrid() const { return staticChunkGrid_; }
+    void SetStaticChunkSize(float chunkSize) { staticChunkGrid_.Clear(chunkSize); }
+
     LightningSystem* GetLightning() { return &lightning_; }
     const std::vector<SceneEventEffect>& GetFrameEventEffects() const { return frameEventEffects_; }
     void SetDebugRenderRange(int start, int count);
@@ -122,6 +151,7 @@ public:
                                 float movementSpeed = 0.0f, float turnRate = 0.0f,
                                 bool smoothMotion = false);
     bool SetInstanceVisible(int index, bool visible);
+    bool SetInstanceVertexColor(int index, float r, float g, float b, float a);
     // Instance scale access (units: seed scale x script SetUnitScale).
     bool GetInstanceScale(int index, float scale[3]) const;
     bool SetInstanceScale(int index, const float scale[3]);
@@ -165,6 +195,7 @@ private:
         std::unique_ptr<MdxViewer> sharedViewer;
     };
 
+    void RegisterStaticInstanceInChunkGrid(int index);
     bool EnsureModelCached(const std::string& path, MdxEntry& entry);
     MdxViewer* GetOrLoadModel(const std::string& path);
     std::unique_ptr<MdxViewer> CreateUnitViewer(const std::string& path);
@@ -184,6 +215,11 @@ private:
     LoadStats loadStats_;
     std::vector<SceneEventEffect> frameEventEffects_;
     LightningSystem lightning_;
+    render::RenderServer renderServer_;
+    resource::ResourceServer* resourceServer_ = &resource::ResourceServer::Instance();
+    core::JobSystem* jobSystem_ = &core::JobSystem::Instance();
+    int lastParallelAnimatedViewers_ = 0;
+    render::StaticSpatialChunkGrid staticChunkGrid_;
     int debugRenderStart_ = 0;
     int debugRenderCount_ = -1;
     std::string debugRenderKind_;

@@ -1,6 +1,7 @@
 #pragma once
 #include "game_state.h"
 #include "warsmash_config.h"
+#include "unit_presentation_system.h"
 #include "../render/scene.h"
 #include "../render/camera.h"
 #include "../render/terrain.h"
@@ -99,28 +100,30 @@ public:
     bool IsUnitSelected(int handleId) const;
     std::vector<CUnit*> GetSelectedSimulationUnits() const;
 
-    // Visual seed (distinct from MapLoader::UnitVisualSeed — no handleId)
-    struct UnitVisualSeed { float scale[3]={1,1,1}; uint32_t skinId=0; int hitpoints=0; int flags=0; };
+    // Phase 5 Stage B Modernization: Dedicated UnitPresentationSystem subsystem
+    // owns all unit/item/effect visual state and subscribes to SimEventBus signals.
+    using UnitVisualSeed = UnitPresentationSystem::UnitVisualSeed;
+    UnitPresentationSystem& GetPresentation() { return presentation_; }
+    const UnitPresentationSystem& GetPresentation() const { return presentation_; }
 
-    std::unordered_map<int, UnitVisualSeed> simUnitVisualSeeds;
-    std::unordered_map<int, animation_utils::PendingUnitAnimation> simUnitPendingAnimations;
-    std::unordered_map<int, int> simUnitToVisualIdx;
-    std::unordered_map<int, std::pair<float, float>> simUnitVisualLastPositions;
-    std::unordered_map<int, bool> simUnitVisualMovingStates;
-    std::unordered_map<int, animation_utils::UnitVisualAnimationMode> simUnitVisualAnimationModes;
-    std::unordered_map<int, int> simUnitVisualLastAttackAnimationTicks;
-    std::unordered_map<int, CResourceType> simUnitVisualResourceTags;
-    std::unordered_map<int, bool> simUnitVisualConstructionStates;
-    std::unordered_map<int, std::vector<std::string>> simUnitVisualPropertyTags;
-    std::unordered_map<int, animation_utils::ScriptedUnitAnimationState> simUnitScriptedAnimations;
-    std::unordered_map<int, std::deque<animation_utils::PendingUnitAnimation>> simUnitQueuedAnimations;
-    std::unordered_map<int, std::vector<std::string>> simUnitAnimationPropertyTags;
-    std::unordered_set<int> simUnitVisualRegistrationFailed;
-    std::unordered_map<int, int> simItemToVisualIdx;
-    // JASS effect id -> scene attached-model index (-1 = point transient
-    // already spawned once). Reconciled every frame in SyncJassEffectVisuals.
-    std::unordered_map<int, int> effectVisuals_;
-    std::unordered_set<int> simItemVisualRegistrationFailed;
+    // Reference aliases forwarding to presentation_ (zero-duplication compatibility)
+    std::unordered_map<int, UnitVisualSeed>& simUnitVisualSeeds = presentation_.unitVisualSeeds;
+    std::unordered_map<int, animation_utils::PendingUnitAnimation>& simUnitPendingAnimations = presentation_.unitPendingAnimations;
+    std::unordered_map<int, int>& simUnitToVisualIdx = presentation_.unitToVisualIdx;
+    std::unordered_map<int, std::pair<float, float>>& simUnitVisualLastPositions = presentation_.unitVisualLastPositions;
+    std::unordered_map<int, bool>& simUnitVisualMovingStates = presentation_.unitVisualMovingStates;
+    std::unordered_map<int, animation_utils::UnitVisualAnimationMode>& simUnitVisualAnimationModes = presentation_.unitVisualAnimationModes;
+    std::unordered_map<int, int>& simUnitVisualLastAttackAnimationTicks = presentation_.unitVisualLastAttackAnimationTicks;
+    std::unordered_map<int, CResourceType>& simUnitVisualResourceTags = presentation_.unitVisualResourceTags;
+    std::unordered_map<int, bool>& simUnitVisualConstructionStates = presentation_.unitVisualConstructionStates;
+    std::unordered_map<int, std::vector<std::string>>& simUnitVisualPropertyTags = presentation_.unitVisualPropertyTags;
+    std::unordered_map<int, animation_utils::ScriptedUnitAnimationState>& simUnitScriptedAnimations = presentation_.unitScriptedAnimations;
+    std::unordered_map<int, std::deque<animation_utils::PendingUnitAnimation>>& simUnitQueuedAnimations = presentation_.unitQueuedAnimations;
+    std::unordered_map<int, std::vector<std::string>>& simUnitAnimationPropertyTags = presentation_.unitAnimationPropertyTags;
+    std::unordered_set<int>& simUnitVisualRegistrationFailed = presentation_.unitVisualRegistrationFailed;
+    std::unordered_map<int, int>& simItemToVisualIdx = presentation_.itemToVisualIdx;
+    std::unordered_map<int, int>& effectVisuals_ = presentation_.effectVisuals;
+    std::unordered_set<int>& simItemVisualRegistrationFailed = presentation_.itemVisualRegistrationFailed;
 
     bool EnsureSimulationUnitVisual(CUnit* unit);
     bool EnsureSimulationItemVisual(CItem* item);
@@ -325,7 +328,8 @@ private:
     // Last seen text-clear sequence (ClearTextMessages drops shown toasts).
     int lastTextClearSeq_ = 0;
 
-    // Rendering
+    // Presentation & Rendering
+    UnitPresentationSystem presentation_;
     SceneManager scene_;
     TerrainRenderer simpleTerrain_;
     TexturedTerrain texturedTerrain_;

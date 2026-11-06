@@ -1087,6 +1087,9 @@ void JassNatives::RegisterFrameNatives() {
                 const int self = data->GetSimHandle(args[0].intVal, JassHandleInfo::FRAME);
                 auto& kids = it->second->childSimIds;
                 if (std::find(kids.begin(), kids.end(), self) == kids.end()) kids.push_back(self);
+                if (f->uiNode && it->second->uiNode) {
+                    f->uiNode->SetParent(it->second->uiNode.get());
+                }
             }
         }
         return JassValue::Null();
@@ -1103,7 +1106,10 @@ void JassNatives::RegisterFrameNatives() {
     });
     vm_.RegisterNative("BlzFrameSetLevel", [getFrame](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
-        if (auto f = getFrame(args[0].intVal)) f->level = args[1].intVal;
+        if (auto f = getFrame(args[0].intVal)) {
+            f->level = args[1].intVal;
+            if (f->uiNode) f->uiNode->SetZOrder(f->level);
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("BlzFrameGetChildrenCount", [getFrame](const std::vector<JassValue>& args) -> JassValue {

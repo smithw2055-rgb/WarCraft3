@@ -163,6 +163,8 @@ set(SOURCES
     src/resource/mpq_storm.cpp
         src/resource/casc.cpp
     src/resource/slk.cpp
+    src/resource/resource_server.cpp
+    src/audio/audio_server.cpp
     src/asset/stb_image.cpp
     src/asset/stb_image_write.cpp
     src/asset/Texture.cpp
@@ -199,6 +201,7 @@ set(SOURCES
     src/sokol_impl.cpp
     # ===== New utility modules =====
     src/core/path_utils.cpp
+    src/core/job_system.cpp
     src/render/picking.cpp
     src/render/unit_selection_geom.cpp
     src/render/splat_metadata.cpp

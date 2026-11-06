@@ -234,6 +234,9 @@ static bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModificat
 
 bool SceneManager::Init(const MpqManager& mpq) {
     mpq_ = const_cast<MpqManager*>(&mpq);
+    if (resourceServer_) {
+        resourceServer_->SetMpqManager(mpq_);
+    }
     ResetLoadStats();
 
     // Load UnitUI.slk: unit War3ID to model path.
@@ -656,8 +659,59 @@ void SceneManager::Clear() {
     for (auto* inst : instances_) delete inst;
     instances_.clear();
     cache_.clear();
+    staticChunkGrid_.Clear();
     lightning_.Clear();
     ResetLoadStats();
+}
+
+void SceneManager::RegisterStaticInstanceInChunkGrid(int index) {
+    if (index < 0 || index >= static_cast<int>(instances_.size())) return;
+    PlacedModel* inst = instances_[index];
+    if (!inst) return;
+
+    const Mat4 model = inst->useCustomModelMatrix
+        ? inst->customModelMatrix
+        : BuildInstanceModelMatrix(*inst);
+
+    render::RenderItem item;
+    item.entityHandle = index;
+    item.modelId = inst->debugWar3ID != 0
+        ? inst->debugWar3ID
+        : static_cast<uint32_t>(reinterpret_cast<uintptr_t>(inst->viewer) & 0xFFFFFFFFu);
+    item.submeshIndex = 0;
+
+    const bool isTranslucent = (inst->vertexAlpha < 0.999f) || inst->transient;
+    const int baseFilterMode = inst->viewer ? inst->viewer->GetPrimaryFilterMode() : 0;
+    const int baseLayerFlags = inst->viewer ? inst->viewer->GetPrimaryLayerFlags() : 0;
+    item.material = render::ShaderMaterial::FromMdxLayer(
+        isTranslucent ? std::max(2, baseFilterMode) : baseFilterMode,
+        baseLayerFlags,
+        item.modelId,
+        false,
+        false
+    );
+    item.properties.teamColorIndex = inst->player;
+    item.properties.vertexTint = Vec4(
+        inst->vertexTint[0], inst->vertexTint[1], inst->vertexTint[2], inst->vertexAlpha);
+    item.worldMatrix = model;
+
+    const float maxScale = std::max({
+        std::fabs(inst->scale[0]), std::fabs(inst->scale[1]), std::fabs(inst->scale[2]), 1.0f});
+    if (inst->viewer) {
+        const Vec3 bc = inst->viewer->GetBoundsCenter();
+        item.worldBoundsCenter = Vec3(
+            inst->renderPos[0] + bc.x,
+            inst->renderPos[1] + bc.y,
+            inst->renderPos[2] + bc.z
+        );
+        item.worldBoundsRadius = std::max(96.0f, inst->viewer->GetBoundsRadius()) * maxScale;
+    } else {
+        item.worldBoundsCenter = Vec3(inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]);
+        item.worldBoundsRadius = 96.0f * maxScale;
+    }
+
+    inst->isStaticChunked = true;
+    staticChunkGrid_.InsertStaticItem(item, inst->visible);
 }
 
 void SceneManager::ResetLoadStats() {
@@ -712,6 +766,19 @@ MdxViewer* SceneManager::GetOrLoadModel(const std::string& path) {
 bool SceneManager::EnsureModelCached(const std::string& path, MdxEntry& entry) {
     if (entry.modelLoaded) {
         return true;
+    }
+
+    // Stage E Modernization: Query unified ResourceServer first for cached or preloaded MdxModelResource
+    if (resourceServer_) {
+        if (mpq_ && resourceServer_->GetMpqManager() != mpq_) {
+            resourceServer_->SetMpqManager(mpq_);
+        }
+        if (auto modelRes = resourceServer_->LoadMdxModel(path)) {
+            entry.path = path;
+            entry.model = modelRes->model;
+            entry.modelLoaded = true;
+            return true;
+        }
     }
 
     // Parses raw model bytes according to the requested extension. .mdl
@@ -853,7 +920,11 @@ bool SceneManager::AddDoodad(uint32_t war3ID, const float pos[3], float angle,
     inst->debugKind = "doodad";
     inst->visible = true;
     inst->viewer = viewer;
+    const int doodadIdx = static_cast<int>(instances_.size());
     instances_.push_back(inst);
+    if (!viewer->HasAnimations()) {
+        RegisterStaticInstanceInChunkGrid(doodadIdx);
+    }
     static int doodadDiagCount = 0;
     if (doodadDiagCount < 8) {
         char s[5] = {(char)(war3ID & 0xFF), (char)((war3ID >> 8) & 0xFF),
@@ -1152,9 +1223,52 @@ bool SceneManager::UpdateInstancePosition(int index, const float pos[3], float a
     return true;
 }
 
+int SceneManager::AddProceduralInstance(uint32_t war3ID, const float pos[3], float angle,
+                                        const float scale[3], int player,
+                                        const std::string& kind, float alpha) {
+    auto* inst = new PlacedModel();
+    inst->pos[0] = pos[0]; inst->pos[1] = pos[1]; inst->pos[2] = pos[2];
+    inst->renderPos[0] = pos[0]; inst->renderPos[1] = pos[1]; inst->renderPos[2] = pos[2];
+    inst->angle = angle;
+    inst->renderAngle = angle;
+    if (scale) {
+        inst->scale[0] = scale[0]; inst->scale[1] = scale[1]; inst->scale[2] = scale[2];
+    }
+    inst->player = player;
+    inst->debugWar3ID = war3ID;
+    inst->debugKind = kind;
+    inst->vertexAlpha = alpha;
+    inst->visible = true;
+    const int idx = (int)instances_.size();
+    instances_.push_back(inst);
+    if (kind == "doodad") {
+        RegisterStaticInstanceInChunkGrid(idx);
+    }
+    return idx;
+}
+
 bool SceneManager::SetInstanceVisible(int index, bool visible) {
     if (index < 0 || index >= (int)instances_.size()) return false;
-    instances_[index]->visible = visible;
+    PlacedModel* inst = instances_[index];
+    if (!inst) return false;
+    inst->visible = visible;
+    if (inst->isStaticChunked) {
+        staticChunkGrid_.SetStaticItemVisible(index, visible);
+    }
+    return true;
+}
+
+bool SceneManager::SetInstanceVertexColor(int index, float r, float g, float b, float a) {
+    if (index < 0 || index >= (int)instances_.size()) return false;
+    auto* inst = instances_[index];
+    if (!inst) return false;
+    inst->vertexTint[0] = r;
+    inst->vertexTint[1] = g;
+    inst->vertexTint[2] = b;
+    inst->vertexAlpha = a;
+    if (inst->isStaticChunked) {
+        staticChunkGrid_.UpdateStaticItemTint(index, Vec4(r, g, b, a), a < 0.999f);
+    }
     return true;
 }
 
@@ -1226,6 +1340,7 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
 
     std::unordered_set<MdxViewer*> updatedViewers;
     for (auto* inst : instances_) {
+        if (!inst || inst->isStaticChunked) continue;
         if (inst->smoothMotion) {
             const float dx = inst->pos[0] - inst->renderPos[0];
             const float dz = inst->pos[2] - inst->renderPos[2];
@@ -1264,58 +1379,88 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
 
         if (inst->visible && inst->viewer) {
             inst->viewer->SetInstanceMatrix(BuildInstanceModelMatrix(*inst));
-            if (updatedViewers.insert(inst->viewer).second) {
-                inst->viewer->Update(dt, view);
-                for (const MdxEventEffect& effect : inst->viewer->GetResolvedEventEffects()) {
-                    SceneEventEffect eventEffect;
-                    eventEffect.effect = effect;
-                    const Vec3 eventPos = effect.hasLocalTransform
-                        ? TransformInstanceLocalPoint(*inst, effect.localPosition)
-                        : Vec3{inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
-                    eventEffect.x = eventPos.x;
-                    eventEffect.y = eventPos.y;
-                    eventEffect.z = eventPos.z;
-                    if (effect.hasLocalTransform) {
-                        eventEffect.hasWorldTransform = true;
-                        eventEffect.worldTransform = BuildInstanceModelMatrix(*inst) * effect.localTransform;
-                    }
-                    frameEventEffects_.push_back(std::move(eventEffect));
-                }
-                for (const MdxParticleEmitter1Spawn& spawn : inst->viewer->GetParticleEmitter1Spawns()) {
-                    if (spawn.modelPath.empty()) {
-                        continue;
-                    }
-                    const Mat4 worldTransform = BuildInstanceModelMatrix(*inst) * spawn.localTransform;
-                    const Vec3 worldVelocity{
-                        inst->scale[0] * spawn.velocity.x,
-                        inst->scale[1] * spawn.velocity.y,
-                        inst->scale[2] * spawn.velocity.z
-                    };
-                    AddTransientModelWithSceneMatrix(spawn.modelPath, worldTransform, inst->player,
-                                                     spawn.lifeSpan, worldVelocity, spawn.gravity);
-                }
+            updatedViewers.insert(inst->viewer);
+        }
+    }
+
+    // Stage G2: Parallel Skeleton & Material Timeline Evaluation across WorkerThreadPool
+    std::vector<MdxViewer*> uniqueViewers;
+    uniqueViewers.reserve(instances_.size());
+    std::unordered_set<MdxViewer*> scheduledViewers;
+    std::vector<PlacedModel*> viewerPrimaryOwner;
+    viewerPrimaryOwner.reserve(instances_.size());
+    for (auto* inst : instances_) {
+        if (inst && inst->visible && inst->viewer) {
+            if (scheduledViewers.insert(inst->viewer).second) {
+                uniqueViewers.push_back(inst->viewer);
+                viewerPrimaryOwner.push_back(inst);
             }
-            if (inst->transient) {
-                inst->transientAge += std::max(0.0f, dt);
-                if (inst->transientHasPhysics && inst->useCustomModelMatrix) {
-                    MdxAdvanceParticleEmitter1SpawnTransform(inst->customModelMatrix,
-                                                             inst->transientVelocity,
-                                                             inst->transientGravity,
-                                                             dt);
-                    inst->pos[0] = inst->customModelMatrix.m[12];
-                    inst->pos[1] = inst->customModelMatrix.m[13];
-                    inst->pos[2] = inst->customModelMatrix.m[14];
-                    inst->renderPos[0] = inst->pos[0];
-                    inst->renderPos[1] = inst->pos[1];
-                    inst->renderPos[2] = inst->pos[2];
-                }
-                const bool sequenceFinished = inst->viewer->HasAnimations()
-                    && inst->viewer->IsCurrentSequenceFinished();
-                if (sequenceFinished || inst->transientAge >= inst->transientMaxAge) {
-                    inst->visible = false;
-                    inst->ownedViewer.reset();
-                    inst->viewer = nullptr;
-                }
+        }
+    }
+    lastParallelAnimatedViewers_ = static_cast<int>(uniqueViewers.size());
+    if (!uniqueViewers.empty()) {
+        core::JobSystem& js = jobSystem_ ? *jobSystem_ : core::JobSystem::Instance();
+        js.ParallelFor(static_cast<int>(uniqueViewers.size()), /*minBatchSize=*/4, [&](int vIdx) {
+            uniqueViewers[static_cast<size_t>(vIdx)]->Update(dt, view);
+        });
+    }
+
+    // Main-thread deterministic post-update: harvest event effects, particle spawns, and transient lifetimes
+    for (size_t vIdx = 0; vIdx < uniqueViewers.size(); ++vIdx) {
+        MdxViewer* viewer = uniqueViewers[vIdx];
+        PlacedModel* inst = viewerPrimaryOwner[vIdx];
+        if (!viewer || !inst) continue;
+        for (const MdxEventEffect& effect : viewer->GetResolvedEventEffects()) {
+            SceneEventEffect eventEffect;
+            eventEffect.effect = effect;
+            const Vec3 eventPos = effect.hasLocalTransform
+                ? TransformInstanceLocalPoint(*inst, effect.localPosition)
+                : Vec3{inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
+            eventEffect.x = eventPos.x;
+            eventEffect.y = eventPos.y;
+            eventEffect.z = eventPos.z;
+            if (effect.hasLocalTransform) {
+                eventEffect.hasWorldTransform = true;
+                eventEffect.worldTransform = BuildInstanceModelMatrix(*inst) * effect.localTransform;
+            }
+            frameEventEffects_.push_back(std::move(eventEffect));
+        }
+        for (const MdxParticleEmitter1Spawn& spawn : viewer->GetParticleEmitter1Spawns()) {
+            if (spawn.modelPath.empty()) {
+                continue;
+            }
+            const Mat4 worldTransform = BuildInstanceModelMatrix(*inst) * spawn.localTransform;
+            const Vec3 worldVelocity{
+                inst->scale[0] * spawn.velocity.x,
+                inst->scale[1] * spawn.velocity.y,
+                inst->scale[2] * spawn.velocity.z
+            };
+            AddTransientModelWithSceneMatrix(spawn.modelPath, worldTransform, inst->player,
+                                             spawn.lifeSpan, worldVelocity, spawn.gravity);
+        }
+    }
+
+    for (auto* inst : instances_) {
+        if (inst && inst->visible && inst->viewer && inst->transient) {
+            inst->transientAge += std::max(0.0f, dt);
+            if (inst->transientHasPhysics && inst->useCustomModelMatrix) {
+                MdxAdvanceParticleEmitter1SpawnTransform(inst->customModelMatrix,
+                                                         inst->transientVelocity,
+                                                         inst->transientGravity,
+                                                         dt);
+                inst->pos[0] = inst->customModelMatrix.m[12];
+                inst->pos[1] = inst->customModelMatrix.m[13];
+                inst->pos[2] = inst->customModelMatrix.m[14];
+                inst->renderPos[0] = inst->pos[0];
+                inst->renderPos[1] = inst->pos[1];
+                inst->renderPos[2] = inst->pos[2];
+            }
+            const bool sequenceFinished = inst->viewer->HasAnimations()
+                && inst->viewer->IsCurrentSequenceFinished();
+            if (sequenceFinished || inst->transientAge >= inst->transientMaxAge) {
+                inst->visible = false;
+                inst->ownedViewer.reset();
+                inst->viewer = nullptr;
             }
         }
     }
@@ -1354,16 +1499,122 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
                       << std::endl;
         }
     }
+    // Extract camera world position from inverse rigid view rotation & translation:
+    // For view matrix V = [R | t], eye = -R^T * t
+    const Vec3 cameraEye(
+        -(view.m[0] * view.m[12] + view.m[1] * view.m[13] + view.m[2]  * view.m[14]),
+        -(view.m[4] * view.m[12] + view.m[5] * view.m[13] + view.m[6]  * view.m[14]),
+        -(view.m[8] * view.m[12] + view.m[9] * view.m[13] + view.m[10] * view.m[14])
+    );
+
+    // Stage A Modernization: Route all visible scene instances through RenderServer
+    // for 6-plane Gribb-Hartmann frustum culling, Opaque/Transparent queue separation,
+    // 64-bit PipelineKey batching, and depth-sorted execution.
+    renderServer_.BeginFrame(view, proj, cameraEye);
+    const bool useStaticChunkFastPath =
+        (debugRenderStart_ == 0 && debugRenderCount_ < 0) &&
+        (debugRenderKind_.empty() || debugRenderKind_ == "doodad");
+    if (useStaticChunkFastPath && staticChunkGrid_.GetTotalStaticItemCount() > 0) {
+        renderServer_.SubmitStaticChunkGrid(staticChunkGrid_);
+    }
+
+    std::vector<render::RenderItem> candidateItems;
+    candidateItems.reserve(static_cast<size_t>(std::max(0, renderEnd - renderStart)));
     for (int index = renderStart; index < renderEnd; ++index) {
         auto* inst = instances_[index];
+        if (!inst || !inst->visible) continue;
+        if (useStaticChunkFastPath && inst->isStaticChunked) continue;
         if (!debugRenderKind_.empty() && inst->debugKind != debugRenderKind_) continue;
-        if (inst->visible && inst->viewer) {
-            const Mat4 model = inst->useCustomModelMatrix
-                ? inst->customModelMatrix
-                : BuildInstanceModelMatrix(*inst);
-            inst->viewer->RenderWithModelMatrix(model, view, proj, inst->player);
+        if (!inst->viewer && inst->debugWar3ID == 0) continue;
+
+        const Mat4 model = inst->useCustomModelMatrix
+            ? inst->customModelMatrix
+            : BuildInstanceModelMatrix(*inst);
+
+        render::RenderItem item;
+        item.entityHandle = index;
+        item.modelId = inst->debugWar3ID != 0
+            ? inst->debugWar3ID
+            : static_cast<uint32_t>(reinterpret_cast<uintptr_t>(inst->viewer) & 0xFFFFFFFFu);
+        item.submeshIndex = 0;
+
+        const bool isTranslucent = (inst->vertexAlpha < 0.999f) || inst->transient;
+        const int baseFilterMode = inst->viewer ? inst->viewer->GetPrimaryFilterMode() : 0;
+        const int baseLayerFlags = inst->viewer ? inst->viewer->GetPrimaryLayerFlags() : 0;
+        item.material = render::ShaderMaterial::FromMdxLayer(
+            isTranslucent ? std::max(2, baseFilterMode) : baseFilterMode,
+            baseLayerFlags,
+            item.modelId,
+            inst->viewer ? inst->viewer->HasAnimations() : false,
+            false
+        );
+        item.properties.teamColorIndex = inst->player;
+        item.properties.vertexTint = Vec4(
+            inst->vertexTint[0], inst->vertexTint[1], inst->vertexTint[2], inst->vertexAlpha);
+        item.worldMatrix = model;
+
+        const float maxScale = std::max({
+            std::fabs(inst->scale[0]), std::fabs(inst->scale[1]), std::fabs(inst->scale[2]), 1.0f});
+        if (inst->viewer) {
+            const Vec3 bc = inst->viewer->GetBoundsCenter();
+            item.worldBoundsCenter = Vec3(
+                inst->renderPos[0] + bc.x,
+                inst->renderPos[1] + bc.y,
+                inst->renderPos[2] + bc.z
+            );
+            item.worldBoundsRadius = std::max(96.0f, inst->viewer->GetBoundsRadius()) * maxScale;
+        } else {
+            item.worldBoundsCenter = Vec3(inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]);
+            item.worldBoundsRadius = 96.0f * maxScale;
         }
+
+        candidateItems.push_back(std::move(item));
     }
+
+    renderServer_.SubmitItemsParallel(candidateItems, jobSystem_, /*minBatchSize=*/8);
+    renderServer_.BuildAndSortBatches();
+    renderServer_.ExecuteBatches([&](const render::RenderBatchGroup& batch) {
+        if (batch.instances.empty()) {
+            return;
+        }
+        std::vector<render::InstanceGpuPayload> gpuInstances = batch.instances;
+        MdxViewer* batchViewer = nullptr;
+        int defaultPlayer = 0;
+
+        for (size_t i = 0; i < batch.entityHandles.size(); ++i) {
+            const int instIdx = batch.entityHandles[i];
+            if (instIdx < 0 || instIdx >= (int)instances_.size()) continue;
+            PlacedModel* inst = instances_[instIdx];
+            if (!inst) continue;
+            if (!batchViewer && inst->viewer) {
+                batchViewer = inst->viewer;
+                defaultPlayer = inst->player;
+            }
+            if (inst->viewer && inst->viewer->HasAnimations() && inst->viewer->GetAnimator()) {
+                const int boneRow = renderServer_.GetBoneAtlas().AllocateAndPackRow(
+                    inst->viewer->GetAnimator()->GetBoneMatrices());
+                gpuInstances[i].instanceParams.y = static_cast<float>(boneRow);
+            } else {
+                gpuInstances[i].instanceParams.y = 0.0f;
+            }
+        }
+
+        if (batchViewer) {
+            const int hwDraws = batchViewer->RenderInstancedBatch(
+                gpuInstances,
+                &renderServer_.GetBoneAtlas(),
+                view,
+                proj,
+                defaultPlayer,
+                !batch.material.IsTransparent()
+            );
+            renderServer_.RecordHardwareInstancedSubmission(
+                hwDraws, static_cast<int>(gpuInstances.size()));
+        } else {
+            renderServer_.RecordHardwareInstancedSubmission(
+                1, static_cast<int>(gpuInstances.size()));
+        }
+    });
     // Procedural lightning bolts (JASS AddLightning*) on top.
     lightning_.Update(dt);
     lightning_.Render(view, proj);

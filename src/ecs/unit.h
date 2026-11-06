@@ -17,6 +17,7 @@
 #include "ecs/abilities/ability_aura.h"
 #include "ecs/attribute_aggregator.h"
 #include "ecs/unit_components.h"
+#include "ecs/ecs_registry.h"
 #include <vector>
 #include <queue>
 #include <functional>
@@ -35,6 +36,12 @@ class CUnit : public CWidget {
 public:
     CUnit(int handleId, CUnitType* unitType, int playerIndex,
           War3ID typeId, float x, float y, float facing);
+    ~CUnit() override;
+
+    // Bind this unit's orthogonal components to a central SimEcsRegistry (Phase 5 True ECS Pooling).
+    // Any components already populated before adoption are migrated into the registry's contiguous pools.
+    void BindRegistry(SimEcsRegistry* registry);
+    SimEcsRegistry* GetBoundRegistry() const { return registry_; }
 
     // Type info
     CUnitType* GetUnitType() const { return unitType_; }
@@ -61,19 +68,46 @@ public:
     UnitAttributeAggregator& Attributes() { return attrs_; }
     const UnitAttributeAggregator& Attributes() const { return attrs_; }
 
-    // Orthogonal ECS Component Accessors (Phase 3 Modernization)
-    UnitConstructionComponent& ConstructionComp() { return constructionComp_; }
-    const UnitConstructionComponent& ConstructionComp() const { return constructionComp_; }
-    UnitCargoComponent& CargoComp() { return cargoComp_; }
-    const UnitCargoComponent& CargoComp() const { return cargoComp_; }
-    UnitMorphComponent& MorphComp() { return morphComp_; }
-    const UnitMorphComponent& MorphComp() const { return morphComp_; }
-    UnitStructureNavComponent& StructureNavComp() { return structureNavComp_; }
-    const UnitStructureNavComponent& StructureNavComp() const { return structureNavComp_; }
-    UnitVisualComponent& VisualComp() { return visualComp_; }
-    const UnitVisualComponent& VisualComp() const { return visualComp_; }
-    UnitCorpseDropComponent& CorpseDropComp() { return corpseDropComp_; }
-    const UnitCorpseDropComponent& CorpseDropComp() const { return corpseDropComp_; }
+    // Orthogonal ECS Component Accessors (Phase 5 True Sparse-Set ECS Storage)
+    // Components are lazily allocated on demand in the bound SimEcsRegistry's
+    // SparseComponentPool<T>, while const getters return a shared default singleton
+    // if the unit has never mutated that component!
+    UnitConstructionComponent& ConstructionComp() { return ActiveRegistry().GetOrCreate<UnitConstructionComponent>(handleId_); }
+    const UnitConstructionComponent& ConstructionComp() const {
+        if (const auto* c = ActiveRegistry().TryGet<UnitConstructionComponent>(handleId_)) return *c;
+        static const UnitConstructionComponent kDefault{};
+        return kDefault;
+    }
+    UnitCargoComponent& CargoComp() { return ActiveRegistry().GetOrCreate<UnitCargoComponent>(handleId_); }
+    const UnitCargoComponent& CargoComp() const {
+        if (const auto* c = ActiveRegistry().TryGet<UnitCargoComponent>(handleId_)) return *c;
+        static const UnitCargoComponent kDefault{};
+        return kDefault;
+    }
+    UnitMorphComponent& MorphComp() { return ActiveRegistry().GetOrCreate<UnitMorphComponent>(handleId_); }
+    const UnitMorphComponent& MorphComp() const {
+        if (const auto* c = ActiveRegistry().TryGet<UnitMorphComponent>(handleId_)) return *c;
+        static const UnitMorphComponent kDefault{};
+        return kDefault;
+    }
+    UnitStructureNavComponent& StructureNavComp() { return ActiveRegistry().GetOrCreate<UnitStructureNavComponent>(handleId_); }
+    const UnitStructureNavComponent& StructureNavComp() const {
+        if (const auto* c = ActiveRegistry().TryGet<UnitStructureNavComponent>(handleId_)) return *c;
+        static const UnitStructureNavComponent kDefault{};
+        return kDefault;
+    }
+    UnitVisualComponent& VisualComp() { return ActiveRegistry().GetOrCreate<UnitVisualComponent>(handleId_); }
+    const UnitVisualComponent& VisualComp() const {
+        if (const auto* c = ActiveRegistry().TryGet<UnitVisualComponent>(handleId_)) return *c;
+        static const UnitVisualComponent kDefault{};
+        return kDefault;
+    }
+    UnitCorpseDropComponent& CorpseDropComp() { return ActiveRegistry().GetOrCreate<UnitCorpseDropComponent>(handleId_); }
+    const UnitCorpseDropComponent& CorpseDropComp() const {
+        if (const auto* c = ActiveRegistry().TryGet<UnitCorpseDropComponent>(handleId_)) return *c;
+        static const UnitCorpseDropComponent kDefault{};
+        return kDefault;
+    }
 
     int GetBaseSpeed() const { return attrs_.GetBaseSpeed(); }
     void AddBonusSpeed(int v) { attrs_.AddBonusSpeed(v); }
@@ -230,12 +264,12 @@ public:
     bool IsAlarmIgnored() const { return ignoreAlarm_; }
     void SetIgnoreAlarm(bool v) { ignoreAlarm_ = v; }
     // Command-card alt icon (ref UnitSetUsesAltIcon): consumed by UI.
-    bool UsesAltIcon() const { return visualComp_.useAltIcon; }
-    void SetUsesAltIcon(bool v) { visualComp_.useAltIcon = v; }
+    bool UsesAltIcon() const { return VisualComp().useAltIcon; }
+    void SetUsesAltIcon(bool v) { VisualComp().useAltIcon = v; }
     // Upgrade morph progress percent 0..100 (ref UnitSetUpgradeProgress):
     // consumed once the morph API lands; construction twin is live.
-    float GetUpgradeProgress() const { return constructionComp_.upgradeProgress; }
-    void SetUpgradeProgress(float v) { constructionComp_.upgradeProgress = v; }
+    float GetUpgradeProgress() const { return ConstructionComp().upgradeProgress; }
+    void SetUpgradeProgress(float v) { ConstructionComp().upgradeProgress = v; }
 
     // ===== Behavior System =====
     // Current behavior
@@ -305,8 +339,8 @@ public:
     bool IsPaused() const { return paused_; }
 
     // Construction state
-    bool IsConstructing() const { return constructionComp_.constructing; }
-    void SetConstructing(bool v) { constructionComp_.constructing = v; }
+    bool IsConstructing() const { return ConstructionComp().constructing; }
+    void SetConstructing(bool v) { ConstructionComp().constructing = v; }
     // Root state (Night Elf ancients): rooted units cannot move but can
     // still attack; movement behaviors complete immediately while rooted.
     bool IsRooted() const { return rooted_; }
@@ -333,10 +367,10 @@ public:
     // Stealth pre-check for fog rendering: invisible flag or a Wind Walk
     // buff. Detector/Faerie-Fire resolution still needs IsInvisibleTo(viewer).
     bool IsStealthed() const;
-    bool IsConstructionPaused() const { return constructionComp_.constructionPaused; }
-    void SetConstructionPaused(bool v) { constructionComp_.constructionPaused = v; }
-    float GetConstructionProgress() const { return constructionComp_.constructionProgress; }
-    void SetConstructionProgress(float v) { constructionComp_.constructionProgress = v; }
+    bool IsConstructionPaused() const { return ConstructionComp().constructionPaused; }
+    void SetConstructionPaused(bool v) { ConstructionComp().constructionPaused = v; }
+    float GetConstructionProgress() const { return ConstructionComp().constructionProgress; }
+    void SetConstructionProgress(float v) { ConstructionComp().constructionProgress = v; }
 
     // Hero level (per-unit instance, not from unit type)
     int GetHeroLevel() const { return heroLevel_; }
@@ -347,47 +381,50 @@ public:
     // percent chance independently (sets are editor groupings only).
     using DeathDropItem = UnitDeathDropItem;
     void SetDeathDrops(std::vector<DeathDropItem> drops) {
-        corpseDropComp_.deathDrops = std::move(drops);
+        CorpseDropComp().deathDrops = std::move(drops);
     }
-    const std::vector<DeathDropItem>& GetDeathDrops() const { return corpseDropComp_.deathDrops; }
+    const std::vector<DeathDropItem>& GetDeathDrops() const { return CorpseDropComp().deathDrops; }
     // Rolls the death drops and creates the won items (ref drop chance %).
     void DropDeathItems(CSimulation& simulation);
 
     // Death
-    int GetDeathTurnTick() const { return corpseDropComp_.deathTurnTick; }
-    void SetDeathTurnTick(int t) { corpseDropComp_.deathTurnTick = t; }
-    bool IsCorpse() const { return corpseDropComp_.corpse; }
-    bool IsBoneCorpse() const { return corpseDropComp_.boneCorpse; }
+    int GetDeathTurnTick() const { return CorpseDropComp().deathTurnTick; }
+    void SetDeathTurnTick(int t) { CorpseDropComp().deathTurnTick = t; }
+    bool IsCorpse() const { return CorpseDropComp().corpse; }
+    bool IsBoneCorpse() const { return CorpseDropComp().boneCorpse; }
     // Killer at the fatal blow (player index, -1 = none/environment; ref
     // kill(simulation, source)): feeds the killer-side death-vision reveal.
     // Recorded in Damage on the killing hit, consumed on the death tick.
-    int GetDeathKillerPlayer() const { return corpseDropComp_.deathKillerPlayer; }
-    void SetDeathKillerPlayer(int v) { corpseDropComp_.deathKillerPlayer = v; }
+    int GetDeathKillerPlayer() const { return CorpseDropComp().deathKillerPlayer; }
+    void SetDeathKillerPlayer(int v) { CorpseDropComp().deathKillerPlayer = v; }
     // Construction worker link (ref CUnit.worker/workerInside): orc/ne
     // builders hide inside the foundation; death pops them back out
     // (PopoutWorker), completion/cancel clears the link.
     void SetWorker(int workerHandleId, bool inside) {
-        constructionComp_.workerHandleId = workerHandleId;
-        constructionComp_.workerInside = inside;
+        auto& c = ConstructionComp();
+        c.workerHandleId = workerHandleId;
+        c.workerInside = inside;
     }
     void ClearWorker() {
-        constructionComp_.workerHandleId = -1;
-        constructionComp_.workerInside = false;
-        constructionComp_.constructionConsumesWorker = false;
+        if (auto* c = ActiveRegistry().TryGet<UnitConstructionComponent>(handleId_)) {
+            c->workerHandleId = -1;
+            c->workerInside = false;
+            c->constructionConsumesWorker = false;
+        }
     }
-    int GetWorkerHandle() const { return constructionComp_.workerHandleId; }
-    bool IsWorkerInside() const { return constructionComp_.workerInside; }
+    int GetWorkerHandle() const { return ConstructionComp().workerHandleId; }
+    bool IsWorkerInside() const { return ConstructionComp().workerInside; }
     // Night-elf consume (ref constructionConsumesWorker, set only for
     // ancients; wisp food is zeroed at build start and restored on popout).
-    void SetConstructionConsumesWorker(bool v) { constructionComp_.constructionConsumesWorker = v; }
-    bool IsConstructionConsumesWorker() const { return constructionComp_.constructionConsumesWorker; }
+    void SetConstructionConsumesWorker(bool v) { ConstructionComp().constructionConsumesWorker = v; }
+    bool IsConstructionConsumesWorker() const { return ConstructionComp().constructionConsumesWorker; }
     // Emerge the hidden construction worker, if any (ref popoutWorker):
     // unhide/unpause/uninvulnerable, nudge beside the ruin, restore
     // consumed-worker food. Always clears the link.
     void PopoutWorker(CSimulation& simulation);
     // Decay suspend (UnitSuspendDecay): frozen corpses never advance.
-    bool IsDecaySuspended() const { return corpseDropComp_.decaySuspended; }
-    void SetDecaySuspended(bool v) { corpseDropComp_.decaySuspended = v; }
+    bool IsDecaySuspended() const { return CorpseDropComp().decaySuspended; }
+    void SetDecaySuspended(bool v) { CorpseDropComp().decaySuspended = v; }
     float GetEndingDecayTime(const CSimulation& simulation) const;
 
     // Collision
@@ -395,13 +432,13 @@ public:
     void SetCollisionSize(float v) { collisionSize_ = v; }
 
     // Cargo (transported units ride along hidden inside this unit)
-    const std::vector<CUnit*>& GetCargoUnits() const { return cargoComp_.cargoUnits; }
-    bool IsLoadedAboard() const { return cargoComp_.loadedAboard; }
+    const std::vector<CUnit*>& GetCargoUnits() const { return CargoComp().cargoUnits; }
+    bool IsLoadedAboard() const { return CargoComp().loadedAboard; }
     bool LoadUnit(CUnit* passenger);
     void UnloadUnitAt(CUnit* passenger, float x, float y);
     // Burrow cargo (Abun) locks attacks until a peon is inside.
-    bool AreAttacksDisabled() const { return cargoComp_.attacksDisabled; }
-    void SetAttacksDisabled(bool v) { cargoComp_.attacksDisabled = v; }
+    bool AreAttacksDisabled() const { return CargoComp().attacksDisabled; }
+    void SetAttacksDisabled(bool v) { CargoComp().attacksDisabled = v; }
     bool CanBeTargetedBy(CSimulation& simulation, CUnit* source,
                          const std::vector<CTargetType>& targetsAllowed) const override;
 
@@ -416,11 +453,12 @@ public:
     bool UsesFood() const { return useFood_; }
     void SetUseFood(bool v) { useFood_ = v; }
     // Revive a dead hero at a position (ref ReviveHero).
-    void Revive(CSimulation& game, float x, float y);    // Alternate-form morph (Metamorphosis, Bear/Raven/Robo forms):
+    void Revive(CSimulation& game, float x, float y);
+    // Alternate-form morph (Metamorphosis, Bear/Raven/Robo forms):
     // swaps the type snapshot, saving the original for Unmorph().
     void MorphTo(CUnitType* form, War3ID formId);
     void Unmorph();
-    bool IsMorphed() const { return morphComp_.morphed; }
+    bool IsMorphed() const { return MorphComp().morphed; }
     // Attack modifier slot (ref attackReplacement): one data-driven proc
     // effect per attack index, installed by orb/arrow abilities. Installing
     // replaces whatever was there (retail orbs do not stack). Behaviors
@@ -441,40 +479,51 @@ public:
     void SetFlyingHeight(float h) { SetFlyHeight(h); }
 
     // Visual state (ref CUnit: scaling values, time scale, vertex color).
-    // Stored on the sim unit so JASS setters persist; the renderer reads
-    // them when drawing (no render dependency here).
-    float GetScale() const { return visualComp_.scale; }
-    void SetScale(float s) { visualComp_.scale = s; }
-    float GetTimeScale() const { return visualComp_.timeScale; }
-    void SetTimeScale(float s) { visualComp_.timeScale = s; }
+    // Stored in SimEcsRegistry<UnitVisualComponent> so JASS setters persist;
+    // the renderer reads them when drawing (no render dependency here).
+    float GetScale() const { return VisualComp().scale; }
+    void SetScale(float s) { VisualComp().scale = s; }
+    float GetTimeScale() const { return VisualComp().timeScale; }
+    void SetTimeScale(float s) { VisualComp().timeScale = s; }
     void SetVertexColor(int r, int g, int b, int a) {
-        visualComp_.vertexR = r; visualComp_.vertexG = g; visualComp_.vertexB = b; visualComp_.vertexA = a;
+        auto& vc = VisualComp();
+        vc.vertexR = r; vc.vertexG = g; vc.vertexB = b; vc.vertexA = a;
     }
     void GetVertexColor(int& r, int& g, int& b, int& a) const {
-        r = visualComp_.vertexR; g = visualComp_.vertexG; b = visualComp_.vertexB; a = visualComp_.vertexA;
+        const auto& vc = VisualComp();
+        r = vc.vertexR; g = vc.vertexG; b = vc.vertexB; a = vc.vertexA;
     }
-    void SetPlayerColor(int color) { visualComp_.playerColor = color; }
-    int GetPlayerColor() const { return visualComp_.playerColor; }
+    void SetPlayerColor(int color) { VisualComp().playerColor = color; }
+    int GetPlayerColor() const { return VisualComp().playerColor; }
     // Acquire-range override (-1 = use unit type default)
     float GetAcquireRange() const { return acquireRange_; }
     void SetAcquireRange(float range) { acquireRange_ = range; }
     // Rally point (ref CUnit rallyPoint; orderId 0 = none).
-    float GetRallyX() const { return structureNavComp_.rallyX; }
-    float GetRallyY() const { return structureNavComp_.rallyY; }
-    int GetRallyOrderId() const { return structureNavComp_.rallyOrderId; }
+    float GetRallyX() const { return StructureNavComp().rallyX; }
+    float GetRallyY() const { return StructureNavComp().rallyY; }
+    int GetRallyOrderId() const { return StructureNavComp().rallyOrderId; }
     void SetRallyPoint(float x, float y, int orderId = 0) {
-        structureNavComp_.rallyX = x; structureNavComp_.rallyY = y; structureNavComp_.rallyOrderId = orderId;
+        auto& sn = StructureNavComp();
+        sn.rallyX = x; sn.rallyY = y; sn.rallyOrderId = orderId;
     }
-    bool IsWaygateActive() const { return structureNavComp_.waygateActive; }
-    void SetWaygateActive(bool v) { structureNavComp_.waygateActive = v; }
-    float GetWaygateX() const { return structureNavComp_.waygateX; }
-    float GetWaygateY() const { return structureNavComp_.waygateY; }
-    void SetWaygateDestination(float x, float y) { structureNavComp_.waygateX = x; structureNavComp_.waygateY = y; }
+    bool IsWaygateActive() const { return StructureNavComp().waygateActive; }
+    void SetWaygateActive(bool v) { StructureNavComp().waygateActive = v; }
+    float GetWaygateX() const { return StructureNavComp().waygateX; }
+    float GetWaygateY() const { return StructureNavComp().waygateY; }
+    void SetWaygateDestination(float x, float y) {
+        auto& sn = StructureNavComp();
+        sn.waygateX = x; sn.waygateY = y;
+    }
     void RegeneratePathingInstance(CSimulation& game);
     void KillPathingInstance(CSimulation& game);
-    int GetPathingStampId() const { return structureNavComp_.pathingStampId; }
+    int GetPathingStampId() const { return StructureNavComp().pathingStampId; }
 
 private:
+    static SimEcsRegistry& DetachedRegistry();
+    SimEcsRegistry& ActiveRegistry() const {
+        return registry_ ? *registry_ : DetachedRegistry();
+    }
+
     void PerformDefaultBehavior(CSimulation& simulation);
     bool TryAutocast(CSimulation& simulation);
     // Kill rewards (bounty dice + hero XP split) fired once at the
@@ -488,6 +537,7 @@ private:
     void RefreshMaxLifeTotal();
     void RefreshMaxManaTotal();
 
+    SimEcsRegistry* registry_ = nullptr;
     CUnitType* unitType_;
     War3ID typeId_;
     int playerIndex_;
@@ -524,14 +574,6 @@ private:
     float propWindow_ = -1.0f;
     bool pathingEnabled_ = true;
 
-    // Orthogonal ECS Subsystem Components (Phase 3 Modernization)
-    UnitConstructionComponent constructionComp_;
-    UnitCargoComponent cargoComp_;
-    UnitMorphComponent morphComp_;
-    UnitStructureNavComponent structureNavComp_;
-    UnitVisualComponent visualComp_;
-    UnitCorpseDropComponent corpseDropComp_;
-
     // Abilities
     std::vector<CAbility*> abilities_; // raw pointers to owned abilities
     std::vector<std::unique_ptr<CAbility>> ownedAbilities_;
@@ -546,7 +588,6 @@ private:
     bool canSleep_ = true;
     bool canSleepPerm_ = true;
     bool ignoreAlarm_ = false;
-
 
     // Behavior storage (owned by unit, created by abilities)
     std::unique_ptr<CBehaviorMove> moveBehavior_;
@@ -564,8 +605,6 @@ private:
     int lastOrderId_ = 0;
     OrderIssuedHook orderIssuedHook_;
     UnitLoadedHook unitLoadedHook_;
-
-
 
     // Attack modifier slots by attack index (ref attackReplacement).
     struct AttackModifierSlot {
