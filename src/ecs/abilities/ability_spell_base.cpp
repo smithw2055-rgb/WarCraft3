@@ -35,23 +35,17 @@ int CAbilitySpellBase::GetBaseOrderId() const {
 }
 
 bool CAbilitySpellBase::CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const {
+    (void)game;
     if (IsDisabled()) return false;
     if (IsOnCooldown()) return false;
     if (!unit) return false;
-    // Order routing (ref ability order checks): a nonzero order must be
-    // this spell's base order (or toggle pair), or the alias order for
-    // code-variant abilities (ANin answering for AUin Inferno, Adet for
-    // Atru True Sight). Id 0 preserves legacy callers via positional match.
     if (!SpellMatchesOrder(code_, orderId) && !SpellMatchesOrder(alias_, orderId)) return false;
-    // Silenced units cannot cast; hexed units can neither attack nor cast
-    // (ref target checks ABConditionIsUnitPassAllAbilityTargetChecks).
     if (unit->IsSilenced() || unit->IsHexed()) return false;
     if (unit->GetMana() < manaCost_) return false;
     return true;
 }
 
 bool CAbilitySpellBase::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const {
-    (void)orderId;
     if (!CheckCanUse(game, unit, orderId)) return false;
     if (targetType_ == CSpellTargetType::NO_TARGET) return false;
     if (targetType_ == CSpellTargetType::TARGET_POINT) return false;
@@ -70,10 +64,9 @@ bool CAbilitySpellBase::CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, i
 }
 
 CBehavior* CAbilitySpellBase::Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) {
-    (void)orderId;
+    (void)game; (void)orderId;
     if (!target) return nullptr;
 
-    // Create spell behavior
     auto* behavior = new CBehaviorSpell();
     behavior->SetUnit(caster);
     behavior->SetSpellAbility(this);
@@ -87,7 +80,7 @@ CBehavior* CAbilitySpellBase::Begin(CSimulation& game, CUnit* caster, int orderI
 }
 
 CBehavior* CAbilitySpellBase::Begin(CSimulation& game, CUnit* caster, int orderId, float x, float y) {
-    (void)orderId;
+    (void)game; (void)orderId;
 
     auto* behavior = new CBehaviorSpell();
     behavior->SetUnit(caster);
@@ -102,7 +95,7 @@ CBehavior* CAbilitySpellBase::Begin(CSimulation& game, CUnit* caster, int orderI
 }
 
 CBehavior* CAbilitySpellBase::BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) {
-    (void)orderId;
+    (void)game; (void)orderId;
 
     auto* behavior = new CBehaviorSpell();
     behavior->SetUnit(caster);
@@ -116,13 +109,77 @@ CBehavior* CAbilitySpellBase::BeginNoTarget(CSimulation& game, CUnit* caster, in
 }
 
 void CAbilitySpellBase::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)game; (void)caster; (void)target;
+    const ABEffectChain* chain = AbilityBuilderRegistry::Instance().Find(alias_);
+    if (!chain) chain = AbilityBuilderRegistry::Instance().Find(code_);
+    if (chain) chain->Run(game, caster, target, false, 0.0f, 0.0f);
 }
 
 void CAbilitySpellBase::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    (void)game; (void)caster; (void)x; (void)y;
+    const ABEffectChain* chain = AbilityBuilderRegistry::Instance().Find(alias_);
+    if (!chain) chain = AbilityBuilderRegistry::Instance().Find(code_);
+    if (chain) chain->Run(game, caster, nullptr, true, x, y);
 }
 
 void CAbilitySpellBase::DoEffect(CSimulation& game, CUnit* caster) {
-    (void)game; (void)caster;
+    const ABEffectChain* chain = AbilityBuilderRegistry::Instance().Find(alias_);
+    if (!chain) chain = AbilityBuilderRegistry::Instance().Find(code_);
+    if (chain) chain->Run(game, caster, nullptr, false, 0.0f, 0.0f);
+}
+
+// ============================================================
+// CAbilityDataDrivenSpell implementation
+// ============================================================
+CAbilityDataDrivenSpell::CAbilityDataDrivenSpell(int handleId, War3ID code, const ABSpellDescriptor& desc)
+    : CAbilitySpellBase(handleId, code, CAbilityCategory::SPELL)
+    , desc_(desc) {
+    SetTargetType(static_cast<CSpellTargetType>(desc.targetType));
+    SetCastRange(desc.defaultRange);
+    SetCastPoint(desc.defaultCastPoint);
+    SetCooldown(desc.defaultCooldown);
+    SetManaCost(desc.defaultManaCost);
+    SetMaxLevel(desc.maxLevel);
+    ctx_.level = 1;
+    ctx_.duration = desc.defaultDuration;
+    ctx_.area = desc.defaultArea;
+    for (int i = 0; i < 9; ++i) {
+        ctx_.data[i] = desc.defaultData[i];
+    }
+}
+
+void CAbilityDataDrivenSpell::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    ctx_.level = level;
+    const float dur = def.DurationAt(level);
+    ctx_.duration = (dur > 0.0f) ? dur : desc_.defaultDuration;
+    const float area = def.AreaAt(level);
+    ctx_.area = (area > 0.0f) ? area : desc_.defaultArea;
+    for (int i = 0; i < 9; ++i) {
+        ctx_.data[i] = def.DataFloatAt(level, i, desc_.defaultData[i]);
+    }
+}
+
+void CAbilityDataDrivenSpell::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    ctx_.level = level_;
+    if (desc_.onEffect) {
+        desc_.onEffect(ctx_, game, caster, target, false, 0.0f, 0.0f);
+        return;
+    }
+    CAbilitySpellBase::DoEffect(game, caster, target);
+}
+
+void CAbilityDataDrivenSpell::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    ctx_.level = level_;
+    if (desc_.onEffect) {
+        desc_.onEffect(ctx_, game, caster, nullptr, true, x, y);
+        return;
+    }
+    CAbilitySpellBase::DoEffect(game, caster, x, y);
+}
+
+void CAbilityDataDrivenSpell::DoEffect(CSimulation& game, CUnit* caster) {
+    ctx_.level = level_;
+    if (desc_.onEffect) {
+        desc_.onEffect(ctx_, game, caster, nullptr, false, 0.0f, 0.0f);
+        return;
+    }
+    CAbilitySpellBase::DoEffect(game, caster);
 }

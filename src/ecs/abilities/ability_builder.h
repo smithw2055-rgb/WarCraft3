@@ -107,15 +107,68 @@ private:
     std::vector<std::unique_ptr<ABAction>> actions_;
 };
 
-// War3ID-keyed registry of effect chains (populated at startup / by tests).
+// Per-level resolved parameters passed to data-driven spell descriptors.
+struct ABSpellEffectContext {
+    int level = 1;
+    float duration = 0.0f;
+    float area = 0.0f;
+    float data[9] = {0.0f}; // DataA (0) .. DataI (8)
+};
+
+// Unity ScriptableObject / Godot Resource style data-driven spell descriptor.
+// Allows authoring and registering complete spells (targeting, range, mana,
+// cooldown, per-level SLK DataA..I extraction, and effect execution) without
+// writing a dedicated C++ CAbilitySpellBase subclass.
+struct ABSpellDescriptor {
+    War3ID code = War3ID(0u);
+    uint8_t targetType = 0; // CSpellTargetType ordinal: 0=NO_TARGET, 1=UNIT, 2=POINT, 3=BOTH
+    float defaultRange = 600.0f;
+    float defaultCastPoint = 0.3f;
+    float defaultCooldown = 0.0f;
+    int defaultManaCost = 0;
+    int maxLevel = 3;
+    float defaultDuration = 0.0f;
+    float defaultArea = 0.0f;
+    float defaultData[9] = {0.0f};
+
+    using EffectRunner = std::function<void(const ABSpellEffectContext& ctx,
+                                            CSimulation& game, CUnit* caster,
+                                            CWidget* unitTarget, bool hasPoint,
+                                            float x, float y)>;
+    EffectRunner onEffect;
+
+    static ABSpellDescriptor MakeAreaDamageAndSlow(
+        War3ID code, float radius, float defaultDamage, float slowPct, float slowDur,
+        float cooldown, int manaCost, CDamageType dmgType = CDamageType::SONIC);
+
+    static ABSpellDescriptor MakeMissileDamageAndStun(
+        War3ID code, float defaultDamage, float stunDur, float missileSpeed,
+        float range, float cooldown, int manaCost, CDamageType dmgType = CDamageType::LIGHTNING);
+
+    static ABSpellDescriptor MakeAreaDamageAndStun(
+        War3ID code, float radius, float defaultDamage, float stunDur,
+        float cooldown, int manaCost, CDamageType dmgType = CDamageType::SONIC);
+
+    static ABSpellDescriptor MakeSummonTimed(
+        War3ID code, War3ID summonUnitType, War3ID buffAlias,
+        int defaultCount, float defaultDuration, float cooldown, int manaCost,
+        int countDataIdx = 1);
+};
+
+// War3ID-keyed registry of effect chains and data-driven spell descriptors.
 class AbilityBuilderRegistry {
 public:
     static AbilityBuilderRegistry& Instance();
     void Register(War3ID alias, ABEffectChain chain);
     const ABEffectChain* Find(War3ID alias) const;
 
+    void RegisterDescriptor(ABSpellDescriptor desc);
+    const ABSpellDescriptor* FindDescriptor(War3ID alias) const;
+    bool Unregister(War3ID alias);
+
 private:
     std::unordered_map<uint32_t, ABEffectChain> chains_; // keyed by War3ID::value
+    std::unordered_map<uint32_t, ABSpellDescriptor> descriptors_;
 };
 
 // Shared summon helper: create + timed-life buff + summoned callback.

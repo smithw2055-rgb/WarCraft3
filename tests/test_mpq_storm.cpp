@@ -483,16 +483,25 @@ static std::unordered_map<std::string, int> ExtractJassCallCounts(const std::str
 }
 
 static bool ExtractRegisteredJassNatives(std::unordered_set<std::string>& out) {
-    const fs::path sourcePath = fs::path(G_PROJECT_SOURCE_DIR) / "src" / "scripting" / "JassNatives.cpp";
-    std::ifstream in(sourcePath, std::ios::binary);
-    if (!in.is_open()) {
-        std::cerr << "[ERROR] Failed to read " << sourcePath.string() << std::endl;
-        return false;
-    }
-    const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    static const std::regex pattern("RegisterNative\\(\\\"([A-Za-z_][A-Za-z0-9_]*)\\\"");
-    for (std::sregex_iterator it(source.begin(), source.end(), pattern), end; it != end; ++it) {
-        out.insert((*it)[1].str());
+    const fs::path scriptingDir = fs::path(G_PROJECT_SOURCE_DIR) / "src" / "scripting";
+    const std::vector<fs::path> sourcePaths = {
+        scriptingDir / "JassNatives.cpp",
+        scriptingDir / "natives" / "jass_natives_units.cpp",
+        scriptingDir / "natives" / "jass_natives_triggers.cpp",
+        scriptingDir / "natives" / "jass_natives_environment.cpp",
+        scriptingDir / "natives" / "jass_natives_ui_data.cpp",
+    };
+    static const std::regex pattern(R"(RegisterNative(?:Auto)?\s*\(\s*(?:[A-Za-z0-9_]+\s*,\s*)?\"([A-Za-z_][A-Za-z0-9_]*)\")");
+    for (const fs::path& sourcePath : sourcePaths) {
+        std::ifstream in(sourcePath, std::ios::binary);
+        if (!in.is_open()) {
+            std::cerr << "[ERROR] Failed to read " << sourcePath.string() << std::endl;
+            return false;
+        }
+        const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        for (std::sregex_iterator it(source.begin(), source.end(), pattern), end; it != end; ++it) {
+            out.insert((*it)[1].str());
+        }
     }
     return !out.empty();
 }

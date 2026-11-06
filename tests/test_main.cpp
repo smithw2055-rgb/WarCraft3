@@ -757,6 +757,16 @@ bool TestAuditLightningShieldFriendlyDamage();
 bool TestAuditCreateItemValidation();
 bool TestAuditPropulsionWindowDegrees();
 bool TestAuditSequenceGoldLumberFilter();
+bool TestSignalAndSimEventBusMulticast();
+bool TestJassBinderAutoRegistration();
+bool TestBlzFrameLiveUIFrameBridgeAndEvents();
+bool TestUnitAttributeAggregatorPipeline();
+bool TestDataDrivenSpellDescriptorAndRegistry();
+bool TestAbilityFactoryO1TableAndAliases();
+bool TestSparseSetEcsRegistryAndUnitComponents();
+bool TestJassBytecodeCompilerAndIndexedLocals();
+bool TestRenderServerMaterialsAndFrustumCulling();
+bool TestRenderServerInstancingAndSimulationInterpolation();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1509,6 +1519,16 @@ int main(int argc, char** argv) {
         {"Audit create item validation", TestAuditCreateItemValidation},
         {"Audit propulsion window degrees", TestAuditPropulsionWindowDegrees},
         {"Audit sequence gold lumber filter", TestAuditSequenceGoldLumberFilter},
+        {"Phase1 Signal and SimEventBus multicast", TestSignalAndSimEventBusMulticast},
+        {"Phase1 JassBinder template auto registration", TestJassBinderAutoRegistration},
+        {"Phase1 BlzFrame live UIFrame bridge and events", TestBlzFrameLiveUIFrameBridgeAndEvents},
+        {"Phase2 UnitAttributeAggregator stat and aura pipeline", TestUnitAttributeAggregatorPipeline},
+        {"Phase2 Data-driven ABSpellDescriptor and level scaling", TestDataDrivenSpellDescriptorAndRegistry},
+        {"Phase2 AbilityFactory O(1) registry and aliases", TestAbilityFactoryO1TableAndAliases},
+        {"Phase3 Sparse-Set ECS registry and CUnit components", TestSparseSetEcsRegistryAndUnitComponents},
+        {"Phase3 JassVM bytecode compiler and indexed local slots", TestJassBytecodeCompilerAndIndexedLocals},
+        {"Phase4 RenderServer materials and frustum culling", TestRenderServerMaterialsAndFrustumCulling},
+        {"Phase4 RenderServer GPU instancing and simulation interpolation", TestRenderServerInstancingAndSimulationInterpolation},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

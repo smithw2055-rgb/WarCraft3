@@ -113,6 +113,11 @@ add_executable(warsmash_tests
     test_jass_p0.cpp
     test_map_smoke.cpp
     test_audit_fixes.cpp
+    test_phase1_modernization.cpp
+    test_phase2_modernization.cpp
+    test_phase3_modernization.cpp
+    test_phase4_modernization.cpp
+    ../src/render/render_server.cpp
     ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
     ../src/map/w3i.cpp
@@ -154,11 +159,16 @@ add_executable(warsmash_tests
     ../src/render/replaceable_ids.cpp
     ../src/scripting/jass_animation_tags.cpp
     ../src/scripting/JassNatives.cpp
+    ../src/scripting/natives/jass_natives_units.cpp
+    ../src/scripting/natives/jass_natives_triggers.cpp
+    ../src/scripting/natives/jass_natives_environment.cpp
+    ../src/scripting/natives/jass_natives_ui_data.cpp
     ../src/scripting/jass_common_env.cpp
     ../src/scripting/jass_config_env.cpp
     ../src/scripting/JassLexer.cpp
     ../src/scripting/JassParser.cpp
     ../src/scripting/JassVM.cpp
+    ../src/scripting/JassBytecode.cpp
     ../src/resource/mpq_storm.cpp
     ../src/resource/casc.cpp
     ../src/resource/slk.cpp
@@ -181,6 +191,7 @@ add_executable(warsmash_tests
     ../src/data/upgradedata.cpp
     ../src/ecs/widget.cpp
     ../src/ecs/animation_state.cpp
+    ../src/ecs/attribute_aggregator.cpp
     ../src/ecs/unit.cpp
     ../src/ecs/fog_state.cpp
     ../src/ecs/unit_type.cpp

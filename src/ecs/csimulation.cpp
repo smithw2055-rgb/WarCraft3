@@ -470,14 +470,10 @@ void CSimulation::InstallUnitHooks(CUnit* ptr) {
     const int handle = ptr->GetHandleId();
     ptr->SetOrderIssuedHook([this, handle](int orderId, int targetKind, float x, float y, int targetHandle) {
         (void)targetKind;
-        if (unitOrderCallback_) {
-            unitOrderCallback_(handle, orderId, targetHandle, x, y);
-        }
+        events_.onUnitOrder.Emit(handle, orderId, targetHandle, x, y);
     });
     ptr->SetUnitLoadedHook([this, handle](int passengerHandle) {
-        if (unitLoadedCallback_) {
-            unitLoadedCallback_(handle, passengerHandle);
-        }
+        events_.onUnitLoaded.Emit(handle, passengerHandle);
     });
 }
 
@@ -611,7 +607,7 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
         }
 
         // Check if building is a town hall (has return resources)
-        bool hasReturnResources = IsTownHallReturnResourceType(typeId);
+        bool hasReturnResources = IsTownHallReturnResourceType(typeId) || (unitType->GetClassifications().count(CUnitClassification::TOWNHALL) > 0);
         for (auto& abilityCode : unitType->GetAbilityList()) {
             if (abilityCode == War3ID("Aret")) {
                 hasReturnResources = true;
@@ -848,6 +844,7 @@ void CSimulation::ProcessUnitRemovals() {
             }
         }
 
+        ecsRegistry_.DestroyEntity(unit->GetHandleId());
         unitMap_.erase(unit->GetHandleId());
     }
     removedUnits_.clear();
@@ -908,9 +905,7 @@ void CSimulation::ProcessNewDestructables() {
 void CSimulation::ProcessItemRemovals() {
     for (auto* item : removedItems_) {
         const int handleId = item->GetHandleId();
-        if (itemRemovedCallback_) {
-            itemRemovedCallback_(handleId);
-        }
+        events_.onItemRemoved.Emit(handleId);
 
         if (worldCollision_) {
             worldCollision_->RemoveItem(item);

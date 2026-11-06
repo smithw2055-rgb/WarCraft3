@@ -133,6 +133,131 @@ const ABEffectChain* AbilityBuilderRegistry::Find(War3ID alias) const {
     return it != chains_.end() ? &it->second : nullptr;
 }
 
+void AbilityBuilderRegistry::RegisterDescriptor(ABSpellDescriptor desc) {
+    descriptors_[desc.code.value] = std::move(desc);
+}
+
+const ABSpellDescriptor* AbilityBuilderRegistry::FindDescriptor(War3ID alias) const {
+    auto it = descriptors_.find(alias.value);
+    return it != descriptors_.end() ? &it->second : nullptr;
+}
+
+bool AbilityBuilderRegistry::Unregister(War3ID alias) {
+    bool removed = false;
+    if (chains_.erase(alias.value) > 0) removed = true;
+    if (descriptors_.erase(alias.value) > 0) removed = true;
+    return removed;
+}
+
+ABSpellDescriptor ABSpellDescriptor::MakeAreaDamageAndSlow(
+    War3ID code, float radius, float defaultDamage, float slowPct, float slowDur,
+    float cooldown, int manaCost, CDamageType dmgType) {
+    ABSpellDescriptor d;
+    d.code = code;
+    d.targetType = 0; // NO_TARGET
+    d.defaultRange = 0.0f;
+    d.defaultCooldown = cooldown;
+    d.defaultManaCost = manaCost;
+    d.defaultArea = radius;
+    d.defaultDuration = slowDur;
+    d.defaultData[0] = defaultDamage;
+    d.defaultData[1] = slowPct;
+    d.onEffect = [dmgType](const ABSpellEffectContext& ctx, CSimulation& game,
+                           CUnit* caster, CWidget*, bool hasPoint, float x, float y) {
+        if (!caster) return;
+        const int casterHandle = caster->GetHandleId();
+        const float dmg = ctx.data[0];
+        const float slowPercent = ctx.data[1];
+        const float dur = ctx.duration > 0.0f ? ctx.duration : 5.0f;
+        const float rad = ctx.area > 0.0f ? ctx.area : 250.0f;
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTarget>(dmg, CAttackType::SPELLS, dmgType));
+        perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
+            [dur, slowPercent, casterHandle]() {
+                return std::make_unique<CBuffSlow>(dur, slowPercent, casterHandle);
+            }));
+        ABActionForEachInRange area(rad, std::move(perUnit));
+        area.Run(game, caster, nullptr, hasPoint, x, y);
+    };
+    return d;
+}
+
+ABSpellDescriptor ABSpellDescriptor::MakeMissileDamageAndStun(
+    War3ID code, float defaultDamage, float stunDur, float missileSpeed,
+    float range, float cooldown, int manaCost, CDamageType dmgType) {
+    ABSpellDescriptor d;
+    d.code = code;
+    d.targetType = 1; // TARGET_UNIT
+    d.defaultRange = range;
+    d.defaultCooldown = cooldown;
+    d.defaultManaCost = manaCost;
+    d.defaultDuration = stunDur;
+    d.defaultData[0] = defaultDamage;
+    d.onEffect = [missileSpeed, dmgType](const ABSpellEffectContext& ctx, CSimulation& game,
+                                         CUnit* caster, CWidget* target, bool, float, float) {
+        const float dmg = ctx.data[0];
+        const float dur = ctx.duration > 0.0f ? ctx.duration : 2.0f;
+        ABActionMissileStun bolt(dmg, dur, missileSpeed, CAttackType::SPELLS, dmgType);
+        bolt.Run(game, caster, target, false, 0.0f, 0.0f);
+    };
+    return d;
+}
+
+ABSpellDescriptor ABSpellDescriptor::MakeAreaDamageAndStun(
+    War3ID code, float radius, float defaultDamage, float stunDur,
+    float cooldown, int manaCost, CDamageType dmgType) {
+    ABSpellDescriptor d;
+    d.code = code;
+    d.targetType = 0; // NO_TARGET
+    d.defaultRange = 0.0f;
+    d.defaultCooldown = cooldown;
+    d.defaultManaCost = manaCost;
+    d.defaultArea = radius;
+    d.defaultDuration = stunDur;
+    d.defaultData[0] = defaultDamage;
+    d.onEffect = [dmgType](const ABSpellEffectContext& ctx, CSimulation& game,
+                           CUnit* caster, CWidget*, bool hasPoint, float x, float y) {
+        if (!caster) return;
+        const float dmg = ctx.data[0];
+        const float dur = ctx.duration > 0.0f ? ctx.duration : 3.0f;
+        const float rad = ctx.area > 0.0f ? ctx.area : 250.0f;
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTarget>(dmg, CAttackType::SPELLS, dmgType));
+        perUnit.Add(std::make_unique<ABActionStunTarget>(dur));
+        ABActionForEachInRange stomp(rad, std::move(perUnit));
+        stomp.Run(game, caster, nullptr, hasPoint, x, y);
+    };
+    return d;
+}
+
+ABSpellDescriptor ABSpellDescriptor::MakeSummonTimed(
+    War3ID code, War3ID summonUnitType, War3ID buffAlias,
+    int defaultCount, float defaultDuration, float cooldown, int manaCost,
+    int countDataIdx) {
+    ABSpellDescriptor d;
+    d.code = code;
+    d.targetType = 0; // NO_TARGET
+    d.defaultRange = 0.0f;
+    d.defaultCooldown = cooldown;
+    d.defaultManaCost = manaCost;
+    d.defaultDuration = defaultDuration;
+    if (countDataIdx >= 0 && countDataIdx < 9) {
+        d.defaultData[countDataIdx] = (float)defaultCount;
+    }
+    d.onEffect = [summonUnitType, buffAlias, defaultCount, countDataIdx](
+                     const ABSpellEffectContext& ctx, CSimulation& game,
+                     CUnit* caster, CWidget* target, bool hasPoint, float x, float y) {
+        int count = defaultCount;
+        if (countDataIdx >= 0 && countDataIdx < 9 && ctx.data[countDataIdx] > 0.0f) {
+            count = (int)ctx.data[countDataIdx];
+        }
+        const float dur = ctx.duration > 0.0f ? ctx.duration : 60.0f;
+        ABActionSummon summon(summonUnitType, buffAlias, count, dur);
+        summon.Run(game, caster, target, hasPoint, x, y);
+    };
+    return d;
+}
+
 CUnit* SummonTimedUnit(CSimulation& game, CUnit* caster, War3ID typeId,
                        War3ID buffAlias, float x, float y, float facing,
                        float duration) {

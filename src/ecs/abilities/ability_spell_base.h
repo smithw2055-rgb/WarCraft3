@@ -1,5 +1,6 @@
 #pragma once
 #include "ecs/ability.h"
+#include "ecs/abilities/ability_builder.h"
 
 struct CAbilityDefFull;
 
@@ -13,18 +14,6 @@ enum class CSpellTargetType : uint8_t {
 
 // ============================================================
 // CAbilitySpellBase - base class for all spell abilities
-//
-// Spell lifecycle:
-//   1. CheckCanUse() - validates mana, cooldown, disabled
-//   2. CheckCanTarget() - validates target type
-//   3. Begin() -> returns CBehaviorSpell
-//   4. CBehaviorSpell handles:
-//      a. Move into cast range
-//      b. Face target
-//      c. Play cast animation (cast point)
-//      d. Deduct mana, start cooldown
-//      e. Call DoEffect() - the actual spell effect
-//      f. Play backswing animation
 // ============================================================
 class CAbilitySpellBase : public CAbility {
 public:
@@ -41,18 +30,13 @@ public:
     void SetCooldown(float v) { cooldown_ = v; }
     int GetManaCost() const { return manaCost_; }
     void SetManaCost(int v) { manaCost_ = v; }
-    int GetLevel() const { return level_; }
-    void SetLevel(int v);
+    int GetLevel() const override { return level_; }
+    void SetLevel(int v) override;
     int GetMaxLevel() const { return maxLevel_; }
     void SetMaxLevel(int v) { maxLevel_ = v; }
-    // Retail per-level numbers (cooldown/mana/range/cast point) override
-    // the hardcoded constructor defaults; the def pointer is cached so
-    // hero skill level-ups re-apply the new level's row.
     void ApplyData(const CAbilityDefFull& def);
 
     // Order validation
-    // Base engine order (retail id, e.g. whirlwind=852128); drives both
-    // JASS order dispatch and the future command-card buttons.
     int GetBaseOrderId() const override;
     bool CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const override;
     bool CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const override;
@@ -64,7 +48,8 @@ public:
     CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, float x, float y) override;
     CBehavior* BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) override;
 
-    // The actual spell effect - override in subclasses
+    // The actual spell effect - defaults to dispatching any registered
+    // ABEffectChain in AbilityBuilderRegistry::Instance(), or overridden in subclasses.
     virtual void DoEffect(CSimulation& game, CUnit* caster, CWidget* target);
     virtual void DoEffect(CSimulation& game, CUnit* caster, float x, float y);
     virtual void DoEffect(CSimulation& game, CUnit* caster);
@@ -77,8 +62,6 @@ public:
     float GetCooldownRemaining() const { return cooldownRemaining_; }
 
 protected:
-    // Per-class effect numbers (damage, bounces, heal...) from the def's
-    // DataA-I fields; runs inside ApplyData, so level-ups re-apply too.
     virtual void ApplyEffectData(const CAbilityDefFull& def, int level);
 
     CSpellTargetType targetType_ = CSpellTargetType::NO_TARGET;
@@ -90,4 +73,27 @@ protected:
     int maxLevel_ = 3;
     float cooldownRemaining_ = 0;
     const CAbilityDefFull* dataDef_ = nullptr;
+};
+
+// ============================================================
+// CAbilityDataDrivenSpell - Unity ScriptableObject / Godot Resource
+// style data-driven spell ability instantiated from ABSpellDescriptor.
+// ============================================================
+class CAbilityDataDrivenSpell : public CAbilitySpellBase {
+public:
+    CAbilityDataDrivenSpell(int handleId, War3ID code, const ABSpellDescriptor& desc);
+
+    const ABSpellEffectContext& GetEffectContext() const { return ctx_; }
+    const ABSpellDescriptor& GetDescriptor() const { return desc_; }
+
+    void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+    void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+    void DoEffect(CSimulation& game, CUnit* caster) override;
+
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
+
+private:
+    ABSpellDescriptor desc_;
+    ABSpellEffectContext ctx_;
 };

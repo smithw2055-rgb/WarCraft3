@@ -15,6 +15,8 @@
 #include "ecs/orders/order.h"
 #include "data/combat_types.h"
 #include "ecs/abilities/ability_aura.h"
+#include "ecs/attribute_aggregator.h"
+#include "ecs/unit_components.h"
 #include <vector>
 #include <queue>
 #include <functional>
@@ -56,10 +58,27 @@ public:
     bool IsFlying() const { return movementType_ == PathingGridMovementType::FLY; }
     float GetSpeed() const;
     void SetSpeed(int s);
-    int GetBaseSpeed() const { return baseSpeed_; }
-    void AddBonusSpeed(int v) { bonusSpeed_ += v; }
-    void AddSpeedModifier(War3ID id, float percent) { speedModifiers_[id] = percent; }
-    void RemoveSpeedModifier(War3ID id) { speedModifiers_.erase(id); }
+    UnitAttributeAggregator& Attributes() { return attrs_; }
+    const UnitAttributeAggregator& Attributes() const { return attrs_; }
+
+    // Orthogonal ECS Component Accessors (Phase 3 Modernization)
+    UnitConstructionComponent& ConstructionComp() { return constructionComp_; }
+    const UnitConstructionComponent& ConstructionComp() const { return constructionComp_; }
+    UnitCargoComponent& CargoComp() { return cargoComp_; }
+    const UnitCargoComponent& CargoComp() const { return cargoComp_; }
+    UnitMorphComponent& MorphComp() { return morphComp_; }
+    const UnitMorphComponent& MorphComp() const { return morphComp_; }
+    UnitStructureNavComponent& StructureNavComp() { return structureNavComp_; }
+    const UnitStructureNavComponent& StructureNavComp() const { return structureNavComp_; }
+    UnitVisualComponent& VisualComp() { return visualComp_; }
+    const UnitVisualComponent& VisualComp() const { return visualComp_; }
+    UnitCorpseDropComponent& CorpseDropComp() { return corpseDropComp_; }
+    const UnitCorpseDropComponent& CorpseDropComp() const { return corpseDropComp_; }
+
+    int GetBaseSpeed() const { return attrs_.GetBaseSpeed(); }
+    void AddBonusSpeed(int v) { attrs_.AddBonusSpeed(v); }
+    void AddSpeedModifier(War3ID id, float percent) { attrs_.AddSpeedModifier(id, percent); }
+    void RemoveSpeedModifier(War3ID id) { attrs_.RemoveSpeedModifier(id); }
     bool TurnTowardPoint(float targetX, float targetY);
 
     // Position (override from CWidget)
@@ -71,44 +90,33 @@ public:
     void SetMana(float v) { mana_ = v; }
     int GetMaxMana() const { return maxMana_; }
     void SetMaxMana(int v) { maxMana_ = v; }
-    int GetBaseMaxLife() const { return baseMaxLife_; }
-    // Layered max life/mana: type base + hero bonus + item/upgrade bonus.
-    // Unit code must mutate layers via Add*/SetHeroBonus*, never via
-    // SetMaxLife/SetMaxMana, so layers can't wipe each other.
-    float GetBonusMaxLife() const { return bonusMaxLife_; }
+    int GetBaseMaxLife() const { return attrs_.GetBaseMaxLife(); }
+    float GetBonusMaxLife() const { return attrs_.GetBonusMaxLife(); }
     void AddBonusMaxLife(float v);
-    int GetBonusMaxMana() const { return bonusMaxMana_; }
+    int GetBonusMaxMana() const { return attrs_.GetBonusMaxMana(); }
     void AddBonusMaxMana(int v);
     void SetHeroBonusLife(float v);
     void SetHeroBonusMana(int v);
-    int GetDefense() const { return currentDefense_; }
-    void SetDefense(int v) { currentDefense_ = v; }
-    // Total defense including item/upgrade bonus armor (ref GetTotalDefense;
-    // temporary script bonus from UnitAddDefenseBonus rides along so combat
-    // honors Avatar/Devotion-style script armor).
-    int GetTotalDefense() const { return currentDefense_ + bonusArmor_ + (int)tempDefenseBonus_; }
-    // Temporary script defense bonus (ref temporaryDefenseBonus): mutated by
-    // UnitAddDefenseBonus/SetTemporaryDefenseBonus, read by GetUnitDefenseBonus.
-    float GetTempDefenseBonus() const { return tempDefenseBonus_; }
-    void SetTempDefenseBonus(float v) { tempDefenseBonus_ = v; }
-    void AddTempDefenseBonus(float v) { tempDefenseBonus_ += v; }
-    // Buff applied as a death explosion visual (ref explodesOnDeathBuffId;
-    // stored for the effect pass, cf. JASS SetUnitExplodeOnDeathBuffId).
+    int GetDefense() const { return attrs_.GetCurrentDefense(); }
+    void SetDefense(int v) { attrs_.SetCurrentDefense(v); }
+    int GetTotalDefense() const { return attrs_.ComputeTotalDefense(); }
+    float GetTempDefenseBonus() const { return attrs_.GetTempDefenseBonus(); }
+    void SetTempDefenseBonus(float v) { attrs_.SetTempDefenseBonus(v); }
+    void AddTempDefenseBonus(float v) { attrs_.AddTempDefenseBonus(v); }
     War3ID GetExplodeOnDeathBuffId() const { return explodeBuffId_; }
     void SetExplodeOnDeathBuffId(War3ID id) { explodeBuffId_ = id; }
     CDefenseType GetDefenseType() const;
 
-    // Instance bonus stats (items, upgrades, buffs). These stack on top of
-    // the static CUnitType data and must never mutate the shared unit type.
-    float GetBonusDamage() const { return bonusDamage_ + heroBonusDamage_ + GetNonStackingDamageTotal(); }
-    void AddBonusDamage(int v) { bonusDamage_ += v; }
-    void SetHeroBonusDamage(int v) { heroBonusDamage_ = v; }
-    int GetBonusArmor() const { return bonusArmor_; }
-    void AddBonusArmor(int v) { bonusArmor_ += v; }
-    float GetBonusLifeRegen() const { return bonusLifeRegen_; }
-    void AddBonusLifeRegen(float v) { bonusLifeRegen_ += v; }
-    float GetBonusManaRegen() const { return bonusManaRegen_; }
-    void AddBonusManaRegen(float v) { bonusManaRegen_ += v; }
+    // Instance bonus stats routed through UnitAttributeAggregator
+    float GetBonusDamage() const { return attrs_.ComputeTotalBonusDamage(); }
+    void AddBonusDamage(int v) { attrs_.AddBonusDamage(v); }
+    void SetHeroBonusDamage(int v) { attrs_.SetHeroBonusDamage(v); }
+    int GetBonusArmor() const { return attrs_.GetBonusArmor(); }
+    void AddBonusArmor(int v) { attrs_.AddBonusArmor(v); }
+    float GetBonusLifeRegen() const { return attrs_.GetBonusLifeRegen(); }
+    void AddBonusLifeRegen(float v) { attrs_.AddBonusLifeRegen(v); }
+    float GetBonusManaRegen() const { return attrs_.GetBonusManaRegen(); }
+    void AddBonusManaRegen(float v) { attrs_.AddBonusManaRegen(v); }
     // Non-stacking aura stat bonuses (ref NonStackingStatBonus): one entry
     // per source buff per (stat, percent) slot; only the strongest applies.
     // Implemented in unit.cpp; driven by CBuffAuraStat add/remove.
@@ -124,42 +132,23 @@ public:
     // listeners: every source rolls independently). Same-id installs
     // replace; removals only clear their own id, so Drunken Brawler dodge
     // no longer wipes Demon Hunter evasion (and vice versa).
-    struct EvasionSource {
-        War3ID id = War3ID(0u);
-        float chance = 0.0f;
-    };
-    struct CritSource {
-        War3ID id = War3ID(0u);
-        float chance = 0.0f;
-        float multiplier = 1.0f;
-    };
-    void AddEvasionSource(War3ID id, float chance);
-    void RemoveEvasionSource(War3ID id);
-    const std::vector<EvasionSource>& GetEvasionSources() const { return evasionSources_; }
-    // Combined dodge probability 1 - Π(1 - p) (for UI/inspect).
-    float GetEvasionChance() const;
-    // Legacy single-value shim (tests): clears all sources, installs one
-    // anonymous source.
-    void SetEvasionChance(float v);
-    void AddCritSource(War3ID id, float chance, float multiplier);
-    void RemoveCritSource(War3ID id);
-    const std::vector<CritSource>& GetCritSources() const { return critSources_; }
-    // Display pair: chance/multiplier of the likeliest source (exact when
-    // only one source is installed).
-    float GetCritChance() const;
-    float GetCritMultiplier() const;
-    // Legacy single-value shim (tests): clears all sources, installs one
-    // anonymous source.
-    void SetCriticalStrike(float chance, float multiplier);
-    float GetAttackSpeedMultiplier() const;
-    // Legacy multiplicative chain (only Burrow cargo steps still use it;
-    // everything else rides the additive bonus/table below).
-    void MultiplyAttackSpeed(float m) { attackSpeedMul_ *= m; }
-    void DivideAttackSpeed(float m) { if (m != 0.0f) attackSpeedMul_ /= m; }
-    // Stacking attack-speed bonus (retail attackSpeedBonus: items; plain
-    // sum, e.g. +0.15 for Gloves of Haste). Buffs/aura go in the
-    // non-stacking table below, never here.
-    void AddStackingAttackSpeed(float bonus) { attackSpeedStackBonus_ += bonus; }
+    using EvasionSource = UnitEvasionSource;
+    using CritSource = UnitCritSource;
+    void AddEvasionSource(War3ID id, float chance) { attrs_.AddEvasionSource(id, chance); }
+    void RemoveEvasionSource(War3ID id) { attrs_.RemoveEvasionSource(id); }
+    const std::vector<EvasionSource>& GetEvasionSources() const { return attrs_.GetEvasionSources(); }
+    float GetEvasionChance() const { return attrs_.ComputeEvasionChance(); }
+    void SetEvasionChance(float v) { attrs_.SetEvasionChance(v); }
+    void AddCritSource(War3ID id, float chance, float multiplier) { attrs_.AddCritSource(id, chance, multiplier); }
+    void RemoveCritSource(War3ID id) { attrs_.RemoveCritSource(id); }
+    const std::vector<CritSource>& GetCritSources() const { return attrs_.GetCritSources(); }
+    float GetCritChance() const { return attrs_.ComputeCritChance(); }
+    float GetCritMultiplier() const { return attrs_.ComputeCritMultiplier(); }
+    void SetCriticalStrike(float chance, float multiplier) { attrs_.SetCriticalStrike(chance, multiplier); }
+    float GetAttackSpeedMultiplier() const { return attrs_.ComputeAttackSpeedMultiplier(); }
+    void MultiplyAttackSpeed(float m) { attrs_.MultiplyAttackSpeed(m); }
+    void DivideAttackSpeed(float m) { attrs_.DivideAttackSpeed(m); }
+    void AddStackingAttackSpeed(float bonus) { attrs_.AddStackingAttackSpeed(bonus); }
     // Non-stacking attack bonuses (ref NonStackingStatBuff: same key takes
     // max, different keys sum; key = buff/ability id, e.g. Binf/Broa/BHav
     // for damage, Bblo/Babr/Bmdf/aura ids for speed). Flat and pct damage
@@ -241,12 +230,12 @@ public:
     bool IsAlarmIgnored() const { return ignoreAlarm_; }
     void SetIgnoreAlarm(bool v) { ignoreAlarm_ = v; }
     // Command-card alt icon (ref UnitSetUsesAltIcon): consumed by UI.
-    bool UsesAltIcon() const { return useAltIcon_; }
-    void SetUsesAltIcon(bool v) { useAltIcon_ = v; }
+    bool UsesAltIcon() const { return visualComp_.useAltIcon; }
+    void SetUsesAltIcon(bool v) { visualComp_.useAltIcon = v; }
     // Upgrade morph progress percent 0..100 (ref UnitSetUpgradeProgress):
     // consumed once the morph API lands; construction twin is live.
-    float GetUpgradeProgress() const { return upgradeProgress_; }
-    void SetUpgradeProgress(float v) { upgradeProgress_ = v; }
+    float GetUpgradeProgress() const { return constructionComp_.upgradeProgress; }
+    void SetUpgradeProgress(float v) { constructionComp_.upgradeProgress = v; }
 
     // ===== Behavior System =====
     // Current behavior
@@ -316,8 +305,8 @@ public:
     bool IsPaused() const { return paused_; }
 
     // Construction state
-    bool IsConstructing() const { return constructing_; }
-    void SetConstructing(bool v) { constructing_ = v; }
+    bool IsConstructing() const { return constructionComp_.constructing; }
+    void SetConstructing(bool v) { constructionComp_.constructing = v; }
     // Root state (Night Elf ancients): rooted units cannot move but can
     // still attack; movement behaviors complete immediately while rooted.
     bool IsRooted() const { return rooted_; }
@@ -344,10 +333,10 @@ public:
     // Stealth pre-check for fog rendering: invisible flag or a Wind Walk
     // buff. Detector/Faerie-Fire resolution still needs IsInvisibleTo(viewer).
     bool IsStealthed() const;
-    bool IsConstructionPaused() const { return constructionPaused_; }
-    void SetConstructionPaused(bool v) { constructionPaused_ = v; }
-    float GetConstructionProgress() const { return constructionProgress_; }
-    void SetConstructionProgress(float v) { constructionProgress_ = v; }
+    bool IsConstructionPaused() const { return constructionComp_.constructionPaused; }
+    void SetConstructionPaused(bool v) { constructionComp_.constructionPaused = v; }
+    float GetConstructionProgress() const { return constructionComp_.constructionProgress; }
+    void SetConstructionProgress(float v) { constructionComp_.constructionProgress = v; }
 
     // Hero level (per-unit instance, not from unit type)
     int GetHeroLevel() const { return heroLevel_; }
@@ -356,52 +345,49 @@ public:
     // Death drops (ref units.doo dropSets + w3i droppedItemTable): items
     // created at the corpse on the death tick, each rolling its own
     // percent chance independently (sets are editor groupings only).
-    struct DeathDropItem {
-        War3ID itemId;
-        int chancePercent = 0;
-    };
+    using DeathDropItem = UnitDeathDropItem;
     void SetDeathDrops(std::vector<DeathDropItem> drops) {
-        deathDrops_ = std::move(drops);
+        corpseDropComp_.deathDrops = std::move(drops);
     }
-    const std::vector<DeathDropItem>& GetDeathDrops() const { return deathDrops_; }
+    const std::vector<DeathDropItem>& GetDeathDrops() const { return corpseDropComp_.deathDrops; }
     // Rolls the death drops and creates the won items (ref drop chance %).
     void DropDeathItems(CSimulation& simulation);
 
     // Death
-    int GetDeathTurnTick() const { return deathTurnTick_; }
-    void SetDeathTurnTick(int t) { deathTurnTick_ = t; }
-    bool IsCorpse() const { return corpse_; }
-    bool IsBoneCorpse() const { return boneCorpse_; }
+    int GetDeathTurnTick() const { return corpseDropComp_.deathTurnTick; }
+    void SetDeathTurnTick(int t) { corpseDropComp_.deathTurnTick = t; }
+    bool IsCorpse() const { return corpseDropComp_.corpse; }
+    bool IsBoneCorpse() const { return corpseDropComp_.boneCorpse; }
     // Killer at the fatal blow (player index, -1 = none/environment; ref
     // kill(simulation, source)): feeds the killer-side death-vision reveal.
     // Recorded in Damage on the killing hit, consumed on the death tick.
-    int GetDeathKillerPlayer() const { return deathKillerPlayer_; }
-    void SetDeathKillerPlayer(int v) { deathKillerPlayer_ = v; }
+    int GetDeathKillerPlayer() const { return corpseDropComp_.deathKillerPlayer; }
+    void SetDeathKillerPlayer(int v) { corpseDropComp_.deathKillerPlayer = v; }
     // Construction worker link (ref CUnit.worker/workerInside): orc/ne
     // builders hide inside the foundation; death pops them back out
     // (PopoutWorker), completion/cancel clears the link.
     void SetWorker(int workerHandleId, bool inside) {
-        workerHandleId_ = workerHandleId;
-        workerInside_ = inside;
+        constructionComp_.workerHandleId = workerHandleId;
+        constructionComp_.workerInside = inside;
     }
     void ClearWorker() {
-        workerHandleId_ = -1;
-        workerInside_ = false;
-        constructionConsumesWorker_ = false;
+        constructionComp_.workerHandleId = -1;
+        constructionComp_.workerInside = false;
+        constructionComp_.constructionConsumesWorker = false;
     }
-    int GetWorkerHandle() const { return workerHandleId_; }
-    bool IsWorkerInside() const { return workerInside_; }
+    int GetWorkerHandle() const { return constructionComp_.workerHandleId; }
+    bool IsWorkerInside() const { return constructionComp_.workerInside; }
     // Night-elf consume (ref constructionConsumesWorker, set only for
     // ancients; wisp food is zeroed at build start and restored on popout).
-    void SetConstructionConsumesWorker(bool v) { constructionConsumesWorker_ = v; }
-    bool IsConstructionConsumesWorker() const { return constructionConsumesWorker_; }
+    void SetConstructionConsumesWorker(bool v) { constructionComp_.constructionConsumesWorker = v; }
+    bool IsConstructionConsumesWorker() const { return constructionComp_.constructionConsumesWorker; }
     // Emerge the hidden construction worker, if any (ref popoutWorker):
     // unhide/unpause/uninvulnerable, nudge beside the ruin, restore
     // consumed-worker food. Always clears the link.
     void PopoutWorker(CSimulation& simulation);
     // Decay suspend (UnitSuspendDecay): frozen corpses never advance.
-    bool IsDecaySuspended() const { return decaySuspended_; }
-    void SetDecaySuspended(bool v) { decaySuspended_ = v; }
+    bool IsDecaySuspended() const { return corpseDropComp_.decaySuspended; }
+    void SetDecaySuspended(bool v) { corpseDropComp_.decaySuspended = v; }
     float GetEndingDecayTime(const CSimulation& simulation) const;
 
     // Collision
@@ -409,13 +395,13 @@ public:
     void SetCollisionSize(float v) { collisionSize_ = v; }
 
     // Cargo (transported units ride along hidden inside this unit)
-    const std::vector<CUnit*>& GetCargoUnits() const { return cargoUnits_; }
-    bool IsLoadedAboard() const { return loadedAboard_; }
+    const std::vector<CUnit*>& GetCargoUnits() const { return cargoComp_.cargoUnits; }
+    bool IsLoadedAboard() const { return cargoComp_.loadedAboard; }
     bool LoadUnit(CUnit* passenger);
     void UnloadUnitAt(CUnit* passenger, float x, float y);
     // Burrow cargo (Abun) locks attacks until a peon is inside.
-    bool AreAttacksDisabled() const { return attacksDisabled_; }
-    void SetAttacksDisabled(bool v) { attacksDisabled_ = v; }
+    bool AreAttacksDisabled() const { return cargoComp_.attacksDisabled; }
+    void SetAttacksDisabled(bool v) { cargoComp_.attacksDisabled = v; }
     bool CanBeTargetedBy(CSimulation& simulation, CUnit* source,
                          const std::vector<CTargetType>& targetsAllowed) const override;
 
@@ -434,7 +420,7 @@ public:
     // swaps the type snapshot, saving the original for Unmorph().
     void MorphTo(CUnitType* form, War3ID formId);
     void Unmorph();
-    bool IsMorphed() const { return morphed_; }
+    bool IsMorphed() const { return morphComp_.morphed; }
     // Attack modifier slot (ref attackReplacement): one data-driven proc
     // effect per attack index, installed by orb/arrow abilities. Installing
     // replaces whatever was there (retail orbs do not stack). Behaviors
@@ -457,41 +443,36 @@ public:
     // Visual state (ref CUnit: scaling values, time scale, vertex color).
     // Stored on the sim unit so JASS setters persist; the renderer reads
     // them when drawing (no render dependency here).
-    float GetScale() const { return scale_; }
-    void SetScale(float s) { scale_ = s; }
-    float GetTimeScale() const { return timeScale_; }
-    void SetTimeScale(float s) { timeScale_ = s; }
+    float GetScale() const { return visualComp_.scale; }
+    void SetScale(float s) { visualComp_.scale = s; }
+    float GetTimeScale() const { return visualComp_.timeScale; }
+    void SetTimeScale(float s) { visualComp_.timeScale = s; }
     void SetVertexColor(int r, int g, int b, int a) {
-        vertexR_ = r; vertexG_ = g; vertexB_ = b; vertexA_ = a;
+        visualComp_.vertexR = r; visualComp_.vertexG = g; visualComp_.vertexB = b; visualComp_.vertexA = a;
     }
     void GetVertexColor(int& r, int& g, int& b, int& a) const {
-        r = vertexR_; g = vertexG_; b = vertexB_; a = vertexA_;
+        r = visualComp_.vertexR; g = visualComp_.vertexG; b = visualComp_.vertexB; a = visualComp_.vertexA;
     }
-    void SetPlayerColor(int color) { playerColor_ = color; }
-    int GetPlayerColor() const { return playerColor_; }
+    void SetPlayerColor(int color) { visualComp_.playerColor = color; }
+    int GetPlayerColor() const { return visualComp_.playerColor; }
     // Acquire-range override (-1 = use unit type default)
     float GetAcquireRange() const { return acquireRange_; }
     void SetAcquireRange(float range) { acquireRange_ = range; }
     // Rally point (ref CUnit rallyPoint; orderId 0 = none).
-    float GetRallyX() const { return rallyX_; }
-    float GetRallyY() const { return rallyY_; }
-    int GetRallyOrderId() const { return rallyOrderId_; }
+    float GetRallyX() const { return structureNavComp_.rallyX; }
+    float GetRallyY() const { return structureNavComp_.rallyY; }
+    int GetRallyOrderId() const { return structureNavComp_.rallyOrderId; }
     void SetRallyPoint(float x, float y, int orderId = 0) {
-        rallyX_ = x; rallyY_ = y; rallyOrderId_ = orderId;
+        structureNavComp_.rallyX = x; structureNavComp_.rallyY = y; structureNavComp_.rallyOrderId = orderId;
     }
-    // Waygate destination (ref CAbilityWayGate; stored on the unit since
-    // the C++ port has no dedicated waygate ability class yet).
-    bool IsWaygateActive() const { return waygateActive_; }
-    void SetWaygateActive(bool v) { waygateActive_ = v; }
-    float GetWaygateX() const { return waygateX_; }
-    float GetWaygateY() const { return waygateY_; }
-    void SetWaygateDestination(float x, float y) { waygateX_ = x; waygateY_ = y; }
-    // Building footprint stamp (ref CUnit.pathingInstance). Buildings OR
-    // their pathTex footprint on creation (snapped, rotation 270); death
-    // and removal unstamp. Ancients toggle via Root/Uproot.
+    bool IsWaygateActive() const { return structureNavComp_.waygateActive; }
+    void SetWaygateActive(bool v) { structureNavComp_.waygateActive = v; }
+    float GetWaygateX() const { return structureNavComp_.waygateX; }
+    float GetWaygateY() const { return structureNavComp_.waygateY; }
+    void SetWaygateDestination(float x, float y) { structureNavComp_.waygateX = x; structureNavComp_.waygateY = y; }
     void RegeneratePathingInstance(CSimulation& game);
     void KillPathingInstance(CSimulation& game);
-    int GetPathingStampId() const { return pathingStampId_; }
+    int GetPathingStampId() const { return structureNavComp_.pathingStampId; }
 
 private:
     void PerformDefaultBehavior(CSimulation& simulation);
@@ -512,65 +493,22 @@ private:
     int playerIndex_;
     float facing_;
 
-    // Stats
+    // Centralized attribute & modifier aggregator (Phase 2 modernization)
+    UnitAttributeAggregator attrs_;
     int speed_ = 0;
-    int baseSpeed_ = 0;
-    int bonusSpeed_ = 0;
-    float auraMoveSpeedPercent_ = 0.0f;
-    std::unordered_map<War3ID, float> speedModifiers_;
-    int baseMaxLife_;
-    int baseMaxMana_;
-    float mana_;
-    int maxMana_;
-    float bonusMaxLife_ = 0.0f;
-    int bonusMaxMana_ = 0;
-    float heroBonusLife_ = 0.0f;
-    int heroBonusMana_ = 0;
-    int currentDefense_;
-    int bonusDamage_ = 0;
-    int heroBonusDamage_ = 0;
-    int bonusArmor_ = 0;
-    float tempDefenseBonus_ = 0.0f;
+    float mana_ = 0.0f;
+    int maxMana_ = 0;
     War3ID explodeBuffId_ = War3ID(0u);
-    float bonusLifeRegen_ = 0.0f;
-    float bonusManaRegen_ = 0.0f;
-    float attackSpeedMul_ = 1.0f;
-    // Non-stacking aura sources per (stat, percent) slot, plus the
-    // currently applied effective delta (additive stats) or factor
-    // (multiplicative stats) so recompute can undo precisely.
-    struct AuraStatSource {
-        War3ID buffId;
-        int caster = -1;
-        float value = 0.0f;
-    };
-    std::map<std::pair<int, bool>, std::vector<AuraStatSource>> auraStats_;
-    std::map<std::pair<int, bool>, float> auraApplied_;
-    std::vector<EvasionSource> evasionSources_;
-    std::vector<CritSource> critSources_;
-    // Non-stacking attack tables (ref NonStackingStatBuff maps keyed by
-    // buff id; aura slots sync per-id bests, see RecomputeAuraStat).
-    std::unordered_map<War3ID, int> nsDamageFlat_;
-    std::unordered_map<War3ID, int> nsDamagePct_;
-    std::unordered_map<War3ID, float> nsAtkSpeed_;
-    // Aura-owned keys per table (so recompute can clear stale per-id bests
-    // without touching timed-buff entries sharing the maps).
-    std::unordered_set<War3ID> auraDamageFlatKeys_;
-    std::unordered_set<War3ID> auraDamagePctKeys_;
-    std::unordered_set<War3ID> auraSpeedKeys_;
-    // Stacking attack-speed sum (retail attackSpeedBonus).
-    float attackSpeedStackBonus_ = 0.0f;
-    std::vector<float> attackRangeBonus_;
     float turnRate_;
     PathingGridMovementType movementType_;
     float collisionSize_;
 
-    // State
+    // Core flags
     bool isBuilding_;
     bool isHero_;
     bool hidden_ = false;
     bool paused_ = false;
     bool invulnerable_ = false;
-    bool constructing_ = false;
     bool rooted_ = false;
     bool invisible_ = false;
     bool detector_ = false;
@@ -578,58 +516,21 @@ private:
     bool ethereal_ = false;
     bool magicImmune_ = false;
     bool illusion_ = false;
-    // Morph snapshot (ref alternate-form units).
-    bool morphed_ = false;
-    CUnitType* originalType_ = nullptr;
-    War3ID originalTypeId_ = War3ID();
-    int savedSpeed_ = 0;
-    int savedBaseMaxLife_ = 0;
-    int savedBaseMaxMana_ = 0;
-    int savedDefense_ = 0;
-    float savedTurnRate_ = 0.0f;
-    PathingGridMovementType savedMovementType_ = PathingGridMovementType::FOOT;
-    float savedCollisionSize_ = 0.0f;
-    bool savedBuilding_ = false;
-    float savedFlyHeight_ = 0.0f;
-    bool constructionPaused_ = false;
-    float constructionProgress_ = 0;
-    int deathTurnTick_ = 0;
-    bool corpse_ = false;
-    bool boneCorpse_ = false;
-    bool decaySuspended_ = false;
-    int deathKillerPlayer_ = -1;
-    // Construction worker link (ref CUnit.worker/workerInside).
-    int workerHandleId_ = -1;
-    bool workerInside_ = false;
-    bool constructionConsumesWorker_ = false;
-    // Death-drop table (units.doo dropSets + w3i droppedItemTable).
-    std::vector<DeathDropItem> deathDrops_;
     int foodUsed_ = 0;
     int foodMade_ = 0;
     bool useFood_ = true;
-
-    // Hero
     int heroLevel_ = 1;
-
-    // Visual state defaults
-    float scale_ = 1.0f;
-    float timeScale_ = 1.0f;
-    int vertexR_ = 255;
-    int vertexG_ = 255;
-    int vertexB_ = 255;
-    int vertexA_ = 255;
-    int playerColor_ = -1;
     float acquireRange_ = -1.0f;
     float propWindow_ = -1.0f;
     bool pathingEnabled_ = true;
-    float rallyX_ = 0.0f;
-    float rallyY_ = 0.0f;
-    int rallyOrderId_ = 0;
-    bool waygateActive_ = false;
-    float waygateX_ = 0.0f;
-    float waygateY_ = 0.0f;
-    // WPM footprint stamp id from RegeneratePathingInstance (-1 = none).
-    int pathingStampId_ = -1;
+
+    // Orthogonal ECS Subsystem Components (Phase 3 Modernization)
+    UnitConstructionComponent constructionComp_;
+    UnitCargoComponent cargoComp_;
+    UnitMorphComponent morphComp_;
+    UnitStructureNavComponent structureNavComp_;
+    UnitVisualComponent visualComp_;
+    UnitCorpseDropComponent corpseDropComp_;
 
     // Abilities
     std::vector<CAbility*> abilities_; // raw pointers to owned abilities
@@ -645,8 +546,7 @@ private:
     bool canSleep_ = true;
     bool canSleepPerm_ = true;
     bool ignoreAlarm_ = false;
-    bool useAltIcon_ = false;
-    float upgradeProgress_ = 0.0f;
+
 
     // Behavior storage (owned by unit, created by abilities)
     std::unique_ptr<CBehaviorMove> moveBehavior_;
@@ -665,10 +565,7 @@ private:
     OrderIssuedHook orderIssuedHook_;
     UnitLoadedHook unitLoadedHook_;
 
-    // Transport cargo (passengers hidden aboard this unit)
-    std::vector<CUnit*> cargoUnits_;
-    bool loadedAboard_ = false;
-    bool attacksDisabled_ = false;
+
 
     // Attack modifier slots by attack index (ref attackReplacement).
     struct AttackModifierSlot {

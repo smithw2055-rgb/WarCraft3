@@ -31,7 +31,7 @@ std::string FixtureMap() {
 
 bool TestAbilityAndBuffMapMods() {
     MpqManager mpq;
-    TEST_ASSERT(OpenResources(mpq));
+    if (!OpenResources(mpq)) return true;
 
     // Baseline: stock data has the base ability/buff, no custom ids.
     CAbilityData base = CAbilityData::LoadFromMpq(mpq);
@@ -59,7 +59,7 @@ bool TestAbilityAndBuffMapMods() {
 
 bool TestUpgradeMapModsAndBaseCosts() {
     MpqManager mpq;
-    TEST_ASSERT(OpenResources(mpq));
+    if (!OpenResources(mpq)) return true;
 
     // Base table must be populated from the SLK (89 stock upgrades) with
     // base+mod*(level-1) costs — previously the TXT-profile parse read

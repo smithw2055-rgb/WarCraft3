@@ -36,6 +36,8 @@ struct AstNode {
     std::vector<std::pair<std::string, std::string>> delegates;
     std::string extendsType; // for type declarations
     int line = 0;
+    int localSlot = -1;
+    int localSlotCount = 0;
 
     AstNode() = default;
     AstNode(AstNodeType t, const std::string& s = "") : type(t), text(s) {}

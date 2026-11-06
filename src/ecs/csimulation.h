@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <functional>
 #include "ecs/fwd.h"
+#include "ecs/sim_events.h"
+#include "ecs/ecs_registry.h"
 #include "ecs/fog_state.h"
 #include "ecs/lockstep.h"
 #include "ecs/unit.h"
@@ -24,8 +26,18 @@ public:
     static constexpr int ITEM_EVENT_PICKUP = 86;
     static constexpr int ITEM_EVENT_USE = 87;
 
+    using CombatTextKind = SimCombatTextKind;
+
     CSimulation();
     ~CSimulation();
+
+    // Multicast EventBus access (Godot Signal / EventBus modernization)
+    SimEventBus& Events() { return events_; }
+    const SimEventBus& Events() const { return events_; }
+
+    // Sparse-Set ECS Component Registry access (Phase 3 modernization)
+    SimEcsRegistry& Registry() { return ecsRegistry_; }
+    const SimEcsRegistry& Registry() const { return ecsRegistry_; }
 
     // System registration
     void SetUnitData(CUnitData* data) { unitData_ = data; }
@@ -218,184 +230,204 @@ public:
 
     // Timed hazards (Stasis Trap mines, Tornado wanderers): position +
     // radius areas that tick periodically until expiry or consumption.
-    // Callbacks must resolve units by handle (raw pointers may dangle) and
-    // must only use SimRand for game-affecting rolls. Returns true from
-    // tick to consume the hazard early (mine triggered).
     struct SimHazard {
         float x = 0.0f, y = 0.0f;
         float radius = 0.0f;
         int ticksLeft = 0;
         int tickPeriod = 1;
         int tickCount = 0;
-        // Wander (tornadoes): stepped toward (tx, ty) every tick.
         float tx = 0.0f, ty = 0.0f, speed = 0.0f;
         std::function<bool(CSimulation&, SimHazard&)> tick;
     };
     void AddHazard(SimHazard hazard) { hazards_.push_back(std::move(hazard)); }
     const std::vector<SimHazard>& GetHazards() const { return hazards_; }
 
-    // Deterministic synced RNG (ref GameTurnManager lockstep: every client
-    // must roll the same sequence; std::rand is banned in sim code).
-    // LCG, seeded fixed per game so replays stay reproducible.
+    // Deterministic synced RNG
     float SimRand01();
     float SimRandRange(float lo, float hi) { return lo + (hi - lo) * SimRand01(); }
 
-    // Projectiles (see combat/projectile.h). Spawned by ranged attacks at
-    // their damage point; stepped in Update() after units.
+    // Projectiles
     void SpawnProjectile(CProjectile&& p) { projectiles_.push_back(std::move(p)); }
     const std::vector<CProjectile>& GetProjectiles() const { return projectiles_; }
     void UpdateProjectiles();
 
     // Takes ownership of an externally constructed unit (tests, editor).
-    // Visible to lookups immediately, joins units_ on the next Update.
     CUnit* AdoptUnit(std::unique_ptr<CUnit> unit);
     void InstallUnitHooks(CUnit* unit);
 
-    // Callbacks
+    // ============================================================
+    // Callbacks & Multicast Signal Adapters
+    // All legacy Set*Callback / Get*Callback methods transparently
+    // route through SimEventBus (events_) so both legacy callers
+    // and modern Signal::Connect subscribers receive events.
+    // ============================================================
     void AddPostUpdateCallback(std::function<void()> cb);
+
     void SetUnitDeathCallback(std::function<void(int unitHandle, int killerHandle, int playerIndex)> cb) {
-        unitDeathCallback_ = std::move(cb);
+        events_.onUnitDeath.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int, int)>& GetUnitDeathCallback() const { return unitDeathCallback_; }
+    const std::function<void(int, int, int)>& GetUnitDeathCallback() const {
+        return events_.onUnitDeath.GetDispatcher();
+    }
+
     void SetUnitDamageCallback(std::function<void(int unitHandle, int sourceHandle, float damage)> cb) {
-        unitDamageCallback_ = std::move(cb);
+        events_.onUnitDamage.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int, float)>& GetUnitDamageCallback() const { return unitDamageCallback_; }
+    const std::function<void(int, int, float)>& GetUnitDamageCallback() const {
+        return events_.onUnitDamage.GetDispatcher();
+    }
+
     void SetUnitOrderCallback(std::function<void(int unitHandle, int orderId, int targetHandle, float x, float y)> cb) {
-        unitOrderCallback_ = std::move(cb);
+        events_.onUnitOrder.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int, int, float, float)>& GetUnitOrderCallback() const { return unitOrderCallback_; }
+    const std::function<void(int, int, int, float, float)>& GetUnitOrderCallback() const {
+        return events_.onUnitOrder.GetDispatcher();
+    }
+
     void SetItemEventCallback(std::function<void(int unitHandle, int itemHandle, int eventType)> cb) {
-        itemEventCallback_ = std::move(cb);
+        events_.onItemEvent.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int, int)>& GetItemEventCallback() const { return itemEventCallback_; }
-    // Transport boarding (transport handle, passenger handle): JASS LOADED.
+    const std::function<void(int, int, int)>& GetItemEventCallback() const {
+        return events_.onItemEvent.GetDispatcher();
+    }
+
     void SetUnitLoadedCallback(std::function<void(int transportHandle, int passengerHandle)> cb) {
-        unitLoadedCallback_ = std::move(cb);
+        events_.onUnitLoaded.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int)>& GetUnitLoadedCallback() const { return unitLoadedCallback_; }
-    // Corpse begins decaying (retail EVENT_UNIT_DECAY): unit handle.
+    const std::function<void(int, int)>& GetUnitLoadedCallback() const {
+        return events_.onUnitLoaded.GetDispatcher();
+    }
+
     void SetUnitDecayCallback(std::function<void(int unitHandle)> cb) {
-        unitDecayCallback_ = std::move(cb);
+        events_.onUnitDecay.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int)>& GetUnitDecayCallback() const { return unitDecayCallback_; }
-    // Shop sales need the seller too (buyer/seller/item sim handles).
+    const std::function<void(int)>& GetUnitDecayCallback() const {
+        return events_.onUnitDecay.GetDispatcher();
+    }
+
     void SetShopEventCallback(std::function<void(int buyerHandle, int sellerHandle, int itemHandle)> cb) {
-        shopEventCallback_ = std::move(cb);
+        events_.onShopItemSold.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int, int)>& GetShopEventCallback() const { return shopEventCallback_; }
-    // Mercenary hire (buyer may be -1; seller shop and hired unit sim handles).
+    const std::function<void(int, int, int)>& GetShopEventCallback() const {
+        return events_.onShopItemSold.GetDispatcher();
+    }
+
     void SetShopUnitEventCallback(std::function<void(int buyerHandle, int sellerHandle, int hiredHandle)> cb) {
-        shopUnitEventCallback_ = std::move(cb);
+        events_.onShopUnitSold.SetLegacyCallback(std::move(cb));
     }
     const std::function<void(int, int, int)>& GetShopUnitEventCallback() const {
-        return shopUnitEventCallback_;
+        return events_.onShopUnitSold.GetDispatcher();
     }
-    // Pawn-back sales (buyer shop, seller pawner, item sim handles).
+
     void SetPawnEventCallback(std::function<void(int buyerHandle, int sellerHandle, int itemHandle)> cb) {
-        pawnEventCallback_ = std::move(cb);
+        events_.onItemPawned.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int, int)>& GetPawnEventCallback() const { return pawnEventCallback_; }
-    // Hero skill learning (unit handle, skill rawcode, new skill level).
+    const std::function<void(int, int, int)>& GetPawnEventCallback() const {
+        return events_.onItemPawned.GetDispatcher();
+    }
+
     void SetHeroSkillCallback(std::function<void(int unitHandle, int skillId, int newLevel)> cb) {
-        heroSkillCallback_ = std::move(cb);
+        events_.onHeroSkillLearned.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int, int)>& GetHeroSkillCallback() const { return heroSkillCallback_; }
-    // Floating combat text (ref spawnTextTag for miss/crit/bash): the sim
-    // only reports the event; presentation (JASS text tags) subscribes.
-    // MISS amount is 0, CRIT amount is the final damage number, BASH
-    // amount is the bonus damage (0 until bash carries a damage bonus).
-    enum class CombatTextKind : uint8_t { MISS, CRIT, BASH };
+    const std::function<void(int, int, int)>& GetHeroSkillCallback() const {
+        return events_.onHeroSkillLearned.GetDispatcher();
+    }
+
     void SetCombatTextCallback(
         std::function<void(int attackerHandle, int victimHandle, CombatTextKind kind, float amount)> cb) {
-        combatTextCallback_ = std::move(cb);
+        events_.onCombatText.SetLegacyCallback(std::move(cb));
     }
     const std::function<void(int, int, CombatTextKind, float)>& GetCombatTextCallback() const {
-        return combatTextCallback_;
+        return events_.onCombatText.GetDispatcher();
     }
     void FireCombatText(int attackerHandle, int victimHandle, CombatTextKind kind, float amount) {
-        if (combatTextCallback_) combatTextCallback_(attackerHandle, victimHandle, kind, amount);
+        events_.onCombatText.Emit(attackerHandle, victimHandle, kind, amount);
     }
-    // Queue lifecycle (building handle, type rawcode, kind 0 = train,
-    // 1 = research, 2 = upgrade morph; started false = cancelled, except
-    // upgrades where it means finished).
+
     void SetQueueEventCallback(std::function<void(int buildingHandle, int typeId, int kind, bool started)> cb) {
-        queueEventCallback_ = std::move(cb);
+        events_.onQueueEvent.SetLegacyCallback(std::move(cb));
     }
     const std::function<void(int, int, int, bool)>& GetQueueEventCallback() const {
-        return queueEventCallback_;
+        return events_.onQueueEvent.GetDispatcher();
     }
-    // Construction lifecycle (building handle, true = finished).
+
     void SetConstructEventCallback(std::function<void(int buildingHandle, bool finished)> cb) {
-        constructEventCallback_ = std::move(cb);
+        events_.onConstructEvent.SetLegacyCallback(std::move(cb));
     }
     const std::function<void(int, bool)>& GetConstructEventCallback() const {
-        return constructEventCallback_;
+        return events_.onConstructEvent.GetDispatcher();
     }
-    // Mid-construction death explosion (ref createDeathExplodeEffect: pure
-    // presentation, fired when a unit dies while IsConstructing). The sim
-    // only reports (unit handle + explode buff id); the renderer spawns the
-    // art. Fires with a zero buff id when none was set via JASS.
+
     void SetDeathExplodeCallback(std::function<void(int unitHandle, War3ID buffId)> cb) {
-        deathExplodeCallback_ = std::move(cb);
+        events_.onDeathExplode.SetLegacyCallback(std::move(cb));
     }
     const std::function<void(int, War3ID)>& GetDeathExplodeCallback() const {
-        return deathExplodeCallback_;
+        return events_.onDeathExplode.GetDispatcher();
     }
     void FireDeathExplode(int unitHandle, War3ID buffId) {
-        if (deathExplodeCallback_) deathExplodeCallback_(unitHandle, buffId);
+        events_.onDeathExplode.Emit(unitHandle, buffId);
     }
-    // Sim-side ownership changes (charm/possession transfers): unit handle
-    // plus previous owner player index. JASS SetUnitOwner fires directly.
+
     void SetOwnerChangedCallback(std::function<void(int unitHandle, int prevOwnerIndex)> cb) {
-        ownerChangedCallback_ = std::move(cb);
+        events_.onOwnerChanged.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int)>& GetOwnerChangedCallback() const { return ownerChangedCallback_; }
+    const std::function<void(int, int)>& GetOwnerChangedCallback() const {
+        return events_.onOwnerChanged.GetDispatcher();
+    }
+
     void SetItemRemovedCallback(std::function<void(int itemHandle)> cb) {
-        itemRemovedCallback_ = std::move(cb);
+        events_.onItemRemoved.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int)>& GetItemRemovedCallback() const { return itemRemovedCallback_; }
+    const std::function<void(int)>& GetItemRemovedCallback() const {
+        return events_.onItemRemoved.GetDispatcher();
+    }
+
     void SetUnitTrainedCallback(std::function<void(int buildingHandle, int trainedHandle)> cb) {
-        unitTrainedCallback_ = std::move(cb);
+        events_.onUnitTrained.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int)>& GetUnitTrainedCallback() const { return unitTrainedCallback_; }
+    const std::function<void(int, int)>& GetUnitTrainedCallback() const {
+        return events_.onUnitTrained.GetDispatcher();
+    }
+
     void SetUnitSummonedCallback(std::function<void(int summonerHandle, int summonedHandle)> cb) {
-        unitSummonedCallback_ = std::move(cb);
+        events_.onUnitSummoned.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int)>& GetUnitSummonedCallback() const { return unitSummonedCallback_; }
+    const std::function<void(int, int)>& GetUnitSummonedCallback() const {
+        return events_.onUnitSummoned.GetDispatcher();
+    }
+
     void SetResearchFinishedCallback(std::function<void(int unitHandle, int upgradeId)> cb) {
-        researchFinishedCallback_ = std::move(cb);
+        events_.onResearchFinished.SetLegacyCallback(std::move(cb));
     }
     const std::function<void(int, int)>& GetResearchFinishedCallback() const {
-        return researchFinishedCallback_;
+        return events_.onResearchFinished.GetDispatcher();
     }
+
     void SetHeroRevivedCallback(std::function<void(int reviverHandle, int revivedHandle)> cb) {
-        heroRevivedCallback_ = std::move(cb);
+        events_.onHeroRevived.SetLegacyCallback(std::move(cb));
     }
-    const std::function<void(int, int)>& GetHeroRevivedCallback() const { return heroRevivedCallback_; }
-    // Spell lifecycle (caster handle, stage 0=channel 1=cast 2=effect
-    // 3=finish 4=endcast; target widget sim handle or -1, plus the aimed
-    // point so GetSpellTarget* event state can be populated).
+    const std::function<void(int, int)>& GetHeroRevivedCallback() const {
+        return events_.onHeroRevived.GetDispatcher();
+    }
+
     void SetSpellEventCallback(std::function<void(int casterHandle, int stage, int targetSimHandle,
                                                   float x, float y)> cb) {
-        spellEventCallback_ = std::move(cb);
+        events_.onSpellEvent.SetLegacyCallback(std::move(cb));
     }
     const std::function<void(int, int, int, float, float)>& GetSpellEventCallback() const {
-        return spellEventCallback_;
+        return events_.onSpellEvent.GetDispatcher();
     }
 
 private:
     void ProcessUnitRemovals();
     void ProcessNewUnits();
-    // Separation steering: positional push-apart for overlapping movable
-    // units (deterministic: units_ order, no RNG).
-    void ResolveUnitSeparation();    void ProcessDestructableRemovals();
+    void ResolveUnitSeparation();
+    void ProcessDestructableRemovals();
     void ProcessNewDestructables();
     void ProcessItemRemovals();
 
     int gameTurnTick_ = 0;
     bool paused_ = false;
-    // Map-init dedupe window backing flag (default off).
     bool mapInitPhase_ = false;
 
     // Game state
@@ -406,7 +438,7 @@ private:
     bool heroXPSuspended_ = false;
     CGameplayConstants gameplayConstants_;
 
-    // Unit lists (using raw pointers managed by unique_ptr in maps)
+    // Unit lists
     std::vector<CUnit*> units_;
     std::vector<CUnit*> newUnits_;
     std::vector<CUnit*> removedUnits_;
@@ -434,11 +466,11 @@ private:
     CCombatSystem combatSystem_;
     CFogSystem fogSystem_;
     std::vector<CFogSightSource> sightScratch_;
-    uint32_t simRandState_ = 0x12345678u; // deterministic sim RNG (LCG)
+    uint32_t simRandState_ = 0x12345678u;
     std::vector<SimCommand> commandLog_;
-    W3EMap* terrainMap_ = nullptr;  // terrain queries (owned by loader)
+    W3EMap* terrainMap_ = nullptr;
     bool waterDeforms_ = true;
-    std::vector<BlightRect> blightRects_; // SetBlight* overrides
+    std::vector<BlightRect> blightRects_;
     std::vector<BlightCircle> blightCircles_;
     struct DelayedAction {
         float secondsLeft = 0.0f;
@@ -447,32 +479,14 @@ private:
     std::vector<DelayedAction> delayedActions_;
     std::vector<SimHazard> hazards_;
     void UpdateHazards();
-    std::unique_ptr<CWorldCollision> worldCollision_;    std::unique_ptr<CPathfindingProcessor> pathfindingProcessor_;
+    std::unique_ptr<CWorldCollision> worldCollision_;
+    std::unique_ptr<CPathfindingProcessor> pathfindingProcessor_;
     std::vector<GlobalShopStockEntry> globalShopStock_;
     AudioSystem* audio_ = nullptr;
     HandleIdAllocator handleIdAlloc_;
 
-    // Post-update callbacks
+    // Post-update callbacks & central multicast EventBus
     std::vector<std::function<void()>> postUpdateCallbacks_;
-    std::function<void(int, int, int)> unitDeathCallback_;
-    std::function<void(int, int, float)> unitDamageCallback_;
-    std::function<void(int, int, int, float, float)> unitOrderCallback_;
-    std::function<void(int, int, int)> itemEventCallback_;
-    std::function<void(int, int)> unitLoadedCallback_;
-    std::function<void(int)> unitDecayCallback_;
-    std::function<void(int, int, int)> shopEventCallback_;
-    std::function<void(int, int, int)> shopUnitEventCallback_;
-    std::function<void(int, int, int)> pawnEventCallback_;
-    std::function<void(int, int, int)> heroSkillCallback_;
-    std::function<void(int, int, CombatTextKind, float)> combatTextCallback_;
-    std::function<void(int, bool)> constructEventCallback_;
-    std::function<void(int, War3ID)> deathExplodeCallback_;
-    std::function<void(int, int, int, bool)> queueEventCallback_;
-    std::function<void(int, int)> ownerChangedCallback_;
-    std::function<void(int)> itemRemovedCallback_;
-    std::function<void(int, int)> unitTrainedCallback_;
-    std::function<void(int, int)> unitSummonedCallback_;
-    std::function<void(int, int)> researchFinishedCallback_;
-    std::function<void(int, int)> heroRevivedCallback_;
-    std::function<void(int, int, int, float, float)> spellEventCallback_;
+    SimEventBus events_;
+    SimEcsRegistry ecsRegistry_;
 };

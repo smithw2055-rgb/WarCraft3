@@ -15,6 +15,8 @@
 // Forward declaration (avoid circular include)
 class CSimulation;
 class CItem;
+class UIFrame;
+class GameUI;
 
 // JASS event type constants (matching Blizzard common.j / JassGameEventsWar3 ordinals)
 enum JassEventType {
@@ -160,6 +162,11 @@ struct JassTrigger {
         bool wasTrue = false;
     };
     std::vector<JassPlayerStateEvent> playerStateEvents;
+    struct JassFrameEventReg {
+        int frameSimId = -1;
+        int eventCode = 0;
+    };
+    std::vector<JassFrameEventReg> frameEvents;
     // Variable-watch events (ref registerVariableEvent).
     struct JassVarEvent {
         std::string varName;
@@ -975,6 +982,10 @@ public:
     // Dialog click + region event state (ref CommonTriggerExecutionScope).
     int eventClickedButtonHandle = -1;
     int eventClickedDialogHandle = -1;
+    int eventTriggerFrameHandle = 0;
+    int eventTriggerFrameEvent = 0;
+    float eventTriggerFrameValue = 0.0f;
+    std::string eventTriggerFrameText;
     int eventTriggeringRegionHandle = -1;
     // Chat event scope (ref player chat execution scope).
     std::string eventChatString;
@@ -1129,7 +1140,9 @@ public:
         int parentSimId = -1;
         int tooltipSimId = -1;
         std::vector<int> childSimIds; // sim ids, insertion order
+        std::shared_ptr<UIFrame> uiNode; // live UIFrame bound in UI tree
     };
+    GameUI* boundGameUi = nullptr;
     std::unordered_map<int, std::shared_ptr<JassFrame>> frames;
     int nextFrameId = 0x27000000;
     std::unordered_map<std::string, int> framesByName; // name -> sim id
@@ -1258,6 +1271,10 @@ struct JassQueuedContext {
     int eventTrackableHandle = -1;
     int eventClickedButtonHandle = -1;
     int eventClickedDialogHandle = -1;
+    int eventTriggerFrameHandle = 0;
+    int eventTriggerFrameEvent = 0;
+    float eventTriggerFrameValue = 0.0f;
+    std::string eventTriggerFrameText;
     int eventTriggeringRegionHandle = -1;
     std::string eventChatString;
     std::string eventChatMatched;
@@ -1292,6 +1309,12 @@ public:
     void SetSimulation(CSimulation* sim) { sim_ = sim; }
     void SetJassVM(JassVM* vm) { vmPtr_ = vm; }
     void SetData(std::shared_ptr<JassNativesData> data) { data_ = data; }
+
+    void WireSimulationEvents(CSimulation& sim);
+    void SetBoundGameUI(GameUI* gui);
+    GameUI* GetBoundGameUI() const;
+    UIFrame* GetLiveUIFrame(int frameJassHandle) const;
+    void FireFrameEvent(int frameSimId, int eventCode, float value = 0.0f, const std::string& text = "");
 
     void RegisterAll();
     void RegisterConfigNatives();

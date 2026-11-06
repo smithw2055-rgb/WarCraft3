@@ -1,5 +1,6 @@
 #pragma once
 #include "JassParser.h"
+struct JassBytecodeChunk;
 #include <unordered_map>
 #include <vector>
 #include <string>
@@ -56,9 +57,11 @@ struct JassValue {
 class JassVM {
 public:
     JassVM();
+    ~JassVM();
 
     struct Scope {
         std::unordered_map<std::string, JassValue> locals;
+        std::vector<JassValue> fastLocals;
     };
 
     struct ThreadFrame {
@@ -118,6 +121,13 @@ public:
     const std::unordered_map<std::string, NativeFunc>& GetRegisteredNatives() const { return natives_; }
     std::unordered_set<std::string> GetFunctionNames() const;
 
+    // Phase 3 Bytecode VM & Indexed Local Slots API
+    void SetBytecodeEnabled(bool enabled) { bytecodeEnabled_ = enabled; }
+    bool IsBytecodeEnabled() const { return bytecodeEnabled_; }
+    const JassBytecodeChunk* GetCompiledBytecode(const std::string& funcName) const;
+    size_t GetCompiledFunctionCount() const { return compiledFunctions_.size(); }
+    uint64_t GetBytecodeExecutedCount() const { return bytecodeExecutedCount_; }
+
 private:
     void CollectScriptStats(const AstNode* node);
     bool PushThreadFrame(ThreadState& state, const std::string& functionName, const std::vector<JassValue>& args = {});
@@ -127,6 +137,8 @@ private:
     void SyncThreadFromCallStack(ThreadState& state);
     JassValue ExecuteNode(const AstNode* node);
     JassValue ExecuteFunction(const AstNode* func, const std::vector<JassValue>& args);
+    JassValue ExecuteBytecode(const JassBytecodeChunk& chunk, const std::vector<JassValue>& args);
+    void CompileAndBindFunctions();
     // vJASS struct support: instances live outside the value type as
     // integer ids (0 = null); members/statics in side tables.
     struct JassStructMember {
@@ -193,6 +205,9 @@ private:
     // id 0 means static context. Lets `thistype.member` inside instance
     // methods reach the current instance (ref JassHelper behavior).
     std::vector<std::pair<std::string, int>> thistypeStack_;
+    bool bytecodeEnabled_ = true;
+    uint64_t bytecodeExecutedCount_ = 0;
+    std::unordered_map<std::string, std::unique_ptr<JassBytecodeChunk>> compiledFunctions_;
 };
 
 // Forward declare for native implementations

@@ -144,6 +144,7 @@ set(SOURCES
     src/main.cpp
     src/platform/platform.cpp
     src/render/renderer.cpp
+    src/render/render_server.cpp
     src/render/shader.cpp
     src/render/camera.cpp
     src/render/terrain.cpp
@@ -216,6 +217,7 @@ set(SOURCES
     src/data/upgradedata.cpp
     src/ecs/widget.cpp
     src/ecs/unit_type.cpp
+    src/ecs/attribute_aggregator.cpp
     src/ecs/unit.cpp
     src/ecs/fog_state.cpp
     src/ecs/player.cpp
@@ -312,8 +314,13 @@ set(SOURCES
     src/scripting/JassLexer.cpp
     src/scripting/JassParser.cpp
     src/scripting/JassVM.cpp
+    src/scripting/JassBytecode.cpp
     src/scripting/jass_animation_tags.cpp
     src/scripting/JassNatives.cpp
+    src/scripting/natives/jass_natives_units.cpp
+    src/scripting/natives/jass_natives_triggers.cpp
+    src/scripting/natives/jass_natives_environment.cpp
+    src/scripting/natives/jass_natives_ui_data.cpp
     # ===== Audio =====
     src/audio/AudioSystem.cpp
     src/audio/UnitSoundset.cpp
@@ -347,6 +354,9 @@ set(SOURCES
     src/ui/BuffBar.cpp
     # ===== Core / State Machine =====
     src/core/game_controller.cpp
+    src/core/world_presentation_bridge.cpp
+    src/core/input_selection_controller.cpp
+    src/core/game_bootstrap_diagnostics.cpp
     src/core/map_path_resolver.cpp
     src/core/warsmash_config.cpp
     # ===== Map Loading =====

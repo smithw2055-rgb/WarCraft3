@@ -109,17 +109,14 @@ CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
     , unitType_(unitType), typeId_(typeId), playerIndex_(playerIndex)
     , facing_(facing)
     , speed_(unitType->GetSpeed())
-    , baseSpeed_(unitType->GetSpeed())
-    , baseMaxLife_(unitType->GetMaxLife())
-    , baseMaxMana_(unitType->GetManaMaximum())
     , maxMana_(unitType->GetManaMaximum())
-    , currentDefense_(unitType->GetDefense())
     , turnRate_(unitType->GetTurnRate())
     , movementType_(unitType->GetMovementType())
     , collisionSize_(unitType->GetCollisionSize())
     , isBuilding_(unitType->IsBuilding())
     , isHero_(unitType->IsHero())
 {
+    attrs_.InitFromUnitType(unitType);
     maxLife_ = (float)unitType->GetMaxLife();
     mana_ = (float)unitType->GetManaInitial();
     flyHeight_ = unitType->GetDefaultFlyingHeight();
@@ -128,18 +125,11 @@ CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
 }
 
 float CUnit::GetSpeed() const {
-    if (baseSpeed_ <= 0) return 0.0f;
-    float base = (float)baseSpeed_ + (float)bonusSpeed_;
-    float percent = auraMoveSpeedPercent_;
-    for (const auto& [id, mod] : speedModifiers_) {
-        percent += mod;
-    }
-    float finalSpeed = base * (1.0f + percent);
-    return std::clamp(finalSpeed, 150.0f, 522.0f);
+    return attrs_.ComputeEffectiveSpeed();
 }
 
 void CUnit::SetSpeed(int s) {
-    baseSpeed_ = s;
+    attrs_.SetBaseSpeed(s);
     speed_ = s;
 }
 
@@ -163,20 +153,20 @@ void CUnit::RegeneratePathingInstance(CSimulation& game) {
     SetPosition(ux, uy);
     auto* pf = game.GetPathfinding();
     if (!pf || !pf->HasPathingMap()) return;
-    pathingStampId_ = pf->GetPathingMap()->StampFootprint(ux, uy, 270, img, false);
+    structureNavComp_.pathingStampId = pf->GetPathingMap()->StampFootprint(ux, uy, 270, img, false);
 }
 
 void CUnit::KillPathingInstance(CSimulation& game) {
-    if (pathingStampId_ < 0) return;
+    if (structureNavComp_.pathingStampId < 0) return;
     if (auto* pf = game.GetPathfinding()) {
-        if (pf->HasPathingMap()) pf->GetPathingMap()->UnstampFootprint(pathingStampId_);
+        if (pf->HasPathingMap()) pf->GetPathingMap()->UnstampFootprint(structureNavComp_.pathingStampId);
     }
-    pathingStampId_ = -1;
+    structureNavComp_.pathingStampId = -1;
 }
 
 void CUnit::DropDeathItems(CSimulation& game) {
-    if (deathDrops_.empty()) return;
-    for (const auto& drop : deathDrops_) {
+    if (corpseDropComp_.deathDrops.empty()) return;
+    for (const auto& drop : corpseDropComp_.deathDrops) {
         if (drop.itemId.value == 0 || drop.chancePercent <= 0) continue;
         if (drop.chancePercent < 100 &&
             game.SimRand01() * 100.0f >= (float)drop.chancePercent) {
@@ -189,10 +179,10 @@ void CUnit::DropDeathItems(CSimulation& game) {
 }
 
 void CUnit::PopoutWorker(CSimulation& game) {
-    const int workerHandle = workerHandleId_;
-    const bool inside = workerInside_;
-    workerHandleId_ = -1;
-    workerInside_ = false;
+    const int workerHandle = constructionComp_.workerHandleId;
+    const bool inside = constructionComp_.workerInside;
+    constructionComp_.workerHandleId = -1;
+    constructionComp_.workerInside = false;
     // Undead/human builders stay outside (inside=false); nothing to pop.
     if (workerHandle < 0 || !inside) return;
     CUnit* worker = game.GetUnit(workerHandle);
@@ -202,7 +192,7 @@ void CUnit::PopoutWorker(CSimulation& game) {
     worker->SetPaused(false);
     // Step out beside the ruin (ref nudgeAround -> setPointAndCheckUnstuck).
     worker->SetPositionAndCheckUnstuck(GetX(), GetY(), game);
-    if (constructionConsumesWorker_) {
+    if (constructionComp_.constructionConsumesWorker) {
         // Night-elf wisps were zeroed at build start (see
         // CBehaviorBuild::CreateBuilding); give their food back (ref
         // popoutWorker restores worker type foodUsed to its player).
@@ -219,51 +209,47 @@ void CUnit::PopoutWorker(CSimulation& game) {
             }
         }
     }
-    constructionConsumesWorker_ = false;
+    constructionComp_.constructionConsumesWorker = false;
 }
 
 void CUnit::RefreshMaxLifeTotal() {
-    maxLife_ = (float)baseMaxLife_ + heroBonusLife_ + bonusMaxLife_;
-    if (maxLife_ < 1.0f) maxLife_ = 1.0f;
+    maxLife_ = attrs_.ComputeMaxLife();
     if (life_ > maxLife_) life_ = maxLife_;
 }
 
 void CUnit::RefreshMaxManaTotal() {
-    maxMana_ = baseMaxMana_ + heroBonusMana_ + bonusMaxMana_;
-    if (maxMana_ < 0) maxMana_ = 0;
+    maxMana_ = attrs_.ComputeMaxMana();
     if (mana_ > (float)maxMana_) mana_ = (float)maxMana_;
 }
 
 void CUnit::MorphTo(CUnitType* form, War3ID formId) {
     if (!form) return;
-    if (!morphed_) {
-        morphed_ = true;
-        originalType_ = unitType_;
-        originalTypeId_ = typeId_;
-        savedSpeed_ = baseSpeed_;
-        savedBaseMaxLife_ = baseMaxLife_;
-        savedBaseMaxMana_ = baseMaxMana_;
-        savedDefense_ = currentDefense_;
-        savedTurnRate_ = turnRate_;
-        savedMovementType_ = movementType_;
-        savedCollisionSize_ = collisionSize_;
-        savedBuilding_ = isBuilding_;
-        savedFlyHeight_ = GetFlyHeight();
+    if (!morphComp_.morphed) {
+        morphComp_.morphed = true;
+        morphComp_.originalType = unitType_;
+        morphComp_.originalTypeId = typeId_;
+        morphComp_.savedSpeed = attrs_.GetBaseSpeed();
+        morphComp_.savedBaseMaxLife = attrs_.GetBaseMaxLife();
+        morphComp_.savedBaseMaxMana = attrs_.GetBaseMaxMana();
+        morphComp_.savedDefense = attrs_.GetCurrentDefense();
+        morphComp_.savedTurnRate = turnRate_;
+        morphComp_.savedMovementType = movementType_;
+        morphComp_.savedCollisionSize = collisionSize_;
+        morphComp_.savedBuilding = isBuilding_;
+        morphComp_.savedFlyHeight = GetFlyHeight();
     }
     const float oldMaxLife = maxLife_;
     const float oldMaxMana = (float)maxMana_;
     const float lifeRatio = (oldMaxLife > 0.0f) ? (life_ / oldMaxLife) : 1.0f;
     const float manaRatio = (oldMaxMana > 0.0f) ? (mana_ / oldMaxMana) : 1.0f;
 
-    // Attacks read unitType_ live, so the form's arsenal (and model,
-    // render-side) applies immediately. Hero/ability state is untouched.
     unitType_ = form;
     typeId_ = formId;
-    baseSpeed_ = form->GetSpeed();
-    speed_ = baseSpeed_;
-    baseMaxLife_ = form->GetMaxLife();
-    baseMaxMana_ = form->GetManaMaximum();
-    currentDefense_ = form->GetDefense();
+    attrs_.SetBaseSpeed(form->GetSpeed());
+    speed_ = form->GetSpeed();
+    attrs_.SetBaseMaxLife(form->GetMaxLife());
+    attrs_.SetBaseMaxMana(form->GetManaMaximum());
+    attrs_.SetCurrentDefense(form->GetDefense());
     turnRate_ = form->GetTurnRate();
     movementType_ = form->GetMovementType();
     collisionSize_ = form->GetCollisionSize();
@@ -276,25 +262,25 @@ void CUnit::MorphTo(CUnitType* form, War3ID formId) {
 }
 
 void CUnit::Unmorph() {
-    if (!morphed_) return;
-    morphed_ = false;
+    if (!morphComp_.morphed) return;
+    morphComp_.morphed = false;
     const float oldMaxLife = maxLife_;
     const float oldMaxMana = (float)maxMana_;
     const float lifeRatio = (oldMaxLife > 0.0f) ? (life_ / oldMaxLife) : 1.0f;
     const float manaRatio = (oldMaxMana > 0.0f) ? (mana_ / oldMaxMana) : 1.0f;
 
-    unitType_ = originalType_;
-    typeId_ = originalTypeId_;
-    baseSpeed_ = savedSpeed_;
-    speed_ = baseSpeed_;
-    baseMaxLife_ = savedBaseMaxLife_;
-    baseMaxMana_ = savedBaseMaxMana_;
-    currentDefense_ = savedDefense_;
-    turnRate_ = savedTurnRate_;
-    movementType_ = savedMovementType_;
-    collisionSize_ = savedCollisionSize_;
-    isBuilding_ = savedBuilding_;
-    SetFlyHeight(savedFlyHeight_);
+    unitType_ = morphComp_.originalType;
+    typeId_ = morphComp_.originalTypeId;
+    attrs_.SetBaseSpeed(morphComp_.savedSpeed);
+    speed_ = morphComp_.savedSpeed;
+    attrs_.SetBaseMaxLife(morphComp_.savedBaseMaxLife);
+    attrs_.SetBaseMaxMana(morphComp_.savedBaseMaxMana);
+    attrs_.SetCurrentDefense(morphComp_.savedDefense);
+    turnRate_ = morphComp_.savedTurnRate;
+    movementType_ = morphComp_.savedMovementType;
+    collisionSize_ = morphComp_.savedCollisionSize;
+    isBuilding_ = morphComp_.savedBuilding;
+    SetFlyHeight(morphComp_.savedFlyHeight);
     RefreshMaxLifeTotal();
     RefreshMaxManaTotal();
     life_ = std::clamp(lifeRatio * maxLife_, 1.0f, maxLife_);
@@ -340,22 +326,22 @@ void CUnit::FireAttackModifiers(CSimulation& game, CUnit* victim, float damageDe
 }
 
 void CUnit::AddBonusMaxLife(float v) {
-    bonusMaxLife_ += v;
+    attrs_.AddBonusMaxLife(v);
     RefreshMaxLifeTotal();
 }
 
 void CUnit::AddBonusMaxMana(int v) {
-    bonusMaxMana_ += v;
+    attrs_.AddBonusMaxMana(v);
     RefreshMaxManaTotal();
 }
 
 void CUnit::SetHeroBonusLife(float v) {
-    heroBonusLife_ = v;
+    attrs_.SetHeroBonusLife(v);
     RefreshMaxLifeTotal();
 }
 
 void CUnit::SetHeroBonusMana(int v) {
-    heroBonusMana_ = v;
+    attrs_.SetHeroBonusMana(v);
     RefreshMaxManaTotal();
 }
 
@@ -710,330 +696,47 @@ bool CUnit::IsSummoned() const {
 
 void CUnit::AddAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId,
                              float value, int caster) {
-    auto key = std::make_pair((int)type, percent);
-    auto& sources = auraStats_[key];
-    for (auto& s : sources) {
-        if (s.buffId == buffId && s.caster == caster) {
-            s.value = value;
-            RecomputeAuraStat(type, percent);
-            return;
-        }
-    }
-    sources.push_back({buffId, caster, value});
-    RecomputeAuraStat(type, percent);
+    attrs_.AddAuraStatBonus(type, percent, buffId, value, caster, unitType_, GetMaxMana());
 }
 
 void CUnit::RemoveAuraStatBonus(CAuraEffectType type, bool percent, War3ID buffId, int caster) {
-    auto key = std::make_pair((int)type, percent);
-    auto it = auraStats_.find(key);
-    if (it == auraStats_.end()) return;
-    auto& sources = it->second;
-    sources.erase(std::remove_if(sources.begin(), sources.end(),
-                                 [&](const AuraStatSource& s) {
-                                     return s.buffId == buffId && s.caster == caster;
-                                 }),
-                  sources.end());
-    if (sources.empty()) {
-        auraStats_.erase(it);
-    }
-    RecomputeAuraStat(type, percent);
+    attrs_.RemoveAuraStatBonus(type, percent, buffId, caster, unitType_, GetMaxMana());
 }
 
 void CUnit::RecomputeAllAuraStats() {
-    // Snapshot keys first: RecomputeAuraStat mutates auraApplied_ in place.
-    std::vector<std::pair<int, bool>> keys;
-    keys.reserve(auraStats_.size());
-    for (const auto& [key, sources] : auraStats_) {
-        (void)sources;
-        keys.push_back(key);
-    }
-    for (const auto& [type, percent] : keys) {
-        RecomputeAuraStat(static_cast<CAuraEffectType>(type), percent);
-    }
+    attrs_.RecomputeAllAuraStats(unitType_, GetMaxMana());
+}
+
+void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {
+    attrs_.RecomputeAuraStat(type, percent, unitType_, GetMaxMana());
 }
 
 void CUnit::SetNonStackingDamageBonus(War3ID key, int flatValue) {
-    if (flatValue == 0) {
-        nsDamageFlat_.erase(key);
-        return;
-    }
-    nsDamageFlat_[key] = flatValue;
+    attrs_.SetNonStackingDamageBonus(key, flatValue);
 }
 
 void CUnit::SetNonStackingDamagePctBonus(War3ID key, int flatValue) {
-    if (flatValue == 0) {
-        nsDamagePct_.erase(key);
-        return;
-    }
-    nsDamagePct_[key] = flatValue;
+    attrs_.SetNonStackingDamagePctBonus(key, flatValue);
 }
 
 void CUnit::ClearNonStackingDamageBonus(War3ID key) {
-    nsDamageFlat_.erase(key);
-    nsDamagePct_.erase(key);
+    attrs_.ClearNonStackingDamageBonus(key);
 }
 
 int CUnit::GetNonStackingDamageTotal() const {
-    int total = 0;
-    for (const auto& [key, value] : nsDamageFlat_) total += value;
-    for (const auto& [key, value] : nsDamagePct_) total += value;
-    return total;
+    return attrs_.GetNonStackingDamageTotal();
 }
 
 void CUnit::SetNonStackingAttackSpeed(War3ID key, float bonus) {
-    if (bonus == 0.0f) {
-        nsAtkSpeed_.erase(key);
-        return;
-    }
-    nsAtkSpeed_[key] = bonus;
+    attrs_.SetNonStackingAttackSpeed(key, bonus);
 }
 
 void CUnit::ClearNonStackingAttackSpeed(War3ID key) {
-    nsAtkSpeed_.erase(key);
+    attrs_.ClearNonStackingAttackSpeed(key);
 }
 
 float CUnit::GetNonStackingAttackSpeedTotal() const {
-    float total = 0.0f;
-    for (const auto& [key, value] : nsAtkSpeed_) total += value;
-    return total;
-}
-
-float CUnit::GetAttackSpeedMultiplier() const {
-    // Retail attack math (ref CUnitAttack.computeDerivedFields): all
-    // stacking and non-stacking speed bonuses add, then clamp to
-    // [-0.9, +4.0] so the multiplier lands in [0.1, 5.0]. The legacy
-    // multiplicative chain (Burrow cargo steps) still rides on top.
-    const float bonus = attackSpeedStackBonus_ + GetNonStackingAttackSpeedTotal();
-    const float clamped = std::max(-0.9f, std::min(4.0f, bonus));
-    return (1.0f + clamped) * attackSpeedMul_;
-}
-
-void CUnit::AddEvasionSource(War3ID id, float chance) {
-    for (auto& src : evasionSources_) {
-        if (src.id == id) {
-            src.chance = chance;
-            return;
-        }
-    }
-    evasionSources_.push_back({id, chance});
-}
-
-void CUnit::RemoveEvasionSource(War3ID id) {
-    evasionSources_.erase(
-        std::remove_if(evasionSources_.begin(), evasionSources_.end(),
-                       [&](const EvasionSource& src) { return src.id == id; }),
-        evasionSources_.end());
-}
-
-float CUnit::GetEvasionChance() const {
-    float survive = 1.0f;
-    for (const auto& src : evasionSources_) {
-        survive *= (1.0f - src.chance);
-    }
-    return 1.0f - survive;
-}
-
-void CUnit::SetEvasionChance(float v) {
-    evasionSources_.clear();
-    if (v != 0.0f) evasionSources_.push_back({War3ID(0u), v});
-}
-
-void CUnit::AddCritSource(War3ID id, float chance, float multiplier) {
-    for (auto& src : critSources_) {
-        if (src.id == id) {
-            src.chance = chance;
-            src.multiplier = multiplier;
-            return;
-        }
-    }
-    critSources_.push_back({id, chance, multiplier});
-}
-
-void CUnit::RemoveCritSource(War3ID id) {
-    critSources_.erase(
-        std::remove_if(critSources_.begin(), critSources_.end(),
-                       [&](const CritSource& src) { return src.id == id; }),
-        critSources_.end());
-}
-
-float CUnit::GetCritChance() const {
-    float best = 0.0f;
-    for (const auto& src : critSources_) {
-        if (src.chance > best) best = src.chance;
-    }
-    return best;
-}
-
-float CUnit::GetCritMultiplier() const {
-    float bestChance = 0.0f;
-    float multiplier = 1.0f;
-    for (const auto& src : critSources_) {
-        if (src.chance > bestChance) {
-            bestChance = src.chance;
-            multiplier = src.multiplier;
-        }
-    }
-    return multiplier;
-}
-
-void CUnit::SetCriticalStrike(float chance, float multiplier) {
-    critSources_.clear();
-    if (chance != 0.0f || multiplier != 1.0f) critSources_.push_back({War3ID(0u), chance, multiplier});
-}
-
-void CUnit::RecomputeAuraStat(CAuraEffectType type, bool percent) {    auto key = std::make_pair((int)type, percent);
-    float best = 0.0f;
-    bool have = false;
-    auto sit = auraStats_.find(key);
-    if (sit != auraStats_.end()) {
-        for (const auto& s : sit->second) {
-            if (!have || s.value > best) {
-                best = s.value;
-                have = true;
-            }
-        }
-    }
-    float applied = 0.0f;
-    auto ait = auraApplied_.find(key);
-    if (ait != auraApplied_.end()) applied = ait->second;
-
-    // Undo the previous effective contribution, then apply the new
-    // strongest one. Math mirrors the legacy direct-mutation aura path
-    // (including its truncation behavior) so single-aura results are
-    // bit-identical.
-    switch (type) {
-        case CAuraEffectType::ARMOR: {
-            const int oldFlat = (int)std::lround(applied);
-            const int newFlat = have ? (int)std::lround(best) : 0;
-            if (oldFlat != 0) AddBonusArmor(-oldFlat);
-            if (newFlat != 0) AddBonusArmor(newFlat);
-            if (newFlat != 0) auraApplied_[key] = (float)newFlat;
-            else auraApplied_.erase(key);
-            break;
-        }
-        case CAuraEffectType::MOVE_SPEED: {
-            if (percent) {
-                const float newFactor = have ? best : 0.0f;
-                auraMoveSpeedPercent_ = newFactor;
-                if (have) {
-                    auraApplied_[key] = best;
-                } else {
-                    auraApplied_.erase(key);
-                }
-            } else {
-                const int oldFlat = (int)applied;
-                const int newFlat = have ? (int)best : 0;
-                if (oldFlat != 0) bonusSpeed_ -= oldFlat;
-                if (newFlat != 0) bonusSpeed_ += newFlat;
-                if (newFlat != 0) auraApplied_[key] = (float)newFlat;
-                else auraApplied_.erase(key);
-            }
-            break;
-        }
-        case CAuraEffectType::ATTACK_SPEED: {
-            // Per-buff best into the shared non-stacking speed table (ref
-            // ATKSPD: max within a key, sum across keys). Stale aura-owned
-            // keys are cleared so a lapsed aura stops contributing, while
-            // timed-buff entries sharing the maps are left alone.
-            std::unordered_map<War3ID, float> bestById;
-            if (sit != auraStats_.end()) {
-                for (const auto& s : sit->second) {
-                    auto it = bestById.find(s.buffId);
-                    if (it == bestById.end() || s.value > it->second) {
-                        bestById[s.buffId] = s.value;
-                    }
-                }
-            }
-            for (auto it = auraSpeedKeys_.begin(); it != auraSpeedKeys_.end();) {
-                if (bestById.find(*it) == bestById.end()) {
-                    ClearNonStackingAttackSpeed(*it);
-                    it = auraSpeedKeys_.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-            for (const auto& [id, value] : bestById) {
-                SetNonStackingAttackSpeed(id, value);
-                auraSpeedKeys_.insert(id);
-            }
-            break;
-        }
-        case CAuraEffectType::DAMAGE: {
-            // Same shape as ATTACK_SPEED, split across the flat/pct damage
-            // maps (ref MELEEATK vs MELEEATKPCT both applying). The pct slot
-            // converts against the primary-attack base exactly like the old
-            // direct-mutation path, so single-aura results are bit-identical.
-            float base = 0.0f;
-            if (percent) {
-                if (auto* unitType = GetUnitType()) {
-                    const auto& attacks = unitType->GetAttacks();
-                    if (!attacks.empty()) {
-                        base = (float)attacks[0].damageBase;
-                        if (attacks[0].damageDice > 0 && attacks[0].damageSidesPerDie > 0) {
-                            base += (float)attacks[0].damageDice *
-                                    (float)(attacks[0].damageSidesPerDie + 1) * 0.5f;
-                        }
-                    }
-                }
-            }
-            std::unordered_map<War3ID, float> bestById;
-            if (sit != auraStats_.end()) {
-                for (const auto& s : sit->second) {
-                    auto it = bestById.find(s.buffId);
-                    if (it == bestById.end() || s.value > it->second) {
-                        bestById[s.buffId] = s.value;
-                    }
-                }
-            }
-            auto& owned = percent ? auraDamagePctKeys_ : auraDamageFlatKeys_;
-            for (auto it = owned.begin(); it != owned.end();) {
-                if (bestById.find(*it) == bestById.end()) {
-                    // Map-specific erase (Clear would also drop the sibling
-                    // map's entry for an aura carrying both flat and pct).
-                    if (percent) SetNonStackingDamagePctBonus(*it, 0);
-                    else SetNonStackingDamageBonus(*it, 0);
-                    it = owned.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-            for (const auto& [id, value] : bestById) {
-                const int flat = percent ? (int)std::lround(base * value)
-                                         : (int)std::lround(value);
-                if (percent) SetNonStackingDamagePctBonus(id, flat);
-                else SetNonStackingDamageBonus(id, flat);
-                owned.insert(id);
-            }
-            break;
-        }
-        case CAuraEffectType::LIFE_REGEN: {
-            if (applied != 0.0f) AddBonusLifeRegen(-applied);
-            if (have && best != 0.0f) {
-                AddBonusLifeRegen(best);
-                auraApplied_[key] = best;
-            } else {
-                auraApplied_.erase(key);
-            }
-            break;
-        }
-        case CAuraEffectType::MANA_REGEN: {
-            const float oldFlat = applied;
-            float newFlat = 0.0f;
-            if (have && best != 0.0f) {
-                newFlat = percent ? best * static_cast<float>(GetMaxMana()) : best;
-            }
-            if (oldFlat != 0.0f) AddBonusManaRegen(-oldFlat);
-            if (newFlat != 0.0f) {
-                AddBonusManaRegen(newFlat);
-                auraApplied_[key] = newFlat;
-            } else {
-                auraApplied_.erase(key);
-            }
-            break;
-        }
-        default:
-            break;
-    }
+    return attrs_.GetNonStackingAttackSpeedTotal();
 }
 
 void CUnit::UpdateBuffs(CSimulation& game) {
@@ -1073,31 +776,16 @@ float CUnit::GetAttackRange(int index) const {
     if (unitType_ && index >= 0 && index < (int)unitType_->GetAttacks().size()) {
         base = unitType_->GetAttacks()[(size_t)index].range;
     }
-    if (index >= 0 && index < (int)attackRangeBonus_.size()) {
-        base += attackRangeBonus_[(size_t)index];
-    }
-    return base;
+    return base + attrs_.GetAttackRangeBonus(index);
 }
 
 void CUnit::AddAttackRangeBonus(int index, float v) {
-    if (index < 0) return;
-    if (index >= (int)attackRangeBonus_.size()) {
-        attackRangeBonus_.resize((size_t)index + 1, 0.0f);
-    }
-    attackRangeBonus_[(size_t)index] += v;
+    attrs_.AddAttackRangeBonus(index, v);
 }
 
 void CUnit::AddAttackRangeBonusAll(float v) {
-    size_t count = 1;
-    if (unitType_) {
-        count = std::max<size_t>(1, unitType_->GetAttacks().size());
-    } else if (!attackRangeBonus_.empty()) {
-        count = attackRangeBonus_.size();
-    }
-    if (attackRangeBonus_.size() < count) {
-        attackRangeBonus_.resize(count, 0.0f);
-    }
-    for (auto& b : attackRangeBonus_) b += v;
+    const size_t attackCount = unitType_ ? unitType_->GetAttacks().size() : 1;
+    attrs_.AddAttackRangeBonusAll(v, attackCount);
 }
 
 void CUnit::SetCurrentBehavior(std::unique_ptr<CBehavior> behavior) {
@@ -1113,12 +801,12 @@ void CUnit::SetCurrentBehavior(std::unique_ptr<CBehavior> behavior) {
 
 bool CUnit::LoadUnit(CUnit* passenger) {
     if (!passenger || passenger == this || passenger->IsDead()) return false;
-    for (auto* loaded : cargoUnits_) {
+    for (auto* loaded : cargoComp_.cargoUnits) {
         if (loaded == passenger) return true; // already aboard
     }
-    passenger->loadedAboard_ = true;
+    passenger->cargoComp_.loadedAboard = true;
     passenger->SetHidden(true);
-    cargoUnits_.push_back(passenger);
+    cargoComp_.cargoUnits.push_back(passenger);
     if (unitLoadedHook_) {
         unitLoadedHook_(passenger->GetHandleId());
     }
@@ -1127,17 +815,17 @@ bool CUnit::LoadUnit(CUnit* passenger) {
 
 void CUnit::UnloadUnitAt(CUnit* passenger, float x, float y) {
     if (!passenger) return;
-    auto it = std::find(cargoUnits_.begin(), cargoUnits_.end(), passenger);
-    if (it == cargoUnits_.end()) return;
-    cargoUnits_.erase(it);
-    passenger->loadedAboard_ = false;
+    auto it = std::find(cargoComp_.cargoUnits.begin(), cargoComp_.cargoUnits.end(), passenger);
+    if (it == cargoComp_.cargoUnits.end()) return;
+    cargoComp_.cargoUnits.erase(it);
+    passenger->cargoComp_.loadedAboard = false;
     passenger->SetHidden(false);
     passenger->SetPosition(x, y);
 }
 
 bool CUnit::CanBeTargetedBy(CSimulation& simulation, CUnit* source,
                             const std::vector<CTargetType>& targetsAllowed) const {
-    if (loadedAboard_) return false; // hidden cargo can't be targeted
+    if (cargoComp_.loadedAboard) return false; // hidden cargo can't be targeted
     return CWidget::CanBeTargetedBy(simulation, source, targetsAllowed);
 }
 
@@ -1226,9 +914,9 @@ bool CUnit::HasQueuedOrders() const {
 }
 
 void CUnit::Revive(CSimulation& game, float x, float y) {
-    corpse_ = false;
-    boneCorpse_ = false;
-    deathTurnTick_ = 0;
+    corpseDropComp_.corpse = false;
+    corpseDropComp_.boneCorpse = false;
+    corpseDropComp_.deathTurnTick = 0;
     hidden_ = false;
     SetPosition(x, y);
     RefreshMaxLifeTotal();
@@ -1236,7 +924,7 @@ void CUnit::Revive(CSimulation& game, float x, float y) {
     SetLife(game, GetMaxLife());
     // Buildings never revive via heroes, but a restored structure needs
     // its footprint back (ref pathingInstance lifecycle).
-    if (IsBuilding() && pathingStampId_ < 0) RegeneratePathingInstance(game);
+    if (IsBuilding() && structureNavComp_.pathingStampId < 0) RegeneratePathingInstance(game);
     // Mana intentionally preserved (reincarnation spends it pre-revive).
 }
 
@@ -1251,13 +939,13 @@ void CUnit::ApplyRegen(CSimulation& simulation) {
     bool canRegen = (regenType == CRegenType::ALWAYS) ||
                     (regenType == CRegenType::ONLY_AT_NIGHT && isNight);
     if (canRegen && life_ < maxLife_) {
-        life_ += (unitType_->GetLifeRegen() + bonusLifeRegen_) * dt;
+        life_ += (unitType_->GetLifeRegen() + attrs_.GetBonusLifeRegen()) * dt;
         if (life_ > maxLife_) life_ = maxLife_;
     }
 
     // Mana regen
     if (mana_ < (float)maxMana_) {
-        mana_ += (unitType_->GetManaRegen() + bonusManaRegen_) * dt;
+        mana_ += (unitType_->GetManaRegen() + attrs_.GetBonusManaRegen()) * dt;
         if (mana_ > (float)maxMana_) mana_ = (float)maxMana_;
     }
 }
@@ -1276,10 +964,10 @@ float CUnit::GetEndingDecayTime(const CSimulation& simulation) const {
 bool CUnit::Update(CSimulation& simulation) {
     if (IsDead()) {
         const int currentTick = simulation.GetGameTurnTick();
-        if (deathTurnTick_ == 0) {
-            deathTurnTick_ = currentTick;
-            corpse_ = false;
-            boneCorpse_ = false;
+        if (corpseDropComp_.deathTurnTick == 0) {
+            corpseDropComp_.deathTurnTick = currentTick;
+            corpseDropComp_.corpse = false;
+            corpseDropComp_.boneCorpse = false;
             // Retail death clears the building footprint (ref killPathingInstance).
             KillPathingInstance(simulation);
             // The fallen drop their orders with their behavior (ref kill:
@@ -1310,9 +998,9 @@ bool CUnit::Update(CSimulation& simulation) {
                             CFogArea::Circle(GetX(), GetY(), gc.dyingRevealRadius);
                         fog->AddTimedModifier(GetPlayerIndex(), area,
                                               CFogState::VISIBLE, gc.fogFlashTime);
-                        if (deathKillerPlayer_ >= 0 &&
-                            deathKillerPlayer_ != GetPlayerIndex()) {
-                            fog->AddTimedModifier(deathKillerPlayer_, area,
+                        if (corpseDropComp_.deathKillerPlayer >= 0 &&
+                            corpseDropComp_.deathKillerPlayer != GetPlayerIndex()) {
+                            fog->AddTimedModifier(corpseDropComp_.deathKillerPlayer, area,
                                                   CFogState::VISIBLE, gc.fogFlashTime);
                         }
                     }
@@ -1344,13 +1032,13 @@ bool CUnit::Update(CSimulation& simulation) {
             // items materialize at the corpse on the death tick.
             DropDeathItems(simulation);
             // Cargo goes down with the transport (WC3 rule).
-            auto passengers = std::move(cargoUnits_);
-            cargoUnits_.clear();
+            auto passengers = std::move(cargoComp_.cargoUnits);
+            cargoComp_.cargoUnits.clear();
             const float dropX = GetX();
             const float dropY = GetY();
             for (auto* passenger : passengers) {
                 if (passenger) {
-                    passenger->loadedAboard_ = false;
+                    passenger->cargoComp_.loadedAboard = false;
                     passenger->SetHidden(false);
                     passenger->SetPosition(dropX, dropY);
                     if (!passenger->IsDead()) {
@@ -1372,21 +1060,21 @@ bool CUnit::Update(CSimulation& simulation) {
             return false;
         }
 
-        if (decaySuspended_) return false;
+        if (corpseDropComp_.decaySuspended) return false;
 
-        if (!corpse_) {
+        if (!corpseDropComp_.corpse) {
             const int deathTicks = std::max(1, (int)std::ceil(unitType_->GetDeathTime() / simulation.GetSimStepTime()));
-            if ((currentTick - deathTurnTick_) > deathTicks) {
-                corpse_ = true;
+            if ((currentTick - corpseDropComp_.deathTurnTick) > deathTicks) {
+                corpseDropComp_.corpse = true;
                 if (!unitType_->CanRaise()) {
-                    boneCorpse_ = true;
+                    corpseDropComp_.boneCorpse = true;
                 }
                 if (!IsHero() && !unitType_->CanDecay()) {
                     return true;
                 }
-                deathTurnTick_ = currentTick;
+                corpseDropComp_.deathTurnTick = currentTick;
                 // Decay begins (retail EVENT_UNIT_DECAY); one-shot by
-                // construction (corpse_ flips, this branch never reruns).
+                // construction (corpseDropComp_.corpse flips, this branch never reruns).
                 if (auto& decayCb = simulation.GetUnitDecayCallback()) {
                     decayCb(handleId_);
                 }
@@ -1394,19 +1082,19 @@ bool CUnit::Update(CSimulation& simulation) {
             return false;
         }
 
-        if (!boneCorpse_) {
+        if (!corpseDropComp_.boneCorpse) {
             const int decayTicks = std::max(1, (int)std::ceil(
                 simulation.GetGameplayConstants().decayTime / simulation.GetSimStepTime()));
-            if ((currentTick - deathTurnTick_) > decayTicks) {
-                boneCorpse_ = true;
-                deathTurnTick_ = currentTick;
+            if ((currentTick - corpseDropComp_.deathTurnTick) > decayTicks) {
+                corpseDropComp_.boneCorpse = true;
+                corpseDropComp_.deathTurnTick = currentTick;
             }
             return false;
         }
 
         const int endingDecayTicks = std::max(1, (int)std::ceil(
             GetEndingDecayTime(simulation) / simulation.GetSimStepTime()));
-        if ((currentTick - deathTurnTick_) > endingDecayTicks) {
+        if ((currentTick - corpseDropComp_.deathTurnTick) > endingDecayTicks) {
             if (IsHero()) {
                 hidden_ = true;
                 return false;
@@ -1474,7 +1162,7 @@ bool CUnit::Update(CSimulation& simulation) {
     }
 
     // Cargo rides along with the transport.
-    for (auto* passenger : cargoUnits_) {
+    for (auto* passenger : cargoComp_.cargoUnits) {
         if (passenger) passenger->SetPosition(x_, y_);
     }
 
@@ -1898,7 +1586,7 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
     if (oldLife > 0 && life_ <= 0) {
         // Killer side-channel for the death tick (ref kill(source): killer
         // gets its own death-vision reveal next to the owner's).
-        deathKillerPlayer_ = source ? source->GetPlayerIndex() : -1;
+        corpseDropComp_.deathKillerPlayer = source ? source->GetPlayerIndex() : -1;
         AwardBountyAndXP(simulation, source);
         auto& deathCb = simulation.GetUnitDeathCallback();
         int srcHandle = source ? source->GetHandleId() : -1;
