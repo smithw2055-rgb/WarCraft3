@@ -1,4 +1,5 @@
 #include "game_controller.h"
+#include "frame_allocator.h"
 #include "../render/renderer.h"
 #include "../render/mdx_event_splat.h"
 #include "../render/mdx_sequence_select.h"
@@ -2545,6 +2546,7 @@ void GameController::WireJassCallbacks() {
 // --- Update ---
 
 void GameController::Update(int screenW, int screenH, float dt) {
+    GetFrameAllocator().Clear();
     if (uiOnlyMode_) {
         if (pendingGlueMapLaunch_ && StartPendingGlueMapLaunch(screenW, screenH)) {
             // Continue into the normal state machine in this frame.
@@ -3306,14 +3308,17 @@ void GameController::SyncJassEffectVisuals() {
     }
 
     // Drop visuals whose effects were destroyed (or never resolved).
-    std::vector<int> gone;
+    int* gone = GetFrameAllocator().AllocateArray<int>(effectVisuals_.size());
+    int goneCount = 0;
     for (auto& [effectId, idx] : effectVisuals_) {
         if (data->effects.find(effectId) == data->effects.end()) {
             if (idx >= 0) scene_.RemoveAttachedModel(idx);
-            gone.push_back(effectId);
+            gone[goneCount++] = effectId;
         }
     }
-    for (int id : gone) effectVisuals_.erase(id);
+    for (int i = 0; i < goneCount; ++i) {
+        int id = gone[i]; effectVisuals_.erase(id);
+    }
 }
 
 static bool IsAllyForFog(const CSimulation& sim, int local, int owner) {
@@ -3418,15 +3423,17 @@ void GameController::SyncAndReconcileVisuals() {
     }
 
     // Reconcile (remove dead, add new)
-    std::vector<int> removedHandles;
+    int* removedHandles = GetFrameAllocator().AllocateArray<int>(simUnitToVisualIdx.size());
+    int removedCount = 0;
     for (auto& [handleId, visualIdx] : simUnitToVisualIdx) {
         CUnit* unit = simulation_.GetUnit(handleId);
         if (!unit || unit->IsDead()) {
             scene_.SetInstanceVisible(visualIdx, false);
-            removedHandles.push_back(handleId);
+            removedHandles[removedCount++] = handleId;
         }
     }
-    for (int handleId : removedHandles) {
+    for (int i = 0; i < removedCount; ++i) {
+        int handleId = removedHandles[i];
         simUnitToVisualIdx.erase(handleId);
         simUnitVisualRegistrationFailed.erase(handleId);
         simUnitVisualMovingStates.erase(handleId);
@@ -3442,15 +3449,17 @@ void GameController::SyncAndReconcileVisuals() {
         if (selectedUnitHandle_ == handleId) selectedUnitHandle_ = -1;
     }
 
-    std::vector<int> removedItemHandles;
+    int* removedItemHandles = GetFrameAllocator().AllocateArray<int>(simItemToVisualIdx.size());
+    int removedItemCount = 0;
     for (auto& [handleId, visualIdx] : simItemToVisualIdx) {
         CItem* item = simulation_.GetItem(handleId);
         if (!item || item->IsDead()) {
             scene_.SetInstanceVisible(visualIdx, false);
-            removedItemHandles.push_back(handleId);
+            removedItemHandles[removedItemCount++] = handleId;
         }
     }
-    for (int handleId : removedItemHandles) {
+    for (int i = 0; i < removedItemCount; ++i) {
+        int handleId = removedItemHandles[i];
         simItemToVisualIdx.erase(handleId);
         simItemVisualRegistrationFailed.erase(handleId);
     }

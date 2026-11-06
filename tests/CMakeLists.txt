@@ -285,7 +285,7 @@ target_compile_definitions(warsmash_tests PRIVATE
 
 # StormLib (optional)
 if(StormLib_FOUND)
-    target_link_libraries(warsmash_tests PRIVATE StormLib::storm)
+    target_link_libraries(warsmash_tests PRIVATE z bz2 tomcrypt tommath StormLib::storm)
     if(PLATFORM_WINDOWS AND DEFINED VCPKG_TRIPLET)
         set(VCPKG_BIN "${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET}/bin")
         foreach(DLL_FILE stormlib.dll zlib1.dll bz2.dll)
@@ -307,7 +307,7 @@ endif()
 
 # CascLib (optional)
 if(CascLib_FOUND)
-    target_link_libraries(warsmash_tests PRIVATE CascLib::casc)
+    target_link_libraries(warsmash_tests PRIVATE z bz2 tomcrypt tommath CascLib::casc)
 else()
     message(STATUS "CascLib not found for tests")
     target_compile_definitions(warsmash_tests PRIVATE WITHOUT_CASCLIB=1)

@@ -70,7 +70,7 @@ endif()
 
 # -------------------------------------------------------------------
 # StormLib - for W3X/W3M map file parsing
-find_package(StormLib CONFIG QUIET)
+#find_package(StormLib CONFIG QUIET)
 if(NOT StormLib_FOUND)
     # Fallback: manual find (vcpkg or custom install)
     if(DEFINED VCPKG_TRIPLET)
@@ -346,6 +346,7 @@ set(SOURCES
     src/ui/MultiSelectionPanel.cpp
     src/ui/BuffBar.cpp
     # ===== Core / State Machine =====
+    src/core/frame_allocator.cpp
     src/core/game_controller.cpp
     src/core/map_path_resolver.cpp
     src/core/warsmash_config.cpp
@@ -371,7 +372,7 @@ if(BUILD_APP)
     # -- Link StormLib (optional - app works without MPQ access) --
     macro(link_stormlib target)
         if(StormLib_FOUND)
-            target_link_libraries(${target} PRIVATE StormLib::storm)
+            target_link_libraries(${target} PRIVATE StormLib::storm z bz2 tomcrypt tommath)
             # Copy runtime DLLs to output directory (Windows)
             if(PLATFORM_WINDOWS AND DEFINED VCPKG_TRIPLET)
                 set(VCPKG_BIN "${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET}/bin")
@@ -405,7 +406,7 @@ if(BUILD_APP)
     # sokol headers are header-only; sokol_app.h on MSVC uses #pragma comment for system libs
     target_compile_definitions(warsmash PRIVATE SOKOL_GLCORE)
     if(PLATFORM_WINDOWS)
-        target_link_libraries(warsmash PRIVATE
+        target_link_libraries(warsmash PRIVATE z
             ${OPENGL_LIBRARIES}
         )
         link_stormlib(warsmash)
@@ -413,7 +414,7 @@ if(BUILD_APP)
         set_target_properties(warsmash PROPERTIES WIN32_EXECUTABLE FALSE)
     else()
         target_include_directories(warsmash PRIVATE ${OPENGL_INCLUDE_DIRS} ${X11_INCLUDE_DIR})
-        target_link_libraries(warsmash PRIVATE
+        target_link_libraries(warsmash PRIVATE z
             ${OPENGL_LIBRARIES}
             ${X11_LIBRARIES}
             ${XI_LIBRARY}
