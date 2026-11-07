@@ -430,15 +430,20 @@ void GameController::SyncMinimapLayer() {
 
 void GameController::SyncHudLiveData() {
     if (!simulationInitialized_) return;
+    WARSMASH_PROFILE_SCOPE(profiler_, "SyncHudLiveData", "UI");
     const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
-    // Resource bar + upkeep + clock from the local player (ref melee UI).
+    // Phase D1: Reactive UIDataBinder dirty-check before pushing HUD resource/selection updates
+    const bool hudDirty = ui_.GetDataBinder().SyncAndRelayoutIfChanged(
+        simulation_, local, selectedUnitHandle_, ui_.GetGameUI());
     if (const CPlayer* player = simulation_.GetPlayer(local)) {
         const float hod = simulation_.GetGameTimeOfDay();
         const int totalMin = (int)(hod * 60.0f);
-        char clock[16] = {};
-        std::snprintf(clock, sizeof(clock), "%02d:%02d", (totalMin / 60) % 24, totalMin % 60);
-        ui_.SetLiveResources(player->GetGold(), player->GetLumber(), player->GetFoodUsed(),
-                             player->GetFoodCap(), clock, player->GetUpkeepLevel());
+        if (hudDirty || (frameCount_ % 15 == 0)) {
+            char clock[16] = {};
+            std::snprintf(clock, sizeof(clock), "%02d:%02d", (totalMin / 60) % 24, totalMin % 60);
+            ui_.SetLiveResources(player->GetGold(), player->GetLumber(), player->GetFoodUsed(),
+                                 player->GetFoodCap(), clock, player->GetUpkeepLevel());
+        }
     }
     // Timer dialog: first displayed JASS dialog wins (ref CTimerDialog).
     std::string title, value;

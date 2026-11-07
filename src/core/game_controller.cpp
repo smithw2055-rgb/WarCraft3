@@ -1,6 +1,8 @@
 #include "core/game_controller_internal.h"
 
-GameController::GameController() = default;
+GameController::GameController() {
+    inputActionMap_.RegisterStandardWarcraftDefaults();
+}
 GameController::~GameController() = default;
 
 void GameController::ParseArgs(int argc, char* argv[]) {
@@ -367,6 +369,8 @@ void GameController::OnLeaveState(GameState state) { (void)state; }
 
 
 void GameController::Update(int screenW, int screenH, float dt) {
+    profiler_.BeginFrame(static_cast<uint64_t>(frameCount_ + 1));
+    WARSMASH_PROFILE_SCOPE(profiler_, "GameController::Update", "Core");
     if (uiOnlyMode_) {
         if (pendingGlueMapLaunch_ && StartPendingGlueMapLaunch(screenW, screenH)) {
             // Continue into the normal state machine in this frame.
@@ -573,8 +577,12 @@ void GameController::StepSimulation(float dt) {
     simulationAccumulator_ = std::min(simulationAccumulator_ + dt, simStep * 3.0f);
     bool ranSimulationStep = false;
     while (simulationAccumulator_ >= simStep) {
-        simulation_.Update();
+        {
+            WARSMASH_PROFILE_SCOPE(profiler_, "SimulationStep", "ECS");
+            simulation_.Update();
+        }
         if (jassNatives_) {
+            WARSMASH_PROFILE_SCOPE(profiler_, "JassNativesStep", "Scripting");
             jassNatives_->UpdateTimers(simStep);
             jassNatives_->UpdateRegions();
             jassNatives_->UpdateRescue();
@@ -674,6 +682,10 @@ void GameController::Render(int screenW, int screenH) {
     sg_apply_viewport(0, 0, screenW, screenH, true);
     sg_apply_scissor_rect(0, 0, screenW, screenH, true);
     if (!terrainOnly_) {
+            WARSMASH_PROFILE_SCOPE(profiler_, "SceneRenderAll", "Render");
+            if (texturedTerrain_.IsValid()) {
+                scene_.SetBoundTerrainChunkGrid(&texturedTerrain_.GetTerrainChunkGrid());
+            }
             scene_.SetDebugRenderRange(debugSceneRenderStart_, debugSceneRenderCount_);
             scene_.SetDebugRenderKind(debugSceneRenderKind_);
             SyncWeather(dt);
@@ -787,6 +799,7 @@ void GameController::Render(int screenW, int screenH) {
     }
     CaptureScreenshotIfNeeded(screenW, screenH);
     Renderer::EndFrame();
+    profiler_.EndFrame();
     Platform::ProcessInput();
     MaybeExitAfterFrame();
 }

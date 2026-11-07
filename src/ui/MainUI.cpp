@@ -2073,8 +2073,23 @@ std::shared_ptr<Texture> MainUI::LoadTextureFromMpq(const std::string& path) {
     auto it = textures_.find(normalized);
     if (it != textures_.end()) return it->second;
 
+    resource::ResourceServer& resServer = resource::ResourceServer::Instance();
+    if (resServer.GetMpqManager() != mpq_) {
+        resServer.SetMpqManager(mpq_);
+    }
+
+    // Phase D2: Pack decoded small icons into dynamic 2D TextureAtlasPacker
+    if (auto blpRes = render::BlpMipTextureResource::LoadFromVfs(resServer, normalized, true)) {
+        if (blpRes->width > 0 && blpRes->width <= 64 &&
+            blpRes->height > 0 && blpRes->height <= 64 &&
+            !blpRes->GetBasePixels().empty()) {
+            iconAtlasPacker_.PackSprite(
+                normalized, blpRes->width, blpRes->height, blpRes->GetBasePixels().data(), nullptr);
+        }
+    }
+
     std::vector<uint8_t> buf;
-    if (!mpq_->ReadFile(normalized, buf)) return nullptr;
+    if (!resServer.ReadRawBytes(normalized, buf) && !mpq_->ReadFile(normalized, buf)) return nullptr;
 
     auto tex = std::make_shared<Texture>();
     if (!tex->LoadFromMemory(buf.data(), buf.size())) return nullptr;

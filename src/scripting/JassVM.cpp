@@ -382,7 +382,7 @@ int JassVM::AllocateStruct(const std::string& type) {
             if (m.isStatic || m.isArray) continue;
             JassValue value = m.defaultExpr ? ExecuteNode(m.defaultExpr)
                                             : DefaultStructValue(m.type);
-            instance.scalars[m.name] = value;
+            instance.SetScalar(m.name, value, &structFastSlotAccessCount_);
         }
     }
     structInstances_[id] = std::move(instance);
@@ -953,12 +953,12 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                         } else if (!mdef) {
                             const int forwarded = FindDelegateInstance(it->second.type, instanceId, target->text);
                             if (forwarded != 0) {
-                                structInstances_[forwarded].scalars[target->text] = val;
+                                structInstances_[forwarded].SetScalar(target->text, val, &structFastSlotAccessCount_);
                             } else {
-                                it->second.scalars[target->text] = val;
+                                it->second.SetScalar(target->text, val, &structFastSlotAccessCount_);
                             }
                         } else {
-                            it->second.scalars[target->text] = val;
+                            it->second.SetScalar(target->text, val, &structFastSlotAccessCount_);
                         }
                     }
                     return val;
@@ -1239,19 +1239,19 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                 if (vit == ait->second.end()) return JassValue::Null();
                 return vit->second;
             }
-            auto vit = it->second.scalars.find(node->text);
-            if (vit == it->second.scalars.end()) {
-                const int forwarded = FindDelegateInstance(it->second.type, instanceId, node->text);
-                if (forwarded != 0) {
-                    auto fit = structInstances_.find(forwarded);
-                    if (fit != structInstances_.end()) {
-                        auto fvit = fit->second.scalars.find(node->text);
-                        if (fvit != fit->second.scalars.end()) return fvit->second;
+            if (const JassValue* fastVal = it->second.TryGetScalar(node->text, &structFastSlotAccessCount_)) {
+                return *fastVal;
+            }
+            const int forwarded = FindDelegateInstance(it->second.type, instanceId, node->text);
+            if (forwarded != 0) {
+                auto fit = structInstances_.find(forwarded);
+                if (fit != structInstances_.end()) {
+                    if (const JassValue* fVal = fit->second.TryGetScalar(node->text, &structFastSlotAccessCount_)) {
+                        return *fVal;
                     }
                 }
-                return JassValue::Null();
             }
-            return vit->second;
+            return JassValue::Null();
         }
 
         case AstNodeType::METHOD_CALL: {
@@ -1286,6 +1286,9 @@ JassValue JassVM::ExecuteNode(const AstNode* node) {
                     return JassValue::Int(AllocateStruct(staticType));
                 }
                 const JassStructMethod* m = FindStructMethod(staticType, method);
+                if (!m && method == "create") {
+                    return JassValue::Int(AllocateStruct(staticType));
+                }
                 if (m && m->func) {
                     if (!m->isStatic) {
                         errors_.push_back("Non-static method '" + method + "' called statically");
@@ -1436,6 +1439,8 @@ bool JassVM::PushBytecodeCoroutineFrame(ThreadState& state,
 
 JassVM::ThreadRunResult JassVM::StepBytecodeCoroutine(ThreadState& state) {
     ThreadRunResult result;
+    std::vector<JassValue> callArgs;
+    callArgs.reserve(16);
     while (!state.bcFrames.empty()) {
         BytecodeCoroutineFrame& frame = state.bcFrames.back();
         const JassBytecodeChunk& chunk = *frame.chunk;
@@ -1671,7 +1676,11 @@ JassVM::ThreadRunResult JassVM::StepBytecodeCoroutine(ThreadState& state) {
 
             case JassOpCode::OP_CALL: {
                 const int argCount = ins.intOperand;
-                std::vector<JassValue> callArgs((size_t)argCount);
+                const size_t prevCap = callArgs.capacity();
+                callArgs.resize((size_t)argCount);
+                if (callArgs.capacity() == prevCap) {
+                    ++zeroAllocCallCount_;
+                }
                 for (int i = argCount - 1; i >= 0; --i) {
                     if (!stack.empty()) {
                         callArgs[(size_t)i] = std::move(stack.back());
@@ -1750,6 +1759,8 @@ JassValue JassVM::ExecuteBytecode(const JassBytecodeChunk& chunk, const std::vec
 
     std::vector<JassValue> stack;
     stack.reserve(32);
+    std::vector<JassValue> callArgs;
+    callArgs.reserve(16);
 
     const auto& code = chunk.code;
     const size_t codeLen = code.size();
@@ -1974,7 +1985,11 @@ JassValue JassVM::ExecuteBytecode(const JassBytecodeChunk& chunk, const std::vec
 
             case JassOpCode::OP_CALL: {
                 const int argCount = ins.intOperand;
-                std::vector<JassValue> callArgs((size_t)argCount);
+                const size_t prevCap = callArgs.capacity();
+                callArgs.resize((size_t)argCount);
+                if (callArgs.capacity() == prevCap) {
+                    ++zeroAllocCallCount_;
+                }
                 for (int i = argCount - 1; i >= 0; --i) {
                     if (!stack.empty()) {
                         callArgs[(size_t)i] = std::move(stack.back());

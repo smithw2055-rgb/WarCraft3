@@ -8,6 +8,7 @@
 #include "wave_builder.h"
 #include "light_manager.h"
 #include "splat_model.h"
+#include "render/render_graph.h"
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -138,6 +139,8 @@ public:
     const TerrainBuildStats& GetBuildStats() const { return buildStats_; }
     int GetLastVisibleCliffCount() const { return lastVisibleCliffs_; }
     int GetLastCulledCliffCount() const { return lastCulledCliffs_; }
+    const render::TerrainChunkGrid& GetTerrainChunkGrid() const { return terrainChunkGrid_; }
+    const render::TerrainCullStats& GetLastChunkCullStats() const { return lastChunkCullStats_; }
 
 private:
     void Release();
@@ -298,4 +301,7 @@ private:
     int groundIndexCount_ = 0;
     int lastVisibleCliffs_ = 0;
     int lastCulledCliffs_ = 0;
+    render::TerrainChunkGrid terrainChunkGrid_;
+    render::TerrainCullStats lastChunkCullStats_{};
+    std::vector<int> visibleTerrainChunks_;
 };

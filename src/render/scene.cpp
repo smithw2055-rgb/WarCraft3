@@ -660,6 +660,7 @@ void SceneManager::Clear() {
     instances_.clear();
     cache_.clear();
     staticChunkGrid_.Clear();
+    particleBatcher_.BeginFrame();
     lightning_.Clear();
     ResetLoadStats();
 }
@@ -777,6 +778,7 @@ bool SceneManager::EnsureModelCached(const std::string& path, MdxEntry& entry) {
             entry.path = path;
             entry.model = modelRes->model;
             entry.modelLoaded = true;
+            sharedMeshRegistry_.RegisterSharedMesh(modelRes->GetCanonicalKey(), entry.model);
             return true;
         }
     }
@@ -831,6 +833,8 @@ bool SceneManager::EnsureModelCached(const std::string& path, MdxEntry& entry) {
     entry.path = path;
     entry.model = std::move(model);
     entry.modelLoaded = true;
+    sharedMeshRegistry_.RegisterSharedMesh(
+        resource::ResourceServer::ParseUri(path).canonicalCacheKey, entry.model);
     return true;
 }
 
@@ -1573,6 +1577,17 @@ void SceneManager::RenderAll(const Mat4& view, const Mat4& proj, float dt) {
 
     renderServer_.SubmitItemsParallel(candidateItems, jobSystem_, /*minBatchSize=*/8);
     renderServer_.BuildAndSortBatches();
+
+    // Phase C: Execute declarative RenderGraph across all active scene passes
+    lastGraphCtx_ = render::RenderGraphContext{};
+    lastGraphCtx_.view = view;
+    lastGraphCtx_.proj = proj;
+    lastGraphCtx_.cameraEye = cameraEye;
+    lastGraphCtx_.renderServer = &renderServer_;
+    lastGraphCtx_.terrainGrid = boundTerrainChunkGrid_;
+    lastGraphCtx_.particleBatcher = &particleBatcher_;
+    renderGraph_.ExecuteFrame(lastGraphCtx_);
+
     renderServer_.ExecuteBatches([&](const render::RenderBatchGroup& batch) {
         if (batch.instances.empty()) {
             return;

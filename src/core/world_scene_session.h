@@ -31,6 +31,7 @@ struct WorldSceneSessionStats {
     size_t terrainChunksBuilt = 0;
     size_t carriedHeroesCaptured = 0;
     size_t carriedHeroesRespawned = 0;
+    size_t resourcesPrunedOnTeardown = 0;
 };
 
 class WorldSceneSession {

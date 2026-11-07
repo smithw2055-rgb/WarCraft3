@@ -23,6 +23,8 @@
 #include "abilities/ability_repair.h"
 #include "pathing/world_collision.h"
 #include "pathing/pathfinding.h"
+#include "pathing/pathfinding_server.h"
+#include "pathing/crowd_steering.h"
 #include "data/unitdata.h"
 #include "data/destructabledata.h"
 #include "data/itemdata.h"
@@ -37,6 +39,8 @@ CSimulation::CSimulation() {
     worldCollision_ = std::make_unique<CWorldCollision>();
     pathfindingProcessor_ = std::make_unique<CPathfindingProcessor>();
     pathfindingProcessor_->SetWorldCollision(worldCollision_.get());
+    pathfindingServer_ = std::make_unique<pathfinding::PathfindingServer>();
+    crowdSteering_ = std::make_unique<pathfinding::CrowdSteeringSystem>();
     fogSystem_.SetOcclusionChecker([this](float fromX, float fromY, float toX, float toY, bool isFlying) -> bool {
         return IsLineOfSightBlocked(fromX, fromY, toX, toY, isFlying);
     });
@@ -401,7 +405,14 @@ bool CSimulation::SetTerrainPathableCell(float x, float y, int pathType, bool pa
     } else {
         cell = (uint8_t)(cell | flag);
     }
+    InvalidateNavigationCaches();
     return true;
+}
+
+void CSimulation::InvalidateNavigationCaches() {
+    if (pathfindingServer_) {
+        pathfindingServer_->InvalidateFlowFields();
+    }
 }
 bool CSimulation::IsPointBlighted(float x, float y) const {
     // W3E-baked blight bit first.

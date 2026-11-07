@@ -242,6 +242,11 @@ int CommandBufferPipeline::IssueGroupPointOrder(CSimulation& sim,
         const int uHandle = validUnits[i]->GetHandleId();
 
         if (sim.IssueUnitOrder(uHandle, std::make_unique<COrderTargetPoint>(orderId, destX, destY))) {
+            if (useFormation && validUnits.size() > 1) {
+                if (CBehaviorMove* mb = validUnits[i]->GetMoveBehavior()) {
+                    mb->SetUseFlowFieldSteering(true);
+                }
+            }
             dispatched++;
             stats_.totalUnitCommandsDispatched++;
             if (replayLog) {

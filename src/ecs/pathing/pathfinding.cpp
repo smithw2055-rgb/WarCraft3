@@ -5,10 +5,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
-#include <queue>
 #include <sstream>
-#include <unordered_map>
-#include <unordered_set>
 
 CPathfindingProcessor::CPathfindingProcessor() {}
 
@@ -20,6 +17,9 @@ const char* GridMappingName(CPathfindingProcessor::GridMapping mapping) {
 
 void LogPathDebug(const CUnit* unit, const char* phase, float startX, float startY, float endX, float endY,
                   const std::string& extra = std::string()) {
+    if (!IsMoveDebugLoggingEnabled()) {
+        return;
+    }
     std::ostringstream oss;
     oss << "[MoveDebug] path";
     if (unit) {
@@ -66,18 +66,13 @@ bool CPathfindingProcessor::IsCellWalkable(int cellX, int cellY, bool allowFlyin
 bool CPathfindingProcessor::IsCellPathableFor(int cellX, int cellY,
                                               PathingGridMovementType movementType) const {
     if (!pathingMap_) return true;
-    // Boundary ring (and off-grid) is outside the playable area for every
-    // movement type (ref playable-area gate; off-grid stays failing).
     if (pathingMap_->IsBoundary(cellX, cellY)) return false;
     switch (movementType) {
         case PathingGridMovementType::FLY:
-            // Blocked by UNFLYABLE (notably over doodad canopies/ceilings).
             return pathingMap_->IsFlyable(cellX, cellY);
         case PathingGridMovementType::FLOAT:
-            // Ships navigate clear-UNSWIMABLE deep water only.
             return pathingMap_->IsWater(cellX, cellY);
         case PathingGridMovementType::AMPHIBIOUS:
-            // Either ground or water passes (ref || rule).
             return pathingMap_->IsWalkable(cellX, cellY) ||
                    pathingMap_->IsWater(cellX, cellY);
         case PathingGridMovementType::DISABLED:
@@ -288,8 +283,8 @@ bool CPathfindingProcessor::FindPathMapped(int startNodeX, int startNodeY,
     }
 
     // If cells are adjacent or same, direct path
-    int dx = abs(resolvedEndX - resolvedStartX);
-    int dy = abs(resolvedEndY - resolvedStartY);
+    int dx = std::abs(resolvedEndX - resolvedStartX);
+    int dy = std::abs(resolvedEndY - resolvedStartY);
     if (dx <= 1 && dy <= 1) {
         const float startWorldX = MappedNodeToWorldX(resolvedStartX, mapping);
         const float startWorldY = MappedNodeToWorldY(resolvedStartY, mapping);
@@ -303,36 +298,44 @@ bool CPathfindingProcessor::FindPathMapped(int startNodeX, int startNodeY,
         }
     }
 
-    struct PathNode {
-        int x, y;
-        float g, f;
-        PathNode* parent = nullptr;
-        PathNode(int cx, int cy) : x(cx), y(cy), g(0), f(0) {}
-    };
+    const int gridW = MappedWidth(mapping);
+    const int gridH = MappedHeight(mapping);
+    if (gridW <= 0 || gridH <= 0) {
+        return false;
+    }
 
-    struct NodeCmp {
-        bool operator()(const PathNode* a, const PathNode* b) const {
-            return a->f > b->f;
-        }
-    };
+    // Phase B1: Zero-allocation generation-stamped flat A* workspace
+    flatWorkspace_.BeginSearch(gridW * gridH);
+    const uint32_t gen = flatWorkspace_.currentGen;
+    uint32_t nextSeq = 1u;
 
-    auto key = [](int x, int y) { return ((uint64_t)(uint32_t)x << 32) | (uint32_t)y; };
+    auto nodeIdx = [gridW](int x, int y) -> int {
+        return y * gridW + x;
+    };
     auto heuristic = [](int ax, int ay, int bx, int by) -> float {
-        float ddx = (float)(bx - ax);
-        float ddy = (float)(by - ay);
+        const float ddx = static_cast<float>(bx - ax);
+        const float ddy = static_cast<float>(by - ay);
         return std::sqrt(ddx * ddx + ddy * ddy);
     };
-
     auto worldDistanceToGoal = [&](int nodeX, int nodeY) -> float {
         const float ddx = MappedNodeToWorldX(nodeX, mapping) - exactEndWorldX;
         const float ddy = MappedNodeToWorldY(nodeY, mapping) - exactEndWorldY;
         return std::sqrt(ddx * ddx + ddy * ddy);
     };
-
-    std::priority_queue<PathNode*, std::vector<PathNode*>, NodeCmp> open;
-    std::unordered_map<uint64_t, PathNode*> allNodes;
-    std::unordered_set<uint64_t> closed;
-    std::unordered_set<uint64_t> goalKeys;
+    auto pushOpen = [&](float f, int idx) {
+        flatWorkspace_.openHeap.push_back({f, idx, nextSeq++});
+        std::push_heap(flatWorkspace_.openHeap.begin(),
+                       flatWorkspace_.openHeap.end(),
+                       std::greater<FlatHeapEntry>{});
+    };
+    auto popOpen = [&]() -> FlatHeapEntry {
+        std::pop_heap(flatWorkspace_.openHeap.begin(),
+                      flatWorkspace_.openHeap.end(),
+                      std::greater<FlatHeapEntry>{});
+        FlatHeapEntry top = flatWorkspace_.openHeap.back();
+        flatWorkspace_.openHeap.pop_back();
+        return top;
+    };
 
     const float bestGoalDistance = worldDistanceToGoal(resolvedEndX, resolvedEndY);
     for (int gy = resolvedEndY - 1; gy <= (resolvedEndY + 1); ++gy) {
@@ -341,11 +344,13 @@ bool CPathfindingProcessor::FindPathMapped(int startNodeX, int startNodeY,
                 continue;
             }
             if (worldDistanceToGoal(gx, gy) <= (bestGoalDistance + 0.001f)) {
-                goalKeys.insert(key(gx, gy));
+                flatWorkspace_.goalGen[static_cast<size_t>(nodeIdx(gx, gy))] = gen;
             }
         }
     }
-    goalKeys.insert(key(resolvedEndX, resolvedEndY));
+    if (IsMappedNodeInBounds(resolvedEndX, resolvedEndY, mapping)) {
+        flatWorkspace_.goalGen[static_cast<size_t>(nodeIdx(resolvedEndX, resolvedEndY))] = gen;
+    }
 
     const float resolvedStartWorldX = MappedNodeToWorldX(resolvedStartX, mapping);
     const float resolvedStartWorldY = MappedNodeToWorldY(resolvedStartY, mapping);
@@ -355,14 +360,12 @@ bool CPathfindingProcessor::FindPathMapped(int startNodeX, int startNodeY,
     int startGridMaxY = resolvedStartY;
     if (exactStartWorldX > resolvedStartWorldX) {
         startGridMaxX = resolvedStartX + 1;
-    }
-    else if (exactStartWorldX < resolvedStartWorldX) {
+    } else if (exactStartWorldX < resolvedStartWorldX) {
         startGridMinX = resolvedStartX - 1;
     }
     if (exactStartWorldY > resolvedStartWorldY) {
         startGridMaxY = resolvedStartY + 1;
-    }
-    else if (exactStartWorldY < resolvedStartWorldY) {
+    } else if (exactStartWorldY < resolvedStartWorldY) {
         startGridMinY = resolvedStartY - 1;
     }
 
@@ -379,94 +382,94 @@ bool CPathfindingProcessor::FindPathMapped(int startNodeX, int startNodeY,
                                         collisionSize, movementType, ignoreUnit)) {
                 continue;
             }
-            auto* start = new PathNode(sx, sy);
-            start->g = std::sqrt((nodeWorldX - exactStartWorldX) * (nodeWorldX - exactStartWorldX)
-                               + (nodeWorldY - exactStartWorldY) * (nodeWorldY - exactStartWorldY));
-            start->f = start->g + heuristic(sx, sy, resolvedEndX, resolvedEndY);
-            open.push(start);
-            allNodes[key(sx, sy)] = start;
+            const int sIdx = nodeIdx(sx, sy);
+            const float g = std::sqrt((nodeWorldX - exactStartWorldX) * (nodeWorldX - exactStartWorldX)
+                                    + (nodeWorldY - exactStartWorldY) * (nodeWorldY - exactStartWorldY));
+            const float f = g + heuristic(sx, sy, resolvedEndX, resolvedEndY);
+            flatWorkspace_.visitedGen[static_cast<size_t>(sIdx)] = gen;
+            flatWorkspace_.gScore[static_cast<size_t>(sIdx)] = g;
+            flatWorkspace_.fScore[static_cast<size_t>(sIdx)] = f;
+            flatWorkspace_.parentIdx[static_cast<size_t>(sIdx)] = -1;
+            pushOpen(f, sIdx);
             seededStart = true;
         }
     }
-    if (!seededStart) {
-        auto* start = new PathNode(resolvedStartX, resolvedStartY);
-        start->g = 0;
-        start->f = heuristic(resolvedStartX, resolvedStartY, resolvedEndX, resolvedEndY);
-        open.push(start);
-        allNodes[key(resolvedStartX, resolvedStartY)] = start;
+    if (!seededStart && IsMappedNodeInBounds(resolvedStartX, resolvedStartY, mapping)) {
+        const int sIdx = nodeIdx(resolvedStartX, resolvedStartY);
+        const float f = heuristic(resolvedStartX, resolvedStartY, resolvedEndX, resolvedEndY);
+        flatWorkspace_.visitedGen[static_cast<size_t>(sIdx)] = gen;
+        flatWorkspace_.gScore[static_cast<size_t>(sIdx)] = 0.0f;
+        flatWorkspace_.fScore[static_cast<size_t>(sIdx)] = f;
+        flatWorkspace_.parentIdx[static_cast<size_t>(sIdx)] = -1;
+        pushOpen(f, sIdx);
     }
 
-    // 8-directional movement
-    const int ddx[] = { -1, 0, 1, -1, 1, -1, 0, 1 };
-    const int ddy[] = { -1, -1, -1, 0, 0, 1, 1, 1 };
+    static const int ddx[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
+    static const int ddy[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
 
-    PathNode* found = nullptr;
-    int maxIterations = 10000;
+    int foundIdx = -1;
+    const int maxIterations = 10000;
     int iter = 0;
 
-    while (!open.empty() && iter < maxIterations) {
+    while (!flatWorkspace_.openHeap.empty() && iter < maxIterations) {
         iter++;
-        auto* current = open.top();
-        open.pop();
-        const uint64_t currentKey = key(current->x, current->y);
-        if (closed.find(currentKey) != closed.end()) {
+        const FlatHeapEntry current = popOpen();
+        const int curIdx = current.nodeIdx;
+        if (flatWorkspace_.closedGen[static_cast<size_t>(curIdx)] == gen) {
             continue;
         }
-        closed.insert(currentKey);
+        flatWorkspace_.closedGen[static_cast<size_t>(curIdx)] = gen;
+        flatWorkspace_.totalNodesExpanded++;
 
-        if (goalKeys.find(currentKey) != goalKeys.end()) {
-            found = current;
+        if (flatWorkspace_.goalGen[static_cast<size_t>(curIdx)] == gen) {
+            foundIdx = curIdx;
             break;
         }
 
+        const int cx = curIdx % gridW;
+        const int cy = curIdx / gridW;
+        const float curG = flatWorkspace_.gScore[static_cast<size_t>(curIdx)];
+
         for (int i = 0; i < 8; i++) {
-            int nx = current->x + ddx[i];
-            int ny = current->y + ddy[i];
+            const int nx = cx + ddx[i];
+            const int ny = cy + ddy[i];
 
             if (!IsMappedNodePathable(nx, ny, mapping, collisionSize, movementType, ignoreUnit)) continue;
             if ((ddx[i] != 0) && (ddy[i] != 0)) {
-                if (!IsMappedNodePathable(current->x + ddx[i], current->y, mapping, collisionSize, movementType, ignoreUnit)
-                    || !IsMappedNodePathable(current->x, current->y + ddy[i], mapping, collisionSize, movementType, ignoreUnit)) {
+                if (!IsMappedNodePathable(cx + ddx[i], cy, mapping, collisionSize, movementType, ignoreUnit)
+                    || !IsMappedNodePathable(cx, cy + ddy[i], mapping, collisionSize, movementType, ignoreUnit)) {
                     continue;
                 }
             }
-            const uint64_t neighborKey = key(nx, ny);
-            if (closed.find(neighborKey) != closed.end()) continue;
+            const int nIdx = nodeIdx(nx, ny);
+            if (flatWorkspace_.closedGen[static_cast<size_t>(nIdx)] == gen) continue;
 
-            float moveCost = (ddx[i] != 0 && ddy[i] != 0) ? 1.414f : 1.0f;
-            float newG = current->g + moveCost;
+            const float moveCost = (ddx[i] != 0 && ddy[i] != 0) ? 1.414f : 1.0f;
+            const float newG = curG + moveCost;
 
-            auto it = allNodes.find(neighborKey);
-            PathNode* neighbor = nullptr;
-            if (it != allNodes.end()) {
-                neighbor = it->second;
-                if (newG >= neighbor->g) continue;
-                neighbor->g = newG;
-                neighbor->f = newG + heuristic(nx, ny, resolvedEndX, resolvedEndY);
-                neighbor->parent = current;
-                open.push(neighbor);
-            } else {
-                neighbor = new PathNode(nx, ny);
-                neighbor->g = newG;
-                neighbor->f = newG + heuristic(nx, ny, resolvedEndX, resolvedEndY);
-                neighbor->parent = current;
-                allNodes[neighborKey] = neighbor;
-                open.push(neighbor);
+            if (flatWorkspace_.visitedGen[static_cast<size_t>(nIdx)] == gen) {
+                if (newG >= flatWorkspace_.gScore[static_cast<size_t>(nIdx)]) continue;
             }
+            const float newF = newG + heuristic(nx, ny, resolvedEndX, resolvedEndY);
+            flatWorkspace_.visitedGen[static_cast<size_t>(nIdx)] = gen;
+            flatWorkspace_.gScore[static_cast<size_t>(nIdx)] = newG;
+            flatWorkspace_.fScore[static_cast<size_t>(nIdx)] = newF;
+            flatWorkspace_.parentIdx[static_cast<size_t>(nIdx)] = curIdx;
+            pushOpen(newF, nIdx);
         }
     }
 
-    if (found) {
-        PathNode* node = found;
-        while (node) {
-            outPath.push_back({node->x, node->y});
-            node = node->parent;
+    if (foundIdx >= 0) {
+        int traceIdx = foundIdx;
+        int guard = gridW * gridH + 1;
+        while (traceIdx >= 0 && guard-- > 0) {
+            outPath.push_back({traceIdx % gridW, traceIdx / gridW});
+            traceIdx = flatWorkspace_.parentIdx[static_cast<size_t>(traceIdx)];
         }
         std::reverse(outPath.begin(), outPath.end());
     }
 
-    for (auto& p : allNodes) delete p.second;
-    return found != nullptr;
+    return foundIdx >= 0;
 }
 
 bool CPathfindingProcessor::FindPath(int startCellX, int startCellY,
@@ -588,7 +591,7 @@ bool CPathfindingProcessor::FindPathWorld(float startX, float startY,
             outWorldPath.back() = {endX, endY};
         }
     }
-    if (!outWorldPath.empty()) {
+    if (!outWorldPath.empty() && IsMoveDebugLoggingEnabled()) {
         const float finalDx = outWorldPath.back().first - endX;
         const float finalDy = outWorldPath.back().second - endY;
         const float finalDrift = std::sqrt(finalDx * finalDx + finalDy * finalDy);

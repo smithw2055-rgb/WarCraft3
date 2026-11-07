@@ -12,6 +12,7 @@
 #include "render/mdx_viewer.h"
 #include "render/picking.h"
 #include "render/render_server.h"
+#include "render/render_graph.h"
 
 struct PlacedModel {
     float pos[3] = {};
@@ -123,16 +124,32 @@ public:
     bool UpdateAttachedModel(int index, const Mat4& modelMatrix);
     bool RemoveAttachedModel(int index);
 
-    // Render all placed models (routed through RenderServer frustum culling & batch sorting)
+    // Render all placed models (routed through RenderServer frustum culling, RenderGraph & batch sorting)
     void RenderAll(const Mat4& view, const Mat4& proj, float dt);
 
-    // Stage A Modernization: Access integrated RenderServer & per-frame statistics
+    // Stage A & Phase C Modernization: Access integrated RenderServer, RenderGraph,
+    // MdxSharedMeshRegistry, ParticleRibbonBatcher & per-frame statistics
     render::RenderServer& GetRenderServer() { return renderServer_; }
+    const render::RenderServer& GetRenderServer() const { return renderServer_; }
+    const render::RenderFrameStats& GetLastRenderStats() const { return renderServer_.GetStats(); }
+
+    render::RenderGraph& GetRenderGraph() { return renderGraph_; }
+    const render::RenderGraph& GetRenderGraph() const { return renderGraph_; }
+    const render::RenderGraphContext& GetLastRenderGraphContext() const { return lastGraphCtx_; }
+
+    render::MdxSharedMeshRegistry& GetSharedMeshRegistry() { return sharedMeshRegistry_; }
+    const render::MdxSharedMeshRegistry& GetSharedMeshRegistry() const { return sharedMeshRegistry_; }
+
+    render::ParticleRibbonBatcher& GetParticleRibbonBatcher() { return particleBatcher_; }
+    const render::ParticleRibbonBatcher& GetParticleRibbonBatcher() const { return particleBatcher_; }
+
+    void SetBoundTerrainChunkGrid(const render::TerrainChunkGrid* grid) { boundTerrainChunkGrid_ = grid; }
+    const render::TerrainChunkGrid* GetBoundTerrainChunkGrid() const { return boundTerrainChunkGrid_; }
+
     resource::ResourceServer& GetResourceServer() { return *resourceServer_; }
     const resource::ResourceServer& GetResourceServer() const { return *resourceServer_; }
     void SetResourceServer(resource::ResourceServer* rs) { if (rs) resourceServer_ = rs; }
-    const render::RenderServer& GetRenderServer() const { return renderServer_; }
-    const render::RenderFrameStats& GetLastRenderStats() const { return renderServer_.GetStats(); }
+
     core::JobSystem& GetJobSystem() { return *jobSystem_; }
     const core::JobSystem& GetJobSystem() const { return *jobSystem_; }
     void SetJobSystem(core::JobSystem* js) { if (js) jobSystem_ = js; }
@@ -216,6 +233,11 @@ private:
     std::vector<SceneEventEffect> frameEventEffects_;
     LightningSystem lightning_;
     render::RenderServer renderServer_;
+    render::RenderGraph renderGraph_;
+    render::RenderGraphContext lastGraphCtx_{};
+    render::MdxSharedMeshRegistry sharedMeshRegistry_;
+    render::ParticleRibbonBatcher particleBatcher_;
+    const render::TerrainChunkGrid* boundTerrainChunkGrid_ = nullptr;
     resource::ResourceServer* resourceServer_ = &resource::ResourceServer::Instance();
     core::JobSystem* jobSystem_ = &core::JobSystem::Instance();
     int lastParallelAnimatedViewers_ = 0;

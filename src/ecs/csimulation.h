@@ -25,6 +25,11 @@ class AudioSystem;
 class SimStateSnapshot;
 class SimHotComponentSystem;
 
+namespace pathfinding {
+class PathfindingServer;
+class CrowdSteeringSystem;
+}
+
 class CSimulation {
     friend class SimStateSnapshot;
     friend class SimHotComponentSystem;
@@ -209,13 +214,21 @@ public:
     }
     bool IsPointBlighted(float x, float y) const;
 
-    // Pathing
+    // Pathing & Modernized Navigation Services (Phase B)
     CWorldCollision* GetWorldCollision() const { return worldCollision_.get(); }
     CPathfindingProcessor* GetPathfinding() const { return pathfindingProcessor_.get(); }
+    pathfinding::PathfindingServer* GetPathfindingServer() const { return pathfindingServer_.get(); }
+    pathfinding::PathfindingServer& PathfindingServer() { return *pathfindingServer_; }
+    const pathfinding::PathfindingServer& PathfindingServer() const { return *pathfindingServer_; }
+    pathfinding::CrowdSteeringSystem* GetCrowdSteering() const { return crowdSteering_.get(); }
+    pathfinding::CrowdSteeringSystem& CrowdSteering() { return *crowdSteering_; }
+    const pathfinding::CrowdSteeringSystem& CrowdSteering() const { return *crowdSteering_; }
+    void InvalidateNavigationCaches();
     void SetPathingMap(WpmData* wpm, float worldOffsetX = 0.0f, float worldOffsetY = 0.0f) {
         if (pathfindingProcessor_) {
             pathfindingProcessor_->SetPathingMap(wpm, worldOffsetX, worldOffsetY);
         }
+        InvalidateNavigationCaches();
     }
 
     // AddItemToAllStock / AddUnitToAllStock. Shops created later copy this
@@ -500,6 +513,8 @@ private:
     void UpdateHazards();
     std::unique_ptr<CWorldCollision> worldCollision_;
     std::unique_ptr<CPathfindingProcessor> pathfindingProcessor_;
+    std::unique_ptr<pathfinding::PathfindingServer> pathfindingServer_;
+    std::unique_ptr<pathfinding::CrowdSteeringSystem> crowdSteering_;
     std::vector<GlobalShopStockEntry> globalShopStock_;
     AudioSystem* audio_ = nullptr;
     HandleIdAllocator handleIdAlloc_;

@@ -799,6 +799,7 @@ bool TexturedTerrain::Build(const W3EMap& map, TileSet* tileset) {
     tileset_ = tileset;
     tilesetChar_ = map.tileset;
     buildStats_ = TerrainBuildStats{};
+    terrainChunkGrid_.BuildFromW3E(map, 16);
     RebuildCornerData(map);
     BuildCliffsFromMdx(map);
     BuildGroundGPU(map);
@@ -871,6 +872,14 @@ void TexturedTerrain::InitLights() {
 
 void TexturedTerrain::Render(const Mat4& view, const Mat4& proj, float time) {
     if (!groundShader_.id) return;
+    if (terrainChunkGrid_.GetChunkCount() > 0) {
+        const render::Frustum frustum = render::Frustum::FromViewProj(proj * view);
+        lastChunkCullStats_ = terrainChunkGrid_.CullChunks(frustum, visibleTerrainChunks_);
+        if (lastChunkCullStats_.visibleChunks == 0) {
+            lastRenderTime_ = time;
+            return;
+        }
+    }
 
     auto isValidBuffer = [](sg_buffer buffer) {
         return buffer.id && sg_query_buffer_state(buffer) == SG_RESOURCESTATE_VALID;

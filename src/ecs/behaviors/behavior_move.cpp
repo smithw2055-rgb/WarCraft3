@@ -3,6 +3,8 @@
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"
 #include "ecs/pathing/pathfinding.h"
+#include "ecs/pathing/pathfinding_server.h"
+#include "ecs/pathing/crowd_steering.h"
 #include "ecs/pathing/world_collision.h"
 #include <cmath>
 #include <algorithm>
@@ -12,7 +14,7 @@ namespace {
 
 void LogMoveDebug(const CUnit* unit, const char* phase, float a, float b, float c, float d,
                   const std::string& extra = std::string()) {
-    if (!unit) {
+    if (!unit || !IsMoveDebugLoggingEnabled()) {
         return;
     }
     std::ostringstream oss;
@@ -71,6 +73,7 @@ void CBehaviorMove::End(CSimulation& simulation) {
     (void)simulation;
     waypoints_.clear();
     propelling_ = false;
+    useFlowFieldSteering_ = false;
 }
 
 bool CBehaviorMove::RecalculatePath(CSimulation& simulation) {
@@ -100,25 +103,27 @@ bool CBehaviorMove::RecalculatePath(CSimulation& simulation) {
             waypoints_.push_back(worldPath[i]);
         }
         pathFound_ = !waypoints_.empty();
-        std::string extra = "pathFound=" + std::to_string(pathFound_ ? 1 : 0)
-            + " waypoints=" + std::to_string(waypoints_.size())
-            + " startCell=(" + std::to_string(startCellX)
-            + "," + std::to_string(startCellY) + ")"
-            + " targetCell=(" + std::to_string(targetCellX)
-            + "," + std::to_string(targetCellY) + ")"
-            + " targetCellWalkable=" + std::to_string(targetCellWalkable ? 1 : 0)
-            + " grid=" + std::string(gridMapping == CPathfindingProcessor::GridMapping::CORNERS ? "corners" : "cells");
-        if (!waypoints_.empty()) {
-            const float lastDx = waypoints_.back().first - targetX_;
-            const float lastDy = waypoints_.back().second - targetY_;
-            const float lastDrift = std::sqrt(lastDx * lastDx + lastDy * lastDy);
-            extra += " firstWp=(" + std::to_string(waypoints_.front().first)
-                + "," + std::to_string(waypoints_.front().second) + ")";
-            extra += " lastWp=(" + std::to_string(waypoints_.back().first)
-                + "," + std::to_string(waypoints_.back().second) + ")";
-            extra += " lastWpDrift=" + std::to_string(lastDrift);
+        if (IsMoveDebugLoggingEnabled()) {
+            std::string extra = "pathFound=" + std::to_string(pathFound_ ? 1 : 0)
+                + " waypoints=" + std::to_string(waypoints_.size())
+                + " startCell=(" + std::to_string(startCellX)
+                + "," + std::to_string(startCellY) + ")"
+                + " targetCell=(" + std::to_string(targetCellX)
+                + "," + std::to_string(targetCellY) + ")"
+                + " targetCellWalkable=" + std::to_string(targetCellWalkable ? 1 : 0)
+                + " grid=" + std::string(gridMapping == CPathfindingProcessor::GridMapping::CORNERS ? "corners" : "cells");
+            if (!waypoints_.empty()) {
+                const float lastDx = waypoints_.back().first - targetX_;
+                const float lastDy = waypoints_.back().second - targetY_;
+                const float lastDrift = std::sqrt(lastDx * lastDx + lastDy * lastDy);
+                extra += " firstWp=(" + std::to_string(waypoints_.front().first)
+                    + "," + std::to_string(waypoints_.front().second) + ")";
+                extra += " lastWp=(" + std::to_string(waypoints_.back().first)
+                    + "," + std::to_string(waypoints_.back().second) + ")";
+                extra += " lastWpDrift=" + std::to_string(lastDrift);
+            }
+            LogMoveDebug(unit_, "repath_ok", unit_->GetX(), unit_->GetY(), targetX_, targetY_, extra);
         }
-        LogMoveDebug(unit_, "repath_ok", unit_->GetX(), unit_->GetY(), targetX_, targetY_, extra);
         if (pathFound_) {
             repathRetryCount_ = 0;
         }
@@ -206,10 +211,36 @@ bool CBehaviorMove::MoveTowardWaypoint(CSimulation& simulation) {
         return true;
     }
 
+    auto* pathfinding = simulation.GetPathfinding();
     float nx = unit_->GetX() + (dx / dist) * step;
     float ny = unit_->GetY() + (dy / dist) * step;
 
-    auto* pathfinding = simulation.GetPathfinding();
+    // Phase B2: If FlowField + RVO CrowdSteering mode is enabled on this unit,
+    // blend cached FlowFieldGrid direction and RVO neighbor avoidance!
+    if (useFlowFieldSteering_ && pathfinding && simulation.GetPathfindingServer() && simulation.GetCrowdSteering()) {
+        const pathfinding::FlowFieldGrid* ff = nullptr;
+        if (pathfinding->HasPathingMap()) {
+            ff = simulation.PathfindingServer().GetOrBuildFlowField(
+                *pathfinding, targetX_, targetY_, 48, unit_->GetMovementType());
+        }
+        const auto steerOut = simulation.CrowdSteering().ComputeUnitSteering(
+            simulation, *unit_, wp.first, wp.second, ff);
+        const float steerSpeed = std::sqrt(steerOut.velX * steerOut.velX + steerOut.velY * steerOut.velY);
+        if (steerSpeed > 1e-3f) {
+            const float candidateX = unit_->GetX() + (steerOut.velX / steerSpeed) * step;
+            const float candidateY = unit_->GetY() + (steerOut.velY / steerSpeed) * step;
+            const float cRad = std::max(0.0f, unit_->GetCollisionSize());
+            if (pathfinding->IsWorldPointPathableForUnit(candidateX, candidateY, cRad, unit_->GetMovementType(), unit_)) {
+                nx = candidateX;
+                ny = candidateY;
+                flowFieldSteeringSteps_++;
+                if (steerOut.avoidanceActive) {
+                    rvoSidestepAdjustments_++;
+                }
+            }
+        }
+    }
+
     const float collisionRadius = std::max(0.0f, unit_->GetCollisionSize());
     if (pathfinding && !pathfinding->IsWorldPointPathableForUnit(nx, ny, collisionRadius,
                                                                  unit_->GetMovementType(), unit_)) {

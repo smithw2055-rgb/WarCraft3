@@ -1,3 +1,4 @@
+#include "scripting/jass_binder.h"
 #include <cstring>
 #include "ecs/abilities/ability_move.h"
 #include "scripting/JassNatives.h"
@@ -1417,9 +1418,9 @@ bool TestPhase7StageJMpqMultiStageDecompressionAndAudioClip() {
 
 bool TestPhase7StageJRetailDriveMapMpqAndAudioVerification() {
     const std::vector<std::string> candidateMaps = {
-        "resources/Maps/Scenario/(8)AzerothGrandPrix.w3x",
-        "resources/Maps/Scenario/(10)ExtremeCandyWar2004.w3x",
-        "resources/Maps/Scenario/(12)WormWar.w3x"
+        "resources/Maps/FrozenThrone/Scenario/(8)AzerothGrandPrix.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(10)ExtremeCandyWar2004.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(12)WormWar.w3x"
     };
 
     MpqManager mpq;
@@ -2621,5 +2622,319 @@ bool TestPhase8StageURetailW3xEndToEndModernizedPipelineBenchmark() {
     TEST_ASSERT(profiler.GetCompletedFrameCount() == 1);
     TEST_ASSERT(profiler.GetAllZoneSummaries().size() >= 4);
 
+    return true;
+}
+
+
+// ============================================================================
+// Stage V (Phase 9 Runtime Integration & Retail Cloud Asset Verification)
+// ============================================================================
+
+bool TestPhase9StageV1ZeroAllocProcessorAndSquadFlowFieldMove() {
+    WpmData wpm;
+    wpm.width = 64;
+    wpm.height = 64;
+    wpm.pathing.assign(64 * 64, 0x00);
+    for (int y = 12; y <= 48; ++y) {
+        wpm.pathing[static_cast<size_t>(y * 64 + 32)] = 0x02; // UNWALKABLE wall
+    }
+
+    CSimulation sim;
+    sim.SetPathingMap(&wpm, -1024.0f, -1024.0f);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    CPathfindingProcessor* proc = sim.GetPathfinding();
+    TEST_ASSERT(proc != nullptr);
+    proc->ResetWorkspaceStats();
+
+    // 1. Run 30 consecutive FindPathWorld queries and verify zero heap reallocations after query 1
+    for (int i = 0; i < 30; ++i) {
+        std::vector<std::pair<float, float>> path;
+        TEST_ASSERT(proc->FindPathWorld(-400.0f, -200.0f + i * 8.0f, 400.0f, 100.0f,
+                                        32.0f, PathingGridMovementType::FOOT, nullptr, path));
+        TEST_ASSERT(path.size() >= 2);
+    }
+    TEST_ASSERT(proc->GetZeroAllocQueriesExecuted() == 30);
+    TEST_ASSERT(proc->GetWorkspaceBufferAllocations() == 1);
+    TEST_ASSERT(proc->GetTotalNodesExpanded() > 100);
+
+    // 2. Spawn a 6-unit squad and issue a group point order via CommandBufferPipeline
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+    std::vector<int> squadHandles;
+    std::vector<CUnit*> squadUnits;
+    for (int i = 0; i < 6; ++i) {
+        CUnit* u = sim.AdoptUnit(std::make_unique<CUnit>(
+            sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"),
+            -500.0f + (i % 3) * 40.0f, -60.0f + (i / 3) * 40.0f, 0.0f));
+        u->AddAbility(sim, std::make_unique<CAbilityMove>(sim.AllocateHandleId()));
+        squadHandles.push_back(u->GetHandleId());
+        squadUnits.push_back(u);
+    }
+    sim.Update();
+
+    core::CommandBufferPipeline cmdPipeline;
+    const int issued = cmdPipeline.IssueGroupPointOrder(
+        sim, 0, squadHandles, OrderIds::MOVE, 500.0f, 120.0f, /*useFormation=*/true, 72.0f, nullptr);
+    TEST_ASSERT(issued == 6);
+
+    // Verify all 6 units automatically had FlowFieldSteering enabled on their CBehaviorMove
+    for (CUnit* u : squadUnits) {
+        TEST_ASSERT(u->GetMoveBehavior() != nullptr);
+        TEST_ASSERT(u->GetMoveBehavior()->IsUsingFlowFieldSteering());
+    }
+
+    // Step simulation 12 ticks and verify FlowFieldGrid cache & CrowdSteeringSystem were exercised
+    for (int t = 0; t < 12; ++t) {
+        sim.Update();
+    }
+
+    uint64_t totalFlowSteps = 0;
+    for (CUnit* u : squadUnits) {
+        totalFlowSteps += u->GetMoveBehavior()->GetFlowFieldSteeringSteps();
+    }
+    TEST_ASSERT(totalFlowSteps > 0);
+    TEST_ASSERT(sim.PathfindingServer().GetStats().flowFieldsBuilt >= 1);
+    TEST_ASSERT(sim.CrowdSteering().GetStats().totalAgentsSteered > 0);
+
+    return true;
+}
+
+bool TestPhase9StageV2SceneManagerIntegratedRenderGraphAndSharedMeshes() {
+    resource::ResourceServer resServer;
+    const std::string knightMdl = R"(
+        Version { FormatVersion 800, }
+        Model "IntegratedKnight" {
+            NumGeosets 1,
+            NumBones 1,
+            BlendTime 150,
+            MinimumExtent { -32.0, -32.0, 0.0 },
+            MaximumExtent { 32.0, 32.0, 96.0 },
+            BoundsRadius 64.0,
+        }
+        Sequences 1 {
+            Anim "Stand" {
+                Interval { 0, 1000 },
+                MinimumExtent { -32.0, -32.0, 0.0 },
+                MaximumExtent { 32.0, 32.0, 96.0 },
+                BoundsRadius 64.0,
+            }
+        }
+        Geoset {
+            Vertices 3 { { -10.0, 0.0, 0.0 }, { 10.0, 0.0, 0.0 }, { 0.0, 0.0, 20.0 }, }
+            Normals 3 { { 0.0, 0.0, 1.0 }, { 0.0, 0.0, 1.0 }, { 0.0, 0.0, 1.0 }, }
+            TVertices 3 { { 0.0, 0.0 }, { 1.0, 0.0 }, { 0.5, 1.0 }, }
+            VertexGroup { 0, 0, 0, }
+            Faces 1 3 { Triangles { { 0, 1, 2 }, } }
+            Groups 1 1 { Matrices { 0 }, }
+        }
+        Bone "RootBone" { ObjectId 0, Parent -1, GeosetId 0, GeosetAnimId -1, }
+        PivotPoints 1 { { 0.0, 0.0, 0.0 }, }
+    )";
+    resServer.MountMemoryFile("Units/Human/Knight/Knight.mdl",
+                              std::vector<uint8_t>(knightMdl.begin(), knightMdl.end()));
+
+    W3EMap w3e;
+    w3e.tileWidth = 65;
+    w3e.tileHeight = 65;
+    w3e.offsetX = -4096.0f;
+    w3e.offsetY = -4096.0f;
+    w3e.tiles.resize(65 * 65);
+    for (auto& tp : w3e.tiles) {
+        tp.groundHeight = 0x2000;
+        tp.waterAndBoundary = 0x2000;
+        tp.cliffAndLayer = 2;
+    }
+    render::TerrainChunkGrid terrainGrid;
+    TEST_ASSERT(terrainGrid.BuildFromW3E(w3e, 16));
+
+    SceneManager scene;
+    scene.SetResourceServer(&resServer);
+    scene.SetBoundTerrainChunkGrid(&terrainGrid);
+
+    const uint32_t knightId = War3ID("hkni").value;
+    scene.RegisterUnitModelPath(knightId, "Units/Human/Knight/Knight.mdx");
+
+    const float scale[3] = {1.0f, 1.0f, 1.0f};
+    for (int i = 0; i < 6; ++i) {
+        const float pos[3] = {static_cast<float>(i * 25 - 60), 0.0f, 0.0f};
+        TEST_ASSERT(scene.AddUnit(knightId, pos, 0.0f, scale, 0, 835, 0) >= 0);
+    }
+
+    // Verify EnsureModelCached automatically registered the model in MdxSharedMeshRegistry
+    TEST_ASSERT(scene.GetSharedMeshRegistry().SharedMeshCount() == 1);
+
+    // Submit 2 particle emitters into SceneManager's integrated ParticleRibbonBatcher
+    scene.GetParticleRibbonBatcher().BeginFrame();
+    render::ParticleSubmission p;
+    p.textureId = 77u;
+    p.blendMode = render::RenderBlendMode::Additive;
+    scene.GetParticleRibbonBatcher().SubmitEmitterParticles({p, p});
+    scene.GetParticleRibbonBatcher().SubmitEmitterParticles({p, p});
+
+    Vec3 camEye(0.0f, 700.0f, 700.0f);
+    Mat4 view = LookAt(camEye, Vec3(0.0f, 0.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
+    Mat4 proj = Perspective(50.0f, 16.0f / 9.0f, 10.0f, 3000.0f);
+
+    scene.RenderAll(view, proj, 0.016f);
+
+    // Verify integrated RenderGraph executed all 7 passes during SceneManager::RenderAll
+    TEST_ASSERT(scene.GetRenderGraph().GetExecutedPassCount() == 7);
+    const auto* terrainPass = scene.GetRenderGraph().GetPassMetrics(render::RenderGraphPassId::TerrainChunkPass);
+    const auto* opaquePass  = scene.GetRenderGraph().GetPassMetrics(render::RenderGraphPassId::OpaqueInstancedPass);
+    const auto* partPass    = scene.GetRenderGraph().GetPassMetrics(render::RenderGraphPassId::ParticleRibbonBatchPass);
+    TEST_ASSERT(terrainPass != nullptr && terrainPass->executed && terrainPass->itemsProcessed > 0);
+    TEST_ASSERT(opaquePass != nullptr && opaquePass->executed && opaquePass->itemsProcessed == 6);
+    TEST_ASSERT(partPass != nullptr && partPass->executed && partPass->drawCallsSubmitted == 1);
+    TEST_ASSERT(scene.GetLastRenderGraphContext().terrainStats.culledChunks > 0);
+
+    return true;
+}
+
+bool TestPhase9StageV3JassZeroAllocNativeCallsAndFastStructSlots() {
+    JassVM vm;
+    jass::RegisterNativeAuto(vm, "FastAdd3", [](int a, int b, int c) -> int {
+        return a + b + c;
+    });
+
+    const std::string src = R"(
+        native FastAdd3 takes integer a, integer b, integer c returns integer
+
+        struct HeroStats
+            integer str = 10
+            integer agi = 15
+            integer intStat = 20
+        endstruct
+
+        globals
+            integer g_total = 0
+            integer g_structSum = 0
+        endglobals
+
+        function RunLoop takes integer count returns integer
+            local integer i = 0
+            local integer acc = 0
+            loop
+                exitwhen i >= count
+                set acc = FastAdd3(acc, i, 1)
+                set i = i + 1
+            endloop
+            return acc
+        endfunction
+
+        function main takes nothing returns nothing
+            local HeroStats h = HeroStats.create()
+            set h.str = h.str + 5
+            set h.agi = h.agi + 10
+            set g_structSum = h.str + h.agi + h.intStat
+            set g_total = RunLoop(50)
+            call h.destroy()
+        endfunction
+    )";
+
+    TEST_ASSERT(vm.LoadScript(src));
+    vm.SetBytecodeEnabled(true);
+    vm.Execute("main");
+
+    // 10+5 + 15+10 + 20 = 60
+    TEST_ASSERT(vm.GetGlobal("g_structSum").AsInt() == 60);
+    // Sum_{i=0..49} (i + 1) = 50 * 51 / 2 = 1275
+    TEST_ASSERT(vm.GetGlobal("g_total").AsInt() == 1275);
+    // Verify pre-reserved callArgs buffer handled all 50 native calls + RunLoop call with zero heap reallocations
+    TEST_ASSERT(vm.GetZeroAllocCallCount() >= 50);
+    // Verify vJASS struct scalar fields used O(1) indexed fastScalarSlots
+    TEST_ASSERT(vm.GetStructFastSlotAccessCount() >= 6);
+
+    return true;
+}
+
+bool TestPhase9StageV4AudioSystemIntegratedServerAndRetailDriveMultiMapSuite() {
+    // 1. Verify AudioSystem Play2D & Play3DPath routing through AudioServer in headless mode
+    AudioSystem audioSys;
+    audioSys.SetHeadlessSimulationEnabled(true);
+    audioSys.SetMasterVolume(0.8f);
+    audioSys.SetMusicVolume(0.5f);
+    TEST_NEAR(audioSys.GetAudioServer().GetBusVolumeLinear(audio::AudioBusId::Master), 0.8f, 1e-3f);
+    TEST_NEAR(audioSys.GetAudioServer().GetBusVolumeLinear(audio::AudioBusId::Music), 0.5f, 1e-3f);
+
+    const int uiVoice = audioSys.Play2D("InterfaceClick", 1.0f);
+    TEST_ASSERT(uiVoice > 0);
+    TEST_ASSERT(audioSys.GetAudioServer().GetActiveVoiceCountOnBus(audio::AudioBusId::UI) == 1);
+
+    const int unitVoice = audioSys.Play3DPath("Sound/Units/Human/Footman/FootmanYes1.wav", 100.0f, 0.0f, 100.0f, 1.0f);
+    TEST_ASSERT(unitVoice > 0);
+    TEST_ASSERT(audioSys.GetAudioServer().GetActiveVoiceCountOnBus(audio::AudioBusId::UnitVoice) == 1);
+
+    // 2. Multi-Map Retail W3X Cloud Asset Verification Suite
+    const std::vector<std::string> retailDriveMaps = {
+        "resources/Maps/FrozenThrone/(8)GardenOfWar.w3x",
+        "resources/Maps/FrozenThrone/(8)LastManStanding.w3x",
+        "resources/Maps/FrozenThrone/(8)PlainsOfSnow.w3x",
+        "resources/Maps/FrozenThrone/(8)TwilightRuins.w3x",
+        "resources/Maps/FrozenThrone/(2)TerenasStand.w3x",
+        "resources/Maps/FrozenThrone/(4)TwistedMeadows.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(6)BlizzardTD.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(8)AzureTowerDefense.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(8)AzerothGrandPrix.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(10)ExtremeCandyWar2004.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(12)WormWar.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(6)BomberCommand.w3x"
+    };
+
+    MpqManager mpq;
+    CSimulation sim;
+    SceneManager scene;
+    UnitPresentationSystem presentation;
+    core::WorldSceneSession session;
+    core::EngineProfiler profiler;
+    profiler.Reset();
+
+    int loadedRetailCount = 0;
+    size_t totalDoodadsVerified = 0;
+    size_t totalTerrainChunksVerified = 0;
+
+    for (size_t i = 0; i < retailDriveMaps.size(); ++i) {
+        const std::string& mapPath = retailDriveMaps[i];
+        FILE* f = std::fopen(mapPath.c_str(), "rb");
+        if (!f) continue;
+        std::fclose(f);
+
+        profiler.BeginFrame(i + 1);
+        bool ok = false;
+        {
+            WARSMASH_PROFILE_SCOPE(profiler, "RetailDriveMapLoadOrSwitch", "Session");
+            if (loadedRetailCount == 0) {
+                ok = session.LoadMap(mpq, sim, scene, presentation, mapPath);
+            } else {
+                ok = session.HotSwitchMap(mpq, sim, scene, presentation, mapPath, false);
+            }
+        }
+        TEST_ASSERT(ok);
+        loadedRetailCount++;
+
+        TEST_ASSERT(scene.GetBoundTerrainChunkGrid() == &session.GetTerrainChunkGrid());
+        TEST_ASSERT(session.GetTerrainChunkGrid().GetChunkCount() > 0);
+        totalTerrainChunksVerified += session.GetTerrainChunkGrid().GetChunkCount();
+        totalDoodadsVerified += session.GetDoodadsDoo().doodads.size();
+
+        // Execute SceneManager::RenderAll with integrated RenderGraph on every retail map
+        Vec3 camEye(0.0f, 1200.0f, 1200.0f);
+        Mat4 view = LookAt(camEye, Vec3(0.0f, 0.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
+        Mat4 proj = Perspective(55.0f, 16.0f / 9.0f, 10.0f, 5000.0f);
+        {
+            WARSMASH_PROFILE_SCOPE(profiler, "RetailDriveSceneRenderGraph", "Render");
+            scene.RenderAll(view, proj, 0.016f);
+        }
+        TEST_ASSERT(scene.GetRenderGraph().GetExecutedPassCount() == 7);
+        profiler.EndFrame();
+    }
+
+    if (loadedRetailCount > 0) {
+        TEST_ASSERT(loadedRetailCount >= 10);
+        TEST_ASSERT(totalTerrainChunksVerified >= 500);
+        TEST_ASSERT(totalDoodadsVerified >= 10000);
+        TEST_ASSERT(session.GetStats().hotSwitchesPerformed == static_cast<uint32_t>(loadedRetailCount - 1));
+    }
+
+    session.TeardownCurrentSession(mpq, sim, scene, presentation);
     return true;
 }

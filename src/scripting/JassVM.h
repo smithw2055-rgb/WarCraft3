@@ -142,6 +142,8 @@ public:
     uint64_t GetBytecodeExecutedCount() const { return bytecodeExecutedCount_; }
     uint64_t GetBytecodeCoroutineRunsCount() const { return bytecodeCoroutineRunsCount_; }
     uint64_t GetBytecodeCoroutineYieldsCount() const { return bytecodeCoroutineYieldsCount_; }
+    uint64_t GetZeroAllocCallCount() const { return zeroAllocCallCount_; }
+    uint64_t GetStructFastSlotAccessCount() const { return structFastSlotAccessCount_; }
     uint64_t GetTotalConstantFoldedCount() const;
 
 private:
@@ -183,8 +185,34 @@ private:
     };
     struct JassStructInstance {
         std::string type;
+        std::vector<JassValue> fastScalarSlots;
+        std::unordered_map<std::string, size_t> scalarSlotByName;
         std::unordered_map<std::string, JassValue> scalars;
         std::unordered_map<std::string, std::unordered_map<int, JassValue>> arrays;
+
+        void SetScalar(const std::string& name, const JassValue& val, uint64_t* fastCounter = nullptr) {
+            auto sit = scalarSlotByName.find(name);
+            if (sit != scalarSlotByName.end() && sit->second < fastScalarSlots.size()) {
+                fastScalarSlots[sit->second] = val;
+                if (fastCounter) (*fastCounter)++;
+            } else {
+                const size_t newSlot = fastScalarSlots.size();
+                fastScalarSlots.push_back(val);
+                scalarSlotByName[name] = newSlot;
+                if (fastCounter) (*fastCounter)++;
+            }
+            scalars[name] = val;
+        }
+
+        const JassValue* TryGetScalar(const std::string& name, uint64_t* fastCounter = nullptr) const {
+            auto sit = scalarSlotByName.find(name);
+            if (sit != scalarSlotByName.end() && sit->second < fastScalarSlots.size()) {
+                if (fastCounter) (*fastCounter)++;
+                return &fastScalarSlots[sit->second];
+            }
+            auto it = scalars.find(name);
+            return (it != scalars.end()) ? &it->second : nullptr;
+        }
     };
     const JassStructDef* FindStructDef(const std::string& name) const;
     bool IsStructBaseOf(const std::string& base, const std::string& derived) const;
@@ -228,6 +256,8 @@ private:
     uint64_t bytecodeExecutedCount_ = 0;
     uint64_t bytecodeCoroutineRunsCount_ = 0;
     uint64_t bytecodeCoroutineYieldsCount_ = 0;
+    uint64_t zeroAllocCallCount_ = 0;
+    mutable uint64_t structFastSlotAccessCount_ = 0;
     std::unordered_map<std::string, std::unique_ptr<JassBytecodeChunk>> compiledFunctions_;
 };
 

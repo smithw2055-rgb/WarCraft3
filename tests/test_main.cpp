@@ -807,6 +807,10 @@ bool TestPhase8StageTBlpMipTextureResourceAndSiblingFallback();
 bool TestPhase8StageTTextureAtlasPackerBorderExtrusionAndMips();
 bool TestPhase8StageUEngineProfilerPercentilesAndChromeTrace();
 bool TestPhase8StageURetailW3xEndToEndModernizedPipelineBenchmark();
+bool TestPhase9StageV1ZeroAllocProcessorAndSquadFlowFieldMove();
+bool TestPhase9StageV2SceneManagerIntegratedRenderGraphAndSharedMeshes();
+bool TestPhase9StageV3JassZeroAllocNativeCallsAndFastStructSlots();
+bool TestPhase9StageV4AudioSystemIntegratedServerAndRetailDriveMultiMapSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1609,6 +1613,10 @@ int main(int argc, char** argv) {
         {"Phase8 Stage T2 TextureAtlasPacker 1px border extrusion and mips", TestPhase8StageTTextureAtlasPackerBorderExtrusionAndMips},
         {"Phase8 Stage U1 EngineProfiler percentiles and Chrome Trace JSON", TestPhase8StageUEngineProfilerPercentilesAndChromeTrace},
         {"Phase8 Stage U2 Retail W3X end-to-end modernized pipeline benchmark", TestPhase8StageURetailW3xEndToEndModernizedPipelineBenchmark},
+        {"Phase9 Stage V1 Zero-alloc CPathfindingProcessor and Squad FlowField move", TestPhase9StageV1ZeroAllocProcessorAndSquadFlowFieldMove},
+        {"Phase9 Stage V2 SceneManager integrated RenderGraph and SharedMeshRegistry", TestPhase9StageV2SceneManagerIntegratedRenderGraphAndSharedMeshes},
+        {"Phase9 Stage V3 JassVM zero-alloc native calls and O(1) fast struct slots", TestPhase9StageV3JassZeroAllocNativeCallsAndFastStructSlots},
+        {"Phase9 Stage V4 AudioSystem server routing and 12-map retail Drive suite", TestPhase9StageV4AudioSystemIntegratedServerAndRetailDriveMultiMapSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

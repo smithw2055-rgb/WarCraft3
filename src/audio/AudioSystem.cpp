@@ -145,7 +145,19 @@ int AudioSystem::playFromSourceEx(SoundSource& src, float volume, float x, float
 }
 
 int AudioSystem::Play2D(const std::string& name, float volume) {
-    if (!engine_) return -1;
+    audio::AudioVoiceRequest req;
+    req.clipKey = name;
+    req.bus = (name.find("Click") != std::string::npos || name.find("Error") != std::string::npos ||
+               name.find("Interface") != std::string::npos)
+              ? audio::AudioBusId::UI
+              : audio::AudioBusId::SFX;
+    req.baseVolume = volume;
+    req.priority = (req.bus == audio::AudioBusId::UI) ? 90 : 50;
+    req.spatial.is3D = false;
+    const int voiceId = audioServer_.SubmitVoice(req);
+    if (voiceId < 0) return -1;
+    if (!engine_) return headlessSimulationEnabled_ ? voiceId : -1;
+    volume *= audioServer_.GetBusVolumeLinear(req.bus);
     auto it = soundCache_.find(name);
     if (it == soundCache_.end()) {
         // Auto-load from MPQ if manager is set
@@ -157,7 +169,10 @@ int AudioSystem::Play2D(const std::string& name, float volume) {
             }
         }
         it = soundCache_.find(name);
-        if (it == soundCache_.end()) return -1;
+        if (it == soundCache_.end()) {
+            audioServer_.StopVoice(voiceId);
+            return -1;
+        }
     }
     return playFromSource(it->second, volume, 0, 0, 0, false);
 }
@@ -180,16 +195,7 @@ int AudioSystem::Play3D(const std::string& name, float x, float y, float z, floa
 }
 
 int AudioSystem::Play3DPath(const std::string& mpqPath, float x, float y, float z, float volume) {
-    if (!engine_ || mpqPath.empty()) return -1;
-    auto it = soundCache_.find(mpqPath);
-    if (it == soundCache_.end()) {
-        if (!LoadSound(mpqPath, mpqPath, mpq_)) {
-            return -1;
-        }
-        it = soundCache_.find(mpqPath);
-        if (it == soundCache_.end()) return -1;
-    }
-    return playFromSource(it->second, volume, x, y, z, true);
+    return Play3DPathEx(mpqPath, x, y, z, volume, 1.0f, 0.0f, 0.0f);
 }
 
 int AudioSystem::Play3DEx(const std::string& name, float x, float y, float z, float volume,
@@ -365,6 +371,7 @@ void AudioSystem::StopMusic() {
 }
 
 void AudioSystem::SetMusicVolume(float vol) {
+    audioServer_.SetBusVolumeLinear(audio::AudioBusId::Music, std::clamp(vol, 0.0f, 1.0f));
     if (musicSound_) ma_sound_set_volume(musicSound_, vol * masterVolume_);
 }
 

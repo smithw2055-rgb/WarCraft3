@@ -389,7 +389,10 @@ bool RenderGraph::IsPassEnabled(RenderGraphPassId passId) const {
 
 void RenderGraph::ExecuteFrame(RenderGraphContext& ctx) {
     ctx.frustum = Frustum::FromViewProj(ctx.proj * ctx.view);
-    if (ctx.renderServer) {
+    if (ctx.renderServer &&
+        ctx.renderServer->GetOpaqueBatches().empty() &&
+        ctx.renderServer->GetTransparentBatches().empty() &&
+        ctx.renderServer->GetStats().visibleItems > 0) {
         ctx.renderServer->BuildAndSortBatches();
     }
 

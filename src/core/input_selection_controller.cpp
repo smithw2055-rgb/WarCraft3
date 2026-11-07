@@ -202,9 +202,15 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
 
                         if (canTargetWidget) {
                             su->IssueOrder(std::make_unique<COrderTargetWidget>(orderId, targetWidget));
-                        } else {
+                        } else if (selUnits.size() == 1 || targetWidget != nullptr) {
                             su->IssueOrder(std::make_unique<COrderTargetPoint>(OrderIds::SMART, wPos.x, wPos.z));
                         }
+                    }
+                    if (!targetWidget && selUnits.size() > 1) {
+                        const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+                        commandPipeline_.IssueGroupPointOrder(
+                            simulation_, local, selectedUnitHandles_, OrderIds::SMART,
+                            wPos.x, wPos.z, /*useFormation=*/true, 72.0f, &replayLog_);
                     }
                     if (!selUnits.empty() && selUnits.front()) {
                         PlayUnitResponse(selUnits.front(), worldAttack ? "YesAttack" : "Yes");
@@ -379,6 +385,35 @@ void GameController::OnMouseScroll(const sapp_event* ev) {
 
 void GameController::OnKeyDown(const sapp_event* ev) {
     if (ui_.HandleEvent(ev)) return;
+
+    // Phase A2: Declarative InputActionMap hotkey resolution & CommandBufferPipeline dispatch
+    if (simulationInitialized_ && !selectedUnitHandles_.empty()) {
+        uint8_t mods = core::kInputModNone;
+        if (Platform::IsKeyDown(SAPP_KEYCODE_LEFT_SHIFT) || Platform::IsKeyDown(SAPP_KEYCODE_RIGHT_SHIFT))
+            mods |= core::kInputModShift;
+        if (Platform::IsKeyDown(SAPP_KEYCODE_LEFT_CONTROL) || Platform::IsKeyDown(SAPP_KEYCODE_RIGHT_CONTROL))
+            mods |= core::kInputModCtrl;
+        if (Platform::IsKeyDown(SAPP_KEYCODE_LEFT_ALT) || Platform::IsKeyDown(SAPP_KEYCODE_RIGHT_ALT))
+            mods |= core::kInputModAlt;
+
+        std::vector<std::string> triggeredActions;
+        if (inputActionMap_.ResolveTriggeredActions(static_cast<int>(ev->key_code), mods, triggeredActions) > 0) {
+            const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;
+            for (const std::string& act : triggeredActions) {
+                if (act == "order_stop" || act == "order_hold") {
+                    if (const auto* b = inputActionMap_.FindAction(act)) {
+                        commandPipeline_.IssueGroupImmediateOrder(
+                            simulation_, local, selectedUnitHandles_, b->associatedOrderId, &replayLog_);
+                        return;
+                    }
+                } else if (act == "order_attack") {
+                    ui_.SetPendingCommand(OrderIds::ATTACK, MainUI::PendingCommandMode::POINT_OR_WIDGET);
+                    return;
+                }
+            }
+        }
+    }
+
     switch (ev->key_code) {
     case SAPP_KEYCODE_ESCAPE:
         // Cinematic skip (ref ESC -> EVENT_PLAYER_END_CINEMATIC): only the

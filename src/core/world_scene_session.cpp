@@ -9,6 +9,7 @@ void WorldSceneSession::TeardownCurrentSession(MpqManager& mpq,
                                                CSimulation& sim,
                                                SceneManager& scene,
                                                UnitPresentationSystem& presentation) {
+    scene.SetBoundTerrainChunkGrid(nullptr);
     scene.Clear();
     presentation.ClearAll();
 
@@ -20,6 +21,11 @@ void WorldSceneSession::TeardownCurrentSession(MpqManager& mpq,
     sim.Update();
     sim.Registry().Clear();
     sim.SpatialGrid().Clear();
+    sim.InvalidateNavigationCaches();
+
+    // Reclaim unreferenced resources in ResourceServer upon map teardown
+    stats_.resourcesPrunedOnTeardown += scene.GetResourceServer().PruneUnusedResources();
+
     mpq.CloseTop();
 
     w3e_ = W3EMap{};
@@ -38,6 +44,7 @@ bool WorldSceneSession::LoadMap(MpqManager& mpq,
         return false;
     }
 
+    scene.GetResourceServer().SetMpqManager(&mpq);
     currentMapPath_ = mapPath;
     stats_.sessionGeneration++;
     stats_.mapsLoaded++;
@@ -49,6 +56,7 @@ bool WorldSceneSession::LoadMap(MpqManager& mpq,
             terrainChunks_.BuildFromW3E(w3e_);
             stats_.terrainChunksBuilt = terrainChunks_.GetChunkCount();
             sim.SetTerrainMap(&w3e_);
+            scene.SetBoundTerrainChunkGrid(&terrainChunks_);
         }
     }
 

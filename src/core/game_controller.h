@@ -2,6 +2,11 @@
 #include "game_state.h"
 #include "warsmash_config.h"
 #include "unit_presentation_system.h"
+#include "world_scene_session.h"
+#include "input_action_map.h"
+#include "engine_profiler.h"
+#include "../render/render_graph.h"
+#include "../ui/ui_data_binder.h"
 #include "../render/scene.h"
 #include "../render/camera.h"
 #include "../render/terrain.h"
@@ -94,6 +99,20 @@ public:
     std::unique_ptr<JassNatives>& GetJassNativesRef() { return jassNatives_; }
     WarsmashConfig& GetConfig() { return config_; }
     const std::string& GetMapPath() const { return mapPath_; }
+    core::WorldSceneSession& GetSceneSession() { return sceneSession_; }
+    const core::WorldSceneSession& GetSceneSession() const { return sceneSession_; }
+    core::InputActionMap& GetInputActionMap() { return inputActionMap_; }
+    const core::InputActionMap& GetInputActionMap() const { return inputActionMap_; }
+    core::CommandBufferPipeline& GetCommandPipeline() { return commandPipeline_; }
+    const core::CommandBufferPipeline& GetCommandPipeline() const { return commandPipeline_; }
+    core::EngineProfiler& GetProfiler() { return profiler_; }
+    const core::EngineProfiler& GetProfiler() const { return profiler_; }
+    render::RenderGraph& GetRenderGraph() { return scene_.GetRenderGraph(); }
+    const render::RenderGraph& GetRenderGraph() const { return scene_.GetRenderGraph(); }
+    ui::UIDataBinder& GetUIDataBinder() { return ui_.GetDataBinder(); }
+    const ui::UIDataBinder& GetUIDataBinder() const { return ui_.GetDataBinder(); }
+    ReplayLog& GetReplayLog() { return replayLog_; }
+    const ReplayLog& GetReplayLog() const { return replayLog_; }
 
     // Selection access (for JASS natives / splat refresh)
     const std::unordered_set<int>& GetSelectedUnitHandles() const { return selectedUnitHandlesSet_; }
@@ -327,6 +346,13 @@ private:
     std::unordered_set<int> lightningSynced_;
     // Last seen text-clear sequence (ClearTextMessages drops shown toasts).
     int lastTextClearSeq_ = 0;
+
+    // Phase A Modernized Engine Subsystems
+    core::WorldSceneSession sceneSession_;
+    core::InputActionMap inputActionMap_;
+    core::CommandBufferPipeline commandPipeline_;
+    core::EngineProfiler& profiler_ = core::EngineProfiler::Instance();
+    ReplayLog replayLog_;
 
     // Presentation & Rendering
     UnitPresentationSystem presentation_;

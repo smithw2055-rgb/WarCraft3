@@ -4,11 +4,12 @@
 #include <deque>
 #include <functional>
 #include <cmath>
+#include <algorithm>
 #include "ecs/fwd.h"
 #include "ecs/unit_type.h"
 #include "map/wpm.h"
 
-// Simple A* pathfinding processor with pathing map integration
+// Zero-Allocation Flat A* Pathfinding Processor with WPM Pathing Map Integration
 class CPathfindingProcessor {
 public:
     enum class GridMapping : uint8_t {
@@ -82,9 +83,68 @@ public:
     float CornerToWorldX(int cornerX) const { return worldOffsetX_ + (float)cornerX * CELL_SIZE; }
     float CornerToWorldY(int cornerY) const { return worldOffsetY_ + (float)cornerY * CELL_SIZE; }
 
+    // Zero-Allocation Flat A* Workspace Telemetry
+    uint64_t GetZeroAllocQueriesExecuted() const { return flatWorkspace_.queriesExecuted; }
+    uint64_t GetWorkspaceBufferAllocations() const { return flatWorkspace_.bufferAllocations; }
+    uint64_t GetTotalNodesExpanded() const { return flatWorkspace_.totalNodesExpanded; }
+    void ResetWorkspaceStats() const {
+        flatWorkspace_.queriesExecuted = 0;
+        flatWorkspace_.bufferAllocations = 0;
+        flatWorkspace_.totalNodesExpanded = 0;
+    }
+
     static constexpr int CELL_SIZE = 32;
 
 private:
+    struct FlatHeapEntry {
+        float f = 0.0f;
+        int nodeIdx = 0;
+        uint32_t seq = 0;
+        bool operator>(const FlatHeapEntry& other) const {
+            if (f != other.f) return f > other.f;
+            return seq > other.seq;
+        }
+    };
+
+    struct FlatAStarWorkspace {
+        int capacity = 0;
+        uint32_t currentGen = 1;
+        uint64_t queriesExecuted = 0;
+        uint64_t bufferAllocations = 0;
+        uint64_t totalNodesExpanded = 0;
+        std::vector<uint32_t> visitedGen;
+        std::vector<uint32_t> closedGen;
+        std::vector<uint32_t> goalGen;
+        std::vector<float> gScore;
+        std::vector<float> fScore;
+        std::vector<int32_t> parentIdx;
+        std::vector<FlatHeapEntry> openHeap;
+
+        void BeginSearch(int requiredNodes) {
+            if (requiredNodes > capacity) {
+                capacity = std::max(requiredNodes, 4096);
+                visitedGen.assign(static_cast<size_t>(capacity), 0u);
+                closedGen.assign(static_cast<size_t>(capacity), 0u);
+                goalGen.assign(static_cast<size_t>(capacity), 0u);
+                gScore.assign(static_cast<size_t>(capacity), 0.0f);
+                fScore.assign(static_cast<size_t>(capacity), 0.0f);
+                parentIdx.assign(static_cast<size_t>(capacity), -1);
+                currentGen = 1u;
+                bufferAllocations++;
+            } else {
+                currentGen++;
+                if (currentGen == 0u) {
+                    std::fill(visitedGen.begin(), visitedGen.end(), 0u);
+                    std::fill(closedGen.begin(), closedGen.end(), 0u);
+                    std::fill(goalGen.begin(), goalGen.end(), 0u);
+                    currentGen = 1u;
+                }
+            }
+            openHeap.clear();
+            queriesExecuted++;
+        }
+    };
+
     bool FindPathMapped(int startNodeX, int startNodeY,
                         int endNodeX, int endNodeY,
                         float exactStartWorldX,
@@ -120,7 +180,9 @@ private:
     int WorldToMappedX(float worldX, GridMapping mapping) const;
     int WorldToMappedY(float worldY, GridMapping mapping) const;
 
-    WpmData* pathingMap_ = nullptr;    CWorldCollision* worldCollision_ = nullptr;
+    WpmData* pathingMap_ = nullptr;
+    CWorldCollision* worldCollision_ = nullptr;
     float worldOffsetX_ = 0.0f;
     float worldOffsetY_ = 0.0f;
+    mutable FlatAStarWorkspace flatWorkspace_;
 };

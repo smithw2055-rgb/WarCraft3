@@ -8,6 +8,8 @@
 #include "UiRenderer.h"
 #include "MultiSelectionPanel.h"
 #include "GlueMenuTypes.h"
+#include "ui_data_binder.h"
+#include "../render/texture_atlas_packer.h"
 #include "../asset/Texture.h"
 #include "../resource/mpq_storm.h"
 #include "../data/abilitydata.h"
@@ -173,6 +175,10 @@ public:
 
     CommandCard* GetCommandCard() { return commandCard_; }
     GameUI& GetGameUI() { return gameUI_; }
+    ui::UIDataBinder& GetDataBinder() { return dataBinder_; }
+    const ui::UIDataBinder& GetDataBinder() const { return dataBinder_; }
+    render::TextureAtlasPacker& GetIconAtlasPacker() { return iconAtlasPacker_; }
+    const render::TextureAtlasPacker& GetIconAtlasPacker() const { return iconAtlasPacker_; }
 
     void PopulateCommandCardForUnitType(War3ID unitTypeId);
     void PopulateCommandCardForUnit(CUnit* unit);
@@ -441,4 +447,6 @@ private:
     int chatHistoryIndex_ = 0;
     std::string chatDraft_;
     double uiTime_ = 0.0;
+    ui::UIDataBinder dataBinder_;
+    render::TextureAtlasPacker iconAtlasPacker_{512, 512, 1};
 };
