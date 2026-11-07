@@ -1,6 +1,7 @@
 #pragma once
 #include "JassParser.h"
 struct JassBytecodeChunk;
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 #include <string>
@@ -74,11 +75,23 @@ public:
         int loopIterationsRemaining = 1000000;
     };
 
+    // Stage K: Stackless/Resumable Bytecode Coroutine Frame for TriggerSleepAction
+    struct BytecodeCoroutineFrame {
+        const JassBytecodeChunk* chunk = nullptr;
+        size_t ip = 0;
+        std::vector<JassValue> localSlots;
+        std::vector<std::unordered_map<int, JassValue>> localArrays;
+        std::vector<JassValue> evalStack;
+        int loopGuard = 2000000;
+    };
+
     struct ThreadState {
         std::string functionName;
         bool started = false;
         bool completed = false;
+        bool useBytecodeCoroutine = false;
         std::vector<ThreadFrame> frames;
+        std::vector<BytecodeCoroutineFrame> bcFrames;
     };
 
     struct ThreadRunResult {
@@ -121,12 +134,15 @@ public:
     const std::unordered_map<std::string, NativeFunc>& GetRegisteredNatives() const { return natives_; }
     std::unordered_set<std::string> GetFunctionNames() const;
 
-    // Phase 3 Bytecode VM & Indexed Local Slots API
+    // Phase 3 & Stage K Bytecode VM, Coroutines & Constant Folding API
     void SetBytecodeEnabled(bool enabled) { bytecodeEnabled_ = enabled; }
     bool IsBytecodeEnabled() const { return bytecodeEnabled_; }
     const JassBytecodeChunk* GetCompiledBytecode(const std::string& funcName) const;
     size_t GetCompiledFunctionCount() const { return compiledFunctions_.size(); }
     uint64_t GetBytecodeExecutedCount() const { return bytecodeExecutedCount_; }
+    uint64_t GetBytecodeCoroutineRunsCount() const { return bytecodeCoroutineRunsCount_; }
+    uint64_t GetBytecodeCoroutineYieldsCount() const { return bytecodeCoroutineYieldsCount_; }
+    uint64_t GetTotalConstantFoldedCount() const;
 
 private:
     void CollectScriptStats(const AstNode* node);
@@ -135,6 +151,9 @@ private:
     void PopCurrentFunctionFrames(ThreadState& state);
     void SyncCallStackFromThread(const ThreadState& state);
     void SyncThreadFromCallStack(ThreadState& state);
+    bool CanRunBytecodeCoroutine(const std::string& functionName) const;
+    bool PushBytecodeCoroutineFrame(ThreadState& state, const std::string& functionName, const std::vector<JassValue>& args = {});
+    ThreadRunResult StepBytecodeCoroutine(ThreadState& state);
     JassValue ExecuteNode(const AstNode* node);
     JassValue ExecuteFunction(const AstNode* func, const std::vector<JassValue>& args);
     JassValue ExecuteBytecode(const JassBytecodeChunk& chunk, const std::vector<JassValue>& args);
@@ -207,6 +226,8 @@ private:
     std::vector<std::pair<std::string, int>> thistypeStack_;
     bool bytecodeEnabled_ = true;
     uint64_t bytecodeExecutedCount_ = 0;
+    uint64_t bytecodeCoroutineRunsCount_ = 0;
+    uint64_t bytecodeCoroutineYieldsCount_ = 0;
     std::unordered_map<std::string, std::unique_ptr<JassBytecodeChunk>> compiledFunctions_;
 };
 

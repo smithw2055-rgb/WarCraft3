@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-// ResourceServer & VFS URI Pipeline (Phase 6 Engine Modernization - Stage E)
+// ResourceServer & VFS URI Pipeline (Phase 6 Engine Modernization - Stage E & Stage J)
 //
 // Inspired by Godot 4 ResourceLoader / RenderingServer RID & Unity Addressables:
 // 1. Strongly-typed 64-bit RID (Resource ID) + intrusive/shared ResourceRef<T>.
@@ -13,8 +13,9 @@
 //    - `TxtTableResource` (parsed INI/TXT key-value tables)
 //    - `BlpImageResource` (decoded RGBA8 mipmaps in CPU memory)
 //    - `MdxModelResource` (parsed MDX binary or MDL text model AST)
+//    - `AudioClipResource` (Stage J: validated WAV PCM / MP3 / FLAC / OGG audio buffer & metadata)
 // 4. Background Async Preload Queue (`RequestAsyncPreload` / `PollAsyncCompletions`)
-//    so heavy CPU decoding (MDX/MDL/BLP/SLK) runs off the main thread while GPU
+//    so heavy CPU decoding (MDX/MDL/BLP/SLK/Audio) runs off the main thread while GPU
 //    upload (`sokol_gfx`) stays cleanly on the main thread.
 // ============================================================================
 #include <atomic>
@@ -52,7 +53,17 @@ enum class ResourceKind : uint8_t {
     SlkTable = 2,
     TxtTable = 3,
     BlpImage = 4,
-    MdxModel = 5
+    MdxModel = 5,
+    AudioClip = 6
+};
+
+enum class AudioFormat : uint8_t {
+    Unknown = 0,
+    WavPcm = 1,
+    Mp3 = 2,
+    Flac = 3,
+    Ogg = 4,
+    SilenceOverride = 5
 };
 
 enum class ResourceLoadState : uint8_t {
@@ -168,6 +179,30 @@ public:
     }
 };
 
+// Stage J: Managed Audio Clip Resource (WAV RIFF/WAVE chunk parser + MP3/FLAC/OGG container support)
+class AudioClipResource final : public Resource {
+public:
+    AudioClipResource() { kind_ = ResourceKind::AudioClip; }
+
+    std::vector<uint8_t> bytes;
+    AudioFormat format = AudioFormat::Unknown;
+    uint16_t audioFormatTag = 0; // 1 = PCM
+    uint16_t channels = 0;
+    uint32_t sampleRate = 0;
+    uint32_t byteRate = 0;
+    uint16_t bitsPerSample = 0;
+    uint32_t pcmDataOffset = 0;
+    uint32_t pcmDataSize = 0;
+    float durationSeconds = 0.0f;
+    bool isSilenceOverride = false;
+
+    static bool ParseAudioContainer(const std::string& pathHint,
+                                    const std::vector<uint8_t>& rawBytes,
+                                    AudioClipResource& outMeta);
+
+    size_t EstimateMemoryBytes() const override { return sizeof(*this) + bytes.capacity(); }
+};
+
 struct ResourceServerStats {
     uint64_t cacheHits = 0;
     uint64_t cacheMisses = 0;
@@ -211,6 +246,7 @@ public:
     ResourceRef<TxtTableResource> LoadTxtTable(const std::string& uriOrPath);
     ResourceRef<BlpImageResource> LoadBlpImage(const std::string& uriOrPath, bool decodeAllMips = false);
     ResourceRef<MdxModelResource> LoadMdxModel(const std::string& uriOrPath);
+    ResourceRef<AudioClipResource> LoadAudioClip(const std::string& uriOrPath);
 
     // Generic template helper
     template <typename T>
@@ -311,6 +347,11 @@ inline ResourceRef<BlpImageResource> ResourceServer::Load<BlpImageResource>(cons
 template <>
 inline ResourceRef<MdxModelResource> ResourceServer::Load<MdxModelResource>(const std::string& uriOrPath) {
     return LoadMdxModel(uriOrPath);
+}
+
+template <>
+inline ResourceRef<AudioClipResource> ResourceServer::Load<AudioClipResource>(const std::string& uriOrPath) {
+    return LoadAudioClip(uriOrPath);
 }
 
 } // namespace resource

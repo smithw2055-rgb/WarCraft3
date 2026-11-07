@@ -1,3 +1,4 @@
+#include "ecs/sim_snapshot.h"
 #include "csimulation.h"
 #include "player.h"
 #include "unit.h"
@@ -170,6 +171,7 @@ void CSimulation::RegisterBuiltInSystems() {
             sim.ProcessNewDestructables();
             sim.ProcessItemRemovals();
             sim.spatialGrid_.Rebuild(sim.units_);
+            SimHotComponentSystem::SyncUnitsToHotPools(sim);
         });
 
     systemPipeline_.RegisterLambda("SpatialSeparationSystem", SimSystemPhase::SpatialSeparation,

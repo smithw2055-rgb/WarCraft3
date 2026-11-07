@@ -29,9 +29,11 @@ void BindExprSlotsRecursive(AstNode* node,
                                    node->children[0]->type == AstNodeType::ARRAY_ACCESS &&
                                    node->children.size() > 1;
         if (!isMember && !isArrayAssign && !node->isArray) {
-            auto it = slotMap.find(node->text);
-            if (it != slotMap.end()) {
-                node->localSlot = it->second;
+            if (localArrays.count(node->text) == 0) {
+                auto it = slotMap.find(node->text);
+                if (it != slotMap.end()) {
+                    node->localSlot = it->second;
+                }
             }
         }
     }
@@ -45,11 +47,20 @@ void CollectLocalDeclsRecursive(AstNode* node,
                                 std::vector<std::string>& slotNames,
                                 std::vector<JassValue>& slotDefaults,
                                 std::unordered_set<std::string>& localArrays,
+                                std::unordered_map<std::string, int>& arraySlotMap,
+                                std::vector<std::string>& arraySlotNames,
+                                std::vector<JassValue>& arraySlotDefaults,
                                 const JassBytecodeCompiler::StructNamePredicate& isStructType) {
     if (!node) return;
     if (node->type == AstNodeType::SET_STMT && !node->returnType.empty()) {
         if (node->isArray) {
             localArrays.insert(node->text);
+            if (arraySlotMap.find(node->text) == arraySlotMap.end()) {
+                const int arrSlot = static_cast<int>(arraySlotNames.size());
+                arraySlotMap[node->text] = arrSlot;
+                arraySlotNames.push_back(node->text);
+                arraySlotDefaults.push_back(DefaultValueForJassType(node->returnType));
+            }
         } else if (node->text.compare(0, 9, "thistype@") != 0 &&
                    (!isStructType || !isStructType(node->text))) {
             if (slotMap.find(node->text) == slotMap.end()) {
@@ -61,7 +72,101 @@ void CollectLocalDeclsRecursive(AstNode* node,
         }
     }
     for (auto& child : node->children) {
-        CollectLocalDeclsRecursive(child.get(), slotMap, slotNames, slotDefaults, localArrays, isStructType);
+        CollectLocalDeclsRecursive(child.get(), slotMap, slotNames, slotDefaults,
+                                   localArrays, arraySlotMap, arraySlotNames, arraySlotDefaults, isStructType);
+    }
+}
+
+// Compile-time constant evaluator for Stage K Constant Folding
+bool TryEvaluateConstExpr(const AstNode* node, JassValue& outVal, uint32_t& inoutFoldCount) {
+    if (!node) return false;
+    switch (node->type) {
+        case AstNodeType::LITERAL_INT:
+        case AstNodeType::LITERAL_RAWCODE:
+            outVal = JassValue::Int(static_cast<int>(node->numberValue));
+            return true;
+        case AstNodeType::LITERAL_REAL:
+            outVal = JassValue::Real(static_cast<float>(node->numberValue));
+            return true;
+        case AstNodeType::LITERAL_BOOL:
+            outVal = JassValue::Bool(node->text == "true");
+            return true;
+        case AstNodeType::LITERAL_STRING:
+            outVal = JassValue::Str(node->text);
+            return true;
+        case AstNodeType::UNARY_OP: {
+            if (node->children.empty()) return false;
+            JassValue sub;
+            if (!TryEvaluateConstExpr(node->children[0].get(), sub, inoutFoldCount)) return false;
+            if (node->text == "-") {
+                if (sub.type == JassValue::REAL) {
+                    outVal = JassValue::Real(-sub.realVal);
+                    inoutFoldCount++;
+                    return true;
+                }
+                if (sub.type == JassValue::INTEGER) {
+                    outVal = JassValue::Int(-sub.intVal);
+                    inoutFoldCount++;
+                    return true;
+                }
+            } else if (node->text == "not" && sub.type == JassValue::BOOLEAN) {
+                outVal = JassValue::Bool(!sub.boolVal);
+                inoutFoldCount++;
+                return true;
+            }
+            return false;
+        }
+        case AstNodeType::BINARY_OP: {
+            if (node->children.size() < 2) return false;
+            JassValue left, right;
+            if (!TryEvaluateConstExpr(node->children[0].get(), left, inoutFoldCount)) return false;
+            if (!TryEvaluateConstExpr(node->children[1].get(), right, inoutFoldCount)) return false;
+
+            const bool isNumeric =
+                (left.type == JassValue::INTEGER || left.type == JassValue::REAL) &&
+                (right.type == JassValue::INTEGER || right.type == JassValue::REAL);
+            const bool useReal = (left.type == JassValue::REAL || right.type == JassValue::REAL);
+
+            if (node->text == "+" && left.type == JassValue::STRING && right.type == JassValue::STRING) {
+                outVal = JassValue::Str(left.strVal + right.strVal);
+                inoutFoldCount++;
+                return true;
+            }
+            if (isNumeric) {
+                if (node->text == "+") {
+                    outVal = useReal ? JassValue::Real(left.AsReal() + right.AsReal())
+                                     : JassValue::Int(left.AsInt() + right.AsInt());
+                    inoutFoldCount++;
+                    return true;
+                }
+                if (node->text == "-") {
+                    outVal = useReal ? JassValue::Real(left.AsReal() - right.AsReal())
+                                     : JassValue::Int(left.AsInt() - right.AsInt());
+                    inoutFoldCount++;
+                    return true;
+                }
+                if (node->text == "*") {
+                    outVal = useReal ? JassValue::Real(left.AsReal() * right.AsReal())
+                                     : JassValue::Int(left.AsInt() * right.AsInt());
+                    inoutFoldCount++;
+                    return true;
+                }
+                if (node->text == "/") {
+                    if (useReal) {
+                        if (right.AsReal() == 0.0f) return false;
+                        outVal = JassValue::Real(left.AsReal() / right.AsReal());
+                    } else {
+                        if (right.AsInt() == 0) return false;
+                        outVal = JassValue::Int(left.AsInt() / right.AsInt());
+                    }
+                    inoutFoldCount++;
+                    return true;
+                }
+            }
+            return false;
+        }
+        default:
+            return false;
     }
 }
 
@@ -81,12 +186,42 @@ struct CompilerContext {
         return chunk.code.size() - 1;
     }
 
+    void EmitConstValue(const JassValue& val) {
+        switch (val.type) {
+            case JassValue::INTEGER:
+                Emit(JassOpCode::OP_CONST_INT, val.intVal);
+                break;
+            case JassValue::REAL:
+                Emit(JassOpCode::OP_CONST_REAL, 0, val.realVal);
+                break;
+            case JassValue::BOOLEAN:
+                Emit(JassOpCode::OP_CONST_BOOL, val.boolVal ? 1 : 0);
+                break;
+            case JassValue::STRING:
+                Emit(JassOpCode::OP_CONST_STR, 0, 0.0f, chunk.InternString(val.strVal));
+                break;
+            default:
+                Emit(JassOpCode::OP_CONST_NULL);
+                break;
+        }
+    }
+
     void PatchJump(size_t instrIdx, int32_t targetIdx) {
         chunk.code[instrIdx].intOperand = targetIdx;
     }
 
     bool CompileExpr(const AstNode* node) {
         if (!node || !supported) return false;
+
+        // Stage K Constant Folding for compound constant expressions (UNARY_OP / BINARY_OP)
+        if (node->type == AstNodeType::BINARY_OP || node->type == AstNodeType::UNARY_OP) {
+            JassValue folded;
+            if (TryEvaluateConstExpr(node, folded, chunk.constantFoldedCount)) {
+                EmitConstValue(folded);
+                return true;
+            }
+        }
+
         switch (node->type) {
             case AstNodeType::LITERAL_INT:
             case AstNodeType::LITERAL_RAWCODE:
@@ -114,17 +249,24 @@ struct CompilerContext {
                 if (node->localSlot >= 0) {
                     Emit(JassOpCode::OP_GET_LOCAL_SLOT, node->localSlot);
                 } else {
-                    Emit(JassOpCode::OP_GET_GLOBAL, 0, 0.0f, chunk.InternString(node->text));
+                    auto lit = chunk.localNameToSlot.find(node->text);
+                    if (lit != chunk.localNameToSlot.end()) {
+                        Emit(JassOpCode::OP_GET_LOCAL_SLOT, lit->second);
+                    } else {
+                        Emit(JassOpCode::OP_GET_GLOBAL, 0, 0.0f, chunk.InternString(node->text));
+                    }
                 }
                 return true;
             }
             case AstNodeType::ARRAY_ACCESS: {
                 if (node->children.empty()) return (supported = false);
-                if (chunk.localNameToSlot.count(node->text) > 0) {
-                    return (supported = false);
-                }
                 if (!CompileExpr(node->children[0].get())) return false;
-                Emit(JassOpCode::OP_GET_GLOBAL_ARRAY, 0, 0.0f, chunk.InternString(node->text));
+                auto arrIt = chunk.localArrayNameToSlot.find(node->text);
+                if (arrIt != chunk.localArrayNameToSlot.end()) {
+                    Emit(JassOpCode::OP_GET_LOCAL_ARRAY_SLOT, arrIt->second);
+                } else {
+                    Emit(JassOpCode::OP_GET_GLOBAL_ARRAY, 0, 0.0f, chunk.InternString(node->text));
+                }
                 return true;
             }
             case AstNodeType::UNARY_OP: {
@@ -199,24 +341,24 @@ struct CompilerContext {
                     return (supported = false);
                 }
                 if (!stmt->returnType.empty()) {
-                    // Local variable declaration
+                    // Local variable or local array declaration
                     if (stmt->isArray) {
-                        return (supported = false);
+                        // Local array slot is pre-registered in chunk.localArrayNameToSlot
+                        return chunk.localArrayNameToSlot.count(stmt->text) > 0;
                     }
                     if (!stmt->children.empty()) {
                         if (!CompileExpr(stmt->children[0].get())) return false;
                     } else {
                         JassValue defVal = DefaultValueForJassType(stmt->returnType);
-                        switch (defVal.type) {
-                            case JassValue::INTEGER: Emit(JassOpCode::OP_CONST_INT, defVal.intVal); break;
-                            case JassValue::REAL: Emit(JassOpCode::OP_CONST_REAL, 0, defVal.realVal); break;
-                            case JassValue::BOOLEAN: Emit(JassOpCode::OP_CONST_BOOL, defVal.boolVal ? 1 : 0); break;
-                            case JassValue::STRING: Emit(JassOpCode::OP_CONST_STR, 0, 0.0f, chunk.InternString(defVal.strVal)); break;
-                            default: Emit(JassOpCode::OP_CONST_NULL); break;
-                        }
+                        EmitConstValue(defVal);
                     }
-                    if (stmt->localSlot < 0) return (supported = false);
-                    Emit(JassOpCode::OP_SET_LOCAL_SLOT, stmt->localSlot);
+                    int slot = stmt->localSlot;
+                    if (slot < 0) {
+                        auto lit = chunk.localNameToSlot.find(stmt->text);
+                        if (lit != chunk.localNameToSlot.end()) slot = lit->second;
+                    }
+                    if (slot < 0) return (supported = false);
+                    Emit(JassOpCode::OP_SET_LOCAL_SLOT, slot);
                     return true;
                 }
                 if (!stmt->children.empty() && stmt->children[0]->type == AstNodeType::ARRAY_ACCESS &&
@@ -225,7 +367,12 @@ struct CompilerContext {
                     if (arrAccess->children.empty()) return (supported = false);
                     if (!CompileExpr(arrAccess->children[0].get())) return false;
                     if (!CompileExpr(stmt->children[1].get())) return false;
-                    Emit(JassOpCode::OP_SET_GLOBAL_ARRAY, 0, 0.0f, chunk.InternString(arrAccess->text));
+                    auto arrIt = chunk.localArrayNameToSlot.find(arrAccess->text);
+                    if (arrIt != chunk.localArrayNameToSlot.end()) {
+                        Emit(JassOpCode::OP_SET_LOCAL_ARRAY_SLOT, arrIt->second);
+                    } else {
+                        Emit(JassOpCode::OP_SET_GLOBAL_ARRAY, 0, 0.0f, chunk.InternString(arrAccess->text));
+                    }
                     return true;
                 }
                 if (stmt->children.empty()) {
@@ -233,8 +380,13 @@ struct CompilerContext {
                 } else {
                     if (!CompileExpr(stmt->children[0].get())) return false;
                 }
-                if (stmt->localSlot >= 0) {
-                    Emit(JassOpCode::OP_SET_LOCAL_SLOT, stmt->localSlot);
+                int slot = stmt->localSlot;
+                if (slot < 0) {
+                    auto lit = chunk.localNameToSlot.find(stmt->text);
+                    if (lit != chunk.localNameToSlot.end()) slot = lit->second;
+                }
+                if (slot >= 0) {
+                    Emit(JassOpCode::OP_SET_LOCAL_SLOT, slot);
                 } else {
                     Emit(JassOpCode::OP_SET_GLOBAL, 0, 0.0f, chunk.InternString(stmt->text));
                 }
@@ -322,6 +474,9 @@ void JassBytecodeCompiler::BindFunctionLocalSlots(AstNode* func,
     std::vector<std::string> slotNames;
     std::vector<JassValue> slotDefaults;
     std::unordered_set<std::string> localArrays;
+    std::unordered_map<std::string, int> arraySlotMap;
+    std::vector<std::string> arraySlotNames;
+    std::vector<JassValue> arraySlotDefaults;
 
     for (const auto& [paramName, paramType] : func->parameters) {
         if (slotMap.find(paramName) == slotMap.end()) {
@@ -333,7 +488,8 @@ void JassBytecodeCompiler::BindFunctionLocalSlots(AstNode* func,
     }
 
     if (!func->children.empty()) {
-        CollectLocalDeclsRecursive(func->children[0].get(), slotMap, slotNames, slotDefaults, localArrays, isStructType);
+        CollectLocalDeclsRecursive(func->children[0].get(), slotMap, slotNames, slotDefaults,
+                                   localArrays, arraySlotMap, arraySlotNames, arraySlotDefaults, isStructType);
         BindExprSlotsRecursive(func->children[0].get(), slotMap, localArrays);
     }
     func->localSlotCount = static_cast<int>(slotNames.size());
@@ -363,14 +519,14 @@ bool JassBytecodeCompiler::CompileFunction(const AstNode* func,
                                    outChunk.slotToLocalName,
                                    outChunk.localDefaults,
                                    localArrays,
+                                   outChunk.localArrayNameToSlot,
+                                   outChunk.slotToLocalArrayName,
+                                   outChunk.localArrayDefaults,
                                    isStructType);
     }
 
-    if (!localArrays.empty()) {
-        return false;
-    }
-
     outChunk.numLocalSlots = static_cast<int>(outChunk.slotToLocalName.size());
+    outChunk.numLocalArraySlots = static_cast<int>(outChunk.slotToLocalArrayName.size());
     CompilerContext ctx{outChunk, isStructType, {}, true};
     if (!func->children.empty()) {
         if (!ctx.CompileStmt(func->children[0].get())) {

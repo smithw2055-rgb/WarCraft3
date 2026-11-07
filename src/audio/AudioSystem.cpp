@@ -53,7 +53,18 @@ bool AudioSystem::LoadSound(const std::string& name, const std::string& mpqPath,
     if (soundCache_.find(name) != soundCache_.end()) return true;
 
     std::vector<uint8_t> buf;
-    bool loaded = resource::ResourceServer::Instance().ReadRawBytes(mpqPath, buf);
+    bool loaded = false;
+    if (auto clip = resource::ResourceServer::Instance().LoadAudioClip(mpqPath)) {
+        if (!clip->bytes.empty()) {
+            buf = clip->bytes;
+            loaded = true;
+        } else if (clip->isSilenceOverride) {
+            return false;
+        }
+    }
+    if (!loaded) {
+        loaded = resource::ResourceServer::Instance().ReadRawBytes(mpqPath, buf);
+    }
     if (!loaded && mpq) {
         loaded = mpq->ReadFile(mpqPath, buf);
     }

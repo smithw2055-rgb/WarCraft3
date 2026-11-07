@@ -1,3 +1,13 @@
+#include "scripting/JassLexer.h"
+#include "scripting/JassParser.h"
+#include "scripting/JassVM.h"
+#include "scripting/JassBytecode.h"
+#include "ecs/sim_snapshot.h"
+#include "ecs/pathing/pathfinding_server.h"
+#include "render/render_graph.h"
+#include "core/world_scene_session.h"
+#include "ui/ui_data_binder.h"
+#include "ui/TextFrame.h"
 #include "audio/audio_server.h"
 #include "audio/AudioSystem.h"
 #include "core/job_system.h"
@@ -1323,5 +1333,685 @@ bool TestPhase6StageIAudioPolyphonyVoiceStealingAndSimEvents() {
     TEST_ASSERT(server.GetActiveVoiceCountOnBus(AudioBusId::UnitVoice) == 1);
 
     server.UnbindSimulationEvents(sim);
+    return true;
+}
+
+
+// ============================================================================
+// Stage J — VFS & MPQ Multi-Stage Audio Decompression + AudioClipResource
+// ============================================================================
+bool TestPhase7StageJMpqMultiStageDecompressionAndAudioClip() {
+    using namespace resource;
+
+    // 1. Construct a synthetic RIFF/WAVE with an intermediate JUNK chunk before fmt & data
+    std::vector<uint8_t> wavBytes;
+    auto pushStr = [&](const char* s) {
+        while (*s) wavBytes.push_back(static_cast<uint8_t>(*s++));
+    };
+    auto pushU16 = [&](uint16_t v) {
+        wavBytes.push_back(static_cast<uint8_t>(v & 0xFFu));
+        wavBytes.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
+    };
+    auto pushU32 = [&](uint32_t v) {
+        wavBytes.push_back(static_cast<uint8_t>(v & 0xFFu));
+        wavBytes.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
+        wavBytes.push_back(static_cast<uint8_t>((v >> 16) & 0xFFu));
+        wavBytes.push_back(static_cast<uint8_t>((v >> 24) & 0xFFu));
+    };
+
+    const uint32_t sampleRate = 22050;
+    const uint16_t channels = 1;
+    const uint16_t bitsPerSample = 16;
+    const uint32_t numSamples = 2205; // 0.10 sec
+    const uint32_t pcmBytes = numSamples * channels * (bitsPerSample / 8);
+
+    pushStr("RIFF");
+    pushU32(4 + (8 + 4) + (8 + 16) + (8 + pcmBytes));
+    pushStr("WAVE");
+    pushStr("JUNK");
+    pushU32(4);
+    pushU32(0);
+    pushStr("fmt ");
+    pushU32(16);
+    pushU16(1); // PCM
+    pushU16(channels);
+    pushU32(sampleRate);
+    pushU32(sampleRate * channels * (bitsPerSample / 8));
+    pushU16(channels * (bitsPerSample / 8));
+    pushU16(bitsPerSample);
+    pushStr("data");
+    pushU32(pcmBytes);
+    wavBytes.resize(wavBytes.size() + pcmBytes, 0);
+
+    ResourceServer server;
+    server.MountMemoryFile("Sound/Units/Human/Footman/FootmanReady1.wav", wavBytes);
+    server.MountMemoryFile("Sound/Units/SilenceOverride.wav", std::vector<uint8_t>{});
+
+    auto clip1 = server.LoadAudioClip("mpq://Sound/Units/Human/Footman/FootmanReady1.wav");
+    auto clip2 = server.LoadAudioClip("sound\\units\\human\\footman\\footmanready1.wav");
+    TEST_ASSERT(clip1 != nullptr && clip2 != nullptr);
+    TEST_ASSERT(clip1 == clip2);
+    TEST_ASSERT(clip1->format == AudioFormat::WavPcm);
+    TEST_ASSERT(clip1->channels == 1);
+    TEST_ASSERT(clip1->sampleRate == 22050);
+    TEST_ASSERT(clip1->bitsPerSample == 16);
+    TEST_ASSERT(clip1->pcmDataSize == pcmBytes);
+    TEST_NEAR(clip1->durationSeconds, 0.10f, 1e-3f);
+
+    // 2. Verify 0-byte silence override WAV entry (used in retail maps like AzerothGrandPrix.w3x)
+    auto silentClip = server.LoadAudioClip("Sound/Units/SilenceOverride.wav");
+    TEST_ASSERT(silentClip != nullptr);
+    TEST_ASSERT(silentClip->isSilenceOverride);
+    TEST_ASSERT(silentClip->format == AudioFormat::SilenceOverride);
+
+    return true;
+}
+
+bool TestPhase7StageJRetailDriveMapMpqAndAudioVerification() {
+    const std::vector<std::string> candidateMaps = {
+        "resources/Maps/Scenario/(8)AzerothGrandPrix.w3x",
+        "resources/Maps/Scenario/(10)ExtremeCandyWar2004.w3x",
+        "resources/Maps/Scenario/(12)WormWar.w3x"
+    };
+
+    MpqManager mpq;
+    int mapsTested = 0;
+    int wavsVerified = 0;
+    int silentOverridesVerified = 0;
+
+    for (const std::string& relPath : candidateMaps) {
+        FILE* f = std::fopen(relPath.c_str(), "rb");
+        if (!f) continue;
+        std::fclose(f);
+
+        TEST_ASSERT(mpq.OpenOnTop(relPath));
+        mapsTested++;
+
+        resource::ResourceServer resServer;
+        resServer.SetMpqManager(&mpq);
+
+        auto files = mpq.ListFiles(relPath);
+        for (const std::string& wavName : files) {
+            if (wavName.size() < 4) continue;
+            std::string ext = wavName.substr(wavName.size() - 4);
+            for (char& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            if (ext != ".wav") continue;
+            auto clip = resServer.LoadAudioClip(wavName);
+            TEST_ASSERT(clip != nullptr);
+            if (clip->isSilenceOverride) {
+                silentOverridesVerified++;
+            } else {
+                TEST_ASSERT(clip->format == resource::AudioFormat::WavPcm);
+                TEST_ASSERT(clip->sampleRate > 0);
+                TEST_ASSERT(clip->pcmDataSize > 0);
+                wavsVerified++;
+            }
+        }
+        mpq.CloseTop();
+    }
+
+    if (mapsTested > 0) {
+        TEST_ASSERT(wavsVerified >= 50);
+        TEST_ASSERT(silentOverridesVerified >= 2);
+    }
+    return true;
+}
+
+// ============================================================================
+// Stage K — 100% Bytecode JASS VM, Local Arrays, Constant Folding & Coroutines
+// ============================================================================
+bool TestPhase7StageKBytecodeLocalArraysAndConstantFolding() {
+    const std::string src = R"(
+        globals
+            integer g_outSum = 0
+            string g_outLabel = ""
+        endglobals
+
+        function ComputeWithLocalArrays takes integer base returns integer
+            local integer array nums
+            local string array labels
+            local integer folded
+            local integer i
+            set folded = (10 + 20) * 3 + 5
+            set labels[0] = "War" + "Craft"
+            set g_outLabel = labels[0]
+            set i = 0
+            loop
+                exitwhen i >= 4
+                set nums[i] = base + i * 10 + folded
+                set i = i + 1
+            endloop
+            return nums[0] + nums[3]
+        endfunction
+
+        function main takes nothing returns nothing
+            set g_outSum = ComputeWithLocalArrays(5)
+        endfunction
+    )";
+
+    JassVM vm;
+    TEST_ASSERT(vm.LoadScript(src));
+
+    const JassBytecodeChunk* vmChunk = vm.GetCompiledBytecode("ComputeWithLocalArrays");
+    TEST_ASSERT(vmChunk != nullptr);
+    TEST_ASSERT(vmChunk->numLocalArraySlots == 2);
+    TEST_ASSERT(vmChunk->constantFoldedCount >= 2);
+
+    vm.SetBytecodeEnabled(true);
+    const uint64_t beforeCount = vm.GetBytecodeExecutedCount();
+    vm.Execute("main");
+    TEST_ASSERT(vm.GetBytecodeExecutedCount() >= beforeCount + 2);
+    // folded = 95; nums[0] = 5 + 0 + 95 = 100; nums[3] = 5 + 30 + 95 = 130; sum = 230
+    TEST_ASSERT(vm.GetGlobal("g_outSum").AsInt() == 230);
+    TEST_ASSERT(vm.GetGlobal("g_outLabel").strVal == "WarCraft");
+    return true;
+}
+
+bool TestPhase7StageKBytecodeResumableCoroutineTriggerSleep() {
+    const std::string src = R"(
+        native TriggerSleepAction takes real timeout returns nothing
+
+        globals
+            integer g_progress = 0
+        endglobals
+
+        function CoroutineWorker takes nothing returns nothing
+            local integer array stepHistory
+            local integer step = 1
+            set stepHistory[0] = 10
+            set g_progress = stepHistory[0]
+            call TriggerSleepAction(0.20)
+            set step = step + 1
+            set stepHistory[1] = stepHistory[0] + 25 * step
+            set g_progress = stepHistory[1]
+            call TriggerSleepAction(0.30)
+            set stepHistory[2] = stepHistory[1] + 40
+            set g_progress = stepHistory[2]
+        endfunction
+    )";
+
+    JassVM vm;
+    TEST_ASSERT(vm.LoadScript(src));
+    vm.RegisterNative("TriggerSleepAction", [&vm](const std::vector<JassValue>& args) -> JassValue {
+        const float seconds = args.empty() ? 0.0f : args[0].realVal;
+        vm.RequestSleep(seconds);
+        return JassValue::Null();
+    });
+
+    const JassBytecodeChunk* chunk = vm.GetCompiledBytecode("CoroutineWorker");
+    TEST_ASSERT(chunk != nullptr);
+    TEST_ASSERT(chunk->numLocalArraySlots == 1);
+
+    JassVM::ThreadState state;
+    JassVM::ThreadRunResult r1 = vm.RunThread(state, "CoroutineWorker");
+    TEST_ASSERT(r1.sleeping && !r1.completed);
+    TEST_NEAR(r1.sleepSeconds, 0.20f, 1e-3f);
+    TEST_ASSERT(state.useBytecodeCoroutine);
+    TEST_ASSERT(vm.GetGlobal("g_progress").AsInt() == 10);
+
+    // Resume after first TriggerSleepAction -> advances to second sleep while preserving local array!
+    JassVM::ThreadRunResult r2 = vm.RunThread(state, "CoroutineWorker");
+    TEST_ASSERT(r2.sleeping && !r2.completed);
+    TEST_NEAR(r2.sleepSeconds, 0.30f, 1e-3f);
+    TEST_ASSERT(vm.GetGlobal("g_progress").AsInt() == 60); // 10 + 25 * 2 = 60
+
+    // Resume after second TriggerSleepAction -> completes thread!
+    JassVM::ThreadRunResult r3 = vm.RunThread(state, "CoroutineWorker");
+    TEST_ASSERT(r3.completed && !r3.sleeping);
+    TEST_ASSERT(vm.GetGlobal("g_progress").AsInt() == 100); // 60 + 40 = 100
+
+    return true;
+}
+
+// ============================================================================
+// Stage L — Data-Oriented ECS Hot Component Pools & Deterministic Snapshot
+// ============================================================================
+bool TestPhase7StageLHotComponentPoolsAndFleetTelemetry() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 400, 270, false);
+
+    std::vector<CUnit*> p0Units;
+    for (int i = 0; i < 10; ++i) {
+        p0Units.push_back(sim.AdoptUnit(std::make_unique<CUnit>(
+            sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"),
+            static_cast<float>(i * 10), 20.0f, 0.0f)));
+    }
+    for (int i = 0; i < 6; ++i) {
+        sim.AdoptUnit(std::make_unique<CUnit>(
+            sim.AllocateHandleId(), footmanType, 1, War3ID("hfoo"),
+            100.0f, 200.0f, 90.0f));
+    }
+
+    // LifecycleCommit inside sim.Update() automatically syncs hot component pools
+    sim.Update();
+    TEST_ASSERT(sim.Registry().Pool<UnitHotTransformComponent>().Size() == 16);
+    TEST_ASSERT(sim.Registry().Pool<UnitHotVitalsComponent>().Size() == 16);
+
+    SimHotFleetMetrics p0Metrics = SimHotComponentSystem::ComputeFleetMetricsFromHotPools(sim.Registry(), 0);
+    TEST_ASSERT(p0Metrics.activeUnitCount == 10);
+    TEST_NEAR(p0Metrics.centroidX, 45.0f, 1e-2f);
+    TEST_NEAR(p0Metrics.centroidY, 20.0f, 1e-2f);
+    TEST_NEAR(p0Metrics.totalAliveLife, 4000.0f, 1e-2f);
+
+    // Mutate hot pools directly in contiguous memory and apply back to CUnits
+    auto* hotTf = sim.Registry().TryGet<UnitHotTransformComponent>(p0Units[0]->GetHandleId());
+    auto* hotVit = sim.Registry().TryGet<UnitHotVitalsComponent>(p0Units[0]->GetHandleId());
+    TEST_ASSERT(hotTf != nullptr && hotVit != nullptr);
+    hotTf->x = 777.0f;
+    hotTf->y = 888.0f;
+    hotVit->life = 250.0f;
+
+    SimHotComponentSystem::ApplyHotPoolsToUnits(sim);
+    TEST_NEAR(p0Units[0]->GetX(), 777.0f, 1e-3f);
+    TEST_NEAR(p0Units[0]->GetY(), 888.0f, 1e-3f);
+    TEST_NEAR(p0Units[0]->GetLife(), 250.0f, 1e-3f);
+
+    return true;
+}
+
+bool TestPhase7StageLSimStateSnapshotRollbackAndBinaryWire() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+    sim.GetPlayer(0)->SetGold(750);
+    sim.GetPlayer(0)->SetLumber(320);
+
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+
+    CUnit* u1 = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), 120.0f, 240.0f, 45.0f));
+    CUnit* u2 = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 1, War3ID("hfoo"), -300.0f, 150.0f, 180.0f));
+    const int u1Handle = u1->GetHandleId();
+    const int u2Handle = u2->GetHandleId();
+    u1->SetScale(1.75f);
+    sim.Update();
+
+    // Capture deterministic snapshot at Tick 1
+    const uint64_t expectedHash = sim.HashState();
+    SimStateSnapshot snap = SimStateSnapshot::Capture(sim);
+    TEST_ASSERT(snap.stateHash == expectedHash);
+    TEST_ASSERT(snap.units.size() == 2);
+
+    // Round-trip through binary wire serialization
+    std::vector<uint8_t> wireBytes = snap.SerializeBinary();
+    TEST_ASSERT(wireBytes.size() > 64);
+    SimStateSnapshot decodedSnap;
+    TEST_ASSERT(SimStateSnapshot::DeserializeBinary(wireBytes.data(), wireBytes.size(), decodedSnap));
+    TEST_ASSERT(decodedSnap.stateHash == expectedHash);
+    TEST_ASSERT(decodedSnap.units.size() == 2);
+
+    // Mutate simulation heavily: spend resources, move u1, remove u2, spawn u3, advance 5 ticks
+    sim.GetPlayer(0)->SetGold(100);
+    u1->SetPosition(999.0f, -999.0f);
+    u1->SetLife(sim, 50.0f);
+    sim.RemoveUnit(u2);
+    CUnit* u3 = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), 500.0f, 500.0f, 0.0f));
+    const int u3Handle = u3->GetHandleId();
+    for (int t = 0; t < 5; ++t) sim.Update();
+
+    TEST_ASSERT(sim.HashState() != expectedHash);
+    TEST_ASSERT(sim.GetUnit(u2Handle) == nullptr);
+    TEST_ASSERT(sim.GetUnit(u3Handle) != nullptr);
+
+    // Restore from decoded binary snapshot and verify 100% state & hash parity!
+    TEST_ASSERT(decodedSnap.Restore(sim));
+    TEST_ASSERT(sim.HashState() == expectedHash);
+    TEST_ASSERT(sim.GetPlayer(0)->GetGold() == 750);
+    TEST_ASSERT(sim.GetPlayer(0)->GetLumber() == 320);
+    TEST_ASSERT(sim.GetUnit(u3Handle) == nullptr);
+
+    CUnit* restoredU1 = sim.GetUnit(u1Handle);
+    CUnit* restoredU2 = sim.GetUnit(u2Handle);
+    TEST_ASSERT(restoredU1 != nullptr && restoredU2 != nullptr);
+    TEST_NEAR(restoredU1->GetX(), 120.0f, 1e-3f);
+    TEST_NEAR(restoredU1->GetLife(), 420.0f, 1e-3f);
+    TEST_NEAR(restoredU1->GetScale(), 1.75f, 1e-3f);
+    TEST_NEAR(restoredU2->GetX(), -300.0f, 1e-3f);
+
+    return true;
+}
+
+// ============================================================================
+// Stage M — Zero-Allocation PathQueryWorkspace, FlowFieldGrid & PathfindingServer
+// ============================================================================
+bool TestPhase7StageMZeroAllocPathQueryWorkspaceAndFlowField() {
+    WpmData wpm;
+    wpm.width = 64;
+    wpm.height = 64;
+    wpm.pathing.assign(64 * 64, 0x00); // All walkable
+
+    // Stamp a vertical obstacle wall at cellX = 32 from cellY = 10..50
+    for (int y = 10; y <= 50; ++y) {
+        wpm.pathing[static_cast<size_t>(y * 64 + 32)] = 0x02; // UNWALKABLE
+    }
+
+    CPathfindingProcessor proc;
+    proc.SetPathingMap(&wpm, -1024.0f, -1024.0f);
+
+    pathfinding::PathQueryWorkspace ws;
+    for (int i = 0; i < 25; ++i) {
+        pathfinding::PathRequest req;
+        req.requestId = i + 1;
+        req.startWorldX = -400.0f;
+        req.startWorldY = 0.0f;
+        req.goalWorldX = 400.0f;
+        req.goalWorldY = 0.0f;
+        req.collisionSize = 32.0f;
+        req.movementType = PathingGridMovementType::FOOT;
+
+        pathfinding::PathResult res;
+        TEST_ASSERT(ws.SolveAStar(proc, req, res));
+        TEST_ASSERT(res.found);
+        TEST_ASSERT(!res.waypoints.empty());
+    }
+
+    // Verify zero heap reallocations after the first query!
+    TEST_ASSERT(ws.GetTotalQueriesExecuted() == 25);
+    TEST_ASSERT(ws.GetBufferAllocationCount() == 1);
+
+    // Build FlowFieldGrid around (400, 0) and sample steering direction from (-400, 0)
+    pathfinding::FlowFieldGrid flow;
+    TEST_ASSERT(flow.Build(proc, 400.0f, 0.0f, 48, PathingGridMovementType::FOOT));
+    TEST_ASSERT(flow.GetReachableCellCount() > 1000);
+
+    float dirX = 0.0f, dirY = 0.0f;
+    TEST_ASSERT(flow.SampleDirectionWorld(proc, -400.0f, 0.0f, dirX, dirY));
+    const float len = std::sqrt(dirX * dirX + dirY * dirY);
+    TEST_NEAR(len, 1.0f, 1e-3f);
+
+    return true;
+}
+
+bool TestPhase7StageMParallelPathfindingServerBatchDeterminism() {
+    WpmData wpm;
+    wpm.width = 64;
+    wpm.height = 64;
+    wpm.pathing.assign(64 * 64, 0x00);
+    for (int y = 16; y <= 48; ++y) {
+        wpm.pathing[static_cast<size_t>(y * 64 + 30)] = 0x02;
+    }
+
+    CPathfindingProcessor proc;
+    proc.SetPathingMap(&wpm, -1024.0f, -1024.0f);
+
+    std::vector<pathfinding::PathRequest> batch;
+    for (int i = 0; i < 24; ++i) {
+        pathfinding::PathRequest req;
+        req.requestId = 100 + i;
+        req.unitHandle = 1000 + i;
+        req.startWorldX = -600.0f + (i % 6) * 32.0f;
+        req.startWorldY = -400.0f + (i / 6) * 64.0f;
+        req.goalWorldX = 500.0f;
+        req.goalWorldY = 200.0f;
+        req.collisionSize = 32.0f;
+        req.movementType = PathingGridMovementType::FOOT;
+        batch.push_back(req);
+    }
+
+    pathfinding::PathfindingServer serverSeq;
+    auto resSeq = serverSeq.SolveBatch(proc, batch, nullptr);
+    TEST_ASSERT(resSeq.size() == 24);
+
+    core::JobSystem jobs(4);
+    pathfinding::PathfindingServer serverPar;
+    auto resPar = serverPar.SolveBatch(proc, batch, &jobs, 4);
+    TEST_ASSERT(resPar.size() == 24);
+    TEST_ASSERT(serverPar.GetStats().parallelBatchesDispatched == 1);
+    TEST_ASSERT(serverPar.GetStats().totalPathsFound == 24);
+
+    // Verify 100% deterministic waypoint equality between sequential and parallel execution
+    for (size_t i = 0; i < 24; ++i) {
+        TEST_ASSERT(resSeq[i].found && resPar[i].found);
+        TEST_ASSERT(resSeq[i].requestId == resPar[i].requestId);
+        TEST_ASSERT(resSeq[i].waypoints == resPar[i].waypoints);
+    }
+
+    // Verify FlowField caching in PathfindingServer
+    const auto* ff1 = serverPar.GetOrBuildFlowField(proc, 500.0f, 200.0f, 32, PathingGridMovementType::FOOT);
+    const auto* ff2 = serverPar.GetOrBuildFlowField(proc, 500.0f, 200.0f, 32, PathingGridMovementType::FOOT);
+    TEST_ASSERT(ff1 != nullptr && ff1 == ff2);
+    TEST_ASSERT(serverPar.GetStats().flowFieldsBuilt == 1);
+    TEST_ASSERT(serverPar.GetStats().flowFieldCacheHits == 1);
+
+    jobs.Shutdown();
+    return true;
+}
+
+// ============================================================================
+// Stage N — Declarative RenderGraph, TerrainChunkGrid & ParticleRibbonBatcher
+// ============================================================================
+bool TestPhase7StageNTerrainChunkGridAndParticleRibbonBatcher() {
+    using namespace render;
+
+    // 1. Build a 65x65 tilepoints (64x64 tiles = 4x4 chunks of 16x16 tiles) W3EMap
+    W3EMap map;
+    map.tileWidth = 65;
+    map.tileHeight = 65;
+    map.offsetX = -4096.0f;
+    map.offsetY = -4096.0f;
+    map.tiles.resize(65 * 65);
+    for (auto& tp : map.tiles) {
+        tp.groundHeight = 0x2000;
+        tp.waterAndBoundary = 0x2000;
+        tp.cliffAndLayer = 2;
+    }
+
+    TerrainChunkGrid grid;
+    TEST_ASSERT(grid.BuildFromW3E(map, 16));
+    TEST_ASSERT(grid.GetChunkCount() == 16); // 4x4 chunks
+    TEST_ASSERT(grid.GetTotalTriangles() == 64 * 64 * 2);
+
+    // Camera looking tightly at the center/origin -> peripheral chunks are culled
+    Vec3 camEye(0.0f, 600.0f, 600.0f);
+    Mat4 view = LookAt(camEye, Vec3(0.0f, 0.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
+    Mat4 proj = Perspective(45.0f, 16.0f / 9.0f, 10.0f, 2500.0f);
+    Frustum frustum = Frustum::FromViewProj(proj * view);
+
+    std::vector<int> visibleChunks;
+    TerrainCullStats tStats = grid.CullChunks(frustum, visibleChunks);
+    TEST_ASSERT(tStats.totalChunks == 16);
+    TEST_ASSERT(tStats.visibleChunks > 0 && tStats.visibleChunks < 16);
+    TEST_ASSERT(tStats.culledChunks > 0);
+    TEST_ASSERT(tStats.visibleTriangles + tStats.culledTriangles == tStats.totalTriangles);
+
+    // 2. Test ParticleRibbonBatcher coalescing 6 emitter submissions into 2 batches
+    ParticleRibbonBatcher batcher;
+    batcher.BeginFrame();
+    for (int e = 0; e < 4; ++e) {
+        ParticleSubmission p;
+        p.textureId = (e % 2 == 0) ? 101u : 202u;
+        p.blendMode = RenderBlendMode::Additive;
+        p.worldPos = Vec3(static_cast<float>(e * 10), 0.0f, 0.0f);
+        batcher.SubmitEmitterParticles({p, p, p});
+    }
+    for (int r = 0; r < 2; ++r) {
+        RibbonSegmentSubmission seg0, seg1;
+        seg0.emitterInstanceId = static_cast<uint32_t>(r + 1);
+        seg0.textureId = 303u;
+        seg0.blendMode = RenderBlendMode::AlphaBlend;
+        seg1 = seg0;
+        batcher.SubmitRibbonChain({seg0, seg1});
+    }
+    batcher.BuildCoalescedBatches();
+
+    const ParticleRibbonBatchStats& bStats = batcher.GetStats();
+    TEST_ASSERT(bStats.emitterSubmissions == 6);
+    TEST_ASSERT(bStats.totalParticlesSubmitted == 12);
+    TEST_ASSERT(bStats.coalescedParticleBatches == 2); // Texture 101 and Texture 202
+    TEST_ASSERT(bStats.coalescedRibbonBatches == 1);   // Texture 303 coalesced across both strips!
+    TEST_ASSERT(bStats.totalCoalescedDrawCalls == 3);
+    TEST_ASSERT(bStats.drawCallsSaved == 3);
+
+    return true;
+}
+
+bool TestPhase7StageNMdxSharedMeshRegistryAndDeclarativeRenderGraph() {
+    using namespace render;
+
+    MdxModel dummyModel;
+    dummyModel.name = "FootmanShared";
+    dummyModel.boundsRadius = 48.0f;
+    MdxGeoset geo;
+    geo.vertices.resize(24 * 3, 0.0f);
+    geo.indices.resize(36, 0);
+    dummyModel.geosets.push_back(geo);
+
+    MdxSharedMeshRegistry meshReg;
+    resource::RID rid1 = meshReg.RegisterSharedMesh("units\\human\\footman\\footman.mdx", dummyModel);
+    resource::RID rid2 = meshReg.RegisterSharedMesh("units\\human\\footman\\footman.mdx", dummyModel);
+    TEST_ASSERT(rid1.IsValid() && rid1 == rid2);
+    TEST_ASSERT(meshReg.SharedMeshCount() == 1);
+
+    const MdxSharedMeshAsset* asset = meshReg.GetSharedMesh(rid1);
+    TEST_ASSERT(asset != nullptr);
+    TEST_ASSERT(asset->totalVertices == 24);
+    TEST_ASSERT(asset->totalTriangles == 12);
+
+    // Spawn 10 lightweight instances referencing the single shared mesh RID
+    for (int i = 0; i < 10; ++i) {
+        int instId = meshReg.CreateInstance(rid1, Mat4::Translate(static_cast<float>(i * 15 - 60), 0.0f, 0.0f), 0);
+        TEST_ASSERT(instId > 0);
+    }
+    TEST_ASSERT(meshReg.ActiveInstanceCount() == 10);
+
+    Vec3 camEye(0.0f, 700.0f, 700.0f);
+    Mat4 view = LookAt(camEye, Vec3(0.0f, 0.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
+    Mat4 proj = Perspective(55.0f, 16.0f / 9.0f, 10.0f, 4000.0f);
+
+    RenderServer renderServer;
+    renderServer.BeginFrame(view, proj, camEye);
+    TEST_ASSERT(meshReg.SubmitInstancesToRenderServer(renderServer) == 10);
+    renderServer.BuildAndSortBatches();
+
+    RenderGraph graph;
+    RenderGraphContext ctx;
+    ctx.view = view;
+    ctx.proj = proj;
+    ctx.cameraEye = camEye;
+    ctx.renderServer = &renderServer;
+    ctx.hasActivePortraitModel = true;
+    ctx.uiOverlayCommandCount = 5;
+
+    graph.ExecuteFrame(ctx);
+    TEST_ASSERT(graph.GetExecutedPassCount() == 7);
+    TEST_ASSERT(graph.GetTotalFrameDrawCalls() > 0);
+
+    const auto* opaquePass = graph.GetPassMetrics(RenderGraphPassId::OpaqueInstancedPass);
+    TEST_ASSERT(opaquePass != nullptr && opaquePass->executed);
+    TEST_ASSERT(opaquePass->itemsProcessed == 10);
+    TEST_ASSERT(opaquePass->drawCallsSubmitted == 1);
+
+    return true;
+}
+
+// ============================================================================
+// Stage O — WorldSceneSession Hot Map Switching & UIDataBinder MVVM Sync
+// ============================================================================
+bool TestPhase7StageOWorldSceneSessionHotMapSwitchAndHeroCarry() {
+    const std::string map1 = "resources/Maps/FrozenThrone/(2)EchoIsles.w3x";
+    const std::string map2 = "resources/Maps/FrozenThrone/(4)TurtleRock.w3x";
+
+    FILE* f1 = std::fopen(map1.c_str(), "rb");
+    FILE* f2 = std::fopen(map2.c_str(), "rb");
+    if (!f1 || !f2) {
+        if (f1) std::fclose(f1);
+        if (f2) std::fclose(f2);
+        return true;
+    }
+    std::fclose(f1);
+    std::fclose(f2);
+
+    MpqManager mpq;
+    CSimulation sim;
+    SceneManager scene;
+    UnitPresentationSystem presentation;
+    core::WorldSceneSession session;
+
+    TEST_ASSERT(session.LoadMap(mpq, sim, scene, presentation, map1));
+    TEST_ASSERT(session.GetStats().mapsLoaded == 1);
+    TEST_ASSERT(session.GetStats().terrainChunksBuilt > 0);
+    TEST_ASSERT(session.GetStats().placedDoodadsRegistered > 0);
+
+    // Spawn a human hero on Player 0 before hot-switching to map2
+    CUnitType* paladinType = MakePhase5UnitType(War3ID("Hpal"), 900, 270, false);
+    CUnit* paladin = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), paladinType, 0, War3ID("Hpal"), 0.0f, 0.0f, 0.0f));
+    paladin->SetHeroLevel(5);
+    sim.Update();
+
+    presentation.unitToVisualIdx[paladin->GetHandleId()] = 12;
+
+    // Hot-switch from EchoIsles to TurtleRock with carryHumanHeroes = true
+    TEST_ASSERT(session.HotSwitchMap(mpq, sim, scene, presentation, map2, true));
+    TEST_ASSERT(session.GetStats().hotSwitchesPerformed == 1);
+    TEST_ASSERT(session.GetStats().mapsLoaded == 2);
+    TEST_ASSERT(session.GetCurrentMapPath() == map2);
+    TEST_ASSERT(presentation.TrackedUnitCount() == 0); // old visual handles purged!
+
+    return true;
+}
+
+bool TestPhase7StageOUIDataBinderReactiveDirtyOnlySync() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.GetPlayer(0)->SetGold(500);
+    sim.GetPlayer(0)->SetLumber(150);
+    sim.GetPlayer(0)->SetFoodUsed(12);
+    sim.GetPlayer(0)->SetFoodCap(20);
+
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+    CUnit* u1 = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+    u1->SetLife(sim, 380.0f);
+    sim.Update();
+    sim.GetPlayer(0)->SetFoodUsed(12);
+    sim.GetPlayer(0)->SetFoodCap(20);
+
+    GameUI gui;
+    gui.screenW = 1280;
+    gui.screenH = 720;
+    SimpleFrame root("Root");
+    root.SetSize(1280.0f, 720.0f);
+    gui.rootFrame = &root;
+
+    TextFrame goldTxt("GoldTxt", &root);
+    TextFrame lumberTxt("LumberTxt", &root);
+    TextFrame foodTxt("FoodTxt", &root);
+    TextFrame upkeepTxt("UpkeepTxt", &root);
+    TextFrame nameTxt("NameTxt", &root);
+    TextFrame hpTxt("HpTxt", &root);
+    TextFrame manaTxt("ManaTxt", &root);
+
+    root.PositionBounds(gui);
+
+    ui::UIDataBinder binder;
+    binder.BindResourceFrames(&goldTxt, &lumberTxt, &foodTxt, &upkeepTxt);
+    binder.BindSelectionFrames(&nameTxt, &hpTxt, &manaTxt);
+
+    // 1. First sync populates all bound TextFrames and triggers 1 layout pass
+    TEST_ASSERT(binder.SyncAndRelayoutIfChanged(sim, 0, u1->GetHandleId(), gui));
+    TEST_ASSERT(goldTxt.GetText() == "500");
+    TEST_ASSERT(lumberTxt.GetText() == "150");
+    TEST_ASSERT(foodTxt.GetText() == "12/20");
+    TEST_ASSERT(hpTxt.GetText() == "380 / 420");
+    TEST_ASSERT(binder.GetStats().layoutPassesTriggered == 1);
+
+    // 2. Subsequent sync with zero simulation changes performs 0 mutations and 0 layout passes!
+    TEST_ASSERT(!binder.SyncAndRelayoutIfChanged(sim, 0, u1->GetHandleId(), gui));
+    TEST_ASSERT(binder.GetStats().layoutPassesTriggered == 1);
+    TEST_ASSERT(binder.GetStats().skippedRedundantFieldChecks >= 7);
+
+    // 3. Mutate only Gold -> only goldTxt updates
+    sim.GetPlayer(0)->SetGold(625);
+    const uint64_t prevDirtyUpdates = binder.GetStats().dirtyFieldUpdates;
+    TEST_ASSERT(binder.SyncAndRelayoutIfChanged(sim, 0, u1->GetHandleId(), gui));
+    TEST_ASSERT(goldTxt.GetText() == "625");
+    TEST_ASSERT(binder.GetStats().dirtyFieldUpdates == prevDirtyUpdates + 1);
+    TEST_ASSERT(binder.GetStats().layoutPassesTriggered == 2);
+
     return true;
 }

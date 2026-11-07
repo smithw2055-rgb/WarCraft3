@@ -145,6 +145,7 @@ set(SOURCES
     src/platform/platform.cpp
     src/render/renderer.cpp
     src/render/render_server.cpp
+    src/render/render_graph.cpp
     src/render/shader.cpp
     src/render/camera.cpp
     src/render/terrain.cpp
@@ -227,6 +228,7 @@ set(SOURCES
     src/ecs/destructable.cpp
     src/ecs/item.cpp
     src/ecs/csimulation.cpp
+    src/ecs/sim_snapshot.cpp
     src/ecs/hero_carry.cpp
     src/ecs/lockstep.cpp
     src/net/tcp_transport.cpp
@@ -311,6 +313,7 @@ set(SOURCES
     src/ecs/behaviors/behavior_item.cpp
     src/ecs/pathing/world_collision.cpp
     src/ecs/pathing/pathfinding.cpp
+    src/ecs/pathing/pathfinding_server.cpp
     src/ecs/combat/combat_system.cpp
     src/ecs/combat/projectile.cpp
     # ===== Scripting =====
@@ -355,8 +358,10 @@ set(SOURCES
     src/ui/FrameBuilder.cpp
     src/ui/MultiSelectionPanel.cpp
     src/ui/BuffBar.cpp
+    src/ui/ui_data_binder.cpp
     # ===== Core / State Machine =====
     src/core/game_controller.cpp
+    src/core/world_scene_session.cpp
     src/core/world_presentation_bridge.cpp
     src/core/input_selection_controller.cpp
     src/core/game_bootstrap_diagnostics.cpp

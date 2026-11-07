@@ -783,6 +783,18 @@ bool TestPhase6StageHStaticSpatialChunkHierarchyCulling();
 bool TestPhase6StageHSceneManagerDoodadChunkAcceleration();
 bool TestPhase6StageIAudioServerBusHierarchyAnd3DSpatialization();
 bool TestPhase6StageIAudioPolyphonyVoiceStealingAndSimEvents();
+bool TestPhase7StageJMpqMultiStageDecompressionAndAudioClip();
+bool TestPhase7StageJRetailDriveMapMpqAndAudioVerification();
+bool TestPhase7StageKBytecodeLocalArraysAndConstantFolding();
+bool TestPhase7StageKBytecodeResumableCoroutineTriggerSleep();
+bool TestPhase7StageLHotComponentPoolsAndFleetTelemetry();
+bool TestPhase7StageLSimStateSnapshotRollbackAndBinaryWire();
+bool TestPhase7StageMZeroAllocPathQueryWorkspaceAndFlowField();
+bool TestPhase7StageMParallelPathfindingServerBatchDeterminism();
+bool TestPhase7StageNTerrainChunkGridAndParticleRibbonBatcher();
+bool TestPhase7StageNMdxSharedMeshRegistryAndDeclarativeRenderGraph();
+bool TestPhase7StageOWorldSceneSessionHotMapSwitchAndHeroCarry();
+bool TestPhase7StageOUIDataBinderReactiveDirtyOnlySync();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1561,6 +1573,18 @@ int main(int argc, char** argv) {
         {"Phase6 Stage H2 SceneManager doodad chunk acceleration and visibility sync", TestPhase6StageHSceneManagerDoodadChunkAcceleration},
         {"Phase6 Stage I1 AudioServer bus hierarchy ducking and 3D spatialization", TestPhase6StageIAudioServerBusHierarchyAnd3DSpatialization},
         {"Phase6 Stage I2 AudioServer polyphony voice stealing and SimEventBus bridge", TestPhase6StageIAudioPolyphonyVoiceStealingAndSimEvents},
+        {"Phase7 Stage J1 MPQ multi-stage audio decompression and AudioClipResource", TestPhase7StageJMpqMultiStageDecompressionAndAudioClip},
+        {"Phase7 Stage J2 Retail Drive W3X map MPQ and WAV verification", TestPhase7StageJRetailDriveMapMpqAndAudioVerification},
+        {"Phase7 Stage K1 JASS bytecode local arrays and constant folding", TestPhase7StageKBytecodeLocalArraysAndConstantFolding},
+        {"Phase7 Stage K2 JASS bytecode resumable coroutine TriggerSleepAction", TestPhase7StageKBytecodeResumableCoroutineTriggerSleep},
+        {"Phase7 Stage L1 ECS hot component pools and fleet telemetry", TestPhase7StageLHotComponentPoolsAndFleetTelemetry},
+        {"Phase7 Stage L2 SimStateSnapshot deterministic rollback and binary wire", TestPhase7StageLSimStateSnapshotRollbackAndBinaryWire},
+        {"Phase7 Stage M1 Zero-allocation PathQueryWorkspace and FlowFieldGrid", TestPhase7StageMZeroAllocPathQueryWorkspaceAndFlowField},
+        {"Phase7 Stage M2 Parallel PathfindingServer batch determinism", TestPhase7StageMParallelPathfindingServerBatchDeterminism},
+        {"Phase7 Stage N1 TerrainChunkGrid culling and ParticleRibbonBatcher", TestPhase7StageNTerrainChunkGridAndParticleRibbonBatcher},
+        {"Phase7 Stage N2 MdxSharedMeshRegistry and declarative RenderGraph", TestPhase7StageNMdxSharedMeshRegistryAndDeclarativeRenderGraph},
+        {"Phase7 Stage O1 WorldSceneSession hot map switch and hero carry", TestPhase7StageOWorldSceneSessionHotMapSwitchAndHeroCarry},
+        {"Phase7 Stage O2 UIDataBinder reactive dirty-only HUD sync", TestPhase7StageOUIDataBinderReactiveDirtyOnlySync},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

@@ -22,7 +22,12 @@
 
 class AudioSystem;
 
+class SimStateSnapshot;
+class SimHotComponentSystem;
+
 class CSimulation {
+    friend class SimStateSnapshot;
+    friend class SimHotComponentSystem;
 public:
     static constexpr int ITEM_EVENT_DROP = 85;
     static constexpr int ITEM_EVENT_PICKUP = 86;

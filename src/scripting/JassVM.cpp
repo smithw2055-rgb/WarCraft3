@@ -492,11 +492,23 @@ JassVM::ThreadRunResult JassVM::RunThread(ThreadState& state, const std::string&
     if (!state.started) {
         state.functionName = functionName;
         state.started = true;
+        if (bytecodeEnabled_ && thistypeStack_.empty() && CanRunBytecodeCoroutine(functionName)) {
+            state.useBytecodeCoroutine = true;
+            if (!PushBytecodeCoroutineFrame(state, functionName)) {
+                state.completed = true;
+                result.completed = true;
+                return result;
+            }
+            ++bytecodeCoroutineRunsCount_;
+            return StepBytecodeCoroutine(state);
+        }
         if (!PushThreadFrame(state, functionName)) {
             state.completed = true;
             result.completed = true;
             return result;
         }
+    } else if (state.useBytecodeCoroutine) {
+        return StepBytecodeCoroutine(state);
     }
 
     while (!state.frames.empty()) {
@@ -1360,6 +1372,370 @@ const JassBytecodeChunk* JassVM::GetCompiledBytecode(const std::string& funcName
     return (it != compiledFunctions_.end()) ? it->second.get() : nullptr;
 }
 
+uint64_t JassVM::GetTotalConstantFoldedCount() const {
+    uint64_t total = 0;
+    for (const auto& [name, chunk] : compiledFunctions_) {
+        (void)name;
+        if (chunk) total += chunk->constantFoldedCount;
+    }
+    return total;
+}
+
+bool JassVM::CanRunBytecodeCoroutine(const std::string& functionName) const {
+    std::unordered_set<std::string> visited;
+    std::vector<std::string> stack = {functionName};
+    while (!stack.empty()) {
+        std::string cur = std::move(stack.back());
+        stack.pop_back();
+        if (!visited.insert(cur).second) continue;
+
+        auto fit = functions_.find(cur);
+        if (fit == functions_.end()) return false;
+        auto bit = compiledFunctions_.find(cur);
+        if (bit == compiledFunctions_.end() || !bit->second) return false;
+        // If a function was hooked (fit->second->text != cur), verify the chunk matches
+        const JassBytecodeChunk& chunk = *bit->second;
+        for (const auto& ins : chunk.code) {
+            if (ins.op == JassOpCode::OP_CALL && ins.strIndex < chunk.stringPool.size()) {
+                const std::string& callee = chunk.stringPool[ins.strIndex];
+                if (natives_.find(callee) != natives_.end()) continue;
+                if (functions_.find(callee) != functions_.end()) {
+                    if (compiledFunctions_.find(callee) == compiledFunctions_.end()) {
+                        return false;
+                    }
+                    stack.push_back(callee);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+bool JassVM::PushBytecodeCoroutineFrame(ThreadState& state,
+                                        const std::string& functionName,
+                                        const std::vector<JassValue>& args) {
+    auto bit = compiledFunctions_.find(functionName);
+    if (bit == compiledFunctions_.end() || !bit->second) return false;
+    const JassBytecodeChunk& chunk = *bit->second;
+
+    BytecodeCoroutineFrame frame;
+    frame.chunk = &chunk;
+    frame.ip = 0;
+    frame.localSlots = chunk.localDefaults;
+    if ((int)frame.localSlots.size() < chunk.numLocalSlots) {
+        frame.localSlots.resize((size_t)chunk.numLocalSlots, JassValue::Null());
+    }
+    for (size_t i = 0; i < (size_t)chunk.numParams && i < args.size() && i < frame.localSlots.size(); ++i) {
+        frame.localSlots[i] = args[i];
+    }
+    frame.localArrays.resize((size_t)chunk.numLocalArraySlots);
+    frame.evalStack.reserve(16);
+    state.bcFrames.push_back(std::move(frame));
+    return true;
+}
+
+JassVM::ThreadRunResult JassVM::StepBytecodeCoroutine(ThreadState& state) {
+    ThreadRunResult result;
+    while (!state.bcFrames.empty()) {
+        BytecodeCoroutineFrame& frame = state.bcFrames.back();
+        const JassBytecodeChunk& chunk = *frame.chunk;
+        const auto& code = chunk.code;
+        if (frame.ip >= code.size()) {
+            state.bcFrames.pop_back();
+            if (!state.bcFrames.empty()) {
+                state.bcFrames.back().evalStack.push_back(JassValue::Null());
+            }
+            continue;
+        }
+
+        const JassInstruction& ins = code[frame.ip++];
+        auto& stack = frame.evalStack;
+
+        switch (ins.op) {
+            case JassOpCode::OP_CONST_INT:
+                stack.push_back(JassValue::Int(ins.intOperand));
+                break;
+            case JassOpCode::OP_CONST_REAL:
+                stack.push_back(JassValue::Real(ins.realOperand));
+                break;
+            case JassOpCode::OP_CONST_BOOL:
+                stack.push_back(JassValue::Bool(ins.intOperand != 0));
+                break;
+            case JassOpCode::OP_CONST_STR:
+                stack.push_back(JassValue::Str(chunk.stringPool[ins.strIndex]));
+                break;
+            case JassOpCode::OP_CONST_NULL:
+                stack.push_back(JassValue::Null());
+                break;
+
+            case JassOpCode::OP_GET_LOCAL_SLOT:
+                stack.push_back(frame.localSlots[(size_t)ins.intOperand]);
+                break;
+            case JassOpCode::OP_SET_LOCAL_SLOT: {
+                JassValue val = stack.empty() ? JassValue::Null() : std::move(stack.back());
+                if (!stack.empty()) stack.pop_back();
+                frame.localSlots[(size_t)ins.intOperand] = std::move(val);
+                break;
+            }
+
+            case JassOpCode::OP_GET_LOCAL_ARRAY_SLOT: {
+                int idx = 0;
+                if (!stack.empty()) {
+                    idx = stack.back().intVal;
+                    stack.pop_back();
+                }
+                const size_t arrSlot = (size_t)ins.intOperand;
+                if (arrSlot < frame.localArrays.size()) {
+                    auto it = frame.localArrays[arrSlot].find(idx);
+                    if (it != frame.localArrays[arrSlot].end()) {
+                        stack.push_back(it->second);
+                    } else if (arrSlot < chunk.localArrayDefaults.size()) {
+                        stack.push_back(chunk.localArrayDefaults[arrSlot]);
+                    } else {
+                        stack.push_back(JassValue::Null());
+                    }
+                } else {
+                    stack.push_back(JassValue::Null());
+                }
+                break;
+            }
+            case JassOpCode::OP_SET_LOCAL_ARRAY_SLOT: {
+                JassValue val = stack.empty() ? JassValue::Null() : std::move(stack.back());
+                if (!stack.empty()) stack.pop_back();
+                int idx = 0;
+                if (!stack.empty()) {
+                    idx = stack.back().intVal;
+                    stack.pop_back();
+                }
+                const size_t arrSlot = (size_t)ins.intOperand;
+                if (arrSlot < frame.localArrays.size()) {
+                    frame.localArrays[arrSlot][idx] = std::move(val);
+                }
+                break;
+            }
+
+            case JassOpCode::OP_GET_GLOBAL: {
+                const std::string& name = chunk.stringPool[ins.strIndex];
+                auto it = globals_.find(name);
+                stack.push_back(it != globals_.end() ? it->second : JassValue::Null());
+                break;
+            }
+            case JassOpCode::OP_SET_GLOBAL: {
+                JassValue val = stack.empty() ? JassValue::Null() : std::move(stack.back());
+                if (!stack.empty()) stack.pop_back();
+                const std::string& name = chunk.stringPool[ins.strIndex];
+                globals_[name] = std::move(val);
+                break;
+            }
+
+            case JassOpCode::OP_GET_GLOBAL_ARRAY: {
+                int idx = 0;
+                if (!stack.empty()) {
+                    idx = stack.back().intVal;
+                    stack.pop_back();
+                }
+                const std::string key = chunk.stringPool[ins.strIndex] + "[" + std::to_string(idx) + "]";
+                auto it = globals_.find(key);
+                stack.push_back(it != globals_.end() ? it->second : JassValue::Null());
+                break;
+            }
+            case JassOpCode::OP_SET_GLOBAL_ARRAY: {
+                JassValue val = stack.empty() ? JassValue::Null() : std::move(stack.back());
+                if (!stack.empty()) stack.pop_back();
+                int idx = 0;
+                if (!stack.empty()) {
+                    idx = stack.back().intVal;
+                    stack.pop_back();
+                }
+                const std::string key = chunk.stringPool[ins.strIndex] + "[" + std::to_string(idx) + "]";
+                globals_[key] = std::move(val);
+                break;
+            }
+
+            case JassOpCode::OP_NEG: {
+                if (stack.empty()) break;
+                JassValue& v = stack.back();
+                if (v.type == JassValue::REAL) v = JassValue::Real(-v.realVal);
+                else v = JassValue::Int(-v.intVal);
+                break;
+            }
+            case JassOpCode::OP_NOT: {
+                if (stack.empty()) break;
+                JassValue& v = stack.back();
+                v = JassValue::Bool(!v.boolVal);
+                break;
+            }
+
+            case JassOpCode::OP_ADD:
+            case JassOpCode::OP_SUB:
+            case JassOpCode::OP_MUL:
+            case JassOpCode::OP_DIV:
+            case JassOpCode::OP_EQ:
+            case JassOpCode::OP_NEQ:
+            case JassOpCode::OP_LT:
+            case JassOpCode::OP_GT:
+            case JassOpCode::OP_LE:
+            case JassOpCode::OP_GE: {
+                if (stack.size() < 2) break;
+                JassValue right = std::move(stack.back()); stack.pop_back();
+                JassValue left = std::move(stack.back()); stack.pop_back();
+                const bool useReal = (left.type == JassValue::REAL || right.type == JassValue::REAL);
+                switch (ins.op) {
+                    case JassOpCode::OP_ADD:
+                        if (left.type == JassValue::STRING || right.type == JassValue::STRING)
+                            stack.push_back(JassValue::Str(left.strVal + right.strVal));
+                        else if (useReal)
+                            stack.push_back(JassValue::Real(left.realVal + right.realVal));
+                        else
+                            stack.push_back(JassValue::Int(left.intVal + right.intVal));
+                        break;
+                    case JassOpCode::OP_SUB:
+                        stack.push_back(useReal ? JassValue::Real(left.realVal - right.realVal)
+                                                : JassValue::Int(left.intVal - right.intVal));
+                        break;
+                    case JassOpCode::OP_MUL:
+                        stack.push_back(useReal ? JassValue::Real(left.realVal * right.realVal)
+                                                : JassValue::Int(left.intVal * right.intVal));
+                        break;
+                    case JassOpCode::OP_DIV:
+                        if (useReal) {
+                            stack.push_back(JassValue::Real(right.realVal == 0.0f ? 0.0f : left.realVal / right.realVal));
+                        } else {
+                            stack.push_back(JassValue::Int(right.intVal == 0 ? 0 : left.intVal / right.intVal));
+                        }
+                        break;
+                    case JassOpCode::OP_EQ:
+                        if (useReal) stack.push_back(JassValue::Bool(left.realVal == right.realVal));
+                        else if (left.type == JassValue::STRING && right.type == JassValue::STRING)
+                            stack.push_back(JassValue::Bool(left.strVal == right.strVal));
+                        else stack.push_back(JassValue::Bool(left.intVal == right.intVal));
+                        break;
+                    case JassOpCode::OP_NEQ:
+                        if (useReal) stack.push_back(JassValue::Bool(left.realVal != right.realVal));
+                        else if (left.type == JassValue::STRING && right.type == JassValue::STRING)
+                            stack.push_back(JassValue::Bool(left.strVal != right.strVal));
+                        else stack.push_back(JassValue::Bool(left.intVal != right.intVal));
+                        break;
+                    case JassOpCode::OP_LT:
+                        stack.push_back(JassValue::Bool(useReal ? (left.realVal < right.realVal) : (left.intVal < right.intVal)));
+                        break;
+                    case JassOpCode::OP_GT:
+                        stack.push_back(JassValue::Bool(useReal ? (left.realVal > right.realVal) : (left.intVal > right.intVal)));
+                        break;
+                    case JassOpCode::OP_LE:
+                        stack.push_back(JassValue::Bool(useReal ? (left.realVal <= right.realVal) : (left.intVal <= right.intVal)));
+                        break;
+                    case JassOpCode::OP_GE:
+                        stack.push_back(JassValue::Bool(useReal ? (left.realVal >= right.realVal) : (left.intVal >= right.intVal)));
+                        break;
+                    default:
+                        break;
+                }
+                break;
+            }
+
+            case JassOpCode::OP_JMP:
+                if (ins.intOperand < (int32_t)frame.ip && --frame.loopGuard <= 0) {
+                    state.bcFrames.pop_back();
+                    if (!state.bcFrames.empty()) {
+                        state.bcFrames.back().evalStack.push_back(JassValue::Null());
+                    }
+                    break;
+                }
+                frame.ip = (size_t)ins.intOperand;
+                break;
+
+            case JassOpCode::OP_JMP_IF_FALSE: {
+                bool cond = false;
+                if (!stack.empty()) {
+                    cond = JassValueToBool(stack.back());
+                    stack.pop_back();
+                }
+                if (!cond) {
+                    frame.ip = (size_t)ins.intOperand;
+                }
+                break;
+            }
+
+            case JassOpCode::OP_JMP_IF_TRUE: {
+                bool cond = false;
+                if (!stack.empty()) {
+                    cond = JassValueToBool(stack.back());
+                    stack.pop_back();
+                }
+                if (cond) {
+                    frame.ip = (size_t)ins.intOperand;
+                }
+                break;
+            }
+
+            case JassOpCode::OP_CALL: {
+                const int argCount = ins.intOperand;
+                std::vector<JassValue> callArgs((size_t)argCount);
+                for (int i = argCount - 1; i >= 0; --i) {
+                    if (!stack.empty()) {
+                        callArgs[(size_t)i] = std::move(stack.back());
+                        stack.pop_back();
+                    }
+                }
+                const std::string& calleeName = chunk.stringPool[ins.strIndex];
+                auto natIt = natives_.find(calleeName);
+                if (natIt != natives_.end()) {
+                    JassValue ret = natIt->second(callArgs);
+                    stack.push_back(std::move(ret));
+                    if (sleepRequested_) {
+                        result.sleeping = true;
+                        result.sleepSeconds = sleepSeconds_;
+                        sleepRequested_ = false;
+                        sleepSeconds_ = 0.0f;
+                        ++bytecodeCoroutineYieldsCount_;
+                        return result;
+                    }
+                } else if (compiledFunctions_.find(calleeName) != compiledFunctions_.end()) {
+                    ++bytecodeExecutedCount_;
+                    PushBytecodeCoroutineFrame(state, calleeName, callArgs);
+                } else {
+                    auto fIt = functions_.find(calleeName);
+                    if (fIt != functions_.end()) {
+                        JassValue ret = ExecuteFunction(fIt->second, callArgs);
+                        stack.push_back(std::move(ret));
+                    } else {
+                        errors_.push_back("Unknown function: " + calleeName);
+                        stack.push_back(JassValue::Null());
+                    }
+                }
+                break;
+            }
+
+            case JassOpCode::OP_POP:
+                if (!stack.empty()) stack.pop_back();
+                break;
+
+            case JassOpCode::OP_RETURN: {
+                state.bcFrames.pop_back();
+                if (!state.bcFrames.empty()) {
+                    state.bcFrames.back().evalStack.push_back(JassValue::Null());
+                }
+                break;
+            }
+
+            case JassOpCode::OP_RETURN_VAL: {
+                JassValue ret = stack.empty() ? JassValue::Null() : std::move(stack.back());
+                if (!stack.empty()) stack.pop_back();
+                state.bcFrames.pop_back();
+                if (!state.bcFrames.empty()) {
+                    state.bcFrames.back().evalStack.push_back(std::move(ret));
+                }
+                break;
+            }
+        }
+    }
+
+    state.completed = true;
+    result.completed = true;
+    return result;
+}
+
 JassValue JassVM::ExecuteBytecode(const JassBytecodeChunk& chunk, const std::vector<JassValue>& args) {
     ++bytecodeExecutedCount_;
 
@@ -1370,6 +1746,7 @@ JassValue JassVM::ExecuteBytecode(const JassBytecodeChunk& chunk, const std::vec
     for (size_t i = 0; i < (size_t)chunk.numParams && i < args.size() && i < localSlots.size(); ++i) {
         localSlots[i] = args[i];
     }
+    std::vector<std::unordered_map<int, JassValue>> localArrays((size_t)chunk.numLocalArraySlots);
 
     std::vector<JassValue> stack;
     stack.reserve(32);
@@ -1405,6 +1782,42 @@ JassValue JassVM::ExecuteBytecode(const JassBytecodeChunk& chunk, const std::vec
                 JassValue val = stack.empty() ? JassValue::Null() : std::move(stack.back());
                 if (!stack.empty()) stack.pop_back();
                 localSlots[(size_t)ins.intOperand] = std::move(val);
+                break;
+            }
+
+            case JassOpCode::OP_GET_LOCAL_ARRAY_SLOT: {
+                int idx = 0;
+                if (!stack.empty()) {
+                    idx = stack.back().intVal;
+                    stack.pop_back();
+                }
+                const size_t arrSlot = (size_t)ins.intOperand;
+                if (arrSlot < localArrays.size()) {
+                    auto it = localArrays[arrSlot].find(idx);
+                    if (it != localArrays[arrSlot].end()) {
+                        stack.push_back(it->second);
+                    } else if (arrSlot < chunk.localArrayDefaults.size()) {
+                        stack.push_back(chunk.localArrayDefaults[arrSlot]);
+                    } else {
+                        stack.push_back(JassValue::Null());
+                    }
+                } else {
+                    stack.push_back(JassValue::Null());
+                }
+                break;
+            }
+            case JassOpCode::OP_SET_LOCAL_ARRAY_SLOT: {
+                JassValue val = stack.empty() ? JassValue::Null() : std::move(stack.back());
+                if (!stack.empty()) stack.pop_back();
+                int idx = 0;
+                if (!stack.empty()) {
+                    idx = stack.back().intVal;
+                    stack.pop_back();
+                }
+                const size_t arrSlot = (size_t)ins.intOperand;
+                if (arrSlot < localArrays.size()) {
+                    localArrays[arrSlot][idx] = std::move(val);
+                }
                 break;
             }
 

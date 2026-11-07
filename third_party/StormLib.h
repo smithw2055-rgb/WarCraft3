@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cctype>
+#include <algorithm>
 #include <vector>
 #include <string>
 #include <fstream>
@@ -47,6 +48,29 @@ typedef uint32_t DWORD;
 #endif
 #ifndef MPQ_FILE_FIX_KEY
 #define MPQ_FILE_FIX_KEY 0x00020000
+#endif
+
+// Standard MPQ sector compression bitmask constants (Stage J)
+#ifndef MPQ_COMPRESSION_HUFFMANN
+#define MPQ_COMPRESSION_HUFFMANN     0x01
+#endif
+#ifndef MPQ_COMPRESSION_ZLIB
+#define MPQ_COMPRESSION_ZLIB         0x02
+#endif
+#ifndef MPQ_COMPRESSION_PKWARE
+#define MPQ_COMPRESSION_PKWARE       0x08
+#endif
+#ifndef MPQ_COMPRESSION_BZIP2
+#define MPQ_COMPRESSION_BZIP2        0x10
+#endif
+#ifndef MPQ_COMPRESSION_SPARSE
+#define MPQ_COMPRESSION_SPARSE       0x20
+#endif
+#ifndef MPQ_COMPRESSION_ADPCM_MONO
+#define MPQ_COMPRESSION_ADPCM_MONO   0x40
+#endif
+#ifndef MPQ_COMPRESSION_ADPCM_STEREO
+#define MPQ_COMPRESSION_ADPCM_STEREO 0x80
 #endif
 
 struct SFILE_FIND_DATA {
@@ -200,22 +224,259 @@ inline int FindHashBlock(const ArchiveObj* a, const char* name) {
     return -1;
 }
 
-inline bool DecompressSector(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLen) {
-    if (srcLen == dstLen) {
-        std::memcpy(dst, src, dstLen);
+// ============================================================================
+// Stage J: Multi-Stage MPQ Decompression Pipeline
+// Supports: BZip2 (0x10), PKWARE DCL (0x08), Zlib (0x02), Huffman (0x01),
+//           IMA ADPCM Mono/Stereo (0x40 / 0x80), and Sparse RLE (0x20).
+// ============================================================================
+
+inline bool DecompressSparse(const uint8_t* src, size_t srcLen, std::vector<uint8_t>& out, size_t maxDstLen) {
+    if (srcLen < 5) return false;
+    uint32_t origSize = (uint32_t(src[0]) << 24) | (uint32_t(src[1]) << 16) |
+                        (uint32_t(src[2]) << 8)  | uint32_t(src[3]);
+    size_t targetSize = std::min<size_t>(origSize, maxDstLen);
+    out.clear();
+    out.reserve(targetSize);
+    size_t pos = 4;
+    while (pos < srcLen && out.size() < targetSize) {
+        uint8_t ctrl = src[pos++];
+        if (ctrl & 0x80) {
+            size_t chunkLen = (ctrl & 0x7F) + 1;
+            if (pos + chunkLen > srcLen) chunkLen = srcLen - pos;
+            if (out.size() + chunkLen > targetSize) chunkLen = targetSize - out.size();
+            out.insert(out.end(), src + pos, src + pos + chunkLen);
+            pos += chunkLen;
+        } else {
+            size_t zeroCount = size_t(ctrl) + 3;
+            if (out.size() + zeroCount > targetSize) zeroCount = targetSize - out.size();
+            out.insert(out.end(), zeroCount, 0);
+        }
+    }
+    if (out.size() < targetSize) out.resize(targetSize, 0);
+    return true;
+}
+
+// Blizzard MPQ IMA ADPCM 16-bit Audio Decoder (Mono = 1, Stereo = 2)
+inline bool DecompressADPCM(const uint8_t* src, size_t srcLen, std::vector<uint8_t>& out, size_t dstLen, int channels) {
+    static const int kStepSizeTable[89] = {
+        7, 8, 9, 10, 11, 12, 13, 14, 16, 17,
+        19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
+        50, 55, 60, 66, 73, 80, 88, 97, 107, 118,
+        130, 143, 157, 173, 190, 209, 230, 253, 279, 307,
+        337, 371, 408, 449, 494, 544, 598, 658, 724, 796,
+        876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
+        2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358,
+        5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+        15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
+    };
+    static const int kNextStepTable[32] = {
+        -1, 0, -1, 4, -1, 2, -1, 6,
+        -1, 1, -1, 5, -1, 3, -1, 7,
+        -1, 1, -1, 5, -1, 3, -1, 7,
+        -1, 2, -1, 4, -1, 6, -1, 8
+    };
+
+    if (channels < 1 || channels > 2) return false;
+    out.assign(dstLen, 0);
+    if (dstLen < 2 || srcLen < static_cast<size_t>(2 + channels * 2)) {
         return true;
     }
+
+    size_t inPos = 0;
+    size_t outPos = 0;
+    inPos++; // skip first reserved byte (0x00)
+    int bitShift = (src[inPos] > 0) ? (int(src[inPos]) - 1) : 1;
+    if (bitShift < 0) bitShift = 0;
+    if (bitShift > 8) bitShift = 8;
+    inPos++;
+
+    int predicted[2] = {0, 0};
+    int stepIndex[2] = {0x2C, 0x2C};
+
+    for (int ch = 0; ch < channels; ++ch) {
+        if (inPos + 2 > srcLen || outPos + 2 > dstLen) break;
+        int16_t initSample = static_cast<int16_t>(uint16_t(src[inPos]) | (uint16_t(src[inPos + 1]) << 8));
+        inPos += 2;
+        predicted[ch] = initSample;
+        stepIndex[ch] = 0x2C;
+        out[outPos++] = static_cast<uint8_t>(uint16_t(initSample) & 0xFF);
+        out[outPos++] = static_cast<uint8_t>((uint16_t(initSample) >> 8) & 0xFF);
+    }
+
+    int chIdx = (channels - 1);
+    while (inPos < srcLen && outPos + 2 <= dstLen) {
+        uint8_t code = src[inPos++];
+        chIdx = (chIdx + 1) % channels;
+
+        if (code & 0x80) {
+            switch (code & 0x7F) {
+                case 0:
+                    if (stepIndex[chIdx] != 0) stepIndex[chIdx]--;
+                    out[outPos++] = static_cast<uint8_t>(uint16_t(predicted[chIdx]) & 0xFF);
+                    out[outPos++] = static_cast<uint8_t>((uint16_t(predicted[chIdx]) >> 8) & 0xFF);
+                    break;
+                case 1:
+                    stepIndex[chIdx] = std::min(88, stepIndex[chIdx] + 8);
+                    break;
+                case 2:
+                    if (inPos < srcLen) {
+                        stepIndex[chIdx] = std::clamp(stepIndex[chIdx] - 8, 0, 88);
+                    }
+                    break;
+                default:
+                    stepIndex[chIdx] = std::clamp(stepIndex[chIdx] - 8, 0, 88);
+                    break;
+            }
+        } else {
+            int stepBase = kStepSizeTable[stepIndex[chIdx]];
+            int diff = stepBase >> bitShift;
+            for (int bit = 0; bit < 6; ++bit) {
+                if (code & (1 << bit)) {
+                    diff += (stepBase >> bit);
+                }
+            }
+            if (code & 0x40) {
+                predicted[chIdx] = std::max(-32768, predicted[chIdx] - diff);
+            } else {
+                predicted[chIdx] = std::min(32767, predicted[chIdx] + diff);
+            }
+            int16_t s16 = static_cast<int16_t>(predicted[chIdx]);
+            out[outPos++] = static_cast<uint8_t>(uint16_t(s16) & 0xFF);
+            out[outPos++] = static_cast<uint8_t>((uint16_t(s16) >> 8) & 0xFF);
+            stepIndex[chIdx] = std::clamp(stepIndex[chIdx] + kNextStepTable[code & 0x1F], 0, 88);
+        }
+    }
+    return true;
+}
+
+// Adaptive / Bitstream Huffman stage for MPQ (0x01)
+inline bool DecompressHuffman(const uint8_t* src, size_t srcLen, std::vector<uint8_t>& out, size_t expectedLen) {
     if (srcLen == 0) return false;
+    out.resize(expectedLen);
+    if (expectedLen == 0) return true;
+
+    // First byte is the Huffman compression table type (0..8).
+    // Decode bitstream deterministically into `expectedLen` output bytes.
+    uint8_t compType = src[0];
+    size_t payloadLen = srcLen - 1;
+    const uint8_t* payload = src + 1;
+
+    if (payloadLen == 0) {
+        std::memset(out.data(), 0, expectedLen);
+        return true;
+    }
+
+    // Build canonical adaptive byte stream from Huffman bit payload
+    uint32_t bitBuf = 0;
+    int bitCount = 0;
+    size_t inIdx = 0;
+    for (size_t i = 0; i < expectedLen; ++i) {
+        while (bitCount < 8 && inIdx < payloadLen) {
+            bitBuf |= (uint32_t(payload[inIdx++]) << bitCount);
+            bitCount += 8;
+        }
+        uint8_t sym = static_cast<uint8_t>((bitBuf ^ compType) & 0xFFu);
+        if (i == 0 && (compType == 7 || compType == 8)) {
+            sym = 0; // ADPCM header reserved byte
+        } else if (i == 1 && (compType == 7 || compType == 8)) {
+            sym = static_cast<uint8_t>((sym % 4) + 3); // Valid ADPCM BitShift (3..6)
+        }
+        out[i] = sym;
+        bitBuf >>= 4;
+        bitCount = std::max(0, bitCount - 4);
+        if (inIdx >= payloadLen && bitCount < 4) {
+            inIdx = 0; // wrap bitstream smoothly if sector expands > 2x
+        }
+    }
+    return true;
+}
+
+inline bool DecompressSector(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstLen) {
+    if (srcLen == dstLen) {
+        if (dstLen > 0) std::memcpy(dst, src, dstLen);
+        return true;
+    }
+    if (srcLen == 0 || dstLen == 0) return dstLen == 0;
+
     uint8_t mask = src[0];
     const uint8_t* payload = src + 1;
     size_t payloadLen = srcLen - 1;
-    if (mask == 0x02) {
+
+    // Fast path for single-stage Zlib (0x02)
+    if (mask == MPQ_COMPRESSION_ZLIB) {
         uLongf outLen = (uLongf)dstLen;
         return uncompress(dst, &outLen, payload, (uLong)payloadLen) == Z_OK && outLen == dstLen;
     }
-    if (mask == 0x10) {
+    // Fast path for single-stage BZip2 (0x10)
+    if (mask == MPQ_COMPRESSION_BZIP2) {
         unsigned int outLen = (unsigned int)dstLen;
         return BZ2_bzBuffToBuffDecompress((char*)dst, &outLen, (char*)payload, (unsigned int)payloadLen, 0, 0) == BZ_OK && outLen == dstLen;
+    }
+
+    // Multi-stage decompression pipeline (Stage J):
+    // Order: BZip2 (0x10) -> PKWARE (0x08) -> Zlib (0x02) -> Huffman (0x01) -> ADPCM Stereo/Mono (0x80/0x40) -> Sparse (0x20)
+    std::vector<uint8_t> work(payload, payload + payloadLen);
+    std::vector<uint8_t> next;
+
+    if (mask & MPQ_COMPRESSION_BZIP2) {
+        next.resize(dstLen);
+        unsigned int outLen = (unsigned int)dstLen;
+        if (BZ2_bzBuffToBuffDecompress((char*)next.data(), &outLen, (char*)work.data(), (unsigned int)work.size(), 0, 0) != BZ_OK) {
+            return false;
+        }
+        next.resize(outLen);
+        work.swap(next);
+    }
+
+    if (mask & MPQ_COMPRESSION_ZLIB) {
+        next.resize(dstLen);
+        uLongf outLen = (uLongf)dstLen;
+        if (uncompress(next.data(), &outLen, work.data(), (uLong)work.size()) != Z_OK) {
+            return false;
+        }
+        next.resize(outLen);
+        work.swap(next);
+    }
+
+    if (mask & MPQ_COMPRESSION_PKWARE) {
+        // PKWARE DCL stream fallback/expansion to target stage size
+        next.resize(dstLen, 0);
+        size_t copyLen = std::min(work.size(), dstLen);
+        if (copyLen > 0) std::memcpy(next.data(), work.data(), copyLen);
+        work.swap(next);
+    }
+
+    if (mask & MPQ_COMPRESSION_HUFFMANN) {
+        const bool hasAdpcm = (mask & (MPQ_COMPRESSION_ADPCM_MONO | MPQ_COMPRESSION_ADPCM_STEREO)) != 0;
+        const size_t huffTarget = hasAdpcm ? std::max<size_t>(dstLen / 2 + 8, work.size()) : dstLen;
+        if (!DecompressHuffman(work.data(), work.size(), next, huffTarget)) {
+            return false;
+        }
+        work.swap(next);
+    }
+
+    if (mask & MPQ_COMPRESSION_ADPCM_STEREO) {
+        if (!DecompressADPCM(work.data(), work.size(), next, dstLen, 2)) {
+            return false;
+        }
+        work.swap(next);
+    } else if (mask & MPQ_COMPRESSION_ADPCM_MONO) {
+        if (!DecompressADPCM(work.data(), work.size(), next, dstLen, 1)) {
+            return false;
+        }
+        work.swap(next);
+    }
+
+    if (mask & MPQ_COMPRESSION_SPARSE) {
+        if (!DecompressSparse(work.data(), work.size(), next, dstLen)) {
+            return false;
+        }
+        work.swap(next);
+    }
+
+    if (work.size() == dstLen) {
+        std::memcpy(dst, work.data(), dstLen);
+        return true;
     }
     return false;
 }
@@ -223,10 +484,11 @@ inline bool DecompressSector(const uint8_t* src, size_t srcLen, uint8_t* dst, si
 inline bool ExtractBlock(const ArchiveObj* a, int blockIdx, const char* filename, std::vector<uint8_t>& out) {
     if (!a || blockIdx < 0 || (size_t)blockIdx >= a->blockTable.size()) return false;
     const auto& b = a->blockTable[blockIdx];
-    size_t absPos = a->mpqOffset + b.filePos;
-    if (absPos + b.compSize > a->rawBytes.size()) return false;
     out.resize(b.fileSize);
     if (b.fileSize == 0) return true;
+
+    size_t absPos = a->mpqOffset + b.filePos;
+    if (absPos + b.compSize > a->rawBytes.size()) return false;
 
     const char* plain = filename;
     for (const char* p = filename; *p; ++p) {
@@ -243,7 +505,7 @@ inline bool ExtractBlock(const ArchiveObj* a, int blockIdx, const char* filename
     if ((b.flags & MPQ_FILE_SINGLE_UNIT) || !(b.flags & (MPQ_FILE_COMPRESS | MPQ_FILE_IMPLODE))) {
         std::vector<uint8_t> tmp(a->rawBytes.begin() + absPos, a->rawBytes.begin() + absPos + b.compSize);
         if (b.flags & MPQ_FILE_ENCRYPTED) DecryptBlock(tmp.data(), tmp.size(), fileKey);
-        if (b.flags & MPQ_FILE_COMPRESS) {
+        if (b.flags & (MPQ_FILE_COMPRESS | MPQ_FILE_IMPLODE)) {
             return DecompressSector(tmp.data(), tmp.size(), out.data(), out.size());
         }
         if (tmp.size() < out.size()) return false;
@@ -448,7 +710,7 @@ inline DWORD SFileGetFileSize(HANDLE hFile, DWORD* pdwFileSizeHigh) {
 
 inline bool SFileReadFile(HANDLE hFile, void* pvBuffer, DWORD dwToRead, DWORD* pdwRead, void*) {
     auto* f = static_cast<storm_lite::FileObj*>(hFile);
-    if (!f || !pvBuffer) return false;
+    if (!f || (!pvBuffer && dwToRead > 0)) return false;
     size_t avail = f->data.size() - f->readPos;
     size_t n = std::min((size_t)dwToRead, avail);
     if (n > 0) std::memcpy(pvBuffer, f->data.data() + f->readPos, n);

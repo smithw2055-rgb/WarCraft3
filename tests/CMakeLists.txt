@@ -119,6 +119,7 @@ add_executable(warsmash_tests
     test_phase4_modernization.cpp
     test_phase5_modernization.cpp
     ../src/render/render_server.cpp
+    ../src/render/render_graph.cpp
     ../src/render/scene.cpp
     ../src/render/mdx_viewer.cpp
     ../src/render/mdx_particles.cpp
@@ -137,6 +138,7 @@ add_executable(warsmash_tests
     ../src/asset/stb_image.cpp
     ../src/core/map_path_resolver.cpp
     ../src/core/job_system.cpp
+    ../src/core/world_scene_session.cpp
     ../src/model/mdx.cpp
     ../src/model/mdl.cpp
     ../src/render/mdx_animator.cpp
@@ -161,6 +163,7 @@ add_executable(warsmash_tests
     ../src/ui/TextureFrame.cpp
     ../src/ui/UiRenderer.cpp
     ../src/ui/TextRenderer.cpp
+    ../src/ui/ui_data_binder.cpp
     ../src/render/replaceable_ids.cpp
     ../src/scripting/jass_animation_tags.cpp
     ../src/scripting/JassNatives.cpp
@@ -204,6 +207,7 @@ add_executable(warsmash_tests
     ../src/ecs/unit_type.cpp
     ../src/ecs/player.cpp
     ../src/ecs/csimulation.cpp
+    ../src/ecs/sim_snapshot.cpp
     ../src/ecs/hero_carry.cpp
     ../src/ecs/lockstep.cpp
     ../src/net/tcp_transport.cpp
@@ -225,6 +229,7 @@ add_executable(warsmash_tests
     ../src/ecs/combat/combat_system.cpp
     ../src/ecs/combat/projectile.cpp
     ../src/ecs/pathing/pathfinding.cpp
+    ../src/ecs/pathing/pathfinding_server.cpp
     ../src/ecs/pathing/world_collision.cpp
     ../src/ecs/behaviors/behavior_move.cpp
     ../src/ecs/behaviors/behavior_attack.cpp

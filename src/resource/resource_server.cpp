@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <fstream>
 #include <utility>
 
@@ -16,7 +17,102 @@ std::string ToLowerAscii(std::string s) {
     return s;
 }
 
+uint16_t ReadLE16(const uint8_t* p) {
+    return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+}
+
+uint32_t ReadLE32(const uint8_t* p) {
+    return static_cast<uint32_t>(p[0]) |
+           (static_cast<uint32_t>(p[1]) << 8) |
+           (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
+}
+
 } // namespace
+
+bool AudioClipResource::ParseAudioContainer(const std::string& pathHint,
+                                            const std::vector<uint8_t>& rawBytes,
+                                            AudioClipResource& outMeta) {
+    outMeta.format = AudioFormat::Unknown;
+    outMeta.audioFormatTag = 0;
+    outMeta.channels = 0;
+    outMeta.sampleRate = 0;
+    outMeta.byteRate = 0;
+    outMeta.bitsPerSample = 0;
+    outMeta.pcmDataOffset = 0;
+    outMeta.pcmDataSize = 0;
+    outMeta.durationSeconds = 0.0f;
+    outMeta.isSilenceOverride = false;
+
+    if (rawBytes.empty()) {
+        // Retail custom maps (e.g. AzerothGrandPrix.w3x) embed 0-byte WAV overrides to mute default unit sounds
+        outMeta.format = AudioFormat::SilenceOverride;
+        outMeta.isSilenceOverride = true;
+        return true;
+    }
+
+    // 1. Check RIFF/WAVE container (handles arbitrary JUNK/fact/LIST chunks before data)
+    if (rawBytes.size() >= 12 &&
+        std::memcmp(rawBytes.data(), "RIFF", 4) == 0 &&
+        std::memcmp(rawBytes.data() + 8, "WAVE", 4) == 0) {
+        outMeta.format = AudioFormat::WavPcm;
+        size_t pos = 12;
+        bool foundFmt = false;
+        while (pos + 8 <= rawBytes.size()) {
+            const uint8_t* chunkHdr = rawBytes.data() + pos;
+            uint32_t chunkSize = ReadLE32(chunkHdr + 4);
+            pos += 8;
+            size_t avail = rawBytes.size() - pos;
+            size_t safeStep = std::min<size_t>(chunkSize, avail);
+
+            if (std::memcmp(chunkHdr, "fmt ", 4) == 0 && safeStep >= 16) {
+                outMeta.audioFormatTag = ReadLE16(rawBytes.data() + pos);
+                outMeta.channels = ReadLE16(rawBytes.data() + pos + 2);
+                outMeta.sampleRate = ReadLE32(rawBytes.data() + pos + 4);
+                outMeta.byteRate = ReadLE32(rawBytes.data() + pos + 8);
+                outMeta.bitsPerSample = ReadLE16(rawBytes.data() + pos + 14);
+                foundFmt = true;
+            } else if (std::memcmp(chunkHdr, "data", 4) == 0) {
+                outMeta.pcmDataOffset = static_cast<uint32_t>(pos);
+                outMeta.pcmDataSize = static_cast<uint32_t>(safeStep);
+                break;
+            }
+
+            pos += safeStep;
+            // RIFF chunks are word-aligned (padded to even byte boundary)
+            if ((chunkSize & 1u) != 0 && pos < rawBytes.size()) {
+                pos += 1;
+            }
+        }
+        if (foundFmt && outMeta.byteRate > 0 && outMeta.pcmDataSize > 0) {
+            outMeta.durationSeconds = static_cast<float>(outMeta.pcmDataSize) /
+                                      static_cast<float>(outMeta.byteRate);
+        }
+        return foundFmt;
+    }
+
+    // 2. Check FLAC ("fLaC"), OGG ("OggS"), or MP3 ("ID3" / 0xFF 0xFB..0xFF)
+    if (rawBytes.size() >= 4 && std::memcmp(rawBytes.data(), "fLaC", 4) == 0) {
+        outMeta.format = AudioFormat::Flac;
+        return true;
+    }
+    if (rawBytes.size() >= 4 && std::memcmp(rawBytes.data(), "OggS", 4) == 0) {
+        outMeta.format = AudioFormat::Ogg;
+        return true;
+    }
+    if ((rawBytes.size() >= 3 && std::memcmp(rawBytes.data(), "ID3", 3) == 0) ||
+        (rawBytes.size() >= 2 && rawBytes[0] == 0xFF && (rawBytes[1] & 0xE0) == 0xE0)) {
+        outMeta.format = AudioFormat::Mp3;
+        return true;
+    }
+
+    const std::string lowerPath = ToLowerAscii(pathHint);
+    if (lowerPath.size() >= 4 && lowerPath.substr(lowerPath.size() - 4) == ".mp3") {
+        outMeta.format = AudioFormat::Mp3;
+        return true;
+    }
+    return false;
+}
 
 ResourceServer::ResourceServer() = default;
 
@@ -143,7 +239,7 @@ bool ResourceServer::ReadRawBytes(const std::string& uriOrPath, std::vector<uint
     if (sz < 0) return false;
     outBytes.resize(static_cast<size_t>(sz));
     ifs.seekg(0, std::ios::beg);
-    return static_cast<bool>(ifs.read(reinterpret_cast<char*>(outBytes.data()), sz));
+    return sz == 0 || static_cast<bool>(ifs.read(reinterpret_cast<char*>(outBytes.data()), sz));
 }
 
 bool ResourceServer::FileExists(const std::string& uriOrPath) const {
@@ -503,6 +599,55 @@ ResourceRef<MdxModelResource> ResourceServer::LoadMdxModel(const std::string& ur
     return res;
 }
 
+ResourceRef<AudioClipResource> ResourceServer::LoadAudioClip(const std::string& uriOrPath) {
+    const ParsedVfsUri parsed = ParseUri(uriOrPath);
+    const std::string typedKey = MakeTypedCacheKey(parsed.canonicalCacheKey, ResourceKind::AudioClip);
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = ridByTypedKey_.find(typedKey);
+        if (it != ridByTypedKey_.end()) {
+            auto rit = resourcesByRid_.find(it->second);
+            if (rit != resourcesByRid_.end()) {
+                cacheHits_++;
+                return std::static_pointer_cast<AudioClipResource>(rit->second);
+            }
+        }
+        cacheMisses_++;
+    }
+
+    std::vector<uint8_t> bytes;
+    if (!ReadRawBytes(uriOrPath, bytes)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        loadFailures_++;
+        return nullptr;
+    }
+
+    auto res = std::make_shared<AudioClipResource>();
+    if (!AudioClipResource::ParseAudioContainer(parsed.rawArchivePath, bytes, *res)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        loadFailures_++;
+        return nullptr;
+    }
+    res->path_ = parsed.rawArchivePath;
+    res->canonicalKey_ = parsed.canonicalCacheKey;
+    res->bytes = std::move(bytes);
+    res->state_ = ResourceLoadState::Loaded;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto existingIt = ridByTypedKey_.find(typedKey);
+    if (existingIt != ridByTypedKey_.end()) {
+        auto rit = resourcesByRid_.find(existingIt->second);
+        if (rit != resourcesByRid_.end()) {
+            return std::static_pointer_cast<AudioClipResource>(rit->second);
+        }
+    }
+    res->rid_ = AllocateRidLocked(ResourceKind::AudioClip);
+    ridByTypedKey_[typedKey] = res->rid_;
+    resourcesByRid_[res->rid_] = res;
+    return res;
+}
+
 ResourceRef<Resource> ResourceServer::LoadByKindInternal(const std::string& uriOrPath, ResourceKind kind) {
     switch (kind) {
         case ResourceKind::RawBinary: return LoadRawBinary(uriOrPath);
@@ -510,6 +655,7 @@ ResourceRef<Resource> ResourceServer::LoadByKindInternal(const std::string& uriO
         case ResourceKind::TxtTable:  return LoadTxtTable(uriOrPath);
         case ResourceKind::BlpImage:  return LoadBlpImage(uriOrPath, false);
         case ResourceKind::MdxModel:  return LoadMdxModel(uriOrPath);
+        case ResourceKind::AudioClip: return LoadAudioClip(uriOrPath);
         default: return nullptr;
     }
 }

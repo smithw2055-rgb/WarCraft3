@@ -13,12 +13,41 @@ struct UnitDeathDropItem {
 };
 
 // ============================================================
-// Phase 3 ECS Orthogonal Data Components for CUnit Subsystems
+// Phase 3 & Stage L ECS Orthogonal Data Components for CUnit
 //
 // Decomposes the monolithic CUnit class into focused, cohesive
-// data components that can be stored both in CUnit and in
-// SimEcsRegistry SparseComponentPools.
+// data components stored in SimEcsRegistry SparseComponentPools,
+// including Stage L Hot-Path Transform & Vitals SoA/Dense Pools.
 // ============================================================
+
+// Stage L1: Contiguous Hot-Path Transform & Spatial Movement Component
+struct UnitHotTransformComponent {
+    float x = 0.0f;
+    float y = 0.0f;
+    float facingDeg = 0.0f;
+    float flyHeight = 0.0f;
+    float collisionSize = 32.0f;
+    float effectiveSpeed = 270.0f;
+    float turnRate = 0.6f;
+    int playerIndex = 0;
+    uint32_t typeId = 0;
+    PathingGridMovementType movementType = PathingGridMovementType::FOOT;
+    bool isBuilding = false;
+    bool pathingEnabled = true;
+};
+
+// Stage L2: Contiguous Hot-Path Vitality & Combat State Component
+struct UnitHotVitalsComponent {
+    float life = 100.0f;
+    float maxLife = 100.0f;
+    float mana = 0.0f;
+    int maxMana = 0;
+    int totalDefense = 0;
+    bool isDead = false;
+    bool isHidden = false;
+    bool isInvulnerable = false;
+    bool isPaused = false;
+};
 
 // 1. Building Construction & Upgrade Progress Component
 struct UnitConstructionComponent {
