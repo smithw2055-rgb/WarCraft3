@@ -138,6 +138,7 @@ add_executable(warsmash_tests
     ../src/asset/Texture.cpp
     ../src/asset/stb_image.cpp
     ../src/core/map_path_resolver.cpp
+    ../src/engine/engine_kernel.cpp
     ../src/core/job_system.cpp
     ../src/core/world_scene_session.cpp
     ../src/core/input_action_map.cpp
@@ -186,8 +187,6 @@ add_executable(warsmash_tests
     ../src/resource/slk.cpp
     ../src/resource/resource_server.cpp
     ../src/map/wpm.cpp
-    ../src/map/wts.cpp
-    ../src/map/object_mods.cpp
     ../src/audio/AudioSystem.cpp
     ../src/audio/audio_server.cpp
     ../src/audio/UnitSoundset.cpp
@@ -302,7 +301,6 @@ add_executable(warsmash_tests
     ../src/ecs/abilities/spells27.cpp
     ../src/ecs/abilities/spells28.cpp
     ../src/ecs/abilities/spells29.cpp
-    ../src/ecs/abilities/spells3.cpp
     ../src/ecs/abilities/auras.cpp
     ../src/ecs/abilities/ability_builder.cpp
 )

@@ -2,6 +2,15 @@
 
 GameController::GameController() {
     inputActionMap_.RegisterStandardWarcraftDefaults();
+    engineKernel_.BindExternalServices(
+        &scene_.GetJobSystem(),
+        &scene_.GetResourceServer(),
+        &audio_.GetAudioServer(),
+        &scene_.GetRenderServer(),
+        &scene_.GetRenderGraph(),
+        &inputActionMap_,
+        &profiler_,
+        CSimulation::SIM_STEP_TIME);
 }
 GameController::~GameController() = default;
 
@@ -528,7 +537,6 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
             texturedTerrain_.SetFog(color, fog.d, fog.e);
         }
     }
-    if (ui_.GetResourceBar()) ui_.GetResourceBar()->SetTimeOfDay(dayNight_.GetTimeOfDay());
 
     for (auto it = activeEventSplats_.begin(); it != activeEventSplats_.end(); ) {
         it->lifeRemaining -= dt;
@@ -573,10 +581,7 @@ void GameController::UpdateInGame(int screenW, int screenH, float dt) {
 void GameController::StepSimulation(float dt) {
     if (!simulationInitialized_) return;
 
-    const float simStep = CSimulation::SIM_STEP_TIME;
-    simulationAccumulator_ = std::min(simulationAccumulator_ + dt, simStep * 3.0f);
-    bool ranSimulationStep = false;
-    while (simulationAccumulator_ >= simStep) {
+    const int subSteps = engineKernel_.Stepper().AdvanceFrame(dt, [this](float simStep) {
         {
             WARSMASH_PROFILE_SCOPE(profiler_, "SimulationStep", "ECS");
             simulation_.Update();
@@ -589,15 +594,13 @@ void GameController::StepSimulation(float dt) {
             jassNatives_->UpdateAI();
             jassNatives_->PumpQueuedThreads(1024);
         }
-        simulationAccumulator_ -= simStep;
-        ranSimulationStep = true;
-    }
+    });
+    const bool ranSimulationStep = (subSteps > 0);
 
     if (ranSimulationStep) {
         presentation_.CaptureSimulationTick(simulation_);
     }
-    presentation_.SetInterpolationAlpha(
-        simStep > 0.0f ? std::clamp(simulationAccumulator_ / simStep, 0.0f, 1.0f) : 1.0f);
+    presentation_.SetInterpolationAlpha(engineKernel_.Stepper().GetInterpolationAlpha());
 
     if (ranSimulationStep) {
         if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {
@@ -675,8 +678,7 @@ void GameController::Render(int screenW, int screenH) {
     if (texturedTerrain_.IsValid()) {
         texturedTerrain_.SetWaterDeforms(simulationInitialized_ && simulation_.GetWaterDeforms());
         texturedTerrain_.Render(view, proj, frameCount_ * 0.016f);
-    } else if (simpleTerrain_.IsValid())
-        simpleTerrain_.Render(view, proj);
+    }
 
     sg_reset_state_cache();
     sg_apply_viewport(0, 0, screenW, screenH, true);

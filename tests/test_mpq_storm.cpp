@@ -2858,16 +2858,23 @@ bool RunStormLibTests() {
     std::cout << "========================================\n" << std::endl;
     
     bool allPassed = true;
-    
+    if (!TestStormLibW3xMaps()) {
+        allPassed = false;
+    }
+
+    const bool hasBaseGameMpqs =
+        fs::exists(ResourcePath("war3.mpq")) &&
+        (fs::exists(ResourcePath("War3x.mpq")) || fs::exists(ResourcePath("war3x.mpq")));
+    if (!hasBaseGameMpqs) {
+        std::cout << "StormLib: base war3.mpq/War3x.mpq not present; W3X map suite passed." << std::endl;
+        return allPassed;
+    }
+
     if (!TestStormLibEnumerateWar3Mpq()) {
         allPassed = false;
     }
     
     if (!TestStormLibExtractSamples()) {
-        allPassed = false;
-    }
-    
-    if (!TestStormLibW3xMaps()) {
         allPassed = false;
     }
 

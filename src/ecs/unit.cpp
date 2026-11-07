@@ -1,3 +1,4 @@
+#include "ecs/unit_text_utils.h"
 #include "ecs/pathing/pathfinding.h"
 #include "csimulation.h"
 #include "ecs/buffs.h"
@@ -53,53 +54,8 @@ static float NormalizeFacingDelta(float delta) {
     return delta;
 }
 
-static const char* AbilityCategoryName(CAbilityCategory category) {
-    switch (category) {
-        case CAbilityCategory::CORE: return "CORE";
-        case CAbilityCategory::ATTACK: return "ATTACK";
-        case CAbilityCategory::MOVEMENT: return "MOVEMENT";
-        case CAbilityCategory::BUFF: return "BUFF";
-        case CAbilityCategory::ITEM: return "ITEM";
-        case CAbilityCategory::HERO: return "HERO";
-        case CAbilityCategory::BUILD: return "BUILD";
-        case CAbilityCategory::INVENTORY: return "INVENTORY";
-        case CAbilityCategory::HARVEST: return "HARVEST";
-        case CAbilityCategory::CARGO_HOLD: return "CARGO_HOLD";
-        case CAbilityCategory::UPGRADE: return "UPGRADE";
-        case CAbilityCategory::QUEUE: return "QUEUE";
-        case CAbilityCategory::RALLY: return "RALLY";
-        case CAbilityCategory::NEUTRAL_BUILDING: return "NEUTRAL_BUILDING";
-        case CAbilityCategory::GOLD_MINE: return "GOLD_MINE";
-        case CAbilityCategory::SELL_ITEMS: return "SELL_ITEMS";
-        case CAbilityCategory::ROOT: return "ROOT";
-        case CAbilityCategory::MOON_WELL: return "MOON_WELL";
-        case CAbilityCategory::BLIGHT: return "BLIGHT";
-        case CAbilityCategory::SPELL: return "SPELL";
-        default: return "UNKNOWN";
-    }
-}
-
-static const char* BehaviorCategoryName(CBehaviorCategory category) {
-    switch (category) {
-        case CBehaviorCategory::NONE: return "NONE";
-        case CBehaviorCategory::STOP: return "STOP";
-        case CBehaviorCategory::MOVE: return "MOVE";
-        case CBehaviorCategory::ATTACK: return "ATTACK";
-        case CBehaviorCategory::SPELL: return "SPELL";
-        case CBehaviorCategory::ATTACK_MOVE: return "ATTACK_MOVE";
-        case CBehaviorCategory::PATROL: return "PATROL";
-        case CBehaviorCategory::FOLLOW: return "FOLLOW";
-        case CBehaviorCategory::HOLD_POSITION: return "HOLD_POSITION";
-        case CBehaviorCategory::BUILD: return "BUILD";
-        case CBehaviorCategory::HARVEST: return "HARVEST";
-        case CBehaviorCategory::RETURN_RESOURCES: return "RETURN_RESOURCES";
-        case CBehaviorCategory::BOARD_TRANSPORT: return "BOARD_TRANSPORT";
-        case CBehaviorCategory::STUN: return "STUN";
-        case CBehaviorCategory::INVENTORY: return "INVENTORY";
-        case CBehaviorCategory::ROOT: return "ROOT";
-        default: return "UNKNOWN";
-    }
-}
+using unit_text_utils::AbilityCategoryName;
+using unit_text_utils::BehaviorCategoryName;
 
 }
 
@@ -108,7 +64,6 @@ CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
     : CWidget(handleId, x, y, (float)unitType->GetMaxLife())
     , unitType_(unitType), typeId_(typeId), playerIndex_(playerIndex)
     , facing_(facing)
-    , speed_(unitType->GetSpeed())
     , maxMana_(unitType->GetManaMaximum())
     , turnRate_(unitType->GetTurnRate())
     , movementType_(unitType->GetMovementType())
@@ -154,6 +109,7 @@ void CUnit::BindRegistry(SimEcsRegistry* registry) {
         migrate(UnitStructureNavComponent{});
         migrate(UnitVisualComponent{});
         migrate(UnitCorpseDropComponent{});
+        migrate(UnitScriptOverridesComponent{});
     }
     registry_ = registry;
 }
@@ -164,7 +120,6 @@ float CUnit::GetSpeed() const {
 
 void CUnit::SetSpeed(int s) {
     attrs_.SetBaseSpeed(s);
-    speed_ = s;
 }
 
 void CUnit::SetPosition(float x, float y) {
@@ -280,7 +235,6 @@ void CUnit::MorphTo(CUnitType* form, War3ID formId) {
     unitType_ = form;
     typeId_ = formId;
     attrs_.SetBaseSpeed(form->GetSpeed());
-    speed_ = form->GetSpeed();
     attrs_.SetBaseMaxLife(form->GetMaxLife());
     attrs_.SetBaseMaxMana(form->GetManaMaximum());
     attrs_.SetCurrentDefense(form->GetDefense());
@@ -306,7 +260,6 @@ void CUnit::Unmorph() {
     unitType_ = MorphComp().originalType;
     typeId_ = MorphComp().originalTypeId;
     attrs_.SetBaseSpeed(MorphComp().savedSpeed);
-    speed_ = MorphComp().savedSpeed;
     attrs_.SetBaseMaxLife(MorphComp().savedBaseMaxLife);
     attrs_.SetBaseMaxMana(MorphComp().savedBaseMaxMana);
     attrs_.SetCurrentDefense(MorphComp().savedDefense);
@@ -327,28 +280,43 @@ void CUnit::SetAttackModifier(int attackIndex, War3ID installer,
         ClearAttackModifier(attackIndex, installer);
         return;
     }
-    AttackModifierSlot& slot = attackModifiers_[attackIndex];
-    slot.installer = installer;
-    slot.effect = std::move(effect);
+    for (auto& slot : attackModifiers_) {
+        if (slot.attackIndex == attackIndex) {
+            slot.installer = installer;
+            slot.effect = std::move(effect);
+            return;
+        }
+    }
+    attackModifiers_.push_back(AttackModifierSlot{attackIndex, installer, std::move(effect)});
 }
 
 void CUnit::ClearAttackModifier(int attackIndex, War3ID installer) {
-    auto it = attackModifiers_.find(attackIndex);
-    if (it == attackModifiers_.end()) return;
-    if (!(it->second.installer == installer)) return;
-    attackModifiers_.erase(it);
+    for (auto it = attackModifiers_.begin(); it != attackModifiers_.end(); ++it) {
+        if (it->attackIndex == attackIndex) {
+            if (it->installer == installer) {
+                attackModifiers_.erase(it);
+            }
+            return;
+        }
+    }
 }
 
 const CAttackModifierEffect* CUnit::GetAttackModifier(int attackIndex) const {
-    auto it = attackModifiers_.find(attackIndex);
-    if (it == attackModifiers_.end() || !it->second.effect) return nullptr;
-    return it->second.effect.get();
+    for (const auto& slot : attackModifiers_) {
+        if (slot.attackIndex == attackIndex) {
+            return slot.effect.get();
+        }
+    }
+    return nullptr;
 }
 
 CAttackModifierEffect* CUnit::GetAttackModifier(int attackIndex) {
-    auto it = attackModifiers_.find(attackIndex);
-    if (it == attackModifiers_.end() || !it->second.effect) return nullptr;
-    return it->second.effect.get();
+    for (auto& slot : attackModifiers_) {
+        if (slot.attackIndex == attackIndex) {
+            return slot.effect.get();
+        }
+    }
+    return nullptr;
 }
 
 void CUnit::FireAttackModifiers(CSimulation& game, CUnit* victim, float damageDealt) {
@@ -809,8 +777,11 @@ bool CUnit::IsHexed() const {
 
 void CUnit::SetSharesVisionWith(int player, bool share) {
     if (player < 0) return;
-    if (share) sharedVision_.insert(player);
-    else sharedVision_.erase(player);
+    if (share) {
+        ScriptOverridesComp().sharedVisionPlayers.insert(player);
+    } else if (auto* sc = ActiveRegistry().TryGet<UnitScriptOverridesComponent>(handleId_)) {
+        sc->sharedVisionPlayers.erase(player);
+    }
 }
 
 bool CUnit::IsStealthed() const {

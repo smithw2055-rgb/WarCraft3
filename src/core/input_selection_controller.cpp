@@ -628,7 +628,7 @@ CUnit* GameController::PickSimulationUnitAtScreenPoint(float sx, float sy, const
         bool visualHasCollisionShapes = false;
         bool visualCollisionHit = false;
         float visualCollisionT = 0.0f;
-        if (auto vit = simUnitToVisualIdx.find(unit->GetHandleId()); vit != simUnitToVisualIdx.end()) {
+        if (auto vit = presentation_.unitToVisualIdx.find(unit->GetHandleId()); vit != presentation_.unitToVisualIdx.end()) {
             if (MdxViewer* v = scene_.GetViewer(vit->second)) {
                 visualHasCollisionShapes = v->HasCollisionShapes();
                 visualCollisionHit = scene_.IntersectInstanceRayWithCollision(vit->second, ray, visualCollisionT);

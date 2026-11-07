@@ -5,11 +5,11 @@
 #include "world_scene_session.h"
 #include "input_action_map.h"
 #include "engine_profiler.h"
+#include "../engine/engine_kernel.h"
 #include "../render/render_graph.h"
 #include "../ui/ui_data_binder.h"
 #include "../render/scene.h"
 #include "../render/camera.h"
-#include "../render/terrain.h"
 #include "../render/textured_terrain.h"
 #include "../render/minimap.h"
 #include "../render/mdx_viewer.h"
@@ -74,12 +74,13 @@ public:
     int GetFrameCount() const { return frameCount_; }
 
     // Accessors
+    engine::EngineKernel& GetEngineKernel() { return engineKernel_; }
+    const engine::EngineKernel& GetEngineKernel() const { return engineKernel_; }
     SceneManager& GetScene() { return scene_; }
     CSimulation& GetSimulation() { return simulation_; }
     MainUI& GetUI() { return ui_; }
     AudioSystem& GetAudio() { return audio_; }
     TexturedTerrain& GetTexturedTerrain() { return texturedTerrain_; }
-    TerrainRenderer& GetSimpleTerrain() { return simpleTerrain_; }
     Minimap& GetMinimap() { return minimap_; }
     OrbitCamera& GetCamera() { return camera_; }
     MdxViewer& GetMdxViewer() { return mdxViewer_; }
@@ -124,25 +125,6 @@ public:
     using UnitVisualSeed = UnitPresentationSystem::UnitVisualSeed;
     UnitPresentationSystem& GetPresentation() { return presentation_; }
     const UnitPresentationSystem& GetPresentation() const { return presentation_; }
-
-    // Reference aliases forwarding to presentation_ (zero-duplication compatibility)
-    std::unordered_map<int, UnitVisualSeed>& simUnitVisualSeeds = presentation_.unitVisualSeeds;
-    std::unordered_map<int, animation_utils::PendingUnitAnimation>& simUnitPendingAnimations = presentation_.unitPendingAnimations;
-    std::unordered_map<int, int>& simUnitToVisualIdx = presentation_.unitToVisualIdx;
-    std::unordered_map<int, std::pair<float, float>>& simUnitVisualLastPositions = presentation_.unitVisualLastPositions;
-    std::unordered_map<int, bool>& simUnitVisualMovingStates = presentation_.unitVisualMovingStates;
-    std::unordered_map<int, animation_utils::UnitVisualAnimationMode>& simUnitVisualAnimationModes = presentation_.unitVisualAnimationModes;
-    std::unordered_map<int, int>& simUnitVisualLastAttackAnimationTicks = presentation_.unitVisualLastAttackAnimationTicks;
-    std::unordered_map<int, CResourceType>& simUnitVisualResourceTags = presentation_.unitVisualResourceTags;
-    std::unordered_map<int, bool>& simUnitVisualConstructionStates = presentation_.unitVisualConstructionStates;
-    std::unordered_map<int, std::vector<std::string>>& simUnitVisualPropertyTags = presentation_.unitVisualPropertyTags;
-    std::unordered_map<int, animation_utils::ScriptedUnitAnimationState>& simUnitScriptedAnimations = presentation_.unitScriptedAnimations;
-    std::unordered_map<int, std::deque<animation_utils::PendingUnitAnimation>>& simUnitQueuedAnimations = presentation_.unitQueuedAnimations;
-    std::unordered_map<int, std::vector<std::string>>& simUnitAnimationPropertyTags = presentation_.unitAnimationPropertyTags;
-    std::unordered_set<int>& simUnitVisualRegistrationFailed = presentation_.unitVisualRegistrationFailed;
-    std::unordered_map<int, int>& simItemToVisualIdx = presentation_.itemToVisualIdx;
-    std::unordered_map<int, int>& effectVisuals_ = presentation_.effectVisuals;
-    std::unordered_set<int>& simItemVisualRegistrationFailed = presentation_.itemVisualRegistrationFailed;
 
     bool EnsureSimulationUnitVisual(CUnit* unit);
     bool EnsureSimulationItemVisual(CItem* item);
@@ -318,7 +300,6 @@ private:
     // consumed once on the way in. Fresh launches never inherit stale data.
     std::vector<CarriedHero> carriedHeroes_;
     bool arrivedViaChangeLevel_ = false;
-    float simulationAccumulator_ = 0.0f;
     float lastTime_ = 0.0f;
     // MIDI ambient re-evaluation throttle (day/night + env switches).
     float ambientCheckAcc_ = 0.0f;
@@ -347,7 +328,8 @@ private:
     // Last seen text-clear sequence (ClearTextMessages drops shown toasts).
     int lastTextClearSeq_ = 0;
 
-    // Phase A Modernized Engine Subsystems
+    // Phase 12 Unified Engine Foundation Kernel & Modernized Subsystems
+    engine::EngineKernel engineKernel_;
     core::WorldSceneSession sceneSession_;
     core::InputActionMap inputActionMap_;
     core::CommandBufferPipeline commandPipeline_;
@@ -357,7 +339,6 @@ private:
     // Presentation & Rendering
     UnitPresentationSystem presentation_;
     SceneManager scene_;
-    TerrainRenderer simpleTerrain_;
     TexturedTerrain texturedTerrain_;
     bool terrainLoaded_ = false;
     bool mapConfigInitialized_ = false;

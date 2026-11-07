@@ -1,12 +1,8 @@
 #pragma once
 #include "UIFrame.h"
 #include "SimpleFrame.h"
-#include "CommandCard.h"
-#include "ResourceBarFrame.h"
-#include "ChatConsoleFrame.h"
 #include "TextRenderer.h"
 #include "UiRenderer.h"
-#include "MultiSelectionPanel.h"
 #include "GlueMenuTypes.h"
 #include "ui_data_binder.h"
 #include "../render/texture_atlas_packer.h"
@@ -27,7 +23,19 @@ class CUnit;
 class FdfHudHost;
 struct sapp_event;
 
-// In-world unit overlay data (populated by main.cpp, rendered by MainUI)
+// Multi-selection unit info (displayed in the FDF multi-selection grid)
+struct MultiSelectUnitInfo {
+    int handleId = -1;
+    std::string name;
+    std::string icon;
+    float hpRatio = 1.0f;
+    float mpRatio = 0.0f;
+    uint32_t playerColor = 0xFF888888;
+    int level = 1;
+    bool isHero = false;
+};
+
+// In-world unit overlay data (populated by GameController, rendered by MainUI)
 struct UnitOverlayInfo {
     int handleId = -1;
     float screenX = 0, screenY = 0;
@@ -173,7 +181,6 @@ public:
     bool OnMouseUp(float x, float y, int btn);
     void OnKeyDown(int key);
 
-    CommandCard* GetCommandCard() { return commandCard_; }
     GameUI& GetGameUI() { return gameUI_; }
     ui::UIDataBinder& GetDataBinder() { return dataBinder_; }
     const ui::UIDataBinder& GetDataBinder() const { return dataBinder_; }
@@ -215,7 +222,6 @@ public:
     // SceneManager::PortraitPathFor); stored for the portrait render pass.
     void SetPortraitModel(const std::string& modelPath);
     const std::string& GetPortraitModel() const { return selectedPortraitModelPath_; }
-    void WireCommandCardCallbacks();
 
     void UpdateInfoPanel(War3ID unitTypeId, const std::string& name, int level,
                          float hp, float maxHp, float mp, float maxMp);
@@ -228,7 +234,6 @@ public:
     void UpdateTooltip(float mouseX, float mouseY);
 
     // Chat
-    ChatConsoleFrame* GetChatConsole() { return chatConsole_; }
     bool IsChatOpen() const;
     void OnCharInput(char c);
 
@@ -250,9 +255,6 @@ public:
     void ClearSelectionBox();
     void RenderOverlays(UiRenderer& r);
     int HitQueueSlot(float x, float y) const;
-
-    // Resource bar access for game state updates
-    ResourceBarFrame* GetResourceBar() { return resourceBar_; }
 
     void UpdateHeroPanelFromUnit(War3ID unitTypeId, int handleId);
 
@@ -358,8 +360,6 @@ private:
     // Text renderer
     TextRenderer textRenderer_;
 
-    CommandCard* commandCard_ = nullptr;
-    ResourceBarFrame* resourceBar_ = nullptr;
     std::unordered_map<std::string, std::shared_ptr<Texture>> textures_;
     std::unordered_map<std::string, std::string> iconTextureUris_;
 
@@ -376,13 +376,10 @@ private:
     const std::vector<TextTagOverlayInfo>* textTagData_ = nullptr;
     HudLeaderboard leaderboard_;
     HudMultiboard multiboard_;
-    MultiSelectionPanel multiSelectionPanel_;
     std::vector<MultiSelectUnitInfo> multiSelectionUnits_;
     bool selectionBoxVisible_ = false;
     ScreenRect selectionBoxRect_;
     bool altDown_ = false;
-
-    ChatConsoleFrame* chatConsole_ = nullptr;
 
     // Tooltip state
     float tooltipTimer_ = 0;

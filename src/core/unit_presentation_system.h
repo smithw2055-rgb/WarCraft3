@@ -18,13 +18,12 @@
 #include "render/render_server.h"
 
 // ============================================================================
-// UnitPresentationSystem (Phase 5 Engine Modernization - Stage B)
+// UnitPresentationSystem (Phase 5 Stage B & Phase 12 Modernization)
 //
 // Godot Node / Unity PresentationSystem-inspired decoupled presentation layer.
-// Replaces the 15+ scattered `simUnit*` / `simItem*` / `effectVisuals_` maps
-// previously hardcoded inside the `GameController` God Class, and subscribes
-// directly to `CSimulation::Events()` (SimEventBus) to automatically clean up
-// visual state when units or items are removed.
+// Owns all unit/item/effect visual state and subscribes directly to
+// `CSimulation::Events()` (SimEventBus) to automatically clean up visual state
+// when units or items are removed.
 // ============================================================================
 class UnitPresentationSystem {
 public:
@@ -157,6 +156,28 @@ public:
 
     void QueueUnitAnimation(int handleId, const animation_utils::PendingUnitAnimation& req) {
         unitQueuedAnimations[handleId].push_back(req);
+    }
+
+    void ModifyUnitAnimationPropertyTags(int handleId, const std::string& properties, bool add) {
+        auto tags = animation_utils::ExtractAnimationSecondaryTags(properties);
+        if (tags.empty()) return;
+        auto& activeTags = unitAnimationPropertyTags[handleId];
+        if (add) {
+            for (const auto& tag : tags) {
+                if (std::find(activeTags.begin(), activeTags.end(), tag) == activeTags.end()) {
+                    activeTags.push_back(tag);
+                }
+            }
+        } else {
+            activeTags.erase(
+                std::remove_if(activeTags.begin(), activeTags.end(),
+                    [&](const std::string& t) {
+                        return std::find(tags.begin(), tags.end(), t) != tags.end();
+                    }),
+                activeTags.end());
+            if (activeTags.empty()) unitAnimationPropertyTags.erase(handleId);
+        }
+        unitVisualAnimationModes.erase(handleId);
     }
 
     bool SetUnitSecondaryAnimationTag(int handleId, const std::string& tag, bool add) {

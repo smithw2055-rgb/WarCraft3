@@ -1,3 +1,6 @@
+#include "engine/engine_kernel.h"
+#include "data/slk_merge.h"
+#include "data/object_mod_meta.h"
 #include "render/mdx_particles.h"
 #include "render/mdx_ribbons.h"
 #include "ui/TextRenderer.h"
@@ -3686,6 +3689,357 @@ bool TestPhase11StageDD2RealScriptHotSwapAndRetailDriveSuite() {
         TEST_ASSERT(scene.GetBroadphaseRejectedCount() > (uint64_t)(scene.GetInstanceCount() * 8 / 10));
         session.TeardownCurrentSession(mpq, sim, scene, presentation);
     }
+
+    return true;
+}
+
+
+// ============================================================================
+// Phase 12 Stage EE1-GG1: General-Purpose Engine Foundation (EngineKernel,
+// SubsystemRegistry, FixedTimestepStepper, IGameModule) & De-Redundancy Suite
+// ============================================================================
+
+bool TestPhase12StageEE1EngineSubsystemRegistryAndPhaseLifecycle() {
+    std::vector<std::string> initOrder;
+    std::vector<std::string> fixedOrder;
+    std::vector<std::string> shutdownOrder;
+
+    class MockSubsystem : public engine::ISubsystem {
+    public:
+        MockSubsystem(std::string name, engine::SubsystemPhase phase,
+                      std::vector<std::string>& iOrd,
+                      std::vector<std::string>& fOrd,
+                      std::vector<std::string>& sOrd)
+            : name_(std::move(name)), phase_(phase),
+              initOrd_(iOrd), fixedOrd_(fOrd), shutOrd_(sOrd) {}
+
+        const char* GetName() const override { return name_.c_str(); }
+        engine::SubsystemPhase GetPhase() const override { return phase_; }
+
+        bool OnInit() override {
+            initOrd_.push_back(name_);
+            return true;
+        }
+        void OnFixedUpdate(float fixedDt) override {
+            accumFixedDt += fixedDt;
+            fixedOrd_.push_back(name_);
+        }
+        void OnFrameUpdate(float dt) override {
+            accumFrameDt += dt;
+        }
+        void OnRender() override {
+            ++renderCalls;
+        }
+        void OnShutdown() override {
+            shutOrd_.push_back(name_);
+        }
+
+        float accumFixedDt = 0.0f;
+        float accumFrameDt = 0.0f;
+        int renderCalls = 0;
+
+    private:
+        std::string name_;
+        engine::SubsystemPhase phase_;
+        std::vector<std::string>& initOrd_;
+        std::vector<std::string>& fixedOrd_;
+        std::vector<std::string>& shutOrd_;
+    };
+
+    struct RenderTestSub final : MockSubsystem {
+        using MockSubsystem::MockSubsystem;
+    };
+    struct PlatformTestSub final : MockSubsystem {
+        using MockSubsystem::MockSubsystem;
+    };
+    struct SimTestSub final : MockSubsystem {
+        using MockSubsystem::MockSubsystem;
+    };
+    struct TelemetryTestSub final : MockSubsystem {
+        using MockSubsystem::MockSubsystem;
+    };
+
+    engine::SubsystemRegistry reg;
+    // Register out of phase order -> registry must automatically sort by SubsystemPhase
+    reg.Register<RenderTestSub>("Render", engine::SubsystemPhase::Render, initOrder, fixedOrder, shutdownOrder);
+    reg.Register<TelemetryTestSub>("Telemetry", engine::SubsystemPhase::Telemetry, initOrder, fixedOrder, shutdownOrder);
+    reg.Register<PlatformTestSub>("Platform", engine::SubsystemPhase::Platform, initOrder, fixedOrder, shutdownOrder);
+    reg.Register<SimTestSub>("Simulation", engine::SubsystemPhase::Simulation, initOrder, fixedOrder, shutdownOrder);
+
+    TEST_ASSERT(reg.Count() == 4);
+    TEST_ASSERT(reg.TryGet<SimTestSub>() != nullptr);
+    TEST_ASSERT(reg.FindByName("Render") == reg.TryGet<RenderTestSub>());
+
+    // 1. InitializeAll executes strictly in ascending SubsystemPhase order
+    TEST_ASSERT(reg.InitializeAll());
+    TEST_ASSERT(initOrder.size() == 4);
+    TEST_ASSERT(initOrder[0] == "Platform");
+    TEST_ASSERT(initOrder[1] == "Simulation");
+    TEST_ASSERT(initOrder[2] == "Render");
+    TEST_ASSERT(initOrder[3] == "Telemetry");
+
+    // 2. FixedUpdateAll, FrameUpdateAll, RenderAll respect enabled state
+    reg.FixedUpdateAll(0.05f);
+    TEST_ASSERT(fixedOrder.size() == 4);
+    TEST_ASSERT(reg.SetSubsystemEnabled("Render", false));
+    fixedOrder.clear();
+    reg.FixedUpdateAll(0.05f);
+    reg.FrameUpdateAll(0.016f);
+    reg.RenderAll();
+    TEST_ASSERT(fixedOrder.size() == 3); // Render skipped while disabled
+    TEST_ASSERT(reg.TryGet<RenderTestSub>()->renderCalls == 0);
+    TEST_ASSERT(reg.TryGet<SimTestSub>()->renderCalls == 1);
+    TEST_NEAR(reg.TryGet<SimTestSub>()->accumFixedDt, 0.10f, 1e-4f);
+
+    // 3. ShutdownAll executes strictly in reverse SubsystemPhase order
+    reg.ShutdownAll();
+    TEST_ASSERT(shutdownOrder.size() == 4);
+    TEST_ASSERT(shutdownOrder[0] == "Telemetry");
+    TEST_ASSERT(shutdownOrder[1] == "Render");
+    TEST_ASSERT(shutdownOrder[2] == "Simulation");
+    TEST_ASSERT(shutdownOrder[3] == "Platform");
+    return true;
+}
+
+bool TestPhase12StageEE2FixedTimestepStepperAndInterpolationAlpha() {
+    engine::FixedTimestepStepper stepper(0.05f, 3); // 20Hz fixed step (50ms), max 3 substeps/frame
+
+    int fixedCalls = 0;
+    // Frame 1: 20ms frame -> 0 fixed steps, accumulator = 20ms, interpolation alpha = 20/50 = 0.40
+    float observedFixedDt = 0.0f;
+    int steps1 = stepper.AdvanceFrame(0.020f, [&](float dt) {
+        observedFixedDt = dt;
+        ++fixedCalls;
+    });
+    TEST_ASSERT(steps1 == 0 && fixedCalls == 0);
+    TEST_NEAR(stepper.GetInterpolationAlpha(), 0.40f, 1e-4f);
+
+    // Frame 2: 45ms frame -> total 65ms -> 1 fixed step (50ms), remainder 15ms -> alpha = 15/50 = 0.30
+    int steps2 = stepper.AdvanceFrame(0.045f, [&](float /*dt*/) { ++fixedCalls; });
+    TEST_ASSERT(steps2 == 1 && fixedCalls == 1);
+    TEST_NEAR(stepper.GetInterpolationAlpha(), 0.30f, 1e-4f);
+
+    // Frame 3: 500ms lag spike -> clamped to maxSubStepsPerFrame (3 * 50ms = 150ms) -> 3 steps, remainder 0ms
+    int steps3 = stepper.AdvanceFrame(0.500f, [&](float /*dt*/) { ++fixedCalls; });
+    TEST_ASSERT(steps3 == 3 && fixedCalls == 4);
+    TEST_ASSERT(stepper.GetSpiralClampCount() == 1);
+    TEST_NEAR(stepper.GetInterpolationAlpha(), 0.0f, 1e-4f);
+    TEST_ASSERT(stepper.GetTotalFixedTicks() == 4);
+    TEST_ASSERT(stepper.GetTotalFrames() == 3);
+    return true;
+}
+
+bool TestPhase12StageFF1EngineKernelPluggableGameModuleAndRetailDriveMap() {
+    class ExperimentalRtsGameModule final : public engine::IGameModule {
+    public:
+        const char* GetModuleName() const override { return "ExperimentalWarcraft3Module"; }
+
+        bool OnInit(engine::EngineKernel& kernel) override {
+            if (kernel.Input()) {
+                kernel.Input()->RegisterStandardWarcraftDefaults();
+            }
+            sim.AddPlayer(std::make_unique<CPlayer>(0, "Player0", CMapControl::USER));
+            presentation.BindSimulationEvents(sim);
+
+            const std::string mapPath = "resources/Maps/FrozenThrone/(2)EchoIsles.w3x";
+            FILE* f = std::fopen(mapPath.c_str(), "rb");
+            if (f) {
+                std::fclose(f);
+                if (!session.LoadMap(mpq, sim, scene, presentation, mapPath)) {
+                    return false;
+                }
+                retailMapLoaded = true;
+            }
+
+            CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+            heroUnit = sim.AdoptUnit(std::make_unique<CUnit>(
+                sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+            sim.Update();
+            presentation.CaptureSimulationTick(sim);
+            return heroUnit != nullptr;
+        }
+
+        void OnFixedTick(engine::EngineKernel& /*kernel*/, float /*fixedDt*/) override {
+            ++fixedTicks;
+            if (heroUnit) {
+                heroUnit->SetPosition(static_cast<float>(fixedTicks * 50), 0.0f);
+            }
+            sim.Update();
+            presentation.CaptureSimulationTick(sim);
+        }
+
+        void OnFrameUpdate(engine::EngineKernel& /*kernel*/, float /*dt*/, float alpha) override {
+            ++frameUpdates;
+            lastAlpha = alpha;
+            presentation.SetInterpolationAlpha(alpha);
+        }
+
+        void OnRender(engine::EngineKernel& /*kernel*/, int /*screenW*/, int /*screenH*/) override {
+            ++renderPasses;
+            Vec3 camEye(0.0f, 900.0f, 900.0f);
+            Mat4 view = LookAt(camEye, Vec3(0.0f, 0.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
+            Mat4 proj = Perspective(55.0f, 16.0f / 9.0f, 10.0f, 4000.0f);
+            scene.RenderAll(view, proj, 0.016f);
+        }
+
+        void OnShutdown(engine::EngineKernel& /*kernel*/) override {
+            if (retailMapLoaded) {
+                session.TeardownCurrentSession(mpq, sim, scene, presentation);
+            }
+            shutDownCleanly = true;
+        }
+
+        MpqManager mpq;
+        CSimulation sim;
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+        CUnit* heroUnit = nullptr;
+        bool retailMapLoaded = false;
+        bool shutDownCleanly = false;
+        int fixedTicks = 0;
+        int frameUpdates = 0;
+        int renderPasses = 0;
+        float lastAlpha = 0.0f;
+    };
+
+    engine::EngineKernel kernel;
+    TEST_ASSERT(kernel.BootstrapStandardSubsystems(2, 0.05f));
+    TEST_ASSERT(kernel.Jobs() != nullptr && kernel.Jobs()->IsInitialized());
+    TEST_ASSERT(kernel.Resources() != nullptr);
+    TEST_ASSERT(kernel.Audio() != nullptr);
+    TEST_ASSERT(kernel.RenderServer() != nullptr);
+    TEST_ASSERT(kernel.RenderGraph() != nullptr);
+    TEST_ASSERT(kernel.Input() != nullptr);
+    TEST_ASSERT(kernel.Scripting() != nullptr);
+    TEST_ASSERT(kernel.Profiler() != nullptr);
+
+    auto mod = std::make_unique<ExperimentalRtsGameModule>();
+    auto* modRaw = mod.get();
+    TEST_ASSERT(kernel.MountGameModule(std::move(mod)));
+
+    // Step 1 frame of 75ms -> triggers 1 fixed tick (50ms, hero moves 0 -> 50) + remainder 25ms (alpha = 0.50)
+    TEST_ASSERT(kernel.StepFrame(0.075f, 1280, 720) == 1);
+    TEST_ASSERT(modRaw->fixedTicks == 1);
+    TEST_ASSERT(modRaw->frameUpdates == 1);
+    TEST_ASSERT(modRaw->renderPasses == 1);
+    TEST_NEAR(modRaw->lastAlpha, 0.50f, 1e-3f);
+
+    // Sample interpolated hero position at alpha = 0.50 -> midpoint between 0 and 50 is 25.0f!
+    render::RenderTransformSnapshot snap;
+    TEST_ASSERT(modRaw->presentation.SampleInterpolatedUnit(modRaw->heroUnit->GetHandleId(), snap));
+    TEST_NEAR(snap.position.x, 25.0f, 1e-2f);
+
+    if (modRaw->retailMapLoaded) {
+        TEST_ASSERT(modRaw->session.GetStats().terrainChunksBuilt > 0);
+        TEST_ASSERT(modRaw->scene.GetRenderGraph().GetExecutedPassCount() == 7);
+    }
+
+    const engine::EngineKernelStats kStats = kernel.GetStats();
+    TEST_ASSERT(kStats.framesExecuted == 1);
+    TEST_ASSERT(kStats.fixedTicksExecuted == 1);
+    TEST_ASSERT(kStats.hasMountedGameModule);
+    TEST_ASSERT(kStats.activeGameModuleName == "ExperimentalWarcraft3Module");
+    TEST_ASSERT(kStats.activeSubsystems == 7);
+
+    kernel.Shutdown();
+    return true;
+}
+
+bool TestPhase12StageGG1UnifiedSlkMergeAndColdUnitScriptOverridesPool() {
+    // 1. Verify unified slk_merge.h & ObjectMetaTable deduplication
+    const std::string metaSlkText =
+        "ID;PWXL;N;E\n"
+        "B;X6;Y3;D0\n"
+        "C;X1;Y1;K\"ID\"\n"
+        "C;X2;Y1;K\"slk\"\n"
+        "C;X3;Y1;K\"field\"\n"
+        "C;X4;Y1;K\"data\"\n"
+        "C;X5;Y1;K\"repeat\"\n"
+        "C;X6;Y1;K\"index\"\n"
+        "C;X1;Y2;K\"unam\"\n"
+        "C;X2;Y2;K\"UnitUI\"\n"
+        "C;X3;Y2;K\"Name\"\n"
+        "C;X4;Y2;K\"0\"\n"
+        "C;X5;Y2;K\"0\"\n"
+        "C;X6;Y2;K\"-1\"\n"
+        "C;X1;Y3;K\"DataA\"\n"
+        "C;X2;Y3;K\"AbilityData\"\n"
+        "C;X3;Y3;K\"Data\"\n"
+        "C;X4;Y3;K\"1\"\n"
+        "C;X5;Y3;K\"3\"\n"
+        "C;X6;Y3;K\"-1\"\n"
+        "E\n";
+    SlkTable metaSlk;
+    TEST_ASSERT(metaSlk.Load(reinterpret_cast<const uint8_t*>(metaSlkText.data()), metaSlkText.size()));
+
+    ObjectMetaTable metaTbl;
+    TEST_ASSERT(metaTbl.Load(metaSlk));
+
+    ObjectModification mod1;
+    // Little-endian FourCC matching binary w3u/w3a reader so mod1.id.ToString() == "unam"
+    mod1.id = War3ID(static_cast<uint32_t>('u') |
+                     (static_cast<uint32_t>('n') << 8) |
+                     (static_cast<uint32_t>('a') << 16) |
+                     (static_cast<uint32_t>('m') << 24));
+    mod1.varType = ObjectModification::STRING;
+    mod1.stringValue = "Elite Footman";
+
+    std::string outSlk, outField;
+    TEST_ASSERT(ResolveObjectModField(metaTbl, mod1, outSlk, outField));
+    TEST_ASSERT(outSlk == "UnitUI" && outField == "Name");
+
+    std::string singleField;
+    TEST_ASSERT(ResolveObjectModField(metaTbl.accessor, mod1, singleField));
+    TEST_ASSERT(singleField == "Name");
+
+    // Verify ObjectMetaTable copy/move rebinds accessor.table to ownedSlk
+    ObjectMetaTable copiedMeta = metaTbl;
+    TEST_ASSERT(copiedMeta.accessor.table == &copiedMeta.ownedSlk);
+    std::string copiedSlk, copiedField;
+    TEST_ASSERT(ResolveObjectModField(copiedMeta, mod1, copiedSlk, copiedField));
+    TEST_ASSERT(copiedSlk == "UnitUI" && copiedField == "Name");
+
+    ObjectMetaTable movedMeta = std::move(copiedMeta);
+    TEST_ASSERT(movedMeta.accessor.table == &movedMeta.ownedSlk);
+    std::string movedSlk, movedField;
+    TEST_ASSERT(ResolveObjectModField(movedMeta, mod1, movedSlk, movedField));
+    TEST_ASSERT(movedSlk == "UnitUI" && movedField == "Name");
+
+    // 2. Verify Cold UnitScriptOverridesComponent lazy pooling on CUnit
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+
+    std::vector<CUnit*> standardUnits;
+    for (int i = 0; i < 20; ++i) {
+        standardUnits.push_back(sim.AdoptUnit(std::make_unique<CUnit>(
+            sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"),
+            static_cast<float>(i * 20), 0.0f, 0.0f)));
+    }
+    sim.Update();
+
+    // Standard units never touch sharedVision or unitTypeFlags -> 0 entries in UnitScriptOverridesComponent pool!
+    TEST_ASSERT(sim.Registry().Pool<UnitScriptOverridesComponent>().Size() == 0);
+    for (const CUnit* u : standardUnits) {
+        TEST_ASSERT(u->SharedVisionPlayers().empty());
+        TEST_ASSERT(!u->HasUnitTypeFlag(7));
+    }
+    // Reading const getters still leaves the pool at 0 allocations!
+    TEST_ASSERT(sim.Registry().Pool<UnitScriptOverridesComponent>().Size() == 0);
+
+    // Mutate script overrides on only 1 of the 20 units -> pool size becomes 1
+    CUnit* specialUnit = standardUnits[0];
+    specialUnit->SetSharesVisionWith(2, true);
+    specialUnit->AddUnitTypeFlag(42);
+    TEST_ASSERT(sim.Registry().Pool<UnitScriptOverridesComponent>().Size() == 1);
+    TEST_ASSERT(specialUnit->SharedVisionPlayers().count(2) == 1);
+    TEST_ASSERT(specialUnit->HasUnitTypeFlag(42));
+
+    // Removing the unit automatically purges its UnitScriptOverridesComponent entry
+    sim.RemoveUnit(specialUnit);
+    sim.Update();
+    TEST_ASSERT(sim.Registry().Pool<UnitScriptOverridesComponent>().Size() == 0);
 
     return true;
 }

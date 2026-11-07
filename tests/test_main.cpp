@@ -825,6 +825,10 @@ bool TestPhase11StageCC1RichTextLayoutCacheAndO1ColorParser();
 bool TestPhase11StageCC2Utf8CodepointDecoderAndCjkMetrics();
 bool TestPhase11StageDD1UnifiedScriptEngineHostAndJassAdapter();
 bool TestPhase11StageDD2RealScriptHotSwapAndRetailDriveSuite();
+bool TestPhase12StageEE1EngineSubsystemRegistryAndPhaseLifecycle();
+bool TestPhase12StageEE2FixedTimestepStepperAndInterpolationAlpha();
+bool TestPhase12StageFF1EngineKernelPluggableGameModuleAndRetailDriveMap();
+bool TestPhase12StageGG1UnifiedSlkMergeAndColdUnitScriptOverridesPool();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1644,7 +1648,11 @@ int main(int argc, char** argv) {
         {"Phase11 Stage CC1 RichTextLayoutCache and O(1) color parser", TestPhase11StageCC1RichTextLayoutCacheAndO1ColorParser},
         {"Phase11 Stage CC2 UTF-8 codepoint decoder and CJK metrics", TestPhase11StageCC2Utf8CodepointDecoderAndCjkMetrics},
         {"Phase11 Stage DD1 Unified IScriptEngineHost and JassAdapter", TestPhase11StageDD1UnifiedScriptEngineHostAndJassAdapter},
-        {"Phase11 Stage DD2 RealScript hot-swap and retail Drive suite", TestPhase11StageDD2RealScriptHotSwapAndRetailDriveSuite},
+                {"Phase11 Stage DD2 RealScript hot-swap and retail Drive suite", TestPhase11StageDD2RealScriptHotSwapAndRetailDriveSuite},
+        {"Phase12 Stage EE1 EngineSubsystemRegistry phase lifecycle and locator", TestPhase12StageEE1EngineSubsystemRegistryAndPhaseLifecycle},
+        {"Phase12 Stage EE2 FixedTimestepStepper and interpolation alpha", TestPhase12StageEE2FixedTimestepStepperAndInterpolationAlpha},
+        {"Phase12 Stage FF1 EngineKernel pluggable IGameModule and retail Drive map", TestPhase12StageFF1EngineKernelPluggableGameModuleAndRetailDriveMap},
+        {"Phase12 Stage GG1 Unified SlkMerge engine and cold UnitScriptOverrides pool", TestPhase12StageGG1UnifiedSlkMergeAndColdUnitScriptOverridesPool},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

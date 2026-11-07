@@ -149,16 +149,13 @@ set(SOURCES
     src/render/texture_atlas_packer.cpp
     src/render/shader.cpp
     src/render/camera.cpp
-    src/render/terrain.cpp
     src/render/textured_terrain.cpp
     src/render/shapes.cpp
     src/render/terrain_shader.cpp
     src/render/shaders_common.cpp
     src/render/shaders_common.h
-    src/render/shadow_manager.cpp
     src/render/fog_of_war.cpp
     src/render/splat_model.cpp
-    src/render/software_mesh.cpp
     src/render/wave_builder.cpp
     src/render/minimap.cpp
     src/render/daynight.cpp
@@ -348,22 +345,14 @@ set(SOURCES
     src/ui/SimpleFrame.cpp
     src/ui/TextureFrame.cpp
     src/ui/BackdropFrame.cpp
-    src/ui/CommandCard.cpp
     src/ui/MainUI.cpp
     src/ui/TextRenderer.cpp
     src/ui/TextFrame.cpp
-    src/ui/InfoPanelFrame.cpp
-    src/ui/PortraitFrame.cpp
-    src/ui/ResourceBarFrame.cpp
     src/ui/ButtonFrame.cpp
-    src/ui/TooltipFrame.cpp
-    src/ui/HeroPanelFrame.cpp
-    src/ui/ChatConsoleFrame.cpp
     src/ui/FrameBuilder.cpp
-    src/ui/MultiSelectionPanel.cpp
-    src/ui/BuffBar.cpp
     src/ui/ui_data_binder.cpp
     # ===== Core / State Machine =====
+    src/engine/engine_kernel.cpp
     src/core/game_controller.cpp
     src/core/world_scene_session.cpp
     src/core/input_action_map.cpp

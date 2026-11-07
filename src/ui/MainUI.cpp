@@ -344,7 +344,6 @@ bool MainUI::Init(MpqManager* mpq, int screenW, int screenH,
     chatMessages_.push_back("Warcraft III HUD online");
     chatHistoryIndex_ = 0;
     ClearCommandSlots();
-    multiSelectionPanel_.Init(screenW, screenH);
     return true;
 }
 
@@ -374,9 +373,6 @@ void MainUI::Shutdown() {
     hudHost_.reset();
     textures_.clear();
     textRenderer_.Shutdown();
-    commandCard_ = nullptr;
-    resourceBar_ = nullptr;
-    chatConsole_ = nullptr;
 
     if (rootFrame_) {
         gameUI_.frameRegistry.erase("Root");
@@ -597,7 +593,6 @@ void MainUI::Render() {
 
 void MainUI::SetMultiSelection(const std::vector<MultiSelectUnitInfo>& units) {
     multiSelectionUnits_ = units;
-    multiSelectionPanel_.SetSelection(units);
 }
 
 void MainUI::SetSelectionBox(const ScreenRect& rect) {
@@ -1066,7 +1061,6 @@ void MainUI::OnKeyDown(int key) {
     }
 }
 
-void MainUI::WireCommandCardCallbacks() {}
 
 bool MainUI::ToggleAutocast(int index) {
     if (index < 0 || index >= kCommandCount || !simulation_) return false;

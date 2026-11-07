@@ -309,14 +309,14 @@ void GameController::InitInGame() {
 
     if (mapLoader_) {
         for (const auto& seed : mapLoader_->GetUnitVisualSeeds()) {
-            simUnitVisualSeeds[seed.handleId] = {
+            presentation_.unitVisualSeeds[seed.handleId] = {
                 {seed.scale[0], seed.scale[1], seed.scale[2]},
                 seed.skinId, seed.hitpoints, seed.flags
             };
         }
         for (const auto& seed : mapLoader_->GetItemVisualSeeds()) {
             if (seed.handleId >= 0 && seed.visualIndex >= 0) {
-                simItemToVisualIdx[seed.handleId] = seed.visualIndex;
+                presentation_.itemToVisualIdx[seed.handleId] = seed.visualIndex;
             }
         }
         const auto& unitLoadResult = mapLoader_->GetUnitLoadResult();

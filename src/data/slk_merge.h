@@ -1,13 +1,20 @@
 #pragma once
-// Shared SLK + map-mod overlay helpers for object-data tables
-// (units, destructables/doodads, items, ...). Extracted verbatim from
-// destructabledata.cpp so CDoodadData reuses the same merge semantics:
-// fuzzy column lookup, id-keyed row index, TXT overlay with SLK fallback.
+// ============================================================================
+// Phase 12 Unified Data Table & ObjectModification Merge Engine (slk_merge.h)
+//
+// Consolidates the 4x duplicated SLK/TXT/ObjectMod merge implementations
+// previously scattered across slk_merge.cpp, itemdata.cpp, unitdata.cpp,
+// destructabledata.cpp, doodaddata.cpp, and object_mod_meta.h.
+// ============================================================================
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <initializer_list>
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "map/object_mods.h"
 #include "resource/slk.h"
@@ -32,6 +39,47 @@ inline std::string TrimCopy(std::string value) {
     }
     const size_t last = value.find_last_not_of(" \t\r\n");
     return value.substr(first, last - first + 1);
+}
+
+inline std::string ToLowerCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+inline void ParseWar3IdList(const std::string& str, std::vector<War3ID>& out) {
+    if (str.empty()) return;
+    size_t pos = 0;
+    while (pos < str.size()) {
+        const size_t comma = str.find(',', pos);
+        const std::string code = TrimCopy(str.substr(pos, comma - pos));
+        if (code.size() == 4) {
+            out.push_back(War3ID::FromString(code));
+        }
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+}
+
+inline bool TryGetTxtValueCaseInsensitive(const TxtTable& tbl,
+                                          const std::string& section,
+                                          const std::string& key,
+                                          std::string& outValue) {
+    const auto values = tbl.GetSection(section);
+    const auto it = values.find(key);
+    if (it != values.end()) {
+        outValue = it->second;
+        return true;
+    }
+    const std::string targetKey = ToLowerCopy(key);
+    for (const auto& [candidateKey, candidateValue] : values) {
+        if (ToLowerCopy(candidateKey) == targetKey) {
+            outValue = candidateValue;
+            return true;
+        }
+    }
+    return false;
 }
 
 struct SlkAccessor {
@@ -98,8 +146,7 @@ struct SlkAccessor {
     }
 };
 
-// TXT overlay wins; SLK row/column second; default last. `txt` carries
-// map w3b/w3u modifications, `slk` the base retail table.
+// Overload 1: Row/Col indexed SLK + TXT overlay (used by destructables, doodads, items)
 inline std::string GetMergedString(const SlkTable& slk, int row, int column,
                                    const TxtTable& txt, const std::string& section,
                                    const std::string& key,
@@ -130,11 +177,46 @@ inline int GetMergedInt(const SlkTable& slk, int row, int column,
     return def;
 }
 
-// ---- Map object-mod overlay (war3map.w3b over the retail SLK) ----
-// Implemented in slk_merge.cpp. Shared by every object-data loader so
-// custom map objects merge with identical semantics.
+// Overload 2: SlkAccessor ID-keyed + case-insensitive TXT overlay (used by unitdata)
+inline std::string GetMergedString(const TxtTable& txt, const SlkAccessor& slk,
+                                   const std::string& section, const std::string& key,
+                                   const std::string& def = "") {
+    std::string value;
+    if (TryGetTxtValueCaseInsensitive(txt, section, key, value)) {
+        return value;
+    }
+    if (slk.TryGetValue(section, key, value)) {
+        return value;
+    }
+    return def;
+}
+
+inline int GetMergedInt(const TxtTable& txt, const SlkAccessor& slk,
+                        const std::string& section, const std::string& key, int def = 0) {
+    const std::string value = GetMergedString(txt, slk, section, key);
+    if (value.empty()) {
+        return def;
+    }
+    return std::atoi(value.c_str());
+}
+
+inline float GetMergedFloat(const TxtTable& txt, const SlkAccessor& slk,
+                            const std::string& section, const std::string& key, float def = 0.0f) {
+    const std::string value = GetMergedString(txt, slk, section, key);
+    if (value.empty()) {
+        return def;
+    }
+    return std::strtof(value.c_str(), nullptr);
+}
+
+// ---- Map object-mod overlay helpers (shared across all object-data loaders) ----
 std::string FormatObjectModificationValue(const ObjectModification& mod);
 
+// 2-output overload: resolves both target SLK name and expanded field key
+bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModification& mod,
+                           std::string& outSlk, std::string& outField);
+
+// 1-output overload: resolves expanded field key while verifying target SLK is non-empty
 bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModification& mod,
                            std::string& outField);
 
@@ -149,16 +231,26 @@ bool ApplyObjectModificationEntry(const ObjectModificationEntry& entry,
                                   int& applied,
                                   int& unknown);
 
+// Generic single-table object modification applier (shared by w3b, w3d, w3t)
+void ApplySingleTableObjectMods(const MpqManager& mpq,
+                                const ObjectModificationSet& mods,
+                                std::initializer_list<const char*> metaSlkCandidates,
+                                const SlkTable& baseSlk,
+                                std::initializer_list<const char*> idColumnCandidates,
+                                TxtTable& overlay,
+                                const char* debugLabel = nullptr);
+
 void ApplyMapDestructableObjectMods(const MpqManager& mpq, const std::string& mapPath,
                                     const SlkTable& destructableSlk,
                                     TxtTable& overlay);
 
-// Doodad custom data (war3map.w3d + DoodadMetaData.slk): same merge
-// semantics as destructables but sourced from the Doodad object changeset
-// (ref Warcraft3MapObjectData doodadChangeset).
 void ApplyMapDoodadObjectMods(const MpqManager& mpq, const std::string& mapPath,
                               const SlkTable& doodadSlk,
                               TxtTable& overlay);
+
+void ApplyMapItemObjectMods(const MpqManager& mpq, const std::string& mapPath,
+                            const SlkTable& itemSlk,
+                            TxtTable& overlay);
 
 void CollectDestructableIds(const SlkAccessor& slk, const TxtTable& txt,
                             std::set<std::string>& outIds);

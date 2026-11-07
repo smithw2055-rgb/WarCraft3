@@ -11,28 +11,6 @@ std::string DescribeUnitType(War3ID typeId, const CUnitData& unitData) {
     return unitType->GetName() + " [" + typeId.ToString() + "]";
 }
 
-const char* BehaviorCategoryName(CBehaviorCategory category) {
-    switch (category) {
-        case CBehaviorCategory::NONE: return "NONE";
-        case CBehaviorCategory::STOP: return "STOP";
-        case CBehaviorCategory::MOVE: return "MOVE";
-        case CBehaviorCategory::ATTACK: return "ATTACK";
-        case CBehaviorCategory::SPELL: return "SPELL";
-        case CBehaviorCategory::ATTACK_MOVE: return "ATTACK_MOVE";
-        case CBehaviorCategory::PATROL: return "PATROL";
-        case CBehaviorCategory::FOLLOW: return "FOLLOW";
-        case CBehaviorCategory::HOLD_POSITION: return "HOLD_POSITION";
-        case CBehaviorCategory::BUILD: return "BUILD";
-        case CBehaviorCategory::HARVEST: return "HARVEST";
-        case CBehaviorCategory::RETURN_RESOURCES: return "RETURN_RESOURCES";
-        case CBehaviorCategory::BOARD_TRANSPORT: return "BOARD_TRANSPORT";
-        case CBehaviorCategory::STUN: return "STUN";
-        case CBehaviorCategory::INVENTORY: return "INVENTORY";
-        case CBehaviorCategory::ROOT: return "ROOT";
-        default: return "UNKNOWN";
-    }
-}
-
 std::string JoinStrings(const std::vector<std::string>& values, const char* delimiter) {
     std::ostringstream oss;
     for (size_t i = 0; i < values.size(); ++i) {

@@ -22,10 +22,9 @@ std::string FormatObjectModificationValue(const ObjectModification& mod) {
 }
 
 bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModification& mod,
-                           std::string& outField) {
+                           std::string& outSlk, std::string& outField) {
     const std::string metaId = mod.id.ToString();
-    std::string slkName;
-    if (!meta.TryGetValue(metaId, "slk", slkName) || slkName.empty()) return false;
+    if (!meta.TryGetValue(metaId, "slk", outSlk) || outSlk.empty()) return false;
     if (!meta.TryGetValue(metaId, "field", outField) || outField.empty()) return false;
 
     int data = 0;
@@ -59,6 +58,7 @@ bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModification& mo
                 outField += std::to_string(upgradeExtensionLevel);
             }
         } else if (appendIndexMode == "0") {
+            // Indexed list storage is collapsed into one comma field in this C++ data path.
         } else if (index == -1 || repeat >= 10) {
             if (level == 0) level = 1;
             if (repeat >= 10 && level >= 0 && level < 100) {
@@ -70,6 +70,12 @@ bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModification& mo
         }
     }
     return true;
+}
+
+bool ResolveObjectModField(const SlkAccessor& meta, const ObjectModification& mod,
+                           std::string& outField) {
+    std::string slkName;
+    return ResolveObjectModField(meta, mod, slkName, outField);
 }
 
 int CopyObjectDataSection(TxtTable& txt, const SlkAccessor& slk,
@@ -121,27 +127,33 @@ bool ApplyObjectModificationEntry(const ObjectModificationEntry& entry,
     return touched;
 }
 
-void ApplyMapDestructableObjectMods(const MpqManager& mpq, const std::string& mapPath,
-                                    const SlkTable& destructableSlk,
-                                    TxtTable& overlay) {
-    if (mapPath.empty()) return;
-
-    ObjectModificationSet mods;
-    if (!LoadWar3MapDestructableMods(mapPath, mods)) {
-        std::cout << "ObjectMods: no war3map.w3b destructable modifications" << std::endl;
-        return;
-    }
-
+void ApplySingleTableObjectMods(const MpqManager& mpq,
+                                const ObjectModificationSet& mods,
+                                std::initializer_list<const char*> metaSlkCandidates,
+                                const SlkTable& baseSlk,
+                                std::initializer_list<const char*> idColumnCandidates,
+                                TxtTable& overlay,
+                                const char* debugLabel) {
     SlkTable metaSlk;
+    bool metaLoaded = false;
     std::vector<uint8_t> metaBuf;
-    if (!mpq.ReadFile("Units\\DestructableMetaData.slk", metaBuf) ||
-        !metaSlk.Load(metaBuf.data(), metaBuf.size())) {
-        std::cerr << "ObjectMods: DestructableMetaData.slk unavailable; destructable modifications skipped" << std::endl;
+    for (const char* candidatePath : metaSlkCandidates) {
+        if (mpq.ReadFile(candidatePath, metaBuf) &&
+            metaSlk.Load(metaBuf.data(), metaBuf.size())) {
+            metaLoaded = true;
+            break;
+        }
+    }
+    if (!metaLoaded) {
+        if (debugLabel) {
+            std::cerr << "ObjectMods: metadata SLK unavailable for " << debugLabel
+                      << "; modifications skipped" << std::endl;
+        }
         return;
     }
 
     const SlkAccessor meta(metaSlk, {"ID"});
-    const SlkAccessor destructableData(destructableSlk, {"DestructableID", "destructableID", "doodID", "ID"});
+    const SlkAccessor baseData(baseSlk, idColumnCandidates);
     int applied = 0;
     int unknown = 0;
     int customCloned = 0;
@@ -154,7 +166,7 @@ void ApplyMapDestructableObjectMods(const MpqManager& mpq, const std::string& ma
             customSkipped++;
             continue;
         }
-        if (CopyObjectDataSection(overlay, destructableData, oldSection, newSection) == 0) {
+        if (CopyObjectDataSection(overlay, baseData, oldSection, newSection) == 0) {
             customSkipped++;
             continue;
         }
@@ -167,68 +179,59 @@ void ApplyMapDestructableObjectMods(const MpqManager& mpq, const std::string& ma
         ApplyObjectModificationEntry(entry, section, meta, overlay, applied, unknown);
     }
 
-    std::cout << "ObjectMods: war3map.w3b original=" << mods.original.size()
-              << " custom=" << mods.custom.size()
-              << " applied=" << applied
-              << " unknown=" << unknown
-              << " customCloned=" << customCloned
-              << " customSkipped=" << customSkipped << std::endl;
+    if (debugLabel) {
+        std::cout << "ObjectMods: " << debugLabel
+                  << " original=" << mods.original.size()
+                  << " custom=" << mods.custom.size()
+                  << " applied=" << applied
+                  << " unknown=" << unknown
+                  << " customCloned=" << customCloned
+                  << " customSkipped=" << customSkipped << std::endl;
+    }
+}
+
+void ApplyMapDestructableObjectMods(const MpqManager& mpq, const std::string& mapPath,
+                                    const SlkTable& destructableSlk,
+                                    TxtTable& overlay) {
+    if (mapPath.empty()) return;
+    ObjectModificationSet mods;
+    if (!LoadWar3MapDestructableMods(mapPath, mods)) {
+        std::cout << "ObjectMods: no war3map.w3b destructable modifications" << std::endl;
+        return;
+    }
+    ApplySingleTableObjectMods(
+        mpq, mods, {"Units\\DestructableMetaData.slk"},
+        destructableSlk, {"DestructableID", "destructableID", "doodID", "ID"},
+        overlay, "war3map.w3b");
 }
 
 void ApplyMapDoodadObjectMods(const MpqManager& mpq, const std::string& mapPath,
                               const SlkTable& doodadSlk,
                               TxtTable& overlay) {
     if (mapPath.empty()) return;
-
     ObjectModificationSet mods;
     if (!LoadWar3MapDoodadMods(mapPath, mods)) {
         return;
     }
+    ApplySingleTableObjectMods(
+        mpq, mods, {"Doodads\\DoodadMetaData.slk", "Units\\DestructableMetaData.slk"},
+        doodadSlk, {"doodID", "DestructableID", "destructableID", "ID"},
+        overlay, "war3map.w3d");
+}
 
-    SlkTable metaSlk;
-    std::vector<uint8_t> metaBuf;
-    if (!mpq.ReadFile("Doodads\\DoodadMetaData.slk", metaBuf) ||
-        !metaSlk.Load(metaBuf.data(), metaBuf.size())) {
-        if (!mpq.ReadFile("Units\\DestructableMetaData.slk", metaBuf) ||
-            !metaSlk.Load(metaBuf.data(), metaBuf.size())) {
-            std::cerr << "ObjectMods: DoodadMetaData.slk unavailable; doodad modifications skipped" << std::endl;
-            return;
-        }
+void ApplyMapItemObjectMods(const MpqManager& mpq, const std::string& mapPath,
+                            const SlkTable& itemSlk,
+                            TxtTable& overlay) {
+    if (mapPath.empty()) return;
+    ObjectModificationSet mods;
+    if (!LoadWar3MapItemMods(mapPath, mods)) {
+        std::cout << "ObjectMods: no war3map.w3t item modifications" << std::endl;
+        return;
     }
-
-    const SlkAccessor meta(metaSlk, {"ID"});
-    const SlkAccessor doodadData(doodadSlk, {"doodID", "DestructableID", "destructableID", "ID"});
-    int applied = 0;
-    int unknown = 0;
-    int customCloned = 0;
-    int customSkipped = 0;
-
-    for (const auto& entry : mods.custom) {
-        const std::string oldSection = entry.oldId.ToString();
-        const std::string newSection = entry.newId.ToString();
-        if (oldSection.size() != 4 || newSection.size() != 4) {
-            customSkipped++;
-            continue;
-        }
-        if (CopyObjectDataSection(overlay, doodadData, oldSection, newSection) == 0) {
-            customSkipped++;
-            continue;
-        }
-        customCloned++;
-        ApplyObjectModificationEntry(entry, newSection, meta, overlay, applied, unknown);
-    }
-
-    for (const auto& entry : mods.original) {
-        const std::string section = entry.oldId.ToString();
-        ApplyObjectModificationEntry(entry, section, meta, overlay, applied, unknown);
-    }
-
-    std::cout << "ObjectMods: war3map.w3d original=" << mods.original.size()
-              << " custom=" << mods.custom.size()
-              << " applied=" << applied
-              << " unknown=" << unknown
-              << " customCloned=" << customCloned
-              << " customSkipped=" << customSkipped << std::endl;
+    ApplySingleTableObjectMods(
+        mpq, mods, {"Units\\UnitMetaData.slk"},
+        itemSlk, {"itemID", "unitID", "ID"},
+        overlay, "war3map.w3t");
 }
 
 void CollectDestructableIds(const SlkAccessor& slk, const TxtTable& txt, std::set<std::string>& outIds) {

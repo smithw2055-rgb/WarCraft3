@@ -661,42 +661,42 @@ inline bool ApplyAnimationRequestToViewer(int handleId,
     if (played) {
         auto storedRequest = request;
         storedRequest.force = false;
-        g->simUnitScriptedAnimations[handleId] = {storedRequest, loop, queueStandAfterCurrent};
+        g->GetPresentation().unitScriptedAnimations[handleId] = {storedRequest, loop, queueStandAfterCurrent};
     }
     return played;
 }
 
 inline void ApplyPendingUnitAnimation(int handleId, MdxViewer* viewer, GameController* g) {
     if (!viewer || !viewer->GetAnimator()) return;
-    const auto pendingIt = g->simUnitPendingAnimations.find(handleId);
-    if (pendingIt == g->simUnitPendingAnimations.end()) return;
+    const auto pendingIt = g->GetPresentation().unitPendingAnimations.find(handleId);
+    if (pendingIt == g->GetPresentation().unitPendingAnimations.end()) return;
     ApplyAnimationRequestToViewer(handleId, viewer, pendingIt->second, g);
-    g->simUnitPendingAnimations.erase(pendingIt);
+    g->GetPresentation().unitPendingAnimations.erase(pendingIt);
 }
 
 inline void QueueUnitAnimationRequest(int handleId,
                                       const animation_utils::PendingUnitAnimation& request,
                                       GameController* g) {
     if (!g) return;
-    g->simUnitQueuedAnimations[handleId].push_back(request);
+    g->GetPresentation().unitQueuedAnimations[handleId].push_back(request);
 }
 
 inline bool ApplyNextQueuedUnitAnimation(int handleId, MdxViewer* viewer, GameController* g) {
     if (!viewer || !viewer->GetAnimator() || !g) return false;
-    auto queuedIt = g->simUnitQueuedAnimations.find(handleId);
-    if (queuedIt == g->simUnitQueuedAnimations.end() || queuedIt->second.empty()) {
+    auto queuedIt = g->GetPresentation().unitQueuedAnimations.find(handleId);
+    if (queuedIt == g->GetPresentation().unitQueuedAnimations.end() || queuedIt->second.empty()) {
         return false;
     }
     auto request = queuedIt->second.front();
     queuedIt->second.pop_front();
     if (queuedIt->second.empty()) {
-        g->simUnitQueuedAnimations.erase(queuedIt);
+        g->GetPresentation().unitQueuedAnimations.erase(queuedIt);
     }
     if (ApplyAnimationRequestToViewer(handleId, viewer, request, g)) {
-        g->simUnitPendingAnimations.erase(handleId);
+        g->GetPresentation().unitPendingAnimations.erase(handleId);
         return true;
     }
-    g->simUnitPendingAnimations[handleId] = std::move(request);
+    g->GetPresentation().unitPendingAnimations[handleId] = std::move(request);
     return false;
 }
 
@@ -918,13 +918,13 @@ inline void PlayResolvedUnitAnimation(CUnit* unit,
 
     const int handleId = unit->GetHandleId();
     auto& splatMeta = g->GetSplatMeta();
-    const auto* scriptTags = &g->simUnitAnimationPropertyTags;
+    const auto* scriptTags = &g->GetPresentation().unitAnimationPropertyTags;
 
     // If script requested a specific animation, use it
     ApplyPendingUnitAnimation(handleId, viewer, g);
 
-    const auto scriptIt = g->simUnitScriptedAnimations.find(handleId);
-    if (scriptIt != g->simUnitScriptedAnimations.end()) {
+    const auto scriptIt = g->GetPresentation().unitScriptedAnimations.find(handleId);
+    if (scriptIt != g->GetPresentation().unitScriptedAnimations.end()) {
         const auto& state = scriptIt->second;
         if (CurrentAnimationRequestMatchesViewer(viewer, state.request)) {
             return;
@@ -945,7 +945,7 @@ inline void PlayResolvedUnitAnimation(CUnit* unit,
         if (applied) {
             return;
         }
-        g->simUnitScriptedAnimations.erase(scriptIt);
+        g->GetPresentation().unitScriptedAnimations.erase(scriptIt);
     }
 
     const CBehaviorCategory behaviorCategory =
@@ -961,8 +961,8 @@ inline void PlayResolvedUnitAnimation(CUnit* unit,
             animation_utils::PlayDeathVisualForUnit(unit, viewer, mode, g->GetSimulation());
             return;
         case animation_utils::UnitVisualAnimationMode::CONSTRUCT: {
-            const auto lastModeIt = g->simUnitVisualAnimationModes.find(handleId);
-            if (lastModeIt == g->simUnitVisualAnimationModes.end()
+            const auto lastModeIt = g->GetPresentation().unitVisualAnimationModes.find(handleId);
+            if (lastModeIt == g->GetPresentation().unitVisualAnimationModes.end()
                 || lastModeIt->second != animation_utils::UnitVisualAnimationMode::CONSTRUCT) {
                 viewer->PlayBirthThenStandSequence();
             }
@@ -1021,8 +1021,8 @@ inline void PlayResolvedUnitAnimation(CUnit* unit,
                 attackBehavior ? attackBehavior->GetAttackAnimationStartTick() : -1;
             const float behaviorAttackDuration =
                 attackBehavior ? attackBehavior->GetAttackAnimationDuration() : 0.0f;
-            const auto lastAttackIt = g->simUnitVisualLastAttackAnimationTicks.find(handleId);
-            const int lastAttackTick = (lastAttackIt != g->simUnitVisualLastAttackAnimationTicks.end())
+            const auto lastAttackIt = g->GetPresentation().unitVisualLastAttackAnimationTicks.find(handleId);
+            const int lastAttackTick = (lastAttackIt != g->GetPresentation().unitVisualLastAttackAnimationTicks.end())
                 ? lastAttackIt->second
                 : std::numeric_limits<int>::min();
             const bool shouldStartAttackAnimation = attackBehavior
@@ -1034,7 +1034,7 @@ inline void PlayResolvedUnitAnimation(CUnit* unit,
                     unit, scriptTags, CResourceType::NONE);
                 if (viewer->PlayAttackSequenceWithTagsAndDuration(
                         attackTags, behaviorAttackDuration)) {
-                    g->simUnitVisualLastAttackAnimationTicks[handleId] =
+                    g->GetPresentation().unitVisualLastAttackAnimationTicks[handleId] =
                         behaviorAttackStartTick;
                 }
                 else {
@@ -1060,9 +1060,9 @@ inline void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameCont
     if (!unit || !viewer) return;
     const int handleId = unit->GetHandleId();
 
-    const auto lastPosIt = g->simUnitVisualLastPositions.find(handleId);
+    const auto lastPosIt = g->GetPresentation().unitVisualLastPositions.find(handleId);
     bool posChanged = false;
-    if (lastPosIt != g->simUnitVisualLastPositions.end()) {
+    if (lastPosIt != g->GetPresentation().unitVisualLastPositions.end()) {
         float dx = unit->GetX() - lastPosIt->second.first;
         float dy = unit->GetY() - lastPosIt->second.second;
         posChanged = (dx * dx + dy * dy) > 0.01f;
@@ -1071,34 +1071,34 @@ inline void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameCont
     }
 
     if (posChanged) {
-        g->simUnitVisualLastPositions[handleId] = {unit->GetX(), unit->GetY()};
+        g->GetPresentation().unitVisualLastPositions[handleId] = {unit->GetX(), unit->GetY()};
     }
 
     // Re-evaluate animation from live behavior, work, and carried-resource
     // state rather than only position changes.
     const bool isMoving = animation_utils::ComputeUnitVisualIsMoving(
-        unit, g->simUnitVisualLastPositions);
-    const bool wasMoving = g->simUnitVisualMovingStates.count(handleId)
-        && g->simUnitVisualMovingStates[handleId];
+        unit, g->GetPresentation().unitVisualLastPositions);
+    const bool wasMoving = g->GetPresentation().unitVisualMovingStates.count(handleId)
+        && g->GetPresentation().unitVisualMovingStates[handleId];
     const CBehaviorCategory behaviorCategory =
         unit_text_utils::GetUnitCurrentBehaviorCategory(unit);
     const CResourceType carriedType =
         unit_text_utils::GetUnitCarriedResourceType(unit);
     const std::vector<std::string> currentPropertyTags =
         animation_utils::CollectUnitAnimationPropertyTags(
-            unit, &g->simUnitAnimationPropertyTags);
+            unit, &g->GetPresentation().unitAnimationPropertyTags);
 
-    const auto lastModeIt = g->simUnitVisualAnimationModes.find(handleId);
-    const auto lastMode = (lastModeIt != g->simUnitVisualAnimationModes.end())
+    const auto lastModeIt = g->GetPresentation().unitVisualAnimationModes.find(handleId);
+    const auto lastMode = (lastModeIt != g->GetPresentation().unitVisualAnimationModes.end())
         ? lastModeIt->second
         : animation_utils::UnitVisualAnimationMode::NONE;
 
-    const auto lastPropertyTagsIt = g->simUnitVisualPropertyTags.find(handleId);
-    const bool propertyTagsChanged = (lastPropertyTagsIt == g->simUnitVisualPropertyTags.end())
+    const auto lastPropertyTagsIt = g->GetPresentation().unitVisualPropertyTags.find(handleId);
+    const bool propertyTagsChanged = (lastPropertyTagsIt == g->GetPresentation().unitVisualPropertyTags.end())
         || (lastPropertyTagsIt->second != currentPropertyTags);
 
-    const auto lastResourceIt = g->simUnitVisualResourceTags.find(handleId);
-    const bool resourceChanged = (lastResourceIt == g->simUnitVisualResourceTags.end())
+    const auto lastResourceIt = g->GetPresentation().unitVisualResourceTags.find(handleId);
+    const bool resourceChanged = (lastResourceIt == g->GetPresentation().unitVisualResourceTags.end())
         || (lastResourceIt->second != carriedType);
 
     const auto resolvedMode = animation_utils::ResolveUnitVisualAnimationMode(
@@ -1113,24 +1113,24 @@ inline void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameCont
         || propertyTagsChanged
         || resourceChanged
         || shouldRefreshAttack
-        || (g->simUnitPendingAnimations.count(handleId) != 0);
+        || (g->GetPresentation().unitPendingAnimations.count(handleId) != 0);
 
     if (needsResolve) {
         PlayResolvedUnitAnimation(unit, viewer, g, resolvedMode);
     }
 
-    g->simUnitVisualConstructionStates[handleId] = unit->IsConstructing();
-    g->simUnitVisualResourceTags[handleId] = carriedType;
-    g->simUnitVisualPropertyTags[handleId] = currentPropertyTags;
-    g->simUnitVisualAnimationModes[handleId] = resolvedMode;
-    g->simUnitVisualMovingStates[handleId] = isMoving;
+    g->GetPresentation().unitVisualConstructionStates[handleId] = unit->IsConstructing();
+    g->GetPresentation().unitVisualResourceTags[handleId] = carriedType;
+    g->GetPresentation().unitVisualPropertyTags[handleId] = currentPropertyTags;
+    g->GetPresentation().unitVisualAnimationModes[handleId] = resolvedMode;
+    g->GetPresentation().unitVisualMovingStates[handleId] = isMoving;
     if (resolvedMode != animation_utils::UnitVisualAnimationMode::ATTACK) {
-        g->simUnitVisualLastAttackAnimationTicks.erase(handleId);
+        g->GetPresentation().unitVisualLastAttackAnimationTicks.erase(handleId);
     }
 
     // Handle queued animations
-    const auto queuedIt = g->simUnitQueuedAnimations.find(handleId);
-    if (queuedIt != g->simUnitQueuedAnimations.end() && !queuedIt->second.empty()) {
+    const auto queuedIt = g->GetPresentation().unitQueuedAnimations.find(handleId);
+    if (queuedIt != g->GetPresentation().unitQueuedAnimations.end() && !queuedIt->second.empty()) {
         if (!viewer->IsCurrentSequenceLooping() && viewer->IsCurrentSequenceFinished()) {
             ApplyNextQueuedUnitAnimation(handleId, viewer, g);
         }
@@ -1154,14 +1154,14 @@ inline void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameCont
     }
     {
         float pos[3] = {sampleX, visualHeight, sampleY};
-        auto vit = g->simUnitToVisualIdx.find(handleId);
-        if (vit != g->simUnitToVisualIdx.end()) {
+        auto vit = g->GetPresentation().unitToVisualIdx.find(handleId);
+        if (vit != g->GetPresentation().unitToVisualIdx.end()) {
             g->GetScene().UpdateInstancePosition(vit->second, pos, sampleFacing);
             // Script scale (SetUnitScale) multiplies the seed scale; refresh
             // every frame so mid-game changes apply (cheap idempotent write).
             float seedScale[3] = {1.0f, 1.0f, 1.0f};
-            auto seedIt = g->simUnitVisualSeeds.find(handleId);
-            if (seedIt != g->simUnitVisualSeeds.end()) {
+            auto seedIt = g->GetPresentation().unitVisualSeeds.find(handleId);
+            if (seedIt != g->GetPresentation().unitVisualSeeds.end()) {
                 seedScale[0] = seedIt->second.scale[0];
                 seedScale[1] = seedIt->second.scale[1];
                 seedScale[2] = seedIt->second.scale[2];

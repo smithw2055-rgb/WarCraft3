@@ -2,7 +2,7 @@
 #include "ecs/widget.h"
 #include "ecs/unit_type.h"
 #include "ecs/player.h"
-#include "ecs/abilities.h"
+#include "ecs/ability.h"
 #include "ecs/buff.h"
 #include "ecs/behaviors/behavior.h"
 #include "ecs/behaviors/behavior_stop.h"
@@ -38,7 +38,7 @@ public:
           War3ID typeId, float x, float y, float facing);
     ~CUnit() override;
 
-    // Bind this unit's orthogonal components to a central SimEcsRegistry (Phase 5 True ECS Pooling).
+    // Bind this unit's orthogonal components to a central SimEcsRegistry (Phase 5 & Phase 12 True ECS Pooling).
     // Any components already populated before adoption are migrated into the registry's contiguous pools.
     void BindRegistry(SimEcsRegistry* registry);
     SimEcsRegistry* GetBoundRegistry() const { return registry_; }
@@ -68,7 +68,7 @@ public:
     UnitAttributeAggregator& Attributes() { return attrs_; }
     const UnitAttributeAggregator& Attributes() const { return attrs_; }
 
-    // Orthogonal ECS Component Accessors (Phase 5 True Sparse-Set ECS Storage)
+    // Orthogonal ECS Component Accessors (Phase 5 & Phase 12 Sparse-Set ECS Storage)
     // Components are lazily allocated on demand in the bound SimEcsRegistry's
     // SparseComponentPool<T>, while const getters return a shared default singleton
     // if the unit has never mutated that component!
@@ -106,6 +106,12 @@ public:
     const UnitCorpseDropComponent& CorpseDropComp() const {
         if (const auto* c = ActiveRegistry().TryGet<UnitCorpseDropComponent>(handleId_)) return *c;
         static const UnitCorpseDropComponent kDefault{};
+        return kDefault;
+    }
+    UnitScriptOverridesComponent& ScriptOverridesComp() { return ActiveRegistry().GetOrCreate<UnitScriptOverridesComponent>(handleId_); }
+    const UnitScriptOverridesComponent& ScriptOverridesComp() const {
+        if (const auto* c = ActiveRegistry().TryGet<UnitScriptOverridesComponent>(handleId_)) return *c;
+        static const UnitScriptOverridesComponent kDefault{};
         return kDefault;
     }
 
@@ -211,10 +217,6 @@ public:
     CAbility* GetAbility(War3ID code) const;
     const std::vector<CAbility*>& GetAbilities() const { return abilities_; }
 
-    // Legacy ability defs (deprecated, kept for backward compat)
-    const std::vector<CAbilityDef>& GetAbilityDefs() const { return abilityDefs_; }
-    void AddAbilityDef(const CAbilityDef& def) { abilityDefs_.push_back(def); }
-
     // ===== Buff System =====
     void AddBuff(std::unique_ptr<CBuff> buff, CSimulation& game);
     void RemoveBuff(War3ID buffId, CSimulation& game);
@@ -262,10 +264,23 @@ public:
     bool CanSleepPerm() const { return canSleepPerm_; }
     void SetCanSleepPerm(bool v) { canSleepPerm_ = v; }
     // Instance unit-type flags (ref UnitAddType/UnitRemoveType raw ids).
-    // Stored per instance; consulted by future targeting/type checks.
-    void AddUnitTypeFlag(int typeId) { addedUnitTypes_.insert(typeId); removedUnitTypes_.erase(typeId); }
-    void RemoveUnitTypeFlag(int typeId) { removedUnitTypes_.insert(typeId); addedUnitTypes_.erase(typeId); }
-    bool HasUnitTypeFlag(int typeId) const { return addedUnitTypes_.count(typeId) > 0; }
+    // Stored per instance in cold UnitScriptOverridesComponent pool; consulted by future targeting/type checks.
+    void AddUnitTypeFlag(int typeId) {
+        auto& sc = ScriptOverridesComp();
+        sc.addedUnitTypes.insert(typeId);
+        sc.removedUnitTypes.erase(typeId);
+    }
+    void RemoveUnitTypeFlag(int typeId) {
+        auto& sc = ScriptOverridesComp();
+        sc.removedUnitTypes.insert(typeId);
+        sc.addedUnitTypes.erase(typeId);
+    }
+    bool HasUnitTypeFlag(int typeId) const {
+        if (const auto* sc = ActiveRegistry().TryGet<UnitScriptOverridesComponent>(handleId_)) {
+            return sc->addedUnitTypes.count(typeId) > 0;
+        }
+        return false;
+    }
     // Town-alarm opt-out (ref UnitIgnoreAlarm): no alarm system consumes
     // this yet; retained so script intent survives.
     bool IsAlarmIgnored() const { return ignoreAlarm_; }
@@ -361,7 +376,7 @@ public:
     void SetDetector(bool v) { detector_ = v; }
     // Players who also see through this unit's sight (UnitShareVision).
     void SetSharesVisionWith(int player, bool share);
-    const std::unordered_set<int>& SharedVisionPlayers() const { return sharedVision_; }
+    const std::unordered_set<int>& SharedVisionPlayers() const { return ScriptOverridesComp().sharedVisionPlayers; }
     // Ethereal (Banish): immune to physical (NORMAL damage), takes bonus
     // from MAGIC/SPELLS (ref CUnitDefaultEtherealDamageModListener).
     bool IsEthereal() const { return ethereal_; }
@@ -552,7 +567,6 @@ private:
 
     // Centralized attribute & modifier aggregator (Phase 2 modernization)
     UnitAttributeAggregator attrs_;
-    int speed_ = 0;
     float mana_ = 0.0f;
     int maxMana_ = 0;
     War3ID explodeBuffId_ = War3ID(0u);
@@ -569,35 +583,30 @@ private:
     bool rooted_ = false;
     bool invisible_ = false;
     bool detector_ = false;
-    std::unordered_set<int> sharedVision_;
     bool ethereal_ = false;
     bool magicImmune_ = false;
     bool illusion_ = false;
+    bool useFood_ = true;
+    bool pathingEnabled_ = true;
+    bool canSleep_ = true;
+    bool canSleepPerm_ = true;
+    bool ignoreAlarm_ = false;
+
     int foodUsed_ = 0;
     int foodMade_ = 0;
-    bool useFood_ = true;
     int heroLevel_ = 1;
     float acquireRange_ = -1.0f;
     float propWindow_ = -1.0f;
-    bool pathingEnabled_ = true;
 
     // Abilities
     std::vector<CAbility*> abilities_; // raw pointers to owned abilities
     std::vector<std::unique_ptr<CAbility>> ownedAbilities_;
-    std::vector<CAbilityDef> abilityDefs_; // legacy
 
     // Buffs
     std::vector<std::unique_ptr<CBuff>> buffs_;
     std::vector<DataDrivenBuffRecord> dataDrivenBuffs_;
     uint64_t zeroAllocBuffAppliedCount_ = 0;
     void SyncDataDrivenBuffModifiers(DataDrivenBuffRecord& rec, bool apply);
-
-    // Instance unit-type flag overrides (UnitAddType/UnitRemoveType).
-    std::unordered_set<int> addedUnitTypes_;
-    std::unordered_set<int> removedUnitTypes_;
-    bool canSleep_ = true;
-    bool canSleepPerm_ = true;
-    bool ignoreAlarm_ = false;
 
     // Behavior storage (owned by unit, created by abilities)
     std::unique_ptr<CBehaviorMove> moveBehavior_;
@@ -616,10 +625,11 @@ private:
     OrderIssuedHook orderIssuedHook_;
     UnitLoadedHook unitLoadedHook_;
 
-    // Attack modifier slots by attack index (ref attackReplacement).
+    // Attack modifier slots by attack index (ref attackReplacement; compact flat vector).
     struct AttackModifierSlot {
+        int attackIndex = 0;
         War3ID installer = War3ID(0u);
         std::unique_ptr<CAttackModifierEffect> effect;
     };
-    std::unordered_map<int, AttackModifierSlot> attackModifiers_;
+    std::vector<AttackModifierSlot> attackModifiers_;
 };

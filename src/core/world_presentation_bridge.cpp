@@ -66,80 +66,74 @@ void GameController::WireJassCallbacks() {
     jassData->camGetEyeY = [this]() -> float { return camera_.GetPosition().y; };
     jassData->camGetEyeZ = [this]() -> float { return camera_.GetPosition().z; };
 
-    jassData->unitSetAnimation = [this](int simHandle, const std::string& animName) {
-        animation_utils::PendingUnitAnimation request;
-        request.sequenceName = animName;
-        request.speedRatio = 1.0f;
-        simUnitQueuedAnimations.erase(simHandle);
-        auto it = simUnitToVisualIdx.find(simHandle);
-        if (it != simUnitToVisualIdx.end()) {
+    auto submitOrApplyAnim = [this](int simHandle, animation_utils::PendingUnitAnimation request, bool clearScripted = false) {
+        if (request.force) {
+            presentation_.unitQueuedAnimations.erase(simHandle);
+            if (clearScripted) {
+                presentation_.unitScriptedAnimations.erase(simHandle);
+            }
+        }
+        auto it = presentation_.unitToVisualIdx.find(simHandle);
+        if (it != presentation_.unitToVisualIdx.end()) {
             auto* viewer = scene_.GetViewer(it->second);
             if (viewer && ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
-                simUnitPendingAnimations.erase(simHandle);
+                presentation_.unitPendingAnimations.erase(simHandle);
                 return;
             }
         }
-        simUnitPendingAnimations[simHandle] = request;
+        presentation_.unitPendingAnimations[simHandle] = std::move(request);
     };
-    jassData->unitQueueAnimation = [this](int simHandle, const std::string& animName) {
-        animation_utils::PendingUnitAnimation request;
-        request.sequenceName = animName;
-        request.speedRatio = 1.0f;
-        auto it = simUnitToVisualIdx.find(simHandle);
-        if (it != simUnitToVisualIdx.end()) {
+    auto queueOrApplyAnim = [this](int simHandle, animation_utils::PendingUnitAnimation request, bool fallbackWhenNoAnimator) {
+        auto it = presentation_.unitToVisualIdx.find(simHandle);
+        if (it != presentation_.unitToVisualIdx.end()) {
             auto* viewer = scene_.GetViewer(it->second);
             if (viewer && viewer->GetAnimator()) {
-                bool shouldQueue = !viewer->IsCurrentSequenceFinished();
-                if (shouldQueue) {
+                if (!viewer->IsCurrentSequenceFinished()) {
                     QueueUnitAnimationRequest(simHandle, request, this);
                     return;
-                } else if (ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
-                    simUnitPendingAnimations.erase(simHandle);
+                }
+                if (ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
+                    presentation_.unitPendingAnimations.erase(simHandle);
                     return;
                 }
             }
-        } else {
-            simUnitPendingAnimations[simHandle] = request;
+            if (!fallbackWhenNoAnimator) return;
         }
+        presentation_.unitPendingAnimations[simHandle] = std::move(request);
     };
-    jassData->unitSetAnimationByIndex = [this](int simHandle, int index) {
+
+    jassData->unitSetAnimation = [submitOrApplyAnim](int simHandle, const std::string& animName) {
+        animation_utils::PendingUnitAnimation request;
+        request.sequenceName = animName;
+        request.speedRatio = 1.0f;
+        submitOrApplyAnim(simHandle, std::move(request));
+    };
+    jassData->unitQueueAnimation = [queueOrApplyAnim](int simHandle, const std::string& animName) {
+        animation_utils::PendingUnitAnimation request;
+        request.sequenceName = animName;
+        request.speedRatio = 1.0f;
+        queueOrApplyAnim(simHandle, std::move(request), false);
+    };
+    jassData->unitSetAnimationByIndex = [submitOrApplyAnim](int simHandle, int index) {
         animation_utils::PendingUnitAnimation request;
         request.sequenceIndex = index;
         request.useSequenceIndex = true;
         request.speedRatio = 1.0f;
-        simUnitQueuedAnimations.erase(simHandle);
-        auto it = simUnitToVisualIdx.find(simHandle);
-        if (it != simUnitToVisualIdx.end()) {
-            auto* viewer = scene_.GetViewer(it->second);
-            if (viewer && ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
-                simUnitPendingAnimations.erase(simHandle);
-                return;
-            }
-        }
-        simUnitPendingAnimations[simHandle] = request;
+        submitOrApplyAnim(simHandle, std::move(request));
     };
-    jassData->unitSetAnimationByIndexEx = [this](int simHandle, int index, float speedRatio) {
+    jassData->unitSetAnimationByIndexEx = [submitOrApplyAnim](int simHandle, int index, float speedRatio) {
         animation_utils::PendingUnitAnimation request;
         request.sequenceIndex = index;
         request.useSequenceIndex = true;
         request.speedRatio = speedRatio;
-        simUnitQueuedAnimations.erase(simHandle);
-        auto it = simUnitToVisualIdx.find(simHandle);
-        if (it != simUnitToVisualIdx.end()) {
-            auto* viewer = scene_.GetViewer(it->second);
-            if (viewer && ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
-                simUnitPendingAnimations.erase(simHandle);
-                return;
-            }
-        }
-        simUnitPendingAnimations[simHandle] = request;
+        submitOrApplyAnim(simHandle, std::move(request));
     };
-    jassData->unitSetAnimationByTags = [this](int simHandle,
-                                              const std::string& primaryTag,
-                                              const std::vector<std::string>& secondaryTags,
-                                              float speedRatio,
-                                              float durationSeconds,
-                                              bool force) {
+    jassData->unitSetAnimationByTags = [submitOrApplyAnim](int simHandle,
+                                                           const std::string& primaryTag,
+                                                           const std::vector<std::string>& secondaryTags,
+                                                           float speedRatio,
+                                                           float durationSeconds,
+                                                           bool force) {
         animation_utils::PendingUnitAnimation request;
         request.primaryTag = primaryTag;
         request.secondaryTags = secondaryTags;
@@ -147,118 +141,59 @@ void GameController::WireJassCallbacks() {
         request.force = force;
         request.speedRatio = speedRatio;
         request.durationSeconds = durationSeconds;
-        if (force) {
-            simUnitQueuedAnimations.erase(simHandle);
-            simUnitScriptedAnimations.erase(simHandle);
-        }
-        auto it = simUnitToVisualIdx.find(simHandle);
-        if (it != simUnitToVisualIdx.end()) {
-            auto* viewer = scene_.GetViewer(it->second);
-            if (viewer && ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
-                simUnitPendingAnimations.erase(simHandle);
-                return;
-            }
-        }
-        simUnitPendingAnimations[simHandle] = request;
+        submitOrApplyAnim(simHandle, std::move(request), true);
     };
-    jassData->unitQueueAnimationByTags = [this](int simHandle,
-                                                const std::string& primaryTag,
-                                                const std::vector<std::string>& secondaryTags) {
+    jassData->unitQueueAnimationByTags = [queueOrApplyAnim](int simHandle,
+                                                            const std::string& primaryTag,
+                                                            const std::vector<std::string>& secondaryTags) {
         animation_utils::PendingUnitAnimation request;
         request.primaryTag = primaryTag;
         request.secondaryTags = secondaryTags;
         request.useTags = true;
         request.speedRatio = 1.0f;
-        auto it = simUnitToVisualIdx.find(simHandle);
-        if (it != simUnitToVisualIdx.end()) {
-            auto* viewer = scene_.GetViewer(it->second);
-            if (viewer && viewer->GetAnimator()) {
-                const bool shouldQueue = !viewer->IsCurrentSequenceFinished();
-                if (shouldQueue) {
-                    QueueUnitAnimationRequest(simHandle, request, this);
-                    return;
-                }
-                if (ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
-                    simUnitPendingAnimations.erase(simHandle);
-                    return;
-                }
-            }
-        }
-        simUnitPendingAnimations[simHandle] = request;
+        queueOrApplyAnim(simHandle, std::move(request), true);
     };
     jassData->unitAddAnimationProperties = [this](int simHandle, const std::string& properties, bool add) {
-        auto tags = animation_utils::ExtractAnimationSecondaryTags(properties);
-        if (tags.empty()) return;
-        auto& activeTags = simUnitAnimationPropertyTags[simHandle];
-        if (add) {
-            for (const auto& tag : tags)
-                if (std::find(activeTags.begin(), activeTags.end(), tag) == activeTags.end())
-                    activeTags.push_back(tag);
-        } else {
-            activeTags.erase(
-                std::remove_if(activeTags.begin(), activeTags.end(),
-                    [&](const std::string& t) { return std::find(tags.begin(), tags.end(), t) != tags.end(); }),
-                activeTags.end());
-            if (activeTags.empty()) simUnitAnimationPropertyTags.erase(simHandle);
-        }
-        simUnitVisualAnimationModes.erase(simHandle);
+        presentation_.ModifyUnitAnimationPropertyTags(simHandle, properties, add);
     };
     jassData->unitSetAnimationSecondaryTag = [this](int simHandle, const std::string& tag, bool add) -> bool {
-        std::vector<std::string> tags{tag};
-        auto& activeTags = simUnitAnimationPropertyTags[simHandle];
-        bool changed = false;
-        if (add) {
-            if (std::find(activeTags.begin(), activeTags.end(), tag) == activeTags.end()) {
-                activeTags.push_back(tag);
-                changed = true;
-            }
-        } else {
-            const auto oldSize = activeTags.size();
-            activeTags.erase(std::remove(activeTags.begin(), activeTags.end(), tag), activeTags.end());
-            changed = activeTags.size() != oldSize;
-            if (activeTags.empty()) simUnitAnimationPropertyTags.erase(simHandle);
-        }
-        if (changed) simUnitVisualAnimationModes.erase(simHandle);
-        return changed;
+        return presentation_.SetUnitSecondaryAnimationTag(simHandle, tag, add);
     };
     jassData->unitForceResetAnimation = [this](int simHandle) {
-        simUnitPendingAnimations.erase(simHandle);
-        auto it = simUnitToVisualIdx.find(simHandle);
-        if (it != simUnitToVisualIdx.end()) {
+        presentation_.unitPendingAnimations.erase(simHandle);
+        auto it = presentation_.unitToVisualIdx.find(simHandle);
+        if (it != presentation_.unitToVisualIdx.end()) {
             auto* viewer = scene_.GetViewer(it->second);
             if (viewer && ApplyNextQueuedUnitAnimation(simHandle, viewer, this)) {
-                simUnitVisualAnimationModes.erase(simHandle);
+                presentation_.unitVisualAnimationModes.erase(simHandle);
                 return;
             }
-            const auto scriptIt = simUnitScriptedAnimations.find(simHandle);
-            if (viewer && scriptIt != simUnitScriptedAnimations.end()) {
+            const auto scriptIt = presentation_.unitScriptedAnimations.find(simHandle);
+            if (viewer && scriptIt != presentation_.unitScriptedAnimations.end()) {
                 auto request = scriptIt->second.request;
                 request.force = true;
-                simUnitScriptedAnimations.erase(scriptIt);
+                presentation_.unitScriptedAnimations.erase(scriptIt);
                 if (ApplyAnimationRequestToViewer(simHandle, viewer, request, this)) {
-                    simUnitVisualAnimationModes.erase(simHandle);
+                    presentation_.unitVisualAnimationModes.erase(simHandle);
                     return;
                 }
             }
         } else {
-            auto queuedIt = simUnitQueuedAnimations.find(simHandle);
-            if (queuedIt != simUnitQueuedAnimations.end() && !queuedIt->second.empty()) {
-                simUnitPendingAnimations[simHandle] = queuedIt->second.front();
+            auto queuedIt = presentation_.unitQueuedAnimations.find(simHandle);
+            if (queuedIt != presentation_.unitQueuedAnimations.end() && !queuedIt->second.empty()) {
+                presentation_.unitPendingAnimations[simHandle] = queuedIt->second.front();
                 queuedIt->second.pop_front();
                 if (queuedIt->second.empty()) {
-                    simUnitQueuedAnimations.erase(queuedIt);
+                    presentation_.unitQueuedAnimations.erase(queuedIt);
                 }
                 return;
             }
         }
-        simUnitScriptedAnimations.erase(simHandle);
-        simUnitVisualAnimationModes.erase(simHandle);
+        presentation_.unitScriptedAnimations.erase(simHandle);
+        presentation_.unitVisualAnimationModes.erase(simHandle);
     };
     jassData->unitClearAnimations = [this](int simHandle) {
-        simUnitPendingAnimations.erase(simHandle);
-        simUnitQueuedAnimations.erase(simHandle);
-        simUnitScriptedAnimations.erase(simHandle);
-        simUnitVisualAnimationModes.erase(simHandle);
+        presentation_.ClearUnitAnimations(simHandle);
     };
 
     // Bind live GameUI to JassNatives so Blz*Frame natives drive real UIFrame nodes
@@ -732,20 +667,20 @@ void GameController::SyncJassEffectVisuals() {
 
     for (auto& [effectId, e] : data->effects) {
         if (!e || e->modelPath.empty()) continue;
-        auto known = effectVisuals_.find(effectId);
+        auto known = presentation_.effectVisuals.find(effectId);
 
         if (e->targetSimHandle < 0) {
             // Point effect: one-shot transient on first sight.
-            if (known == effectVisuals_.end()) {
+            if (known == presentation_.effectVisuals.end()) {
                 float pos[3] = {e->x, groundHeight(e->x, e->y), e->y};
                 scene_.AddTransientModelAtScenePosition(e->modelPath, pos, 0.0f, 1.0f);
-                effectVisuals_[effectId] = -1;
+                presentation_.effectVisuals[effectId] = -1;
             }
             continue;
         }
 
         // Attached effect: persistent instance, repositioned every frame.
-        int idx = (known == effectVisuals_.end()) ? -1 : known->second;
+        int idx = (known == presentation_.effectVisuals.end()) ? -1 : known->second;
         if (idx < 0) {
             int player = 0;
             if (CWidget* w = simulation_.GetWidget(e->targetSimHandle)) {
@@ -753,7 +688,7 @@ void GameController::SyncJassEffectVisuals() {
             }
             idx = scene_.AddAttachedModel(e->modelPath, player);
             if (idx < 0) continue; // model missing; retry next frame
-            effectVisuals_[effectId] = idx;
+            presentation_.effectVisuals[effectId] = idx;
         }
 
         // Compose unit-instance transform * attach-node matrix (mirrors the
@@ -771,14 +706,14 @@ void GameController::SyncJassEffectVisuals() {
                 h = unit_selection_geom::ComputeUnitVisualHeight(
                     *u, texturedTerrain_.IsValid(),
                     [&](float x, float z) { return texturedTerrain_.GetGroundHeight(x, z); });
-                auto vit = simUnitToVisualIdx.find(u->GetHandleId());
-                if (vit != simUnitToVisualIdx.end()) {
+                auto vit = presentation_.unitToVisualIdx.find(u->GetHandleId());
+                if (vit != presentation_.unitToVisualIdx.end()) {
                     viewerIdx = vit->second;
                     viewer = scene_.GetViewer(viewerIdx);
                 }
             } else {
-                auto vit = simItemToVisualIdx.find(w->GetHandleId());
-                if (vit != simItemToVisualIdx.end()) {
+                auto vit = presentation_.itemToVisualIdx.find(w->GetHandleId());
+                if (vit != presentation_.itemToVisualIdx.end()) {
                     viewerIdx = vit->second;
                     viewer = scene_.GetViewer(viewerIdx);
                 }
@@ -808,20 +743,20 @@ void GameController::SyncJassEffectVisuals() {
         }
         if (placed) {
             if (!scene_.UpdateAttachedModel(idx, finalMat)) {
-                effectVisuals_.erase(effectId);
+                presentation_.effectVisuals.erase(effectId);
             }
         }
     }
 
     // Drop visuals whose effects were destroyed (or never resolved).
     std::vector<int> gone;
-    for (auto& [effectId, idx] : effectVisuals_) {
+    for (auto& [effectId, idx] : presentation_.effectVisuals) {
         if (data->effects.find(effectId) == data->effects.end()) {
             if (idx >= 0) scene_.RemoveAttachedModel(idx);
             gone.push_back(effectId);
         }
     }
-    for (int id : gone) effectVisuals_.erase(id);
+    for (int id : gone) presentation_.effectVisuals.erase(id);
 }
 
 static bool IsAllyForFog(const CSimulation& sim, int local, int owner) {
@@ -882,12 +817,12 @@ void GameController::SyncAndReconcileVisuals() {
         if (!unit || unit->IsDead()) continue;
         int handleId = unit->GetHandleId();
 
-        auto visualIt = simUnitToVisualIdx.find(handleId);
-        if (visualIt == simUnitToVisualIdx.end()) {
+        auto visualIt = presentation_.unitToVisualIdx.find(handleId);
+        if (visualIt == presentation_.unitToVisualIdx.end()) {
             EnsureSimulationUnitVisual(unit);
-            visualIt = simUnitToVisualIdx.find(handleId);
+            visualIt = presentation_.unitToVisualIdx.find(handleId);
         }
-        if (visualIt != simUnitToVisualIdx.end()) {
+        if (visualIt != presentation_.unitToVisualIdx.end()) {
             if (auto* viewer = scene_.GetViewer(visualIt->second)) {
                 if (jassNatives_ && jassNatives_->GetData()) {
                     auto blend = jassNatives_->GetData()->unitBlendTimes.find(handleId);
@@ -905,12 +840,12 @@ void GameController::SyncAndReconcileVisuals() {
     for (auto* item : simulation_.GetItems()) {
         if (!item || item->IsDead()) continue;
         const int handleId = item->GetHandleId();
-        auto visualIt = simItemToVisualIdx.find(handleId);
-        if (visualIt == simItemToVisualIdx.end()) {
+        auto visualIt = presentation_.itemToVisualIdx.find(handleId);
+        if (visualIt == presentation_.itemToVisualIdx.end()) {
             EnsureSimulationItemVisual(item);
-            visualIt = simItemToVisualIdx.find(handleId);
+            visualIt = presentation_.itemToVisualIdx.find(handleId);
         }
-        if (visualIt != simItemToVisualIdx.end()) {
+        if (visualIt != presentation_.itemToVisualIdx.end()) {
             float height = texturedTerrain_.IsValid()
                 ? texturedTerrain_.GetGroundHeight(item->GetX(), item->GetY())
                 : 0.0f;
@@ -927,7 +862,7 @@ void GameController::SyncAndReconcileVisuals() {
 
     // Reconcile (remove dead, add new)
     std::vector<int> removedHandles;
-    for (auto& [handleId, visualIdx] : simUnitToVisualIdx) {
+    for (auto& [handleId, visualIdx] : presentation_.unitToVisualIdx) {
         CUnit* unit = simulation_.GetUnit(handleId);
         if (!unit || unit->IsDead()) {
             scene_.SetInstanceVisible(visualIdx, false);
@@ -944,7 +879,7 @@ void GameController::SyncAndReconcileVisuals() {
     }
 
     std::vector<int> removedItemHandles;
-    for (auto& [handleId, visualIdx] : simItemToVisualIdx) {
+    for (auto& [handleId, visualIdx] : presentation_.itemToVisualIdx) {
         CItem* item = simulation_.GetItem(handleId);
         if (!item || item->IsDead()) {
             scene_.SetInstanceVisible(visualIdx, false);
@@ -1297,14 +1232,14 @@ void GameController::AddActiveEventSplatsToTerrain() {
 bool GameController::EnsureSimulationUnitVisual(CUnit* unit) {
     if (!unit) return false;
     int handleId = unit->GetHandleId();
-    if (simUnitToVisualIdx.find(handleId) != simUnitToVisualIdx.end()) return true;
-    if (simUnitVisualRegistrationFailed.find(handleId) != simUnitVisualRegistrationFailed.end()) return false;
+    if (presentation_.unitToVisualIdx.find(handleId) != presentation_.unitToVisualIdx.end()) return true;
+    if (presentation_.unitVisualRegistrationFailed.find(handleId) != presentation_.unitVisualRegistrationFailed.end()) return false;
 
-    auto seedIt = simUnitVisualSeeds.find(handleId);
+    auto seedIt = presentation_.unitVisualSeeds.find(handleId);
     float scale[3] = {1, 1, 1};
     uint32_t skinId = 0;
     int hp = 0, flags = 0;
-    if (seedIt != simUnitVisualSeeds.end()) {
+    if (seedIt != presentation_.unitVisualSeeds.end()) {
         scale[0] = seedIt->second.scale[0]; scale[1] = seedIt->second.scale[1]; scale[2] = seedIt->second.scale[2];
         skinId = seedIt->second.skinId; hp = seedIt->second.hitpoints; flags = seedIt->second.flags;
     }
@@ -1321,10 +1256,10 @@ bool GameController::EnsureSimulationUnitVisual(CUnit* unit) {
     int visualIdx = scene_.AddUnit(unit->GetTypeId().value, pos, unit->GetFacing(),
                                    scale, unit->GetPlayerIndex(), hp, flags, skinId);
     if (visualIdx < 0) {
-        simUnitVisualRegistrationFailed.insert(handleId);
+        presentation_.unitVisualRegistrationFailed.insert(handleId);
         return false;
     }
-    simUnitToVisualIdx[handleId] = visualIdx;
+    presentation_.unitToVisualIdx[handleId] = visualIdx;
 
     // Apply initial animation
     if (auto* viewer = scene_.GetViewer(visualIdx)) {
@@ -1338,8 +1273,8 @@ bool GameController::EnsureSimulationUnitVisual(CUnit* unit) {
 bool GameController::EnsureSimulationItemVisual(CItem* item) {
     if (!item) return false;
     const int handleId = item->GetHandleId();
-    if (simItemToVisualIdx.find(handleId) != simItemToVisualIdx.end()) return true;
-    if (simItemVisualRegistrationFailed.find(handleId) != simItemVisualRegistrationFailed.end()) return false;
+    if (presentation_.itemToVisualIdx.find(handleId) != presentation_.itemToVisualIdx.end()) return true;
+    if (presentation_.itemVisualRegistrationFailed.find(handleId) != presentation_.itemVisualRegistrationFailed.end()) return false;
     if (item->IsDead()) return false;
 
     float height = texturedTerrain_.IsValid()
@@ -1349,11 +1284,11 @@ bool GameController::EnsureSimulationItemVisual(CItem* item) {
     float scale[3] = {1.0f, 1.0f, 1.0f};
     const int visualIdx = scene_.AddItem(item->GetTypeId().value, pos, 0.0f, scale, 0, 0);
     if (visualIdx < 0) {
-        simItemVisualRegistrationFailed.insert(handleId);
+        presentation_.itemVisualRegistrationFailed.insert(handleId);
         return false;
     }
 
-    simItemToVisualIdx[handleId] = visualIdx;
+    presentation_.itemToVisualIdx[handleId] = visualIdx;
     bool explored = true;
     if (simulationInitialized_) {
         const int local = config_.localPlayerIndex >= 0 ? config_.localPlayerIndex : 0;

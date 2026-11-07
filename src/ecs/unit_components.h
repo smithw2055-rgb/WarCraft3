@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <unordered_set>
 #include <vector>
 #include "resource/slk.h"
 #include "ecs/unit_type.h"
@@ -13,11 +14,12 @@ struct UnitDeathDropItem {
 };
 
 // ============================================================
-// Phase 3 & Stage L ECS Orthogonal Data Components for CUnit
+// Phase 3, Stage L & Phase 12 ECS Orthogonal Data Components for CUnit
 //
 // Decomposes the monolithic CUnit class into focused, cohesive
 // data components stored in SimEcsRegistry SparseComponentPools,
-// including Stage L Hot-Path Transform & Vitals SoA/Dense Pools.
+// including Stage L Hot-Path Transform & Vitals SoA/Dense Pools
+// and Phase 12 Cold Script Override Pools.
 // ============================================================
 
 // Stage L1: Contiguous Hot-Path Transform & Spatial Movement Component
@@ -114,4 +116,12 @@ struct UnitCorpseDropComponent {
     bool decaySuspended = false;
     int deathKillerPlayer = -1;
     std::vector<UnitDeathDropItem> deathDrops;
+};
+
+// 7. Phase 12 Cold Script Override Component (UnitShareVision, UnitAddType, UnitRemoveType)
+// Lazily allocated in SimEcsRegistry so 99% of standard units pay 0 bytes for empty hash sets.
+struct UnitScriptOverridesComponent {
+    std::unordered_set<int> sharedVisionPlayers;
+    std::unordered_set<int> addedUnitTypes;
+    std::unordered_set<int> removedUnitTypes;
 };
