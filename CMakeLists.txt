@@ -323,6 +323,7 @@ set(SOURCES
     src/scripting/JassLexer.cpp
     src/scripting/JassParser.cpp
     src/scripting/JassVM.cpp
+    src/scripting/script_engine_host.cpp
     src/scripting/JassBytecode.cpp
     src/scripting/jass_animation_tags.cpp
     src/scripting/JassNatives.cpp

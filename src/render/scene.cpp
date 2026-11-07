@@ -1305,6 +1305,22 @@ bool SceneManager::IntersectInstanceRayWithCollision(int index, const picking::P
         return false;
     }
 
+    // Stage BB1: Broad-phase world bounding sphere rejection before 4x4 matrix construction & inversion
+    if (!inst->useCustomModelMatrix) {
+        const float maxScale = std::max(0.01f, std::max(inst->scale[0], std::max(inst->scale[1], inst->scale[2])));
+        const Vec3 bc = inst->viewer->GetBoundsCenter();
+        const float bcOffset = std::sqrt(bc.x * bc.x + bc.y * bc.y + bc.z * bc.z);
+        const float localRad = std::max(64.0f, inst->viewer->GetBoundsRadius());
+        const float broadRadius = (bcOffset + localRad + 256.0f) * maxScale;
+        const Vec3 worldOrigin{inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
+        float broadT = 0.0f;
+        if (!picking::IntersectSphere(ray, worldOrigin, broadRadius, broadT)) {
+            ++broadphaseRejectedCount_;
+            return false;
+        }
+    }
+
+    ++narrowphaseTestedCount_;
     Mat4 modelMatrix = Mat4::Identity();
     if (inst->useCustomModelMatrix) {
         modelMatrix = inst->customModelMatrix;
@@ -1317,6 +1333,95 @@ bool SceneManager::IntersectInstanceRayWithCollision(int index, const picking::P
     }
 
     return inst->viewer->IntersectRayWithCollision(ray, modelMatrix, outT);
+}
+
+int SceneManager::RaycastInstancesNonAlloc(const picking::PickRay& ray, float maxDistance,
+                                           SceneRaycastHit* outHits, int maxHits,
+                                           bool includeBoundsSphereFallback) const {
+    if (!outHits || maxHits <= 0) return 0;
+    const float effMaxDist = (maxDistance > 0.0f) ? maxDistance : 1e9f;
+    int hitCount = 0;
+
+    auto insertSortedHit = [&](int idx, float dist) {
+        SceneRaycastHit hit;
+        hit.instanceIndex = idx;
+        hit.distance = dist;
+        hit.hitPoint = {
+            ray.origin.x + ray.direction.x * dist,
+            ray.origin.y + ray.direction.y * dist,
+            ray.origin.z + ray.direction.z * dist
+        };
+        if (hitCount < maxHits) {
+            outHits[hitCount++] = hit;
+        } else if (dist < outHits[hitCount - 1].distance) {
+            outHits[hitCount - 1] = hit;
+        } else {
+            return;
+        }
+        // Keep sorted in ascending distance order (insertion sort step)
+        for (int i = hitCount - 1; i > 0 && outHits[i].distance < outHits[i - 1].distance; --i) {
+            std::swap(outHits[i], outHits[i - 1]);
+        }
+    };
+
+    for (int i = 0; i < (int)instances_.size(); ++i) {
+        const PlacedModel* inst = instances_[i];
+        if (!inst || !inst->visible) continue;
+
+        float hitT = 0.0f;
+        if (inst->viewer && inst->viewer->HasCollisionShapes()) {
+            if (IntersectInstanceRayWithCollision(i, ray, hitT) && hitT <= effMaxDist) {
+                insertSortedHit(i, hitT);
+            }
+            continue;
+        }
+
+        if (!includeBoundsSphereFallback) continue;
+
+        const float maxScale = std::max(0.01f, std::max(inst->scale[0], std::max(inst->scale[1], inst->scale[2])));
+        float sphereRad = 48.0f * maxScale;
+        Vec3 sphereCenter{inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
+        if (inst->viewer) {
+            const float viewerRad = inst->viewer->GetBoundsRadius();
+            if (viewerRad > 1.0f) {
+                sphereRad = viewerRad * maxScale;
+            }
+        }
+        if (picking::IntersectSphere(ray, sphereCenter, sphereRad, hitT)) {
+            ++narrowphaseTestedCount_;
+            if (hitT <= effMaxDist) {
+                insertSortedHit(i, hitT);
+            }
+        } else {
+            ++broadphaseRejectedCount_;
+        }
+    }
+
+    return hitCount;
+}
+
+int SceneManager::QueryScreenRectInstances(const Mat4& view, const Mat4& proj, int screenW, int screenH,
+                                           float minScreenX, float minScreenY, float maxScreenX, float maxScreenY,
+                                           std::vector<int>& outIndices) const {
+    outIndices.clear();
+    if (screenW <= 0 || screenH <= 0) return 0;
+    const float x0 = std::min(minScreenX, maxScreenX);
+    const float x1 = std::max(minScreenX, maxScreenX);
+    const float y0 = std::min(minScreenY, maxScreenY);
+    const float y1 = std::max(minScreenY, maxScreenY);
+
+    for (int i = 0; i < (int)instances_.size(); ++i) {
+        const PlacedModel* inst = instances_[i];
+        if (!inst || !inst->visible) continue;
+        float sx = 0.0f, sy = 0.0f;
+        const Vec3 worldPos{inst->renderPos[0], inst->renderPos[1], inst->renderPos[2]};
+        if (picking::WorldToScreen(worldPos, view, proj, screenW, screenH, sx, sy)) {
+            if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) {
+                outIndices.push_back(i);
+            }
+        }
+    }
+    return (int)outIndices.size();
 }
 
 void SceneManager::SetDebugRenderRange(int start, int count) {

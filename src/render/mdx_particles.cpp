@@ -101,7 +101,10 @@ void MdxParticleSystem::Init(const MdxModel& model, MpqManager* mpq) {
     popcornOwned_.clear();
     if (model.particleEmitters2.empty() && model.particleEmittersPopcorn.empty()) return;
 
-    InitSharedParticleResources();
+    const bool glActive = Renderer::IsActive();
+    if (glActive) {
+        InitSharedParticleResources();
+    }
     sg_sampler_desc smp = {};
     smp.min_filter = SG_FILTER_LINEAR;
     smp.mag_filter = SG_FILTER_LINEAR;
@@ -142,16 +145,20 @@ void MdxParticleSystem::Init(const MdxModel& model, MpqManager* mpq) {
             state.sampler = sg_make_sampler(&smp);
         }
 
-        // Allocate instance buffer
+        // Allocate instance buffer and pre-reserve zero-alloc staging vectors
         int maxParticles = 1024;
         state.instanceCapacity = maxParticles;
-        sg_buffer_desc ibd = {};
-        ibd.usage.vertex_buffer = true;
-        ibd.usage.stream_update = true;
-        ibd.size = (size_t)maxParticles * sizeof(InstanceData);
-        state.instanceBuffer = sg_make_buffer(&ibd);
+        state.particles.reserve((size_t)maxParticles);
+        state.stagingInstances.reserve((size_t)maxParticles);
+        if (glActive) {
+            sg_buffer_desc ibd = {};
+            ibd.usage.vertex_buffer = true;
+            ibd.usage.stream_update = true;
+            ibd.size = (size_t)maxParticles * sizeof(InstanceData);
+            state.instanceBuffer = sg_make_buffer(&ibd);
+        }
 
-        emitters_.push_back(state);
+        emitters_.push_back(std::move(state));
     }
 
     // Popcorn (CORN) fallback: map to billboard Emitter2 states so the
@@ -207,15 +214,19 @@ void MdxParticleSystem::Init(const MdxModel& model, MpqManager* mpq) {
         }
         const int maxParticles = 512;
         state.instanceCapacity = maxParticles;
-        sg_buffer_desc ibd = {};
-        ibd.usage.vertex_buffer = true;
-        ibd.usage.stream_update = true;
-        ibd.size = (size_t)maxParticles * sizeof(InstanceData);
-        state.instanceBuffer = sg_make_buffer(&ibd);
+        state.particles.reserve((size_t)maxParticles);
+        state.stagingInstances.reserve((size_t)maxParticles);
+        if (glActive) {
+            sg_buffer_desc ibd = {};
+            ibd.usage.vertex_buffer = true;
+            ibd.usage.stream_update = true;
+            ibd.size = (size_t)maxParticles * sizeof(InstanceData);
+            state.instanceBuffer = sg_make_buffer(&ibd);
+        }
 
         popcornOwned_.push_back(std::move(synth));
         // Re-point after push (deque-stable via unique_ptr heap object).
-        emitters_.push_back(state);
+        emitters_.push_back(std::move(state));
         emitters_.back().emitterData = popcornOwned_.back().get();
     }
 }
@@ -395,11 +406,26 @@ void MdxParticleSystem::Update(float dt, const Vec3& worldOffset, const MdxModel
             }
         }
 
-        // Update instance buffer
-        if (!particles.empty() && state.instanceBuffer.id) {
-            // Resize buffer if needed
+        // Stage AA1: Populate persistent pre-reserved stagingInstances buffer (0 per-frame heap allocations)
+        const size_t prevStagingCap = state.stagingInstances.capacity();
+        state.stagingInstances.resize(particles.size());
+        if (!particles.empty() && state.stagingInstances.capacity() == prevStagingCap) {
+            ++zeroAllocUploads_;
+        }
+        for (size_t i = 0; i < particles.size(); i++) {
+            const auto& p = particles[i];
+            state.stagingInstances[i] = {
+                p.position.x, p.position.y, p.position.z,
+                p.size,
+                p.color.x, p.color.y, p.color.z, p.color.w,
+                p.texCol, p.texRow
+            };
+        }
+
+        // Update GPU instance buffer when renderer is active
+        if (!particles.empty() && Renderer::IsActive() && state.instanceBuffer.id) {
             if ((int)particles.size() > state.instanceCapacity) {
-                if (state.instanceBuffer.id) sg_destroy_buffer(state.instanceBuffer);
+                sg_destroy_buffer(state.instanceBuffer);
                 state.instanceCapacity = (int)particles.size() + 256;
                 sg_buffer_desc ibd = {};
                 ibd.usage.vertex_buffer = true;
@@ -407,20 +433,8 @@ void MdxParticleSystem::Update(float dt, const Vec3& worldOffset, const MdxModel
                 ibd.size = (size_t)state.instanceCapacity * sizeof(InstanceData);
                 state.instanceBuffer = sg_make_buffer(&ibd);
             }
-
-            // Fill instance data
-            std::vector<InstanceData> instanceData(particles.size());
-            for (size_t i = 0; i < particles.size(); i++) {
-                auto& p = particles[i];
-                instanceData[i] = {
-                    p.position.x, p.position.y, p.position.z,
-                    p.size,
-                    p.color.x, p.color.y, p.color.z, p.color.w,
-                    p.texCol, p.texRow
-                };
-            }
             sg_update_buffer(state.instanceBuffer,
-                             sg_range{instanceData.data(), particles.size() * sizeof(InstanceData)});
+                             sg_range{state.stagingInstances.data(), state.stagingInstances.size() * sizeof(InstanceData)});
         }
     }
 }
@@ -493,8 +507,14 @@ void MdxParticleSystem::Render(const Mat4& view, const Mat4& proj) {
 
 int MdxParticleSystem::GetParticleCount() const {
     int total = 0;
-    for (auto& e : emitters_) total += (int)e.particles.size();
+    for (const auto& e : emitters_) total += (int)e.particles.size();
     return total;
+}
+
+const std::vector<MdxParticleSystem::InstanceData>& MdxParticleSystem::GetEmitterStagingInstances(size_t emitterIdx) const {
+    static const std::vector<InstanceData> kEmpty;
+    if (emitterIdx >= emitters_.size()) return kEmpty;
+    return emitters_[emitterIdx].stagingInstances;
 }
 
 // ---- Shared particle resources ----

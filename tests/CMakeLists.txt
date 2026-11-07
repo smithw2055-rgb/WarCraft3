@@ -179,6 +179,7 @@ add_executable(warsmash_tests
     ../src/scripting/JassLexer.cpp
     ../src/scripting/JassParser.cpp
     ../src/scripting/JassVM.cpp
+    ../src/scripting/script_engine_host.cpp
     ../src/scripting/JassBytecode.cpp
     ../src/resource/mpq_storm.cpp
     ../src/resource/casc.cpp

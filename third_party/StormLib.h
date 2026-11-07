@@ -1,5 +1,36 @@
 #pragma once
-#if defined(__has_include_next) && __has_include_next(<StormLib.h>)
+#ifdef __has_include_next
+#if __has_include_next(<StormLib.h>)
+#define WARSMASH_HAS_NEXT_STORMLIB 1
+#endif
+#endif
+#if !defined(WARSMASH_HAS_NEXT_STORMLIB) && defined(_MSC_VER) && !defined(WITHOUT_STORMLIB)
+#if __has_include("../vcpkg_installed/x64-windows/include/StormLib.h")
+#define WARSMASH_HAS_VCPKG_STORMLIB 1
+#endif
+#endif
+#if defined(WARSMASH_HAS_VCPKG_STORMLIB)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX 1
+#endif
+#include "../vcpkg_installed/x64-windows/include/StormLib.h"
+#undef PlaySound
+#undef CreateDialog
+#undef GetObject
+#undef DrawText
+#undef RGB
+#undef NEAR
+#undef FAR
+#undef ERROR
+#undef DELETE
+#undef TRANSPARENT
+#undef OPAQUE
+#undef ABSOLUTE
+#undef RELATIVE
+#elif defined(WARSMASH_HAS_NEXT_STORMLIB)
 #include_next <StormLib.h>
 #else
 #include <cstdint>
@@ -17,7 +48,11 @@ extern "C" int BZ2_bzBuffToBuffDecompress(char*, unsigned int*, char*, unsigned 
 #define BZ_OK 0
 
 typedef void* HANDLE;
+#ifdef _WIN32
+typedef unsigned long DWORD;
+#else
 typedef uint32_t DWORD;
+#endif
 
 #ifndef MPQ_OPEN_READ_ONLY
 #define MPQ_OPEN_READ_ONLY 0x00000100

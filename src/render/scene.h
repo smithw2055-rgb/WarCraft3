@@ -192,7 +192,26 @@ public:
         if (index < 0 || index >= (int)instances_.size()) return nullptr;
         return instances_[index];
     }
+    struct SceneRaycastHit {
+        int instanceIndex = -1;
+        float distance = 0.0f;
+        Vec3 hitPoint = {0.0f, 0.0f, 0.0f};
+    };
+
     bool IntersectInstanceRayWithCollision(int index, const picking::PickRay& ray, float& outT) const;
+    // Stage BB1 & BB2: Broadphase-accelerated non-allocating batch raycast & 2D screen box query
+    int RaycastInstancesNonAlloc(const picking::PickRay& ray, float maxDistance,
+                                 SceneRaycastHit* outHits, int maxHits,
+                                 bool includeBoundsSphereFallback = true) const;
+    int QueryScreenRectInstances(const Mat4& view, const Mat4& proj, int screenW, int screenH,
+                                 float minScreenX, float minScreenY, float maxScreenX, float maxScreenY,
+                                 std::vector<int>& outIndices) const;
+    uint64_t GetBroadphaseRejectedCount() const { return broadphaseRejectedCount_; }
+    uint64_t GetNarrowphaseTestedCount() const { return narrowphaseTestedCount_; }
+    void ResetPickingStats() const {
+        broadphaseRejectedCount_ = 0;
+        narrowphaseTestedCount_ = 0;
+    }
 
 private:
     struct LoadStats {
@@ -245,4 +264,6 @@ private:
     int debugRenderStart_ = 0;
     int debugRenderCount_ = -1;
     std::string debugRenderKind_;
+    mutable uint64_t broadphaseRejectedCount_ = 0;
+    mutable uint64_t narrowphaseTestedCount_ = 0;
 };

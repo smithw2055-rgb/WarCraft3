@@ -17,25 +17,39 @@ TextRenderer::~TextRenderer() {
 }
 
 void TextRenderer::Shutdown() {
-    if (!atlasValid_) return;
-    if (Renderer::IsActive() && sg_query_image_state(atlasTex_) == SG_RESOURCESTATE_VALID) {
+    if (atlasValid_ && Renderer::IsActive() && sg_query_image_state(atlasTex_) == SG_RESOURCESTATE_VALID) {
         sg_destroy_image(atlasTex_);
     }
     atlasTex_ = {};
     atlasValid_ = false;
+    metricsValid_ = false;
     glyphs_.clear();
+    unicodeGlyphs_.clear();
+    layoutCache_.clear();
     atlasW_ = 0;
     atlasH_ = 0;
     ascender_ = 0.0f;
     lineHeight_ = 0.0f;
-    fontSize_ = 0.0f;
+    fontSize_ = 24.0f;
+}
+
+void TextRenderer::InitHeadlessMetrics(float fontSize, float asciiAdvanceRatio) {
+    Shutdown();
+    fontSize_ = std::max(1.0f, fontSize);
+    ascender_ = fontSize_ * 0.8f;
+    lineHeight_ = fontSize_ * 1.2f;
+    const int firstChar = 32, lastChar = 126;
+    const int numChars = lastChar - firstChar + 1;
+    glyphs_.assign((size_t)numChars, GlyphInfo{});
+    for (int i = 0; i < numChars; ++i) {
+        glyphs_[(size_t)i].ax = fontSize_ * asciiAdvanceRatio;
+    }
+    metricsValid_ = true;
 }
 
 bool TextRenderer::LoadFromMpq(MpqManager* mpq, const char* fontPath, float fontSize) {
     if (!mpq) return false;
 
-    // Retail UI fonts live in the MPQ (ref war3skins.txt MasterFont).
-    // FRIZQT__.TTF is the Western UI face; the CJK faces follow.
     const char* paths[] = {
         fontPath,
         "Fonts\\FRIZQT__.TTF",
@@ -96,9 +110,10 @@ bool TextRenderer::LoadFromMpq(MpqManager* mpq, const char* fontPath, float font
 bool TextRenderer::LoadFromMemory(const uint8_t* ttfData, int ttfSize, float fontSize) {
     if (!ttfData || ttfSize <= 0) return false;
 
-    fontSize_ = fontSize;
-    BakeAtlas(ttfData, fontSize);
-    return atlasValid_;
+    fontSize_ = std::max(1.0f, fontSize);
+    layoutCache_.clear();
+    BakeAtlas(ttfData, fontSize_);
+    return atlasValid_ || metricsValid_;
 }
 
 void TextRenderer::BakeAtlas(const uint8_t* ttfData, float fontSize) {
@@ -118,7 +133,6 @@ void TextRenderer::BakeAtlas(const uint8_t* ttfData, float fontSize) {
     int numChars = lastChar - firstChar + 1;
     glyphs_.resize(numChars);
 
-    // First pass: measure all glyphs and determine atlas size
     struct TempGlyph {
         int w, h;
         int xoff, yoff;
@@ -133,13 +147,12 @@ void TextRenderer::BakeAtlas(const uint8_t* ttfData, float fontSize) {
         int gi = stbtt_FindGlyphIndex(&info, ch);
         if (gi == 0) continue;
 
-        stbtt_GetGlyphHMetrics(&info, gi, nullptr, nullptr);
-        int advance, lsb;
+        int advance = 0, lsb = 0;
         stbtt_GetGlyphHMetrics(&info, gi, &advance, &lsb);
         temp[i].ax = advance * scale;
         temp[i].ay = 0;
 
-        int w, h, xoff, yoff;
+        int w = 0, h = 0, xoff = 0, yoff = 0;
         unsigned char* bitmap = stbtt_GetGlyphBitmap(&info, scale, scale, gi, &w, &h, &xoff, &yoff);
         if (bitmap) {
             temp[i].w = w;
@@ -157,7 +170,6 @@ void TextRenderer::BakeAtlas(const uint8_t* ttfData, float fontSize) {
         }
     }
 
-    // Determine atlas size (try to fit in a reasonable texture)
     int atlasW = 256, atlasH = 256;
     while (atlasW < 2048 && atlasH < 2048 && atlasW * atlasH < totalArea * 2) {
         if (atlasW <= atlasH) atlasW *= 2;
@@ -167,7 +179,6 @@ void TextRenderer::BakeAtlas(const uint8_t* ttfData, float fontSize) {
     atlasW_ = atlasW;
     atlasH_ = atlasH;
 
-    // Pack glyphs row by row
     std::vector<uint8_t> atlasPixels(atlasW_ * atlasH_, 0);
     int curX = 1, curY = 1, rowH = 0;
 
@@ -200,7 +211,6 @@ void TextRenderer::BakeAtlas(const uint8_t* ttfData, float fontSize) {
         unsigned char* bitmap = stbtt_GetGlyphBitmap(&info, scale, scale, gi, &w, &h, nullptr, nullptr);
         if (!bitmap) continue;
 
-        // Copy bitmap to atlas
         for (int py = 0; py < h; py++) {
             for (int px = 0; px < w; px++) {
                 int atlasIdx = (curY + py) * atlasW_ + (curX + px);
@@ -224,7 +234,11 @@ void TextRenderer::BakeAtlas(const uint8_t* ttfData, float fontSize) {
         curX += w + 1;
     }
 
-    // Convert alpha-only atlas to RGBA
+    metricsValid_ = true;
+    if (!Renderer::IsActive()) {
+        return;
+    }
+
     std::vector<uint8_t> rgba(atlasW_ * atlasH_ * 4);
     for (int i = 0; i < atlasW_ * atlasH_; i++) {
         rgba[i * 4 + 0] = 255;
@@ -233,7 +247,6 @@ void TextRenderer::BakeAtlas(const uint8_t* ttfData, float fontSize) {
         rgba[i * 4 + 3] = atlasPixels[i];
     }
 
-    // Create sokol texture
     sg_image_desc desc = {};
     desc.type = SG_IMAGETYPE_2D;
     desc.width = atlasW_;
@@ -250,112 +263,244 @@ void TextRenderer::BakeAtlas(const uint8_t* ttfData, float fontSize) {
     }
 }
 
-float TextRenderer::MeasureText(const char* text, float size) const {
-    if (!text || !atlasValid_) return 0;
-    float scale = size / fontSize_;
-    float x = 0;
-    while (*text) {
-        if (*text == '|' && *(text + 1)) {
-            char code = *(text + 1);
-            if (code == 'c' || code == 'C') {
-                if (std::strlen(text) >= 10) {
-                    text += 10;
-                    continue;
-                }
-            } else if (code == 'r' || code == 'R') {
-                text += 2;
-                continue;
-            } else if (code == 'n' || code == 'N') {
-                text += 2;
-                continue;
-            }
-        }
-        unsigned char ch = (unsigned char)*text;
-        if (ch >= 32 && ch <= 126) {
-            const auto& g = glyphs_[ch - 32];
-            x += g.ax * scale;
-        } else if (ch == '\t') {
-            x += MeasureText("    ", size);
-        }
-        text++;
+uint32_t TextRenderer::DecodeNextUtf8Codepoint(const char*& cursor) {
+    if (!cursor || !*cursor) return 0;
+    const unsigned char b0 = static_cast<unsigned char>(*cursor++);
+    if (b0 < 0x80) {
+        return b0;
     }
-    return x;
+    if ((b0 & 0xE0) == 0xC0) {
+        const unsigned char b1 = static_cast<unsigned char>(*cursor);
+        if ((b1 & 0xC0) != 0x80) return b0;
+        ++cursor;
+        return ((uint32_t)(b0 & 0x1F) << 6) | (uint32_t)(b1 & 0x3F);
+    }
+    if ((b0 & 0xF0) == 0xE0) {
+        const unsigned char b1 = static_cast<unsigned char>(cursor[0]);
+        if ((b1 & 0xC0) != 0x80) return b0;
+        const unsigned char b2 = static_cast<unsigned char>(cursor[1]);
+        if ((b2 & 0xC0) != 0x80) return b0;
+        cursor += 2;
+        return ((uint32_t)(b0 & 0x0F) << 12) |
+               ((uint32_t)(b1 & 0x3F) << 6) |
+               (uint32_t)(b2 & 0x3F);
+    }
+    if ((b0 & 0xF8) == 0xF0) {
+        const unsigned char b1 = static_cast<unsigned char>(cursor[0]);
+        if ((b1 & 0xC0) != 0x80) return b0;
+        const unsigned char b2 = static_cast<unsigned char>(cursor[1]);
+        if ((b2 & 0xC0) != 0x80) return b0;
+        const unsigned char b3 = static_cast<unsigned char>(cursor[2]);
+        if ((b3 & 0xC0) != 0x80) return b0;
+        cursor += 3;
+        return ((uint32_t)(b0 & 0x07) << 18) |
+               ((uint32_t)(b1 & 0x3F) << 12) |
+               ((uint32_t)(b2 & 0x3F) << 6) |
+               (uint32_t)(b3 & 0x3F);
+    }
+    return b0;
 }
 
-void TextRenderer::RenderText(UiRenderer& r, float x, float y, const char* text, uint32_t color, float size) {
-    if (!text || !atlasValid_) return;
-
-    // y is the TOP of the line box (all callers pass box tops); the stb
-    // glyph top offset (yoff, negative above the baseline) applies from the
-    // baseline below it.
-    float scale = size / fontSize_;
-    float baselineY = y + ascender_ * scale;
-    float posX = x;
-    uint32_t curColor = color;
-
+bool TextRenderer::TryParseColorCodeO1(const char* p, uint32_t& outColor) {
+    // Expects p pointing at "|c" or "|C"; checks exactly 8 hex digits in O(1) without strlen()
+    if (!p || p[0] != '|' || (p[1] != 'c' && p[1] != 'C')) return false;
     auto hexNibble = [](char c) -> int {
         if (c >= '0' && c <= '9') return c - '0';
         if (c >= 'a' && c <= 'f') return c - 'a' + 10;
         if (c >= 'A' && c <= 'F') return c - 'A' + 10;
         return -1;
     };
-    auto parseHexByte = [&](const char* p) -> int {
-        int h = hexNibble(p[0]);
-        int l = hexNibble(p[1]);
-        if (h < 0 || l < 0) return -1;
-        return (h << 4) | l;
-    };
+    uint8_t bytes[4] = {};
+    for (int i = 0; i < 4; ++i) {
+        const char chH = p[2 + i * 2];
+        if (chH == '\0') return false;
+        const char chL = p[2 + i * 2 + 1];
+        if (chL == '\0') return false;
+        const int h = hexNibble(chH);
+        const int l = hexNibble(chL);
+        if (h < 0 || l < 0) return false;
+        bytes[i] = static_cast<uint8_t>((h << 4) | l);
+    }
+    // WC3 |cAARRGGBB -> packed ABGR uint32_t used by UiRenderer
+    const uint32_t a = bytes[0];
+    const uint32_t r = bytes[1];
+    const uint32_t g = bytes[2];
+    const uint32_t b = bytes[3];
+    outColor = (a << 24) | (b << 16) | (g << 8) | r;
+    return true;
+}
 
-    while (*text) {
-        if (*text == '|' && *(text + 1)) {
-            char code = *(text + 1);
-            if (code == 'n' || code == 'N') {
-                posX = x;
-                baselineY += lineHeight_ * scale;
-                text += 2;
+void TextRenderer::RegisterUnicodeGlyphAdvance(uint32_t codepoint, float advanceAtBaseSize) {
+    GlyphInfo info{};
+    info.ax = advanceAtBaseSize;
+    unicodeGlyphs_[codepoint] = info;
+    layoutCache_.clear();
+}
+
+float TextRenderer::GetCodepointAdvanceBase(uint32_t cp) const {
+    if (cp >= 32 && cp <= 126 && (cp - 32) < glyphs_.size()) {
+        return glyphs_[cp - 32].ax;
+    }
+    if (cp == '\t') {
+        const float spaceAdv = (glyphs_.size() > 0) ? glyphs_[0].ax : (fontSize_ * 0.5f);
+        return spaceAdv * 4.0f;
+    }
+    auto it = unicodeGlyphs_.find(cp);
+    if (it != unicodeGlyphs_.end()) {
+        return it->second.ax;
+    }
+    // CJK Unified Ideographs, CJK Symbols/Punctuation, Halfwidth/Fullwidth Forms
+    if ((cp >= 0x4E00 && cp <= 0x9FFF) ||
+        (cp >= 0x3000 && cp <= 0x303F) ||
+        (cp >= 0xFF00 && cp <= 0xFFEF)) {
+        return fontSize_;
+    }
+    if (cp > 126) {
+        return fontSize_ * 0.6f;
+    }
+    return 0.0f;
+}
+
+const CachedTextLayout& TextRenderer::GetOrBuildLayout(const char* text) const {
+    static const CachedTextLayout kEmptyLayout{};
+    if (!text) return kEmptyLayout;
+
+    std::string key(text);
+    auto it = layoutCache_.find(key);
+    if (it != layoutCache_.end()) {
+        ++layoutCacheHits_;
+        return it->second;
+    }
+    ++layoutCacheMisses_;
+
+    if (layoutCache_.size() >= 1024) {
+        layoutCache_.clear();
+    }
+
+    CachedTextLayout built;
+    RichTextSpan curSpan;
+    bool hasActiveColor = false;
+    uint32_t activeColor = 0;
+    float curLineWidth = 0.0f;
+    float maxLineWidth = 0.0f;
+    int lines = 1;
+
+    const char* p = text;
+    while (*p) {
+        if (p[0] == '|' && p[1] != '\0') {
+            const char code = p[1];
+            uint32_t parsedColor = 0;
+            if ((code == 'c' || code == 'C') && TryParseColorCodeO1(p, parsedColor)) {
+                if (!curSpan.text.empty()) {
+                    built.spans.push_back(std::move(curSpan));
+                    curSpan = RichTextSpan{};
+                }
+                hasActiveColor = true;
+                activeColor = parsedColor;
+                curSpan.colorOverride = activeColor;
+                curSpan.hasColorOverride = true;
+                p += 10;
                 continue;
             }
             if (code == 'r' || code == 'R') {
-                curColor = color;
-                text += 2;
+                if (!curSpan.text.empty()) {
+                    built.spans.push_back(std::move(curSpan));
+                    curSpan = RichTextSpan{};
+                }
+                hasActiveColor = false;
+                activeColor = 0;
+                curSpan.hasColorOverride = false;
+                p += 2;
                 continue;
             }
-            if (code == 'c' || code == 'C') {
-                if (std::strlen(text) >= 10) {
-                    int a = parseHexByte(text + 2);
-                    int r_ = parseHexByte(text + 4);
-                    int g = parseHexByte(text + 6);
-                    int b = parseHexByte(text + 8);
-                    if (a >= 0 && r_ >= 0 && g >= 0 && b >= 0) {
-                        curColor = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r_;
-                        text += 10;
-                        continue;
-                    }
+            if (code == 'n' || code == 'N') {
+                if (!curSpan.text.empty() || curSpan.newlineBefore) {
+                    built.spans.push_back(std::move(curSpan));
+                    curSpan = RichTextSpan{};
                 }
+                curSpan.newlineBefore = true;
+                curSpan.hasColorOverride = hasActiveColor;
+                curSpan.colorOverride = activeColor;
+                maxLineWidth = std::max(maxLineWidth, curLineWidth);
+                curLineWidth = 0.0f;
+                ++lines;
+                p += 2;
+                continue;
             }
         }
-        unsigned char ch = (unsigned char)*text;
-        if (ch == '\n') {
-            posX = x;
-            baselineY += lineHeight_ * scale;
-            text++;
-            continue;
-        }
-        if (ch < 32 || ch > 126) {
-            text++;
+
+        if (*p == '\n') {
+            if (!curSpan.text.empty() || curSpan.newlineBefore) {
+                built.spans.push_back(std::move(curSpan));
+                curSpan = RichTextSpan{};
+            }
+            curSpan.newlineBefore = true;
+            curSpan.hasColorOverride = hasActiveColor;
+            curSpan.colorOverride = activeColor;
+            maxLineWidth = std::max(maxLineWidth, curLineWidth);
+            curLineWidth = 0.0f;
+            ++lines;
+            ++p;
             continue;
         }
 
-        const auto& g = glyphs_[ch - 32];
-        if (g.bw > 0 && g.bh > 0) {
-            float qx = posX + g.bl * scale;
-            float qy = baselineY + g.bt * scale;
-            float qw = g.bw * scale;
-            float qh = g.bh * scale;
-            r.DrawTexturedQuad(qx, qy, qw, qh, atlasTex_,
-                                g.tx0, g.ty0, g.tx1, g.ty1, curColor);
+        const char* prev = p;
+        const uint32_t cp = DecodeNextUtf8Codepoint(p);
+        curSpan.text.append(prev, (size_t)(p - prev));
+        curLineWidth += GetCodepointAdvanceBase(cp);
+    }
+
+    if (!curSpan.text.empty() || curSpan.newlineBefore) {
+        built.spans.push_back(std::move(curSpan));
+    }
+    maxLineWidth = std::max(maxLineWidth, curLineWidth);
+    built.unscaledWidth = maxLineWidth;
+    built.lineCount = lines;
+
+    auto [insIt, _] = layoutCache_.emplace(std::move(key), std::move(built));
+    return insIt->second;
+}
+
+float TextRenderer::MeasureText(const char* text, float size) const {
+    if (!text || (!atlasValid_ && !metricsValid_)) return 0.0f;
+    const CachedTextLayout& layout = GetOrBuildLayout(text);
+    const float scale = (fontSize_ > 0.0f) ? (size / fontSize_) : 1.0f;
+    return layout.unscaledWidth * scale;
+}
+
+void TextRenderer::RenderText(UiRenderer& r, float x, float y, const char* text, uint32_t color, float size) {
+    if (!text || (!atlasValid_ && !metricsValid_)) return;
+
+    const CachedTextLayout& layout = GetOrBuildLayout(text);
+    const float scale = (fontSize_ > 0.0f) ? (size / fontSize_) : 1.0f;
+    float baselineY = y + ascender_ * scale;
+    float posX = x;
+    uint32_t curColor = color;
+
+    for (const RichTextSpan& span : layout.spans) {
+        if (span.newlineBefore) {
+            posX = x;
+            baselineY += lineHeight_ * scale;
         }
-        posX += g.ax * scale;
-        text++;
+        curColor = span.hasColorOverride ? span.colorOverride : color;
+
+        const char* p = span.text.c_str();
+        while (*p) {
+            const uint32_t cp = DecodeNextUtf8Codepoint(p);
+            if (cp >= 32 && cp <= 126 && (cp - 32) < glyphs_.size()) {
+                const auto& g = glyphs_[cp - 32];
+                if (atlasValid_ && g.bw > 0 && g.bh > 0) {
+                    const float qx = posX + g.bl * scale;
+                    const float qy = baselineY + g.bt * scale;
+                    const float qw = g.bw * scale;
+                    const float qh = g.bh * scale;
+                    r.DrawTexturedQuad(qx, qy, qw, qh, atlasTex_,
+                                       g.tx0, g.ty0, g.tx1, g.ty1, curColor);
+                }
+                posX += g.ax * scale;
+            } else {
+                posX += GetCodepointAdvanceBase(cp) * scale;
+            }
+        }
     }
 }

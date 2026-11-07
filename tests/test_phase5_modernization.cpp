@@ -1,3 +1,7 @@
+#include "render/mdx_particles.h"
+#include "render/mdx_ribbons.h"
+#include "ui/TextRenderer.h"
+#include "scripting/script_engine_host.h"
 #include "ecs/fog_state.h"
 #include "render/fog_of_war.h"
 #include "render/mdx_animator.h"
@@ -3303,6 +3307,384 @@ bool TestPhase10StageZ2TacticalThreatMapUtilityAiAndRetailDriveSuite() {
         mapFog.Rasterize(0, w3e.tileWidth, w3e.tileHeight, minX, minY, maxX, maxY, fogBuf.data());
         TEST_ASSERT(mapFog.IsVisibleTo(0, 0.0f, 0.0f));
         session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+// ============================================================================
+// Phase 11 Stage AA1-DD2: Zero-Alloc VFX Particle Staging & RibbonRingBuffer,
+// Broadphase Raycast & NonAlloc Picking, O(1) RichTextLayoutCache & UTF-8/CJK,
+// and IScriptEngineHost RealScript Hot-Swap with Retail Drive Map Verification
+// ============================================================================
+
+bool TestPhase11StageAA1ParticleSystemZeroAllocStaging() {
+    MdxModel model;
+    MdxParticleEmitter2 pe;
+    pe.name = "FireEmitter";
+    pe.objectId = 0;
+    pe.parentId = -1;
+    pe.speed = 60.0f;
+    pe.variation = 0.1f;
+    pe.latitude = 30.0f;
+    pe.gravity = 9.8f;
+    pe.lifeSpan = 1.5f;
+    pe.emissionRate = 120.0f;
+    pe.width = 16.0f;
+    pe.length = 16.0f;
+    pe.rows = 1;
+    pe.columns = 1;
+    pe.timeMiddle = 0.5f;
+    for (int i = 0; i < 3; ++i) {
+        pe.segmentColors[i][0] = 1.0f;
+        pe.segmentColors[i][1] = 0.5f;
+        pe.segmentColors[i][2] = 0.1f;
+        pe.segmentAlphas[i] = 255;
+        pe.segmentScaling[i] = 12.0f;
+    }
+    model.particleEmitters2.push_back(pe);
+
+    MdxParticleSystem partSys;
+    partSys.Init(model, nullptr);
+    TEST_ASSERT(partSys.GetEmitterCount() == 1);
+
+    for (int step = 0; step < 30; ++step) {
+        partSys.Update(0.05f, Vec3{10.0f, 0.0f, 20.0f});
+    }
+
+    TEST_ASSERT(partSys.GetParticleCount() > 50);
+    // Every non-empty frame updated stagingInstances in-place with zero heap reallocations
+    TEST_ASSERT(partSys.GetZeroAllocUploadCount() >= 25);
+    const auto& staged = partSys.GetEmitterStagingInstances(0);
+    TEST_ASSERT((int)staged.size() == partSys.GetParticleCount());
+    TEST_ASSERT(std::fabs(staged[0].size - 12.0f) < 0.01f);
+    return true;
+}
+
+bool TestPhase11StageAA2RibbonRingBufferZeroAllocTrail() {
+    RibbonRingBuffer ring;
+    TEST_ASSERT(ring.empty() && ring.size() == 0);
+    for (int i = 0; i < 600; ++i) {
+        RibbonSegment seg;
+        seg.age = (float)(i % 10) * 0.1f;
+        seg.life = 0.5f;
+        seg.slot = i;
+        ring.push_back(seg);
+    }
+    // Capped at kMaxCapacity (512) with oldest overwritten in ring order
+    TEST_ASSERT(ring.size() == RibbonRingBuffer::kMaxCapacity);
+    TEST_ASSERT(ring[0].slot == 88);
+    TEST_ASSERT(ring[ring.size() - 1].slot == 599);
+
+    // Compact expired segments (age >= life) in-place without allocation
+    ring.remove_if_inplace([](const RibbonSegment& s) { return s.age >= s.life; });
+    TEST_ASSERT(ring.size() > 0 && ring.size() < RibbonRingBuffer::kMaxCapacity);
+
+    // Test MdxRibbonSystem zero-alloc staging vertex/index generation
+    MdxModel model;
+    MdxRibbonEmitter rb;
+    rb.name = "BladeTrail";
+    rb.objectId = 0;
+    rb.parentId = -1;
+    rb.heightAbove = 25.0f;
+    rb.heightBelow = 25.0f;
+    rb.alpha = 0.9f;
+    rb.color[0] = 0.2f; rb.color[1] = 0.6f; rb.color[2] = 1.0f;
+    rb.lifeSpan = 1.0f;
+    rb.emissionRate = 60.0f;
+    rb.rows = 1;
+    rb.columns = 1;
+    model.ribbonEmitters.push_back(rb);
+
+    MdxRibbonSystem ribSys;
+    ribSys.Init(model, nullptr);
+    for (int step = 0; step < 20; ++step) {
+        ribSys.Update(0.04f, Vec3{(float)step * 10.0f, 0.0f, 0.0f});
+    }
+    TEST_ASSERT(ribSys.GetSegmentCount() >= 10);
+    TEST_ASSERT(ribSys.GetLiveQuadCount() == ribSys.GetSegmentCount() - 1);
+    TEST_ASSERT(ribSys.GetZeroAllocRibbonUploadCount() >= 10);
+    return true;
+}
+
+bool TestPhase11StageBB1BroadphaseSphereRejectionAndCollisionRaycast() {
+    resource::ResourceServer resServer;
+    const std::string colMdl = R"(
+        Version { FormatVersion 800, }
+        Model "PickableTower" {
+            NumGeosets 1,
+            NumBones 1,
+            BlendTime 150,
+            MinimumExtent { -32.0, -32.0, 0.0 },
+            MaximumExtent { 32.0, 32.0, 128.0 },
+            BoundsRadius 64.0,
+        }
+        Sequences 1 {
+            Anim "Stand" {
+                Interval { 0, 1000 },
+                MinimumExtent { -32.0, -32.0, 0.0 },
+                MaximumExtent { 32.0, 32.0, 128.0 },
+                BoundsRadius 64.0,
+            }
+        }
+        Geoset {
+            Vertices 3 { { -10.0, 0.0, 0.0 }, { 10.0, 0.0, 0.0 }, { 0.0, 0.0, 20.0 }, }
+            Normals 3 { { 0.0, 0.0, 1.0 }, { 0.0, 0.0, 1.0 }, { 0.0, 0.0, 1.0 }, }
+            TVertices 3 { { 0.0, 0.0 }, { 1.0, 0.0 }, { 0.5, 1.0 }, }
+            VertexGroup { 0, 0, 0, }
+            Faces 1 3 { Triangles { { 0, 1, 2 }, } }
+            Groups 1 1 { Matrices { 0 }, }
+        }
+        Bone "RootBone" { ObjectId 0, Parent -1, GeosetId 0, GeosetAnimId -1, }
+        CollisionShape "HitBox" {
+            ObjectId 1,
+            Parent 0,
+            Box,
+            Vertices {
+                { -30.0, -30.0, 0.0 },
+                { 30.0, 30.0, 100.0 },
+            }
+        }
+        PivotPoints 2 { { 0.0, 0.0, 0.0 }, { 0.0, 0.0, 0.0 }, }
+    )";
+    resServer.MountMemoryFile("Buildings/Human/WatchTower/WatchTower.mdl",
+                              std::vector<uint8_t>(colMdl.begin(), colMdl.end()));
+
+    SceneManager scene;
+    scene.SetResourceServer(&resServer);
+    const uint32_t towerId = War3ID("hwtw").value;
+    scene.RegisterUnitModelPath(towerId, "Buildings/Human/WatchTower/WatchTower.mdx");
+
+    const float scale[3] = {1.0f, 1.0f, 1.0f};
+    // Place 40 towers along a wide grid; only 1 tower is at (0, 0, 0)
+    for (int i = 0; i < 40; ++i) {
+        const float pos[3] = {(float)(i * 600), 0.0f, (float)((i % 5) * 600)};
+        TEST_ASSERT(scene.AddUnit(towerId, pos, 0.0f, scale, 0, 500, 0) >= 0);
+    }
+
+    scene.ResetPickingStats();
+    picking::PickRay ray;
+    ray.origin = {0.0f, 50.0f, 200.0f};
+    ray.direction = {0.0f, 0.0f, -1.0f};
+
+    int hitCount = 0;
+    for (int i = 0; i < scene.GetInstanceCount(); ++i) {
+        float t = 0.0f;
+        if (scene.IntersectInstanceRayWithCollision(i, ray, t)) {
+            ++hitCount;
+        }
+    }
+    TEST_ASSERT(hitCount == 1);
+    // Broad-phase sphere rejection must reject >= 38 of the 40 distant towers without 4x4 matrix inversion!
+    TEST_ASSERT(scene.GetBroadphaseRejectedCount() >= 38);
+    TEST_ASSERT(scene.GetNarrowphaseTestedCount() <= 2);
+    return true;
+}
+
+bool TestPhase11StageBB2RaycastInstancesNonAllocAndScreenRectQuery() {
+    SceneManager scene;
+    const float scale[3] = {1.0f, 1.0f, 1.0f};
+    // Place 5 procedural instances along Z axis: z = -100, -300, -500 and 2 far off-axis
+    const float p0[3] = {0.0f, 0.0f, -500.0f};
+    const float p1[3] = {0.0f, 0.0f, -100.0f};
+    const float p2[3] = {0.0f, 0.0f, -300.0f};
+    const float p3[3] = {2000.0f, 0.0f, -200.0f};
+    const float p4[3] = {-2000.0f, 0.0f, -200.0f};
+    const int idx0 = scene.AddProceduralInstance(War3ID("hfoo").value, p0, 0.0f, scale, 0);
+    const int idx1 = scene.AddProceduralInstance(War3ID("hfoo").value, p1, 0.0f, scale, 0);
+    const int idx2 = scene.AddProceduralInstance(War3ID("hfoo").value, p2, 0.0f, scale, 0);
+    scene.AddProceduralInstance(War3ID("hfoo").value, p3, 0.0f, scale, 0);
+    scene.AddProceduralInstance(War3ID("hfoo").value, p4, 0.0f, scale, 0);
+
+    picking::PickRay ray;
+    ray.origin = {0.0f, 0.0f, 100.0f};
+    ray.direction = {0.0f, 0.0f, -1.0f};
+
+    SceneManager::SceneRaycastHit hits[4];
+    const int numHits = scene.RaycastInstancesNonAlloc(ray, 1000.0f, hits, 4, true);
+    TEST_ASSERT(numHits == 3);
+    // Verify ascending distance order: idx1 (z=-100) -> idx2 (z=-300) -> idx0 (z=-500)
+    TEST_ASSERT(hits[0].instanceIndex == idx1);
+    TEST_ASSERT(hits[1].instanceIndex == idx2);
+    TEST_ASSERT(hits[2].instanceIndex == idx0);
+    TEST_ASSERT(hits[0].distance < hits[1].distance && hits[1].distance < hits[2].distance);
+
+    // Test 2D screen box selection
+    Mat4 view = LookAt(Vec3(0.0f, 400.0f, 400.0f), Vec3(0.0f, 0.0f, -250.0f), Vec3(0.0f, 1.0f, 0.0f));
+    Mat4 proj = Perspective(60.0f, 16.0f / 9.0f, 10.0f, 3000.0f);
+    std::vector<int> boxed;
+    const int boxedCount = scene.QueryScreenRectInstances(view, proj, 1280, 720, 200.0f, 50.0f, 1080.0f, 670.0f, boxed);
+    TEST_ASSERT(boxedCount == 3);
+    return true;
+}
+
+bool TestPhase11StageCC1RichTextLayoutCacheAndO1ColorParser() {
+    TextRenderer tr;
+    tr.InitHeadlessMetrics(24.0f, 0.5f); // Each ASCII char = 12px at size 24
+    TEST_ASSERT(tr.IsValid());
+
+    uint32_t parsedColor = 0;
+    TEST_ASSERT(TextRenderer::TryParseColorCodeO1("|cffffcc00Gold|r", parsedColor));
+    // Short/truncated "|c123" must fail safely in O(1) without reading past null terminator
+    TEST_ASSERT(!TextRenderer::TryParseColorCodeO1("|c123", parsedColor));
+
+    const char* richStr = "|cffffcc00Gold: 500|r|n|cff00ff00Lumber: 250|r";
+    const float w1 = tr.MeasureText(richStr, 24.0f);
+    const float w2 = tr.MeasureText(richStr, 24.0f);
+    TEST_NEAR(w1, w2, 1e-4f);
+    // "Lumber: 250" is 11 chars -> 11 * 12.0f = 132.0f max line width
+    TEST_NEAR(w1, 11.0f * 12.0f, 1e-3f);
+    TEST_ASSERT(tr.GetLayoutCacheMissCount() == 1);
+    TEST_ASSERT(tr.GetLayoutCacheHitCount() == 1);
+
+    const CachedTextLayout& layout = tr.GetOrBuildLayout(richStr);
+    TEST_ASSERT(layout.lineCount == 2);
+    TEST_ASSERT(layout.spans.size() == 2);
+    TEST_ASSERT(layout.spans[0].hasColorOverride && layout.spans[0].text == "Gold: 500");
+    TEST_ASSERT(layout.spans[1].newlineBefore && layout.spans[1].text == "Lumber: 250");
+    return true;
+}
+
+bool TestPhase11StageCC2Utf8CodepointDecoderAndCjkMetrics() {
+    TextRenderer tr;
+    tr.InitHeadlessMetrics(24.0f, 0.5f); // ASCII = 12px, CJK fullwidth = 24px
+
+    const char* cjkRich = "|cffffcc00阿尔萨斯|r Lv10";
+    // "阿尔萨斯" = 4 CJK chars (4 * 24 = 96px) + " Lv10" = 5 ASCII chars (5 * 12 = 60px) => 156px
+    const float measured = tr.MeasureText(cjkRich, 24.0f);
+    TEST_NEAR(measured, 4.0f * 24.0f + 5.0f * 12.0f, 1e-3f);
+
+    // Custom glyph override for a specific Unicode codepoint
+    const char* swordChar = "\xE5\x89\x91"; // U+5251
+    const char* cursor = swordChar;
+    const uint32_t cp = TextRenderer::DecodeNextUtf8Codepoint(cursor);
+    TEST_ASSERT(cp == 0x5251u);
+    tr.RegisterUnicodeGlyphAdvance(0x5251u, 30.0f);
+    TEST_NEAR(tr.MeasureText(swordChar, 24.0f), 30.0f, 1e-3f);
+    return true;
+}
+
+bool TestPhase11StageDD1UnifiedScriptEngineHostAndJassAdapter() {
+    scripting::ScriptHostRouter router(std::make_unique<scripting::JassScriptHostAdapter>());
+    TEST_ASSERT(router.GetActiveHost() != nullptr);
+    TEST_ASSERT(router.GetActiveHost()->GetBackendKind() == scripting::ScriptBackendKind::JassLegacy);
+
+    int hostHookSum = 0;
+    router.RegisterSharedNativeAuto("HostReportScore", [&](int player, int delta) -> int {
+        hostHookSum += player * 100 + delta;
+        return hostHookSum;
+    });
+
+    const std::string jassSrc = R"(
+        native HostReportScore takes integer p, integer d returns integer
+        globals
+            integer g_campaignStage = 3
+            integer g_lastScore = 0
+        endglobals
+        function OnUnitDeathHandler takes nothing returns nothing
+            set g_lastScore = HostReportScore(2, 45)
+            set g_campaignStage = 4
+        endfunction
+    )";
+
+    auto* host = router.GetActiveHost();
+    TEST_ASSERT(host->LoadModule("CampaignJass", jassSrc));
+    host->SetGlobal("g_campaignStage", JassValue::Int(3));
+
+    const int subId = host->SubscribeEvent(101, "OnUnitDeathHandler", /*filterHandle=*/5001);
+    TEST_ASSERT(subId > 0);
+
+    scripting::ScriptEventPayload ev;
+    ev.eventId = 101;
+    ev.sourceHandle = 5001;
+    ev.targetHandle = 5002;
+    ev.numericValue = 120.0f;
+    TEST_ASSERT(host->FireEvent(ev) == 1);
+    TEST_ASSERT(hostHookSum == 245);
+    TEST_ASSERT(host->GetGlobal("g_lastScore").AsInt() == 245);
+    TEST_ASSERT(host->GetGlobal("g_campaignStage").AsInt() == 4);
+
+    // Handle destruction automatically unsubscribes handle-filtered triggers
+    host->OnHandleDestroyed(5001);
+    TEST_ASSERT(host->FireEvent(ev) == 0);
+    return true;
+}
+
+bool TestPhase11StageDD2RealScriptHotSwapAndRetailDriveSuite() {
+    scripting::ScriptHostRouter router(std::make_unique<scripting::JassScriptHostAdapter>());
+
+    int sharedNativeCalls = 0;
+    router.RegisterSharedNativeAuto("EngineAddGold", [&](int playerIdx, int amount) -> int {
+        ++sharedNativeCalls;
+        return playerIdx * 1000 + amount;
+    });
+
+    // Populate globals in JassScriptHostAdapter before hot-swapping to RealScriptEngineHost
+    router.GetActiveHost()->SetGlobal("g_migratedGold", JassValue::Int(1250));
+    router.GetActiveHost()->SetGlobal("g_heroName", JassValue::Str("Arthas"));
+
+    auto realScriptHost = std::make_unique<scripting::RealScriptEngineHost>();
+    auto* rsRaw = realScriptHost.get();
+
+    // Hot-swap from JassVM -> RealScriptEngineHost with automatic native re-binding & global state migration!
+    TEST_ASSERT(router.HotSwapBackend(std::move(realScriptHost), /*migrateGlobals=*/true));
+    TEST_ASSERT(router.GetHotSwapCount() == 1);
+    TEST_ASSERT(router.GetActiveHost()->GetBackendKind() == scripting::ScriptBackendKind::RealScript);
+    TEST_ASSERT(router.GetActiveHost()->GetGlobal("g_migratedGold").AsInt() == 1250);
+    TEST_ASSERT(router.GetActiveHost()->GetGlobal("g_heroName").strVal == "Arthas");
+
+    // Load a RealScript module with declarative variables and register a RealScript handler
+    const std::string rsModule = R"(
+        let rs_wave_bonus = 350;
+        let rs_boss_active = true;
+    )";
+    TEST_ASSERT(rsRaw->LoadModule("RealScriptWaveLogic.rs", rsModule));
+    TEST_ASSERT(rsRaw->GetGlobal("rs_wave_bonus").AsInt() == 350);
+    TEST_ASSERT(rsRaw->GetGlobal("rs_boss_active").AsBool() == true);
+
+    rsRaw->RegisterScriptFunction("OnRealScriptWaveEvent", [](scripting::RealScriptEngineHost& host,
+                                                              const std::vector<scripting::ScriptValue>& args) {
+        const int srcHandle = !args.empty() ? args[0].AsInt() : 0;
+        const int bonus = host.GetGlobal("rs_wave_bonus").AsInt();
+        const auto res = host.InvokeNativeZeroAlloc("EngineAddGold", {
+            scripting::ScriptValue::Int(1),
+            scripting::ScriptValue::Int(bonus + srcHandle)
+        });
+        host.SetGlobal("g_migratedGold", res);
+        return res;
+    });
+
+    rsRaw->SubscribeEvent(202, "OnRealScriptWaveEvent", /*filterHandle=*/50);
+    scripting::ScriptEventPayload waveEv;
+    waveEv.eventId = 202;
+    waveEv.sourceHandle = 50;
+    TEST_ASSERT(rsRaw->FireEvent(waveEv) == 1);
+    TEST_ASSERT(sharedNativeCalls == 1);
+    TEST_ASSERT(rsRaw->GetGlobal("g_migratedGold").AsInt() == 1400);
+    TEST_ASSERT(rsRaw->GetZeroAllocNativeCallCount() >= 2);
+
+    // End-to-End Retail Drive Map Picking & Broadphase Verification on (4)TwistedMeadows.w3x
+    MpqManager mpq;
+    CSimulation sim;
+    SceneManager scene;
+    UnitPresentationSystem presentation;
+    core::WorldSceneSession session;
+    const std::string mapPath = "resources/Maps/FrozenThrone/(4)TwistedMeadows.w3x";
+    FILE* f = std::fopen(mapPath.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        TEST_ASSERT(session.LoadMap(mpq, sim, scene, presentation, mapPath));
+        TEST_ASSERT(scene.GetInstanceCount() > 100);
+
+        scene.ResetPickingStats();
+        picking::PickRay pickRay;
+        pickRay.origin = {0.0f, 1500.0f, 0.0f};
+        pickRay.direction = {0.0f, -1.0f, 0.0f};
+        SceneManager::SceneRaycastHit hits[8];
+        (void)scene.RaycastInstancesNonAlloc(pickRay, 5000.0f, hits, 8, true);
+        // Over 90% of doodads across the retail map are rejected by the broadphase sphere check
+        TEST_ASSERT(scene.GetBroadphaseRejectedCount() > (uint64_t)(scene.GetInstanceCount() * 8 / 10));
+        session.TeardownCurrentSession(mpq, sim, scene, presentation);
     }
 
     return true;

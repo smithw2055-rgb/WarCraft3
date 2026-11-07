@@ -817,6 +817,14 @@ bool TestPhase10StageY1MdxAnimatorZeroAllocInPlaceAndCursorCache();
 bool TestPhase10StageY2MdxAnimatorCrossFadeAndAnimationLod();
 bool TestPhase10StageZ1DataDrivenBuffZeroAllocPoolAndStacking();
 bool TestPhase10StageZ2TacticalThreatMapUtilityAiAndRetailDriveSuite();
+bool TestPhase11StageAA1ParticleSystemZeroAllocStaging();
+bool TestPhase11StageAA2RibbonRingBufferZeroAllocTrail();
+bool TestPhase11StageBB1BroadphaseSphereRejectionAndCollisionRaycast();
+bool TestPhase11StageBB2RaycastInstancesNonAllocAndScreenRectQuery();
+bool TestPhase11StageCC1RichTextLayoutCacheAndO1ColorParser();
+bool TestPhase11StageCC2Utf8CodepointDecoderAndCjkMetrics();
+bool TestPhase11StageDD1UnifiedScriptEngineHostAndJassAdapter();
+bool TestPhase11StageDD2RealScriptHotSwapAndRetailDriveSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1629,6 +1637,14 @@ int main(int argc, char** argv) {
         {"Phase10 Stage Y2 MdxAnimator cross-fade and animation LOD", TestPhase10StageY2MdxAnimatorCrossFadeAndAnimationLod},
         {"Phase10 Stage Z1 DataDrivenBuff zero-alloc pool and stacking", TestPhase10StageZ1DataDrivenBuffZeroAllocPoolAndStacking},
         {"Phase10 Stage Z2 TacticalThreatMap utility AI and retail Drive suite", TestPhase10StageZ2TacticalThreatMapUtilityAiAndRetailDriveSuite},
+        {"Phase11 Stage AA1 ParticleSystem zero-alloc staging buffer", TestPhase11StageAA1ParticleSystemZeroAllocStaging},
+        {"Phase11 Stage AA2 RibbonRingBuffer zero-alloc trail segments", TestPhase11StageAA2RibbonRingBufferZeroAllocTrail},
+        {"Phase11 Stage BB1 Broadphase sphere rejection and collision raycast", TestPhase11StageBB1BroadphaseSphereRejectionAndCollisionRaycast},
+        {"Phase11 Stage BB2 RaycastInstancesNonAlloc and screen rect query", TestPhase11StageBB2RaycastInstancesNonAllocAndScreenRectQuery},
+        {"Phase11 Stage CC1 RichTextLayoutCache and O(1) color parser", TestPhase11StageCC1RichTextLayoutCacheAndO1ColorParser},
+        {"Phase11 Stage CC2 UTF-8 codepoint decoder and CJK metrics", TestPhase11StageCC2Utf8CodepointDecoderAndCjkMetrics},
+        {"Phase11 Stage DD1 Unified IScriptEngineHost and JassAdapter", TestPhase11StageDD1UnifiedScriptEngineHostAndJassAdapter},
+        {"Phase11 Stage DD2 RealScript hot-swap and retail Drive suite", TestPhase11StageDD2RealScriptHotSwapAndRetailDriveSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

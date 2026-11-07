@@ -170,7 +170,9 @@ void MdxRibbonSystem::Init(const MdxModel& model, MpqManager* mpq) {
                 state.sampler = sg_make_sampler(&smp);
             }
         }
-        emitters_.push_back(state);
+        state.stagingVertices.reserve((size_t)kMaxSegmentsPerEmitter * 4);
+        state.stagingIndices.reserve((size_t)kMaxSegmentsPerEmitter * 6);
+        emitters_.push_back(std::move(state));
     }
 }
 
@@ -280,38 +282,42 @@ void MdxRibbonSystem::Update(float dt, const Vec3& worldOffset, const MdxModel* 
             }
         }
 
-        // Age live segments; fade alpha over lifetime; gravity sinks verts.
-        for (auto it = state.segments.begin(); it != state.segments.end();) {
-            it->age += dt;
-            if (it->age >= it->life) {
-                it = state.segments.erase(it);
-                continue;
+        // Stage AA2: Age live segments in-place inside RibbonRingBuffer (0 heap allocations)
+        const float gravityDrop = data.gravity * dt;
+        state.segments.remove_if_inplace([&](RibbonSegment& seg) -> bool {
+            seg.age += dt;
+            if (seg.age >= seg.life) {
+                return true;
             }
-            const float gravityDrop = data.gravity * dt;
-            it->above[1] -= gravityDrop;
-            it->below[1] -= gravityDrop;
-            const float fade = it->life > 0.0f ? std::clamp(1.0f - (it->age / it->life), 0.0f, 1.0f) : 1.0f;
-            it->alpha = it->initialAlpha * fade;
-            ++it;
-        }
+            seg.above[1] -= gravityDrop;
+            seg.below[1] -= gravityDrop;
+            const float fade = seg.life > 0.0f ? std::clamp(1.0f - (seg.age / seg.life), 0.0f, 1.0f) : 1.0f;
+            seg.alpha = seg.initialAlpha * fade;
+            return false;
+        });
 
         UploadEmitter(state);
     }
 }
 
 void MdxRibbonSystem::UploadEmitter(RibbonEmitterState& state) {
-    if (!Renderer::IsActive()) return;
     const size_t quads = state.segments.size() > 1 ? state.segments.size() - 1 : 0;
-    if (quads == 0) return;
+    if (quads == 0) {
+        state.stagingVertices.clear();
+        state.stagingIndices.clear();
+        return;
+    }
 
     const MdxRibbonEmitter& data = *state.emitterData;
     const unsigned columns = std::max(1u, data.columns);
     const unsigned rows = std::max(1u, data.rows);
 
-    std::vector<Vertex> verts;
-    verts.reserve(quads * 4);
-    std::vector<uint16_t> indices;
-    indices.reserve(quads * 6);
+    const size_t prevVertCap = state.stagingVertices.capacity();
+    const size_t prevIdxCap = state.stagingIndices.capacity();
+    auto& verts = state.stagingVertices;
+    auto& indices = state.stagingIndices;
+    verts.clear();
+    indices.clear();
 
     const size_t count = state.segments.size();
     for (size_t i = 0; i + 1 < count; i++) {
@@ -340,6 +346,12 @@ void MdxRibbonSystem::UploadEmitter(RibbonEmitterState& state) {
         indices.push_back(base + 3);
         indices.push_back(base + 2);
     }
+
+    if (verts.capacity() == prevVertCap && indices.capacity() == prevIdxCap) {
+        ++zeroAllocRibbonUploads_;
+    }
+
+    if (!Renderer::IsActive()) return;
 
     const size_t vertBytes = verts.size() * sizeof(Vertex);
     const size_t indexBytes = indices.size() * sizeof(uint16_t);

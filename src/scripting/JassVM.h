@@ -118,6 +118,7 @@ public:
     // Variable access (for game integration)
     void SetGlobal(const std::string& name, const JassValue& val);
     JassValue GetGlobal(const std::string& name) const;
+    const std::unordered_map<std::string, JassValue>& GetGlobals() const { return globals_; }
 
     bool IsValid() const { return !programs_.empty(); }
     void RequestSleep(float seconds);

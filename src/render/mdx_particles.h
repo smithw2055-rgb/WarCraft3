@@ -2,6 +2,7 @@
 #include "third_party/sokol/sokol_gfx.h"
 #include "model/mdx.h"
 #include "render/math.h"
+#include <cstdint>
 #include <vector>
 #include <random>
 #include <memory>
@@ -21,12 +22,21 @@ struct Particle {
     float texRow;
 };
 
+struct ParticleInstanceData {
+    float posX, posY, posZ;
+    float size;
+    float colorR, colorG, colorB, colorA;
+    float texCol, texRow;
+};
+
 struct ParticleEmitterState {
     const MdxParticleEmitter2* emitterData = nullptr;
     MdxParticleEmitter2Sample sample;
     int lastEmissionKey = -1;
     float emissionAccum = 0.0f;
     std::vector<Particle> particles;
+    // Stage AA1: Persistent pre-reserved staging buffer (0 per-frame heap allocations)
+    std::vector<ParticleInstanceData> stagingInstances;
     sg_buffer instanceBuffer = {0};
     int instanceCapacity = 0;
     sg_image texture = {0};
@@ -38,15 +48,10 @@ struct ParticleEmitterState {
 
 class MdxParticleSystem {
 public:
+    using InstanceData = ParticleInstanceData;
+
     MdxParticleSystem();
     ~MdxParticleSystem();
-
-    struct InstanceData {
-        float posX, posY, posZ;
-        float size;
-        float colorR, colorG, colorB, colorA;
-        float texCol, texRow;
-    };
 
     void Init(const MdxModel& model, class MpqManager* mpq);
     void Update(float dt, const Vec3& worldOffset = Vec3{0,0,0});
@@ -64,6 +69,9 @@ public:
     void Destroy();
 
     int GetParticleCount() const;
+    size_t GetEmitterCount() const { return emitters_.size(); }
+    uint64_t GetZeroAllocUploadCount() const { return zeroAllocUploads_; }
+    const std::vector<InstanceData>& GetEmitterStagingInstances(size_t emitterIdx) const;
 
     // Shared particle shader/pipeline
     static sg_shader ParticleShader();
@@ -97,4 +105,5 @@ private:
     Vec3 worldOffset_ = {0, 0, 0};
     Mat4 instanceMatrix_ = Mat4::Identity();
     bool hasInstanceMatrix_ = false;
+    uint64_t zeroAllocUploads_ = 0;
 };

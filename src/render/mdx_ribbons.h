@@ -7,7 +7,8 @@
 #include "third_party/sokol/sokol_gfx.h"
 #include "model/mdx.h"
 #include "render/math.h"
-#include <deque>
+#include <array>
+#include <cstdint>
 #include <vector>
 
 class MdxAnimator;
@@ -24,10 +25,83 @@ struct RibbonSegment {
     int slot = 0;
 };
 
+struct RibbonVertex {
+    float x, y, z;
+    float u, v;
+    float r, g, b, a;
+};
+
+// ============================================================
+// Stage AA2: Fixed-capacity zero-allocation ring buffer for
+// ribbon trail segments (replaces std::deque<RibbonSegment>).
+// ============================================================
+class RibbonRingBuffer {
+public:
+    static constexpr size_t kMaxCapacity = 512;
+
+    size_t size() const { return count_; }
+    bool empty() const { return count_ == 0; }
+    void clear() {
+        head_ = 0;
+        count_ = 0;
+    }
+
+    RibbonSegment& operator[](size_t i) {
+        return storage_[(head_ + i) % kMaxCapacity];
+    }
+    const RibbonSegment& operator[](size_t i) const {
+        return storage_[(head_ + i) % kMaxCapacity];
+    }
+
+    void pop_front() {
+        if (count_ > 0) {
+            head_ = (head_ + 1) % kMaxCapacity;
+            --count_;
+        }
+    }
+
+    void push_back(const RibbonSegment& seg) {
+        if (count_ == kMaxCapacity) {
+            storage_[head_] = seg;
+            head_ = (head_ + 1) % kMaxCapacity;
+        } else {
+            storage_[(head_ + count_) % kMaxCapacity] = seg;
+            ++count_;
+        }
+    }
+
+    // Compacts live segments in-place (preserving chronological order) without heap allocation
+    template <typename Pred>
+    void remove_if_inplace(Pred&& shouldRemove) {
+        size_t writeIdx = 0;
+        for (size_t readIdx = 0; readIdx < count_; ++readIdx) {
+            RibbonSegment& seg = (*this)[readIdx];
+            if (!shouldRemove(seg)) {
+                if (writeIdx != readIdx) {
+                    (*this)[writeIdx] = seg;
+                }
+                ++writeIdx;
+            }
+        }
+        count_ = writeIdx;
+        if (count_ == 0) {
+            head_ = 0;
+        }
+    }
+
+private:
+    std::array<RibbonSegment, kMaxCapacity> storage_{};
+    size_t head_ = 0;
+    size_t count_ = 0;
+};
+
 struct RibbonEmitterState {
     const MdxRibbonEmitter* emitterData = nullptr;
     float emissionAccum = 0.0f;
-    std::deque<RibbonSegment> segments;
+    RibbonRingBuffer segments;
+    // Stage AA2: Persistent pre-reserved staging buffers (0 per-frame heap allocations)
+    std::vector<RibbonVertex> stagingVertices;
+    std::vector<uint16_t> stagingIndices;
     sg_image texture = {0};
     sg_view textureView = {0};
     sg_sampler sampler = {0};
@@ -40,14 +114,10 @@ struct RibbonEmitterState {
 
 class MdxRibbonSystem {
 public:
+    using Vertex = RibbonVertex;
+
     MdxRibbonSystem();
     ~MdxRibbonSystem();
-
-    struct Vertex {
-        float x, y, z;
-        float u, v;
-        float r, g, b, a;
-    };
 
     void Init(const MdxModel& model, class MpqManager* mpq);
     void Update(float dt, const Vec3& worldOffset = Vec3{0, 0, 0});
@@ -66,6 +136,7 @@ public:
 
     size_t GetSegmentCount() const;
     size_t GetLiveQuadCount() const;
+    uint64_t GetZeroAllocRibbonUploadCount() const { return zeroAllocRibbonUploads_; }
 
     static sg_shader RibbonShader();
     static sg_pipeline RibbonPipeline();
@@ -87,6 +158,7 @@ private:
     Vec3 worldOffset_ = {0, 0, 0};
     Mat4 instanceMatrix_ = Mat4::Identity();
     bool hasInstanceMatrix_ = false;
+    uint64_t zeroAllocRibbonUploads_ = 0;
 
     static sg_shader sharedRibbonShader_;
     static sg_pipeline sharedRibbonPipeline_;

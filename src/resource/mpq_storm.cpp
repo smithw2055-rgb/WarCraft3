@@ -170,6 +170,15 @@ bool ReadFromArchive(const MpqArchive* archive, const std::string& filename,
     if (!SFileOpenFileEx(archive->handle, key.c_str(), SFILE_OPEN_BASE_FILE, &hFile))
         return false;
     DWORD fileSize = SFileGetFileSize(hFile, nullptr);
+    if (fileSize == 0xFFFFFFFFu) {
+        SFileCloseFile(hFile);
+        return false;
+    }
+    if (fileSize == 0) {
+        out.clear();
+        SFileCloseFile(hFile);
+        return true;
+    }
     out.resize(fileSize);
     DWORD bytesRead = 0;
     const bool ok = SFileReadFile(hFile, out.data(), fileSize, &bytesRead, nullptr);
