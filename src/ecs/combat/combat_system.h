@@ -5,6 +5,10 @@
 #include <unordered_map>
 #include <vector>
 
+namespace engine {
+class ISimulationModule;
+}
+
 struct DamageResult {
     float damageDealt = 0;
     float damageBlocked = 0;
@@ -23,7 +27,7 @@ public:
 
     // Override the default TFT table / DefenseArmor with data-loaded values
     // (CGameplayConstants from Units\MiscGame.txt). Until Configure() is
-    // called the compiled-in defaults are used.
+    // called the compiled-in or module-provided defaults are used.
     void Configure(float defenseArmor, const AttackDefenseTable& table);
 
     // Ethereal / magic-immune rules (ref default damage-taken listeners).
@@ -33,8 +37,30 @@ public:
                              bool magicImmuneResistsUltimates,
                              bool etherealBonusAlly = false);
 
+    // Phase 15: Bind active ISimulationModule (e.g. War3GameModule or NullSimulationModule)
+    void SetCombatModule(const engine::ISimulationModule* module, bool pureEngineMode = false);
+    const engine::ISimulationModule* GetCombatModule() const { return combatModule_; }
+    bool IsPureEngineUnmitigatedMode() const { return pureEngineMode_; }
+
+    // Inspect / mutate the active Attack-vs-Defense table and armor reduction factor
+    const AttackDefenseTable& GetTable() const { return table_; }
+    void SetTable(const AttackDefenseTable& table) {
+        table_ = table;
+        customTableConfigured_ = true;
+    }
+    void ResetTableToModuleDefault(const AttackDefenseTable& table) {
+        table_ = table;
+        customTableConfigured_ = false;
+    }
+    void SetTableEntry(CAttackType atk, CDefenseType def, float multiplier);
+    float GetTableEntry(CAttackType atk, CDefenseType def) const { return GetConfiguredMultiplier(atk, def); }
+
+    float GetDefenseArmorFactor() const { return defenseArmor_; }
+    void SetDefenseArmorFactor(float k) { defenseArmor_ = k; }
+
     // Attack-type vs defense-type multiplier table (WC3 standard)
     static float GetAttackDefenseMultiplier(CAttackType atk, CDefenseType def);
+    static int DefenseTypeToIndex(CDefenseType def);
 
     // Full damage calculation. rollMiss=false skips the evasion roll
     // (splash secondaries after the single primary roll; retail secondaries
@@ -123,9 +149,12 @@ public:
     void SetSeed(uint32_t seed) { rngState_ = seed; }
     uint32_t GetRandState() const { return rngState_; }
 
-private:
     float GetConfiguredMultiplier(CAttackType atk, CDefenseType def) const;
 
+private:
+    const engine::ISimulationModule* combatModule_ = nullptr;
+    bool pureEngineMode_ = false;
+    bool customTableConfigured_ = false;
     float defenseArmor_ = 0.06f;
     AttackDefenseTable table_;
     float etherealBonusMagic_ = 1.6667f;

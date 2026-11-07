@@ -1,99 +1,86 @@
-# 现代化游戏引擎底座抽象与精简重构设计文档 (Phase 12 & Phase 13)
+# 现代化游戏引擎底座抽象与精简重构设计文档 (Phase 12 – Phase 15)
 
 本项目以 **WarCraft III (Warsmash C++)** 为实验载体，参考 **Godot 4**（`OS / MainLoop`、Server 单例架构、`GDExtension` 动态插件系统、`SceneTree`、`ResourceServer`）与 **Unity**（`PlayerLoop`、`SubsystemManager`、`DOTS Sparse-Set ECS`、可热插拔 `GamePlay Assembly`、数据驱动 `ScriptableObject`）的设计哲学，在已完成 Phase 1–11 现代化改造的基础上，进一步完成：
-- **Phase 12**：**通用游戏引擎底座（`engine::*`）抽象解耦** 与 **全库去冗余/过时代码精简（De-Redundancy & Legacy Pruning）**。
-- **Phase 13**：**将 `CSimulation` 内的魔兽争霸3单位/技能体系彻底拆分为独立的 `war3::War3GameModule` 动态可插拔模块（含 `engine::ISimulationModule` 模拟策略接口、模块作用域技能目录管理与 OS 原生 `.so`/`.dll` `dlopen` 动态热重载器 `engine::DynamicModuleLoader`）**。
+
+* **Phase 12**：**通用游戏引擎底座（`engine::*`）抽象解耦** 与 **全库去冗余/过时代码精简（De-Redundancy & Legacy Pruning）**。
+
+* **Phase 13**：**将 `CSimulation` 内的魔兽争霸3单位/技能体系彻底拆分为独立的 `war3::War3GameModule` 动态可插拔模块（含 `engine::ISimulationModule` 模拟策略接口、模块作用域技能目录管理与 OS 原生 `.so`/`.dll` `dlopen` 动态热重载器 `engine::DynamicModuleLoader`）**。
+
+* **Phase 14**：**继续将 `CPlayer` 科技树/升级体系（Techtree Tier Equivalences & Live Upgrade Effect Engine）、维护费税率（Upkeep Tax）与对战/同盟胜负及残局暴露判定规则（Melee & Allied Victory/Defeat & Crippled Rules）进一步抽离至 `war3::War3GameModule` 动态插件中**。
+
+* **Phase 15**：**继续将 `CCombatSystem` 7×8 护甲/攻击类型克制表、0.06 护甲减伤曲线、虚无/魔免规则，以及 `MeleeAIController` 战术 AI 生命周期托管、四族建造规划推导与护甲克制优先集火评分（Armor-Counter Tactical Target Scoring）全面解耦至 `war3::War3GameModule` 动态插件中**。
 
 ## 1. 通用化引擎底座架构抽象（`src/engine/`）
 
-为了将本项目从“单一硬编码的魔兽争霸3模拟器”演进为“可复用、可插拔的通用 RTS/RPG 现代游戏引擎”，Phase 12–13 抽离了零业务耦合的 `src/engine/` 引擎内核层，将底层服务与上层游戏规则（`IGameModule` + `ISimulationModule`）彻底解耦：
+为了将本项目从“单一硬编码的魔兽争霸3模拟器”演进为“可复用、可插拔的通用 RTS/RPG 现代游戏引擎”，Phase 12–15 抽离了零业务耦合的 `src/engine/` 引擎内核层，将底层服务与上层游戏规则（`IGameModule` + `ISimulationModule`）彻底解耦：
 
 | 引擎底座模块 | 核心职责与设计模式 | 对标现代引擎参考 |
 | :--- | :--- | :--- |
 | `engine::ISubsystem` & `engine::SubsystemRegistry` (`src/engine/engine_subsystem.h`) | 定义 9 阶段确定性生命周期总线（`Platform(0) -> Jobs(50) -> Resource(100) -> Audio(200) -> Scripting(300) -> Simulation(400) -> Presentation(500) -> Render(600) -> UI(700) -> Telemetry(800)`），提供 `O(1)` 类型索引服务定位器（`Register<T>` / `TryGet<T>`）、按阶段升序初始化与逆序安全销毁 | Unity `SubsystemManager` / Godot `Server` 注册表 |
 | `engine::FixedTimestepStepper` (`src/engine/fixed_timestep_stepper.h`) | 将固定频率确定性模拟步进（如 20Hz RTS 帧同步或 60Hz 物理步进）与高刷显示器渲染帧率（60/144/240Hz）彻底解耦；内置死亡螺旋钳制（`maxSubStepsPerFrame`）并自动计算 `[0, 1]` 帧间插值因子 `interpolationAlpha` | Godot `MainLoop` 物理插值分步器 / Unity `FixedUpdate` |
 | `engine::IGameModule` (`src/engine/game_module.h`) | 定义通用引擎底座与具体游戏业务模块（如 `War3GameModule`、塔防/MOBA/RPG 模块或无头回归测试宿主）的标准生命周期契约（`OnRegisterSubsystems`、`OnInit`、`OnFixedTick`、`OnFrameUpdate`、`OnRender`、`OnShutdown`） | Godot `MainLoop` / Unity `World` 业务插件 |
-| `engine::ISimulationModule` & `engine::NullSimulationModule` (`src/engine/simulation_module.h`) | **[Phase 13 新增]** 抽象 `CSimulation` 通用 ECS 世界容器与具体游戏玩法规则的边界契约：负责技能目录挂载/卸载（`OnRegisterAbilityCatalog` / `OnUnregisterAbilityCatalog`）、单位原型技能自动装配（`OnAssembleUnitAbilities`）、物品与可破坏物初始化（`OnConfigureCreatedItem` / `OnConfigureCreatedDestructable`）以及实体入世/退世的科技树与人口结算钩子（`OnUnitCommittedToWorld` / `OnUnitRemovedFromWorld`）。挂载 `NullSimulationModule` 时 `CSimulation` 即刻进入 **Pure Engine Mode（纯净通用引擎模式）** | Godot `GDExtension` 玩法扩展 / Unity `Authoring & Baker System` |
+| `engine::ISimulationModule` & `engine::NullSimulationModule` (`src/engine/simulation_module.h`) | **[Phase 13–15 核心]** 抽象 `CSimulation` 通用 ECS 世界容器、`CPlayer` 通用玩家状态、`CCombatSystem` 通用战斗计算器及 `MeleeAIController` 战术 AI 与具体游戏玩法规则的完整边界契约：涵盖技能目录挂载/卸载、单位原型技能装配、实体入世/阵亡/形态升级蜕变/退世钩子、科技树等效层级解析、科技升级实时属性加成引擎、经济维护费税率、胜负与残局判定、**攻击/护甲克制倍率与护甲减伤曲线（`GetAttackDefenseMultiplier` / `ComputeArmorDamageReduction` / `ShouldResistMagicDamage` / `EvaluateEtherealDamageFactor`）**，以及**战术 AI 托管与护甲克制目标评分（`CreatePlayerAI` / `TickPlayerAIs` / `EvaluateTacticalTargetScore`）**。挂载 `NullSimulationModule` 时 `CSimulation` 即刻进入 **Pure Engine Mode（纯净通用引擎模式）** | Godot `GDExtension` 玩法扩展 / Unity `Authoring & Rule System` |
 | `engine::DynamicModuleLoader` (`src/engine/dynamic_module_loader.h/.cpp`) | **[Phase 13 新增]** 统一管理内置模块工厂（`RegisterBuiltInModule`）与操作系统原生共享库（`.so` / `.dll`）运行时动态加载（`LoadSharedLibrary`、`UnloadSharedLibrary`、`HotReloadSharedLibrary`），基于 POSIX `dlopen`/`dlsym`/`dlclose`（及 Windows `LoadLibraryA`/`GetProcAddress`）绑定 C ABI 导出入口，并通过 `shared_ptr` 自定义析构器安全托管跨 DLL 边界实例与代数（Generation）追踪 | Godot `GDExtensionLoader` / Unreal `FModuleManager` |
 | `engine::EngineKernel` (`src/engine/engine_kernel.h/.cpp`) | 统一收拢七大核心引擎服务器（`JobSystem`、`ResourceServer`、`AudioServer`、`RenderServer + RenderGraph`、`InputActionMap`、`ScriptHostRouter`、`EngineProfiler`），支持**独立自治模式（`BootstrapStandardSubsystems`）**与**非侵入宿主绑定模式（`BindExternalServices`）**双轨运行 | Godot `OS + Engine` / Unity `PlayerLoop` |
 
-### 引擎分层全景图
-
-1. **Layer 0 — 平台与并发原语层（Platform & Concurrency）**
-   - `platform/*`、`core/job_system.*`（多线程工作池与 `ParallelFor`）、`core/signal.h`（多播信号槽）、`core/engine_profiler.*`（分层采样与 Chrome Trace 导出）。
-2. **Layer 1 — 引擎服务器层（Engine Servers — Godot Server Pattern）**
-   - **虚拟文件系统与资源服务器 (`resource/resource_server.*`)**：统一 `mpq://`、`casc://`、`map://` URI 规范化、`RID` 句柄缓存、后台异步预加载与引用计数 GC。
-   - **渲染服务器与声明式渲染图 (`render/render_server.*`, `render/render_graph.*`)**：7 通道声明式 RenderGraph、视锥 3 态分块裁剪（`StaticSpatialChunkGrid` / `TerrainChunkGrid`）、共享网格注册表（`MdxSharedMeshRegistry`）、硬件实例化批次合批与 `BonePaletteAtlas`（RGBA32F 骨骼矩阵纹理图集）。
-   - **音频混音服务器 (`audio/audio_server.*`)**：分层混音总线（Master / Music / SFX / UnitVoice / UI / Ambient）、语音侧链闪避（Sidechain Ducking）、3D 距离衰减与优先级偷声（Voice Stealing）。
-   - **多后端脚本宿主路由 (`scripting/script_engine_host.*`)**：统一 `IScriptEngineHost` 契约，支持 `JassVM` 字节码协程后端与 `RealScriptEngineHost` 运行时热切换（Hot-Swap）。
-3. **Layer 2 — 通用引擎内核与世界框架层（Engine Kernel & ECS World）**
-   - `engine/engine_kernel.*`、`engine/engine_subsystem.h`、`engine/fixed_timestep_stepper.h`、`engine/game_module.h`、`engine/simulation_module.h`、`engine/dynamic_module_loader.*`。
-   - `ecs/csimulation.*`（零 War3 规则硬编码的确定性 ECS 实体世界与句柄管理器）、`ecs/ability_factory.*`（支持按 `moduleId` 隔离挂载与批量卸载的通用技能工厂注册表）。
-   - `ecs/ecs_registry.h`（`SparseComponentPool<T>` 稀疏集连续内存池）、`ecs/sim_systems.h`（声明式 `SimulationSystemPipeline`）、`ecs/spatial_grid.h`（`O(N)` 空间哈希网格）、`ecs/pathing/pathfinding_server.*`（零分配 A* 工作区与流场 `FlowFieldGrid` + RVO 群体避障）。
-4. **Layer 3 — 独立可热插拔游戏业务模块层（`src/game/war3/` — `War3GameModule` & `libwar3_module_plugin.so`）**
-   - `game/war3/war3_game_module.h/.cpp`、`game/war3/war3_module_plugin_export.cpp`：封装全部 ~190 个魔兽争霸3标准技能/法术描述符注册与四族工人/英雄/城镇大厅/建筑/商店原型装配规则，既可静态链接也可编译为独立 `libwar3_module_plugin.so` 动态共享库按需挂载或运行时热重载。
-
 ## 2. Phase 13：`CSimulation` 单位/技能体系拆分为独立的 `War3GameModule` 动态模块
 
-### 2.1 重构前痛点诊断
-在 Phase 12 之前，`CSimulation` (`src/ecs/csimulation.cpp`) 与 `AbilityFactory` (`src/ecs/ability_factory.cpp`) 存在严重的引擎层与魔兽3业务层耦合：
-1. **`CSimulation` 直接包含 14 个魔兽3具体技能头文件**（`ability_attack.h`、`ability_move.h`、`ability_harvest.h`、`ability_build.h`、`ability_queue.h`、`ability_upgrade.h`、`ability_revive.h`、`ability_hero.h`、`ability_inventory.h`、`ability_rally.h`、`ability_return_resources.h`、`ability_goldmine.h`、`ability_blight.h`、`ability_shop.h`）。
-2. **`CSimulation::CreateUnit` 硬编码了近 200 行魔兽3专属种族与建筑规则**：例如硬编码检查 `"uaco"`（不死族侍僧不采木）、`"ewsp"`（暗夜精灵小精灵采木量）、四族建造技能 FourCC（`AHbu`/`AObu`/`AEbu`/`AUbu`）、英雄复活祭坛与商店柜台逻辑，以及人口占用（`foodUsed`/`foodMade`）和科技树计数更新。
-3. **`AbilityFactory` 静态硬编码了 ~190 个魔兽3技能与法术（`AHbz`、`AOww`、`AEbl`、`AUdc` 等）**：无法按模块卸载或隔离，导致引擎底座无法在不携带魔兽3技能表的情况下运行其他类型游戏（如科幻 RTS、塔防、生存肉鸽）。
+* **`CSimulation` 纯净化改造（`src/ecs/csimulation.h/.cpp`）**：移除全部 14 个具体魔兽技能 `#include`，将单位技能装配、物品/可破坏物配置、实体入世/退世结算统一委托给 `simModule_`。
 
-### 2.2 核心解耦架构与实现细节
+* **模块作用域技能注册表（`src/ecs/ability_factory.h/.cpp`）**：`src/ecs/ability_factory.cpp` 从 **820+ 行** 精简至 **226 行**（缩减 **72%**），支持按 `moduleId` 注册、查询与批量卸载（`RegisterModuleCreator`、`RegisterModuleAlias`、`RegisterModuleSpellDescriptor`、`UnregisterModuleCreators`）。
 
-#### （1）`CSimulation` 纯净化改造（`src/ecs/csimulation.h/.cpp`）
-- **移除全部 14 个具体技能 `#include`**：`src/ecs/csimulation.cpp` 不再直接引用任何 `ecs/abilities/ability_*.h` 具体技能实现类，编译依赖大幅减轻。
-- **委托 `engine::ISimulationModule` 策略接口**：
-  - `CreateUnit` 仅负责分配 `handleId`、在 `SimEcsRegistry` 中初始化通用 ECS 组件（Transform、Stats、Movement、Combat、Pathing）与空间网格坐标，随后调用 `simModule_->OnAssembleUnitAbilities(*this, *unitPtr, *unitType)` 完成业务技能挂载。
-  - 实体正式入世（`CreateUnit` 提交及 `ProcessPendingCommits`）与退世（`RemoveUnit`）统一回调 `simModule_->OnUnitCommittedToWorld(*this, *u)` 与 `simModule_->OnUnitRemovedFromWorld(*this, *u)`。
-  - 新增 `SetSimulationModule(std::shared_ptr<engine::ISimulationModule>)`、`SetPureEngineMode(bool)` 与 `IsPureEngineMode()`：当开启 `SetPureEngineMode(true)` 时，`CSimulation` 切换至 `engine::NullSimulationModule`，创建的 `CUnit` 为 **0 魔兽技能、0 魔兽人口规则** 的纯净 ECS 实体。
+* **原生共享库插件导出（`src/game/war3/war3_module_plugin_export.cpp` -> `libwar3_module_plugin.so`）**：导出标准 C ABI 入口符号，支持通过 `DynamicModuleLoader` 在运行时 `dlopen` 动态挂载或 `HotReloadSharedLibrary` 在线热重载。
 
-#### （2）模块作用域技能注册表（`src/ecs/ability_factory.h/.cpp`）
-- `src/ecs/ability_factory.cpp` 从 **820+ 行** 精简至 **226 行**（缩减 **72%**），不再包含任何具体魔兽技能头文件。
-- 新增模块级管理 API：
-  - `AbilityFactory::RegisterModuleCreator(moduleId, code, creator)`
-  - `AbilityFactory::RegisterModuleAlias(moduleId, alias, targetCode)`
-  - `AbilityFactory::RegisterModuleSpellDescriptor(moduleId, desc)`
-  - `AbilityFactory::UnregisterModuleCreators(moduleId)`：支持在模块卸载或热重载时，精确清理由指定 `moduleId`（如 `"War3GameModule"` 或自定义扩展模块 `"SciFiTerranModule"`）注册的所有技能与 `AbilityBuilderRegistry` 描述符，互不干扰。
-  - `AbilityFactory::GetModuleRegisteredCount(moduleId)` 与 `AbilityFactory::GetCreatorModuleId(code)`：提供模块归属自省能力。
+## 3. Phase 14：将 `CPlayer` 科技树/升级体系与胜负判定规则抽离至 `War3GameModule` 插件
 
-#### （3）独立的 `war3::War3GameModule` 动态模块（`src/game/war3/`）
-- **`war3_game_module.h/.cpp`**：同时实现 `engine::IGameModule`（引擎主循环生命周期）与 `engine::ISimulationModule`（模拟层实体装配与规则钩子）：
-  - `RegisterWar3AbilityCatalog()` / `UnregisterWar3AbilityCatalog()`：集中管理全部 ~190 个魔兽3基础技能、英雄技能、物品技能与数据驱动法术描述符，归属模块 ID 为 `"War3GameModule"`。
-  - `OnAssembleUnitAbilities(...)`：完整封装魔兽3攻击（`Aatk`）、移动（`Amov`）、四族采集（`Ahar` + `uaco`/`ewsp` 定制）、四族建造（`AHbu`/`AObu`/`AEbu`/`AUbu`）、训练队列（`Aque`）、集结点（`ARal`）、建筑升级（`Aupg`）、英雄复活祭坛（`Arev`）、金矿/返还资源（`Agld`/`Aret`）、商店（`Ane2`/`Apit`/`Asud`）、英雄面板与物品栏（`AHer`/`AInv`）及 SLK `abilList` 装配。
-  - 实时统计 `engine::SimulationModuleStats`（`unitsAssembled`、`abilitiesAttached`、`itemsConfigured`、`destructablesConfigured`、`unitsCommitted`、`unitsRemoved`）。
-- **`war3_module_plugin_export.cpp` & `libwar3_module_plugin.so`**：
-  - 导出标准 C ABI 符号：`WarsmashGetModulePluginId`、`WarsmashCreateSimulationModule`、`WarsmashDestroySimulationModule`、`WarsmashCreateGameModule`、`WarsmashDestroyGameModule`。
-  - 通过 `engine::DynamicModuleLoader::Instance().LoadSharedLibrary("War3DynamicPluginSO", "./libwar3_module_plugin.so")` 即可在运行时通过 OS `dlopen`/`dlsym` 动态加载魔兽3模块，并支持 `HotReloadSharedLibrary` 在线热重载（Generation 自动递增）。
+* **四族科技树等效推导与建筑升级蜕变同步（`War3GameModule::GetEffectiveTechLevel` & `OnUnitMorphed`）**：内置人族（`htow <- hkee <- hcas`）、兽族（`ogre <- ostr <- ofor`）、不死族（`unpl <- unp1 <- unp2`）、暗夜精灵（`etol <- etoa <- etoe`）及防御塔科技等效树，支持 `RegisterTechEquivalence` 动态扩展；建筑完成升级蜕变（`CAbilityUpgrade`）时自动转移科技计数与人口上限差值。
 
-## 3. Phase 12 去冗余设计与过时代码清理回顾（De-Redundancy & Legacy Code Removal）
+* **数据驱动的科技升级属性实时生效引擎（`CUpgradeEffectSpec` & `War3GameModule::ApplySingleUpgradeToUnit`）**：完整解析 `UpgradeData.slk` 的 `effect1..4`、`base1..4`、`mod1..4`、`code1..4` 与 `class`，支持护甲（`rarm`）、攻击力（`ratx`/`ratd`/`ratc`）、生命值（`rhpx`/`rhpo`）、法力值（`rmnx`/`rmno`）、移速（`rmvx`）、攻速（`rats`）与技能等级（`rlev`）对场上存活单位与新训练单位的增量幂等生效。
 
-### 3.1 移除 28 个废弃/过时源码与头文件（净删 ~1,400+ 行死代码）
+* **对战/同盟胜负判定与残局暴露规则引擎（`War3GameModule::EvaluateVictoryDefeat` & `IsPlayerCrippled`）**：封装无主基地且无农民/资金重建时的残局暴露（`Crippled`）、建筑全灭判负（`DEFEAT`）以及双向同盟共享胜利（`VICTORY`）规则与 `SimEventBus` 信号广播。
 
-| 清理类别 | 移除的过时文件 | 移除原因与现代替代方案 |
-| :--- | :--- | :--- |
-| **早期渲染原型 (Phase 0)** | `src/render/terrain.h`, `src/render/terrain.cpp` (`TerrainRenderer` / `simpleTerrain_`) | 早期纯色高度图原型，全库无 `Build()` 调用，已完全被 `TexturedTerrain` + `TerrainChunkGrid` 取代 |
-| **废弃软件网格与阴影桩** | `src/render/software_mesh.h/.cpp`, `src/render/shadow_manager.h/.cpp` | 全库 0 引用、未接线的早期实验桩代码，地形高度查询已统一由 `TexturedTerrain` 与 `W3EMap` 承载 |
-| **前 FDF 时代旧 UI 组件** | `src/ui/AudioOptionsFrame.h`, `src/ui/SliderFrame.h/.cpp`, `src/ui/HeroPanelFrame.h/.cpp`, `src/ui/InfoPanelFrame.h/.cpp`, `src/ui/PortraitFrame.h/.cpp`, `src/ui/TooltipFrame.h/.cpp`, `src/ui/BuffBar.h/.cpp`, `src/ui/CommandCard.h/.cpp`, `src/ui/ResourceBarFrame.h/.cpp`, `src/ui/ChatConsoleFrame.h/.cpp`, `src/ui/MultiSelectionPanel.h/.cpp` | 在引入零售级 FDF 驱动栈（`FdfHudHost` + `ConsoleHUD` + `ExtendedFrames.h`）后，`MainUI` 中的 `commandCard_`、`resourceBar_`、`chatConsole_` 恒为 `nullptr`，上述 21 个旧 UI 文件已彻底废弃 |
-| **废弃 ECS 技能原型头** | `src/ecs/abilities.h` (`struct CAbilityDef`) | 早期占位结构体，已被 `ecs/ability.h` + `data/abilitydata.h` (`CAbilityDefFull`) + `ABSpellDescriptor` 取代 |
+## 4. Phase 15：将 `CCombatSystem` 护甲/攻击克制表与 `MeleeAIController` 战术 AI 决策解耦至 `War3GameModule` 插件
 
-### 3.2 合并 `src/data/` 中四重复制的 SLK/TXT/物编合并管线（净减 ~450 行重复代码）
-- 在 `src/data/slk_merge.h` 与 `src/data/slk_merge.cpp` 中统一提供双重载 `GetMergedString/Int/Float`、单表/多表双重载 `ResolveObjectModField`、`ParseWar3IdList` 以及通用单表物编合并引擎 `ApplySingleTableObjectMods(...)`。
-- `ApplyMapDestructableObjectMods`（`w3b`）、`ApplyMapDoodadObjectMods`（`w3d`）、`ApplyMapItemObjectMods`（`w3t`）全部收敛为对 `ApplySingleTableObjectMods` 的 5 行声明式调用。
+### 4.1 `CCombatSystem` 护甲/攻击克制矩阵与减伤规则插件化（`src/ecs/combat/combat_system.h/.cpp`）
 
-### 3.3 `CUnit` 冷数据下沉与内存布局瘦身（单实例体积缩减 17.2%）
-- 新增 `UnitScriptOverridesComponent`（`src/ecs/unit_components.h`），将 `sharedVisionPlayers`、`addedUnitTypes`、`removedUnitTypes` 下沉至 `SimEcsRegistry` 的 `SparseComponentPool<UnitScriptOverridesComponent>` 中按需懒分配，常规单位实现 **0 字节额外开销**。
-- 实测 `sizeof(CUnit)` 从 **1,352 字节** 降至 **1,120 字节**（每个单位节省 **232 字节**，缩减 **17.2%**）。
+* **问题诊断**：重构前，`src/ecs/combat/combat_system.cpp` 内部静态硬编码了魔兽3冰封王座的 7×8 攻击对护甲克制表 `kTable`（普通/穿刺/攻城/魔法/混乱/英雄/法术 vs 无甲/轻甲/中甲/重甲/城甲/英雄/神圣/未武装）、`0.06` 护甲非线性减伤公式以及虚无（Ethereal `1.66x` 魔法加成与物理免疫）/魔免（Magic Immunity）判定规则，导致通用战斗组件无法在不修改源码的情况下切换为纯数值 1:1 伤害模型或其他游戏类型的克制表。
 
-## 4. 云端游戏资源验证与单元测试覆盖
+* **解耦方案**：
+  1. **标准克制表与伤害规则收归 `War3GameModule`**：
+     * `War3GameModule::GetCanonicalWar3AttackDefenseTable()` 封装完整的魔兽3 TFT 7×8 克制矩阵。
+     * `War3GameModule` 实现 `ISimulationModule` 的四大战斗策略钩子：`GetAttackDefenseMultiplier`、`ComputeArmorDamageReduction`、`ShouldResistMagicDamage` 与 `EvaluateEtherealDamageFactor`。
+     * 支持运行时通过 `War3GameModule::SetAttackDefenseMultiplier(atk, def, mult)`、`SetCombatTable(table)` 与 `SetDefenseArmorFactor(k)` 热修改克制倍率（如自定义地图平衡性补丁），并实时同步至绑定的 `CCombatSystem`。
+  2. **Pure Engine Mode 1:1 纯净伤害模式**：
+     * 当 `CSimulation` 切换至 `NullSimulationModule`（`SetPureEngineMode(true)`）时，`CCombatSystem` 自动通过 `ISimulationModule` 进入无克制偏置模式：所有攻击与护甲组合倍率恒为 `1.0x`，护甲非线性减伤归零（`0.0f`），彻底剥离魔兽3专属规则。
 
-结合云端 Google Drive [`WarCraft3`](https://drive.google.com/drive/folders/1sEyljyjTcnwtxQNPEhYC2dVMh4Idit-L) / [`Maps/FrozenThrone`](https://drive.google.com/drive/folders/1sb1fktbnjqbIEjNrKky4l_iWyMfb_wU3) 下的 14 张零售级对战与 [`Scenario`](https://drive.google.com/drive/folders/18rVJURpX4ZHWLumjNUp0ZeXEN-TJOaj-) 地图（含 [`(2)EchoIsles.w3x`](https://drive.google.com/file/d/1d5qijwX3yNOvm9Xej64YpfSTivPlNGff/view?usp=drivesdk)、[`(4)TurtleRock.w3x`](https://drive.google.com/file/d/106f_pFaSePSYhTJTZezXX4NYGotoG1pY/view?usp=drivesdk)、[`(4)TwistedMeadows.w3x`](https://drive.google.com/file/d/1v51wDc9ilk5BtPbEsPUX0mZVWnA3olix/view?usp=drivesdk)、[`(8)GardenOfWar.w3x`](https://drive.google.com/file/d/1LOvXHMDAyjLaLdZlAg4ubMIAcqNi6qrP/view?usp=drivesdk)、[`(6)BlizzardTD.w3x`](https://drive.google.com/file/d/1NK4On-ccrEEzFzRPsTv625yZY5QXl-h8/view?usp=drivesdk)、[`(8)AzerothGrandPrix.w3x`](https://drive.google.com/file/d/1H-h7ZYHa2qdwykkdNkpSaRDdKuNojLAM/view?usp=drivesdk) 等），全量运行 **821 项** 单元与集成测试：
-- **Phase 12 专项测试（`Stage EE1`、`Stage EE2`、`Stage FF1`、`Stage GG1`）**：4 项全通过。
-- **Phase 13 专项测试**：
-  - `Stage HH1`: `War3GameModule` 单位与技能装配解耦 vs `PureEngineMode` (`NullSimulationModule`) 对照验证。
-  - `Stage HH2`: `AbilityFactory` 模块作用域技能目录挂载、自定义模块（`SciFiTerranModule`）动态注入与独立卸载验证。
-  - `Stage II1`: `DynamicModuleLoader` 基于 `dlopen`/`dlsym` 加载 `./libwar3_module_plugin.so` 原生共享库、跨 `.so` 边界装配 `CSimulation` 单位及运行时 `HotReloadSharedLibrary` 热重载代数递增验证。
-  - `Stage II2`: 动态创建的 `War3GameModule` 在多张云端冰封王座零售地图（Melee + Scenario）上的 `WorldSceneSession` 端到端加载与 `EngineKernel` 固定步进驱动验证。
-- **总计 821 / 821 项测试全部通过（100% 通过率，零回归）**。
+### 4.2 `MeleeAIController` 战术 AI 生命周期托管与护甲克制集火评分（`src/ecs/melee_ai.h/.cpp`）
+
+* **问题诊断**：
+  1. 重构前，`MeleeAIController` 实例仅保存在 JASS 脚本层的 `JassNativesData::aiControllers` 哈希表中，引擎内核与 `War3GameModule` 无法统一管理、步进或热插拔 AI 控制器。
+  2. `TacticalThreatMap::ScoreTargetUtility` 在评估集火目标优先级时，仅考虑了残血斩杀分（`executionBonus`）、单位角色分（`roleBonus`）与距离惩罚（`distPenalty`），**忽略了攻击类型对目标护甲类型的克制倍率**（例如穿刺火枪手面对同等距离与血量的轻甲狮鹫骑士 `2.0x` 与城甲单位 `0.35x` 时评分相同）。
+
+* **解耦方案**：
+  1. **`War3GameModule` 统一托管 AI 生命周期与四族建造规划推导**：
+     * `War3GameModule` 内置 `aiControllers_` 注册表，实现 `CreatePlayerAI`、`AttachPlayerAI`、`GetPlayerAI`、`RemovePlayerAI`、`SetPlayerAIEnabled`、`CommandPlayerAI` 与 `TickPlayerAIs`，并在 `War3GameModule::OnFixedTick` 中自动驱动所有启用状态的 AI 控制器；同时与 JASS `StartMeleeAI`、`CommandAI`、`PauseCompAI` 双向打通。
+     * 将四族基地/农民/农场/兵营/祭坛/英雄/防御塔的自动角色发现逻辑提炼为 `War3GameModule::DiscoverRaceBuildPlan`，供 `MeleeAIController::DiscoverPlan()` 委托调用。
+  2. **护甲克制感知的效用 AI 集火评分（`War3GameModule::EvaluateTacticalTargetScore`）**：
+     * `TacticalThreatMap::ScoreTargetUtility` 在计算基础效用分后，回调 `simModule_->EvaluateTacticalTargetScore(*boundSim_, *attacker, *candidateTarget, baseScore)`。
+     * `War3GameModule` 实时查询攻击者主武器 `CAttackType` 对候选目标 `CDefenseType` 的克制倍率 `counterMult`，叠加 `(counterMult - 1.0f) * 90.0f` 的克制权重（例如穿刺打轻甲 `2.0x` 获得 `+90 分` 强集火激励，魔法打重甲 `2.0x` 获得 `+90 分`，而穿刺打城甲 `0.35x` 受到 `-58.5 分` 抑制），使战术微操具备真正的兵种相克智能。
+
+## 5. 云端游戏资源验证与单元测试覆盖
+
+结合云端 Google Drive [`WarCraft3`](https://drive.google.com/drive/folders/1sEyljyjTcnwtxQNPEhYC2dVMh4Idit-L) / [`Maps/FrozenThrone`](https://drive.google.com/drive/folders/1sb1fktbnjqbIEjNrKky4l_iWyMfb_wU3) 下的 14 张零售级对战与 [`Scenario`](https://drive.google.com/drive/folders/18rVJURpX4ZHWLumjNUp0ZeXEN-TJOaj-) 地图（含 [`(2)EchoIsles.w3x`](https://drive.google.com/file/d/1d5qijwX3yNOvm9Xej64YpfSTivPlNGff/view?usp=drivesdk)、[`(4)TurtleRock.w3x`](https://drive.google.com/file/d/106f_pFaSePSYhTJTZezXX4NYGotoG1pY/view?usp=drivesdk)、[`(4)TwistedMeadows.w3x`](https://drive.google.com/file/d/1v51wDc9ilk5BtPbEsPUX0mZVWnA3olix/view?usp=drivesdk)、[`(8)GardenOfWar.w3x`](https://drive.google.com/file/d/1LOvXHMDAyjLaLdZlAg4ubMIAcqNi6qrP/view?usp=drivesdk)、[`(6)BlizzardTD.w3x`](https://drive.google.com/file/d/1NK4On-ccrEEzFzRPsTv625yZY5QXl-h8/view?usp=drivesdk)、[`(8)AzerothGrandPrix.w3x`](https://drive.google.com/file/d/1H-h7ZYHa2qdwykkdNkpSaRDdKuNojLAM/view?usp=drivesdk) 等），全量运行 **829 项** 单元与集成测试：
+
+* **Phase 12 专项测试（`Stage EE1`–`Stage GG1`）**：4 项全通过。
+
+* **Phase 13 专项测试（`Stage HH1`–`Stage II2`）**：4 项全通过。
+
+* **Phase 14 专项测试（`Stage JJ1`–`Stage KK2`）**：4 项全通过。
+
+* **Phase 15 专项测试**：
+  * `Stage LL1`: `War3GameModule` 7×8 攻击/护甲克制倍率（穿刺 vs 轻甲 `2.0x`、穿刺 vs 城甲 `0.35x`、魔法 vs 重甲 `2.0x` + 10 点护甲 `37.5%` 减伤）与 `PureEngineMode` 1:1 纯净伤害对照验证。
+  * `Stage LL2`: `War3GameModule` 运行时自定义克制倍率热覆盖（`SetAttackDefenseMultiplier`）及 `./libwar3_module_plugin.so`（Version 15）跨 `.so` 边界战斗公式验证。
+  * `Stage MM1`: `War3GameModule` 托管 `MeleeAIController` 生命周期、四族建造规划自动发现（`htow`/`hpea`/`hhou`/`hbar`/`hrif`）与兵种护甲克制集火评分（穿刺火枪手优先集火轻甲目标而非城甲目标）验证。
+  * `Stage MM2`: 云端零售地图 `(2)EchoIsles.w3x` 端到端加载、`EngineKernel` 固定步进驱动 `War3GameModule::OnFixedTick` 自动步进战术 AI 与战斗系统验证。
+
+* **总计 829 / 829 项测试全部通过（100% 通过率，零回归）**。

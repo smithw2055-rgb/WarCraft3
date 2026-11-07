@@ -1661,9 +1661,12 @@ void JassNatives::RegisterPlayerNatives() {
             case 2: p->SetLumber(args[2].intVal); break;
             case 3: p->SetHeroTokens(args[2].intVal); break;
             case 4: p->SetFoodCap(args[2].intVal); break;
+            case 6: p->SetAlliedVictory(args[2].intVal != 0); break;
             case 7: p->SetGivesBounty(args[2].intVal != 0); break;
+            case 11: p->SetObserver(args[2].intVal != 0); break;
             case 13: p->SetGoldUpkeepRate(args[2].intVal); break;
             case 14: p->SetLumberUpkeepRate(args[2].intVal); break;
+            case 25: p->SetGameResultCode(args[2].intVal); break;
         }
         return JassValue::Null();
     });
@@ -1764,7 +1767,7 @@ void JassNatives::RegisterPlayerNatives() {
     vm_.RegisterNative("SetPlayerTechResearched", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !sim) return JassValue::Null();
         auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
-        if (p) p->SetTechLevel(War3ID((uint32_t)args[1].intVal), args[2].intVal);
+        if (p) p->SetTechLevel(*sim, War3ID((uint32_t)args[1].intVal), args[2].intVal);
         return JassValue::Null();
     });
     // Research levels on top of the current level (ref addTechResearched;
@@ -1775,7 +1778,7 @@ void JassNatives::RegisterPlayerNatives() {
         if (!p) return JassValue::Null();
         const War3ID id((uint32_t)args[1].intVal);
         if (sim->GetUpgradeData() && !sim->GetUpgradeData()->HasUpgrade(id)) return JassValue::Null();
-        p->SetTechLevel(id, p->GetTechLevel(id) + std::max(0, args[2].intVal));
+        p->SetTechLevel(*sim, id, p->GetTechLevel(id) + std::max(0, args[2].intVal));
         return JassValue::Null();
     });
     vm_.RegisterNative("GetPlayerTechResearched", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {

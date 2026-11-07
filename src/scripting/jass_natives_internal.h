@@ -115,10 +115,13 @@ inline double GetPlayerStateValue(CSimulation& sim, int playerId, int state) {
         case 3: return (double)p->GetHeroTokens();
         case 4: return (double)p->GetFoodCap();
         case 5: return (double)p->GetFoodUsed();
+        case 6: return p->HasAlliedVictory() ? 1.0 : 0.0;
         case 7: return p->GetGivesBounty() ? 1.0 : 0.0;
         case 8: return (double)p->GetFoodCapMod();
+        case 11: return p->IsObserver() ? 1.0 : 0.0;
         case 13: return (double)p->GetGoldUpkeepRate();
         case 14: return (double)p->GetLumberUpkeepRate();
+        case 25: return (double)p->GetGameResultCode();
         default: return 0.0;
     }
 }

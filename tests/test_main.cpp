@@ -833,6 +833,14 @@ bool TestPhase13StageHH1War3GameModuleDecoupledUnitAndAbilityAssembly();
 bool TestPhase13StageHH2ModuleScopedAbilityCatalogMountAndUnload();
 bool TestPhase13StageII1DynamicModuleLoaderSharedLibraryDlopenAndHotReload();
 bool TestPhase13StageII2War3GameModuleRetailDriveMapsEndToEndSuite();
+bool TestPhase14StageJJ1War3TechtreeTierEquivalencesAndBuildingMorph();
+bool TestPhase14StageJJ2War3UpgradeEffectEngineLiveAndSpawnedUnits();
+bool TestPhase14StageKK1War3MeleeAndAlliedVictoryDefeatAndCrippledRules();
+bool TestPhase14StageKK2DynamicPluginHotReloadAndCloudRetailMapsPhase14Suite();
+bool TestPhase15StageLL1War3CombatMatrixArmorCurveAndEtherealVsPureEngine();
+bool TestPhase15StageLL2CustomCombatMatrixHotOverrideAndDynamicPluginCombat();
+bool TestPhase15StageMM1War3ModuleTacticalAiLifecycleAndArmorCounterScoring();
+bool TestPhase15StageMM2RetailDriveMapsCombatAndTacticalAiEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1661,6 +1669,14 @@ int main(int argc, char** argv) {
         {"Phase13 Stage HH2 Module-scoped ability catalog mount and unload", TestPhase13StageHH2ModuleScopedAbilityCatalogMountAndUnload},
         {"Phase13 Stage II1 DynamicModuleLoader shared library dlopen and hot-reload", TestPhase13StageII1DynamicModuleLoaderSharedLibraryDlopenAndHotReload},
         {"Phase13 Stage II2 War3GameModule retail Drive maps end-to-end suite", TestPhase13StageII2War3GameModuleRetailDriveMapsEndToEndSuite},
+        {"Phase14 Stage JJ1 War3 techtree tier equivalences and building morph", TestPhase14StageJJ1War3TechtreeTierEquivalencesAndBuildingMorph},
+        {"Phase14 Stage JJ2 War3 upgrade effect engine live and spawned units", TestPhase14StageJJ2War3UpgradeEffectEngineLiveAndSpawnedUnits},
+        {"Phase14 Stage KK1 War3 melee and allied victory defeat and crippled rules", TestPhase14StageKK1War3MeleeAndAlliedVictoryDefeatAndCrippledRules},
+        {"Phase14 Stage KK2 Dynamic plugin SO and cloud maps Phase14 suite", TestPhase14StageKK2DynamicPluginHotReloadAndCloudRetailMapsPhase14Suite},
+        {"Phase15 Stage LL1 War3 combat matrix armor curve and ethereal vs PureEngine", TestPhase15StageLL1War3CombatMatrixArmorCurveAndEtherealVsPureEngine},
+        {"Phase15 Stage LL2 Custom combat matrix hot override and dynamic plugin SO", TestPhase15StageLL2CustomCombatMatrixHotOverrideAndDynamicPluginCombat},
+        {"Phase15 Stage MM1 War3Module tactical AI lifecycle and armor counter scoring", TestPhase15StageMM1War3ModuleTacticalAiLifecycleAndArmorCounterScoring},
+        {"Phase15 Stage MM2 Retail Drive maps combat and tactical AI end-to-end suite", TestPhase15StageMM2RetailDriveMapsCombatAndTacticalAiEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

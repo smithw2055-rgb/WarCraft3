@@ -4,35 +4,13 @@
 #include "ecs/unit_attack.h"
 #include "ecs/widget.h"
 #include "ecs/player.h"
+#include "engine/simulation_module.h"
+#include "game/war3/war3_game_module.h"
 #include "audio/AudioSystem.h"
 #include <cmath>
 #include <algorithm>
 
-// Attack-type vs defense-type multipliers, indexed by DefenseTypeIndex()
-// below: NONE, LIGHT, MEDIUM, HEAVY, FORTIFIED, HERO, DIVINE, UNARMORED.
-// Default values are the TFT data (Units\MiscGame.txt DamageBonus* rows,
-// Small,Medium,Large,Fort,Normal,Hero,Divine,None column order); the same
-// values are produced by CGameplayConstants when the data files are present,
-// and CCombatSystem::Configure() replaces this table with the loaded one
-// (e.g. when a map overrides constants via war3mapMisc.txt).
-static const AttackDefenseTable kTable = {
-    // Normal: 100/150/100/70/100/100/5/100
-    { 1.0f, 1.0f, 1.5f, 1.0f, 0.7f, 1.0f, 0.05f, 1.0f },
-    // Pierce: 200/75/100/35/50/5/150
-    { 1.0f, 2.0f, 0.75f, 1.0f, 0.35f, 0.5f, 0.05f, 1.5f },
-    // Siege: 100/50/100/150/50/5/150
-    { 1.0f, 1.0f, 0.5f, 1.0f, 1.5f, 0.5f, 0.05f, 1.5f },
-    // Magic: 125/75/200/35/50/5/100
-    { 1.0f, 1.25f, 0.75f, 2.0f, 0.35f, 0.5f, 0.05f, 1.0f },
-    // Chaos: full damage to everything
-    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
-    // Hero: reduced vs Fortified only
-    { 1.0f, 1.0f, 1.0f, 1.0f, 0.5f, 1.0f, 0.05f, 1.0f },
-    // Spells: 100% except Hero 70%, Divine 5%
-    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.05f, 1.0f }
-};
-
-static int DefenseTypeIndex(CDefenseType def) {
+int CCombatSystem::DefenseTypeToIndex(CDefenseType def) {
     switch (def) {
         case CDefenseType::NONE:      return 0;
         case CDefenseType::LIGHT:     return 1;
@@ -46,11 +24,18 @@ static int DefenseTypeIndex(CDefenseType def) {
     }
 }
 
-CCombatSystem::CCombatSystem() : table_(kTable) {}
+CCombatSystem::CCombatSystem()
+    : table_(war3::War3GameModule::GetCanonicalWar3AttackDefenseTable()) {}
+
+void CCombatSystem::SetCombatModule(const engine::ISimulationModule* module, bool pureEngineMode) {
+    combatModule_ = module;
+    pureEngineMode_ = pureEngineMode;
+}
 
 void CCombatSystem::Configure(float defenseArmor, const AttackDefenseTable& table) {
     defenseArmor_ = defenseArmor;
     table_ = table;
+    customTableConfigured_ = true;
 }
 
 void CCombatSystem::ConfigureMagicRules(float etherealBonusMagic, float etherealBonusSpells,
@@ -62,6 +47,22 @@ void CCombatSystem::ConfigureMagicRules(float etherealBonusMagic, float ethereal
     magicImmuneResistsDamage_ = magicImmuneResistsDamage;
     magicImmuneResistsUltimates_ = magicImmuneResistsUltimates;
     etherealBonusAlly_ = etherealBonusAlly;
+}
+
+void CCombatSystem::SetTableEntry(CAttackType atk, CDefenseType def, float multiplier) {
+    int di = DefenseTypeToIndex(def);
+    if (di < 0 || di > 7) return;
+    customTableConfigured_ = true;
+    switch (atk) {
+        case CAttackType::NORMAL: table_.normal[di] = multiplier; break;
+        case CAttackType::PIERCE: table_.pierce[di] = multiplier; break;
+        case CAttackType::SIEGE:  table_.siege[di]  = multiplier; break;
+        case CAttackType::MAGIC:  table_.magic[di]  = multiplier; break;
+        case CAttackType::SPELLS: table_.spells[di] = multiplier; break;
+        case CAttackType::CHAOS:  table_.chaos[di]  = multiplier; break;
+        case CAttackType::HERO:   table_.hero[di]   = multiplier; break;
+        default: break;
+    }
 }
 
 float CCombatSystem::CombatRand01() {
@@ -76,7 +77,13 @@ static float LookupRow(const float row[8], int di) {
 }
 
 float CCombatSystem::GetConfiguredMultiplier(CAttackType atk, CDefenseType def) const {
-    int di = DefenseTypeIndex(def);
+    if (pureEngineMode_ && combatModule_) {
+        return combatModule_->GetAttackDefenseMultiplier(static_cast<int>(atk), static_cast<int>(def));
+    }
+    if (!customTableConfigured_ && combatModule_) {
+        return combatModule_->GetAttackDefenseMultiplier(static_cast<int>(atk), static_cast<int>(def));
+    }
+    int di = DefenseTypeToIndex(def);
     switch (atk) {
         case CAttackType::NORMAL:       return LookupRow(table_.normal, di);
         case CAttackType::PIERCE:       return LookupRow(table_.pierce, di);
@@ -90,7 +97,8 @@ float CCombatSystem::GetConfiguredMultiplier(CAttackType atk, CDefenseType def) 
 }
 
 float CCombatSystem::GetAttackDefenseMultiplier(CAttackType atk, CDefenseType def) {
-    int di = DefenseTypeIndex(def);
+    const auto& kTable = war3::War3GameModule::GetCanonicalWar3AttackDefenseTable();
+    int di = DefenseTypeToIndex(def);
     if (di < 0 || di > 7) di = 0;
     switch (atk) {
         case CAttackType::NORMAL:       return kTable.normal[di];
@@ -110,7 +118,7 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
                                                float damageBase, float bonusDamage,
                                                int dice, int sidesPerDie,
                                                bool rollMiss) {
-    (void)attacker; // reserved for future evasion/level hooks
+    (void)isRanged;
     DamageResult result;
 
     if (!target || target->IsDead()) return result;
@@ -127,9 +135,6 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
         }
     }
     if (invulnerable) {
-        // Retail invulnerability suppresses only the taken-mods, the life
-        // change and the kill; evasion above and the crit roll below still
-        // run so the combat text matches a live target's.
         if (isAttack && attacker && attacker != dynamic_cast<CUnit*>(target)) {
             for (const auto& src : attacker->GetCritSources()) {
                 if (src.chance > 0.0f && CombatRand01() < src.chance) {
@@ -141,14 +146,19 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
         return result;
     }
 
-    // Magic immunity (ref CUnitDefaultMagicImmuneDamageModListener): MAGIC
-    // attacks fizzle when MagicImmunesResistDamage; SPELLS fizzle unless
-    // UNIVERSAL damage with MagicImmunesResistUltimates off. The inner
-    // conjunction is && (ref): UNIVERSAL always pierces, and non-universal
-    // SPELLS pass while the ultimates gate is off.
-    {
-        CUnit* targetUnit = dynamic_cast<CUnit*>(target);
-        if (targetUnit && targetUnit->IsMagicImmune()) {
+    // Phase 15: Magic immunity & Ethereal rules delegated to active ISimulationModule when bound
+    CUnit* targetUnit = dynamic_cast<CUnit*>(target);
+    if (targetUnit) {
+        if (combatModule_) {
+            if (combatModule_->ShouldResistMagicDamage(
+                    static_cast<int>(attackType),
+                    static_cast<int>(damageType),
+                    targetUnit->IsMagicImmune(),
+                    magicImmuneResistsDamage_,
+                    magicImmuneResistsUltimates_)) {
+                return result;
+            }
+        } else if (targetUnit->IsMagicImmune()) {
             if (attackType == CAttackType::MAGIC && magicImmuneResistsDamage_) {
                 return result;
             }
@@ -160,15 +170,22 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
         }
     }
 
-    // Ethereal bonus multiplier. Physical (NORMAL damage from a
-    // non-MAGIC attack) is negated. Allied casters skip the bonus unless
-    // EtherealDamageBonusAlly is set.
     float etherealMultiplier = 1.0f;
-    bool etherealNegate = false;
-    {
-        CUnit* targetUnit = dynamic_cast<CUnit*>(target);
-        if (targetUnit && targetUnit->IsEthereal()) {
-            const bool allied = attacker && attacker->GetPlayerIndex() == targetUnit->GetPlayerIndex();
+    if (targetUnit) {
+        const bool allied = attacker && attacker->GetPlayerIndex() == targetUnit->GetPlayerIndex();
+        if (combatModule_) {
+            if (!combatModule_->EvaluateEtherealDamageFactor(
+                    static_cast<int>(attackType),
+                    static_cast<int>(damageType),
+                    targetUnit->IsEthereal(),
+                    allied,
+                    etherealBonusAlly_,
+                    etherealBonusMagic_,
+                    etherealBonusSpells_,
+                    etherealMultiplier)) {
+                return result;
+            }
+        } else if (targetUnit->IsEthereal()) {
             const bool grantBonus = !allied || etherealBonusAlly_;
             if (grantBonus && attackType == CAttackType::MAGIC) {
                 etherealMultiplier = etherealBonusMagic_;
@@ -176,11 +193,10 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
                 etherealMultiplier = etherealBonusSpells_;
             }
             if (damageType == CDamageType::NORMAL && attackType != CAttackType::MAGIC) {
-                etherealNegate = true;
+                return result;
             }
         }
     }
-    if (etherealNegate) return result;
 
     // Roll damage (bonus damage is part of the base, like ref computeFinalDamage)
     float rolledDamage = damageBase + bonusDamage;
@@ -189,10 +205,8 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
             rolledDamage += (float)(1 + (int)(CombatRand01() * (float)sidesPerDie));
     }
 
-    // Attack-type vs defense-type multiplier, always applied (ref CUnit.damage).
-    // Destructables/items have no armor type; they use NONE (1.0x everywhere).
+    // Attack-type vs defense-type multiplier
     CDefenseType targetDef = CDefenseType::NONE;
-    CUnit* targetUnit = dynamic_cast<CUnit*>(target);
     int targetArmor = 0;
     if (targetUnit) {
         targetDef = targetUnit->GetDefenseType();
@@ -225,14 +239,16 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
     // including spells and enhanced physical, ignores armor value).
     float armorReduction = 0.0f;
     if (damageType == CDamageType::NORMAL) {
-        armorReduction = CalcArmorDamageReduction(targetArmor, 0, defenseArmor_);
+        if (combatModule_) {
+            armorReduction = combatModule_->ComputeArmorDamageReduction(targetArmor, 0, defenseArmor_);
+        } else {
+            armorReduction = CalcArmorDamageReduction(targetArmor, 0, defenseArmor_);
+        }
         if (armorReduction > 0.95f) armorReduction = 0.95f;
     }
     result.damageBlocked = rolledDamage * armorReduction;
     rolledDamage *= (1.0f - armorReduction);
 
-    // No clamp to zero (ref CUnit.damage): negative damage flows through
-    // and heals, capped at max life by the caller.
     result.damageDealt = rolledDamage;
     return result;
 }
@@ -256,9 +272,6 @@ float CCombatSystem::ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidg
                                    int dice, int sidesPerDie,
                                    float baseMultiplier, bool rollMiss) {
     if (!target || target->IsDead()) return 0;
-    // Uphill accuracy (ref CUnitDefaultAccuracyCheckListener; same gate as
-    // CUnit::Damage so splash/JASS paths share the retail miss rule).
-    // Skipped when the caller already rolled once (splash secondaries).
     if (rollMiss && simulation.CheckHighlandMiss(attacker, target, isAttack)) {
         simulation.FireCombatText(attacker ? attacker->GetHandleId() : -1, target->GetHandleId(),
                                   CSimulation::CombatTextKind::MISS, 0.0f);
@@ -276,8 +289,6 @@ float CCombatSystem::ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidg
     }
     const float dealt = result.damageDealt * baseMultiplier;
     if (dealt == 0.0f) {
-        // Retail still reports the damage event for invulnerable targets
-        // (suppressed mods, no life change); evaded/spent hits stay silent.
         if (target->IsInvulnerable()) {
             auto& quietCb = simulation.GetUnitDamageCallback();
             if (quietCb) {
@@ -294,13 +305,11 @@ float CCombatSystem::ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidg
 
     const float oldLife = target->GetLife();
     float newLife = oldLife - dealt;
-    // Retail heals on negative damage, capped at max unless already above.
     if (dealt < 0.0f && oldLife <= target->GetMaxLife() && newLife > target->GetMaxLife()) {
         newLife = target->GetMaxLife();
     }
     target->SetLife(simulation, newLife);
 
-    // Fire damage event
     auto& dmgCb = simulation.GetUnitDamageCallback();
     if (dmgCb) {
         int srcHandle = attacker ? attacker->GetHandleId() : -1;
@@ -309,7 +318,6 @@ float CCombatSystem::ApplyDamage(CSimulation& simulation, CUnit* attacker, CWidg
 
     (void)isRanged;
 
-    // Play weapon sound
     auto* audio = simulation.GetAudioSystem();
     if (audio && !weaponSoundType.empty()) {
         audio->Play3D(weaponSoundType, target->GetX(), target->GetY() + 50.0f, 0, 0.7f);
@@ -325,11 +333,6 @@ float CCombatSystem::ApplySplashDamage(CSimulation& simulation, CUnit* attacker,
                                        float damageBase, float bonusDamage,
                                        int dice, int sidesPerDie,
                                        const CUnitAttack& attack) {
-    // Single miss roll vs the primary (ref runPreDamageListeners once for
-    // the whole splash). A missed splash-family swing deals base x
-    // MissDamageReduction across primary + rings with the bonus in full;
-    // other weapons fizzle entirely. MSPLASH shows the miss text,
-    // ARTILLERY stays silent (ref).
     float baseMultiplier = 1.0f;
     if (target && RollAttackMiss(simulation, attacker, target, isAttack)) {
         if (CWeaponTypeInfo::IsSplashWeapon(attack.weaponType)) {
@@ -388,7 +391,6 @@ float CCombatSystem::ApplySplashDamageAtPoint(CSimulation& simulation, CUnit* at
     }
     for (CUnit* other : *unitList) {
         if (!other || other == excludeWidget || other == attacker || other->IsDead()) continue;
-        // Allies (and the attacker itself) are immune to friendly splash.
         bool isAlly = false;
         if (attacker) {
             if (ownerPlayer) {
@@ -405,7 +407,7 @@ float CCombatSystem::ApplySplashDamageAtPoint(CSimulation& simulation, CUnit* at
         const float distSq = dx * dx + dy * dy;
         float factor = 0.0f;
         if (distSq <= fullSq) {
-            factor = 1.0f; // inside the full-damage area
+            factor = 1.0f;
         } else if (distSq <= halfSq) {
             factor = attack.damageFactorHalf;
         } else if (attack.areaQuarter > 0.0f && distSq <= quarterSq) {
@@ -413,9 +415,6 @@ float CCombatSystem::ApplySplashDamageAtPoint(CSimulation& simulation, CUnit* at
         } else {
             continue;
         }
-        // Ring falloff scales the base; instance bonuses apply in full.
-        // Miss rolls are the caller's single primary roll (rollMiss=false
-        // from splash/ground paths); direct callers keep per-victim rolls.
         total += ApplyDamage(simulation, attacker, other, isAttack, isRanged,
                              attackType, damageType, "",
                              damageBase * factor, bonusDamage, dice, sidesPerDie,
@@ -465,7 +464,6 @@ float CCombatSystem::ApplyLineDamage(CSimulation& simulation, CUnit* attacker,
             }
         }
         if (isAlly) continue;
-        // Distance from the spill segment [p0, p0 + dir*spillDistance].
         const float rx = other->GetX() - x0;
         const float ry = other->GetY() - y0;
         float t = rx * nx + ry * ny;
@@ -476,7 +474,6 @@ float CCombatSystem::ApplyLineDamage(CSimulation& simulation, CUnit* attacker,
         const float dx = other->GetX() - cx;
         const float dy = other->GetY() - cy;
         if (dx * dx + dy * dy > spillRadius * spillRadius) continue;
-        // Spill carries the full attack (no ring falloff).
         total += ApplyDamage(simulation, attacker, other, isAttack, isRanged,
                              attackType, damageType, "",
                              damageBase, bonusDamage, dice, sidesPerDie);
@@ -485,16 +482,12 @@ float CCombatSystem::ApplyLineDamage(CSimulation& simulation, CUnit* attacker,
 }
 
 float CCombatSystem::CalcArmorDamageReduction(int defense, int attackerLevel, float defenseArmor) {
-    // Single source of truth lives in CDefenseTypeInfo (ref armor formula
-    // including the negative-armor branch); kept here for API compatibility.
     return CDefenseTypeInfo::CalcDamageReduction(defense, attackerLevel, defenseArmor);
 }
 
 bool CCombatSystem::CheckEvasion(CUnit* target, CUnit* attacker) {
     (void)attacker;
     if (!target) return false;
-    // Ref evasionListeners loop: every source rolls independently; the
-    // attack is evaded when any roll succeeds (miss = miss || roll).
     for (const auto& src : target->GetEvasionSources()) {
         if (src.chance <= 0.0f) continue;
         if (src.chance >= 1.0f) return true;

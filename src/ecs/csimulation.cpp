@@ -46,8 +46,10 @@ void CSimulation::SetSimulationModule(std::shared_ptr<engine::ISimulationModule>
     }
     simModule_ = std::move(module);
     pureEngineMode_ = (dynamic_cast<engine::NullSimulationModule*>(simModule_.get()) != nullptr);
+    combatSystem_.SetCombatModule(simModule_.get(), pureEngineMode_);
     if (simModule_) {
         simModule_->OnAttachToSimulation(*this);
+        simModule_->OnConfigureCombatSystem(*this, combatSystem_);
     }
 }
 
@@ -632,6 +634,58 @@ CPlayer* CSimulation::GetPlayer(int index) const {
 
 void CSimulation::AddPlayer(std::unique_ptr<CPlayer> player) {
     players_.push_back(std::move(player));
+}
+
+int CSimulation::GetEffectiveTechLevel(int playerIndex, War3ID techId) const {
+    if (simModule_) {
+        return simModule_->GetEffectiveTechLevel(*this, playerIndex, techId.value);
+    }
+    if (const CPlayer* p = GetPlayer(playerIndex)) {
+        return p->GetTechLevel(techId);
+    }
+    return 0;
+}
+
+void CSimulation::SetPlayerTechLevel(int playerIndex, War3ID techId, int level) {
+    if (CPlayer* p = GetPlayer(playerIndex)) {
+        p->SetTechLevel(*this, techId, level);
+    }
+}
+
+void CSimulation::EvaluateVictoryDefeat() {
+    if (simModule_) {
+        simModule_->EvaluateVictoryDefeat(*this);
+    }
+}
+
+bool CSimulation::IsPlayerCrippled(int playerIndex) const {
+    if (simModule_) {
+        return simModule_->IsPlayerCrippled(*this, playerIndex);
+    }
+    if (const CPlayer* p = GetPlayer(playerIndex)) {
+        return p->IsCrippled();
+    }
+    return false;
+}
+
+bool CSimulation::CreatePlayerAI(int playerIndex, int difficulty) {
+    if (simModule_) {
+        return simModule_->CreatePlayerAI(*this, playerIndex, difficulty);
+    }
+    return false;
+}
+
+bool CSimulation::RemovePlayerAI(int playerIndex) {
+    if (simModule_) {
+        return simModule_->RemovePlayerAI(playerIndex);
+    }
+    return false;
+}
+
+void CSimulation::TickPlayerAIs(float dt) {
+    if (simModule_) {
+        simModule_->TickPlayerAIs(*this, dt);
+    }
 }
 
 void CSimulation::AdvanceGameTime(float dt) {

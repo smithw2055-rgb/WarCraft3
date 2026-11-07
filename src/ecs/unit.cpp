@@ -1171,13 +1171,6 @@ bool CUnit::Update(CSimulation& simulation) {
             // Hidden construction workers emerge from the ruin (ref
             // popoutWorker; no-op without a worker link).
             PopoutWorker(simulation);
-            // Ref death path: the fallen stop satisfying techtree
-            // requirements (heroes keep theirs while awaiting revive).
-            if (!IsHero()) {
-                if (CPlayer* player = simulation.GetPlayer(GetPlayerIndex())) {
-                    player->RemoveTechUnlocked(simulation, GetTypeId());
-                }
-            }
             // Death reveal (ref CUnitDeathVisionFogModifier for owner +
             // killer): a short timed VISIBLE circle on the fog grid.
             {
@@ -1203,20 +1196,11 @@ bool CUnit::Update(CSimulation& simulation) {
             if (IsConstructing()) {
                 simulation.FireDeathExplode(handleId_, explodeBuffId_);
             }
-            // Food refund at death, not at removal (ref kill zeroes both:
-            // player.setUnitFoodMade/Used(this, 0)).
-            if (CPlayer* player = simulation.GetPlayer(GetPlayerIndex())) {
-                if (foodMade_ != 0) {
-                    if (!IsConstructing()) {
-                        player->SetFoodCap(std::max(0, player->GetFoodCap() - foodMade_));
-                    }
-                    foodMade_ = 0;
-                }
-                const int used = GetFoodUsed();
-                if (used != 0) {
-                    player->SetFoodUsed(std::max(0, player->GetFoodUsed() - used));
-                    foodUsed_ = 0;
-                }
+            // Phase 14: Delegate game-specific unit death rules (techtree possession
+            // decrement, food cap/used refund, and melee victory/defeat evaluation)
+            // to the active ISimulationModule.
+            if (auto* mod = simulation.GetSimulationModule()) {
+                mod->OnUnitDied(simulation, *this);
             }
             // Death drops (units.doo dropSets + w3i droppedItemTable): won
             // items materialize at the corpse on the death tick.

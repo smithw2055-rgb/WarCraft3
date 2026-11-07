@@ -539,6 +539,8 @@ public:
     void RegeneratePathingInstance(CSimulation& game);
     void KillPathingInstance(CSimulation& game);
     int GetPathingStampId() const { return StructureNavComp().pathingStampId; }
+    UnitAttributeAggregator& Attrs() { return attrs_; }
+    const UnitAttributeAggregator& Attrs() const { return attrs_; }
 
 private:
     static SimEcsRegistry& DetachedRegistry();

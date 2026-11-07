@@ -2033,13 +2033,16 @@ void JassNatives::RegisterCameraFlowNatives() {
         if (!args.empty() && sim) sim->SetPaused(args[0].boolVal);
         return JassValue::Null();
     });
-    vm_.RegisterNative("PauseCompAI", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("PauseCompAI", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         const int playerId = ResolvePlayerId(data, args[0].intVal);
         data->compAIpaused[playerId] = args[1].boolVal;
         auto it = data->aiControllers.find(playerId);
         if (it != data->aiControllers.end() && it->second) {
             it->second->SetEnabled(!args[1].boolVal);
+        }
+        if (sim && sim->GetSimulationModule()) {
+            sim->GetSimulationModule()->SetPlayerAIEnabled(playerId, !args[1].boolVal);
         }
         return JassValue::Null();
     });
@@ -2056,13 +2059,18 @@ void JassNatives::RegisterCameraFlowNatives() {
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("CripplePlayer", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("CripplePlayer", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3) return JassValue::Null();
         const int player = ResolvePlayerId(data, args[0].intVal);
         if (args[2].boolVal) {
             data->crippledPlayers.insert(player);
         } else {
             data->crippledPlayers.erase(player);
+        }
+        if (sim) {
+            if (CPlayer* p = sim->GetPlayer(player)) {
+                p->SetCrippled(args[2].boolVal);
+            }
         }
         return JassValue::Null();
     });
@@ -2080,7 +2088,7 @@ void JassNatives::RegisterCameraFlowNatives() {
         if (!args.empty() && data) data->restartDisabled = args[0].boolVal;
         return JassValue::Null();
     });
-    vm_.RegisterNative("RemovePlayer", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("RemovePlayer", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         const int player = ResolvePlayerId(data, args[0].intVal);
         // Sim player slots are index-stable, so removal only closes the
@@ -2089,6 +2097,15 @@ void JassNatives::RegisterCameraFlowNatives() {
             data->playerMapConfig[(size_t)player].slotActive = false;
         }
         data->removedPlayerResults[player] = args[1].intVal;
+        if (sim) {
+            if (CPlayer* p = sim->GetPlayer(player)) {
+                p->SetSlotActive(false);
+                p->SetGameResultCode(args[1].intVal);
+            }
+            if (auto* mod = sim->GetSimulationModule()) {
+                mod->OnPlayerRemoved(*sim, player, args[1].intVal);
+            }
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("SetPlayerUnitsOwner", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {

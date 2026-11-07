@@ -628,7 +628,7 @@ bool CAbilityNeutralBuilding::HireFromTavern(CSimulation& game, CUnit* tavern, C
         game.GetUnitData() ? game.GetUnitData()->GetUnitType(hero->GetTypeId()) : nullptr;
     if (!heroType) return false;
     for (const auto& req : heroType->GetRequirementsTier(aliveHeroes)) {
-        if (player->GetTechLevel(req.id) < (req.level > 0 ? req.level : 1)) {
+        if (player->GetEffectiveTechLevel(game, req.id) < (req.level > 0 ? req.level : 1)) {
             return false;
         }
     }

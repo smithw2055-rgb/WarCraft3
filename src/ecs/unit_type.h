@@ -157,6 +157,8 @@ public:
     const std::vector<War3ID>& GetStructuresBuilt() const { return structuresBuilt_; }
     const std::vector<War3ID>& GetUnitsTrained() const { return unitsTrained_; }
     const std::vector<War3ID>& GetResearchesAvailable() const { return researchesAvailable_; }
+    const std::vector<War3ID>& GetUpgradesUsed() const { return upgradesUsed_; }
+    void SetUpgradesUsed(std::vector<War3ID> v) { upgradesUsed_ = std::move(v); }
     bool HasUpgradeClass(CUpgradeClass upgradeClass) const {
         return upgradeClassToType_.find(upgradeClass) != upgradeClassToType_.end();
     }

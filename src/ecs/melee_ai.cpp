@@ -13,6 +13,7 @@
 #include "orders/order.h"
 #include "behaviors/behavior.h"
 #include "pathing/pathfinding.h"
+#include "game/war3/war3_game_module.h"
 #include <cmath>
 #include <algorithm>
 
@@ -109,6 +110,9 @@ bool MeleeAIController::IsEnemyPlayer(int index) const {
 void MeleeAIController::DiscoverPlan() {
     plan_ = AIRacePlan{};
     if (!sim_ || !sim_->GetUnitData()) return;
+    if (war3::War3GameModule::DiscoverRaceBuildPlan(*sim_, playerIndex_, plan_)) {
+        return;
+    }
     CUnitData* unitData = sim_->GetUnitData();
 
     // Town hall: first owned building that trains units.
@@ -868,6 +872,7 @@ int TacticalThreatMap::WorldToRow(float y) const {
 }
 
 void TacticalThreatMap::Rebuild(const CSimulation& sim, int aiPlayerIndex) {
+    boundSim_ = &sim;
     std::fill(cells_.begin(), cells_.end(), TacticalThreatCell{});
     activeThreatCells_ = 0;
 
@@ -969,7 +974,12 @@ float TacticalThreatMap::ScoreTargetUtility(const CUnit* attacker, const CUnit* 
     const float atkRange = std::max(100.0f, attacker->GetAttackRange(0));
     const float distPenalty = (dist <= atkRange) ? (dist * 0.02f) : (20.0f + (dist - atkRange) * 0.08f);
 
-    return std::max(0.01f, roleBonus + executionBonus - distPenalty);
+    const float baseScore = std::max(0.01f, roleBonus + executionBonus - distPenalty);
+    if (boundSim_ && boundSim_->GetSimulationModule()) {
+        return boundSim_->GetSimulationModule()->EvaluateTacticalTargetScore(
+            *boundSim_, *attacker, *candidateTarget, baseScore);
+    }
+    return baseScore;
 }
 
 bool TacticalThreatMap::ComputeRetreatVector(float unitX, float unitY, float& outDirX, float& outDirY) const {

@@ -1,4 +1,5 @@
 #include "scripting/jass_natives_internal.h"
+#include "game/war3/war3_game_module.h"
 
 void JassNatives::RegisterTimerNatives() {
     vm_.RegisterNative("CreateTimer", [data = data_](const std::vector<JassValue>&) -> JassValue {
@@ -1460,7 +1461,7 @@ void JassNatives::RegisterGameNatives() {
         (void)data;
         return JassValue::Bool(ok);
     });
-    vm_.RegisterNative("CommandAI", [data = data_](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("CommandAI", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !data) return JassValue::Null();
         const int playerId = ResolvePlayerId(data, args[0].intVal);
         if (playerId >= 0 && playerId < 24) {
@@ -1468,6 +1469,9 @@ void JassNatives::RegisterGameNatives() {
             auto it = data->aiControllers.find(playerId);
             if (it != data->aiControllers.end() && it->second) {
                 it->second->Command(args[1].intVal, args[2].intVal);
+            }
+            if (sim && sim->GetSimulationModule()) {
+                sim->GetSimulationModule()->CommandPlayerAI(playerId, args[1].intVal, args[2].intVal);
             }
         }
         return JassValue::Null();
@@ -1490,6 +1494,9 @@ void JassNatives::RegisterGameNatives() {
             auto paused = data->compAIpaused.find(playerId);
             if (paused != data->compAIpaused.end() && paused->second) {
                 controller->SetEnabled(false);
+            }
+            if (auto* war3Mod = dynamic_cast<war3::War3GameModule*>(sim->GetSimulationModule())) {
+                war3Mod->AttachPlayerAI(playerId, controller);
             }
             data->aiControllers[playerId] = std::move(controller);
         }

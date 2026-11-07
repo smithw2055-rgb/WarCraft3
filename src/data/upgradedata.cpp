@@ -181,6 +181,7 @@ CUpgradeData CUpgradeData::LoadFromMpq(const MpqManager& mpq, const std::string&
         const int timeMod = tbl.GetInt(sid, "timemod", 0);
         upg->maxLevel = std::max(1, tbl.GetInt(sid, "maxlevel", 1));
         upg->race = raceIndex(tbl.GetString(sid, "race", ""));
+        upg->upgradeClass = tbl.GetString(sid, "class", "");
 
         // Per-level costs follow base + mod*(level-1) (ref upgrade cost formula).
         for (int l = 1; l <= upg->maxLevel; l++) {
@@ -197,6 +198,18 @@ CUpgradeData CUpgradeData::LoadFromMpq(const MpqManager& mpq, const std::string&
             }
             const std::string eff = tbl.GetString(sid, "effect" + std::to_string(l), "");
             if (!eff.empty()) upg->effectPerLevel.push_back(eff);
+        }
+        // Parse SLK effect slots effect1..4, base1..4, mod1..4, code1..4
+        for (int slot = 1; slot <= 4; ++slot) {
+            const std::string suffix = std::to_string(slot);
+            const std::string effCode = tbl.GetString(sid, "effect" + suffix, "");
+            if (effCode.empty() || effCode == "_") continue;
+            CUpgradeEffectSpec spec;
+            spec.effectCode = effCode;
+            spec.base = tbl.GetFloat(sid, "base" + suffix, 0.0f);
+            spec.mod = tbl.GetFloat(sid, "mod" + suffix, 0.0f);
+            spec.code = tbl.GetString(sid, "code" + suffix, "");
+            upg->effects.push_back(std::move(spec));
         }
 
         data.upgrades_[id] = std::move(upg);

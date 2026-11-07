@@ -69,4 +69,16 @@ struct SimEventBus {
     Signal<int, int> onHeroRevived;
     // (casterHandle, stage, targetWidgetHandle, targetX, targetY)
     Signal<int, int, int, float, float> onSpellEvent;
+
+    // Phase 14 Techtree/Upgrade & Victory/Defeat module signals
+    // (playerIndex, techRawcode, newLevel)
+    Signal<int, uint32_t, int> onPlayerTechLevelChanged;
+    // (playerIndex)
+    Signal<int> onPlayerDefeated;
+    // (playerIndex)
+    Signal<int> onPlayerVictorious;
+    // (playerIndex, isCrippled)
+    Signal<int, bool> onPlayerCrippled;
+    // (victory, winningPlayerIndex)
+    Signal<bool, int> onGameEnd;
 };

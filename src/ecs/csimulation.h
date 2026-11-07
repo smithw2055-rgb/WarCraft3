@@ -122,10 +122,17 @@ public:
     const std::vector<CItem*>& GetItems() const { return items_; }
     CWidget* GetWidget(int handleId) const;
 
-    // Player management
+    // Player management & Phase 14 Techtree / Victory-Defeat module delegation
     CPlayer* GetPlayer(int index) const;
     int GetPlayerCount() const { return (int)players_.size(); }
     void AddPlayer(std::unique_ptr<CPlayer> player);
+    int GetEffectiveTechLevel(int playerIndex, War3ID techId) const;
+    void SetPlayerTechLevel(int playerIndex, War3ID techId, int level);
+    void EvaluateVictoryDefeat();
+    bool IsPlayerCrippled(int playerIndex) const;
+    bool CreatePlayerAI(int playerIndex, int difficulty = 1);
+    bool RemovePlayerAI(int playerIndex);
+    void TickPlayerAIs(float dt = SIM_STEP_TIME);
 
     // Timing
     int GetGameTurnTick() const { return gameTurnTick_; }

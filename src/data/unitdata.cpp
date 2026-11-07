@@ -3,6 +3,7 @@
 #include "gameplay_constants.h"
 #include "ecs/unit_type.h"
 #include "ecs/unit.h"
+#include "ecs/csimulation.h"
 #include "ecs/handle_id.h"
 #include "map/object_mods.h"
 #include "resource/mpq_storm.h"
@@ -385,8 +386,12 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
         std::vector<War3ID> buildsList;
         std::vector<War3ID> trainsList;
         std::vector<War3ID> researchesList;
+        std::vector<War3ID> upgradesUsedList;
         std::vector<War3ID> upgradesToList;
         std::vector<War3ID> itemsSoldList;
+        const std::string rawUpgradesUsed = GetMergedString(unitBalanceTxt, unitBalance, sid, "upgrades",
+            GetMergedString(unitBalanceTxt, unitBalance, sid, "upgr"));
+        ParseWar3IdList(rawUpgradesUsed, upgradesUsedList);
         const std::string rawBuilds = GetMergedString(unitBalanceTxt, unitBalance, sid, "builds");
         const std::string rawTrain = GetMergedString(unitBalanceTxt, unitBalance, sid, "train");
         const std::string rawTrains = GetMergedString(unitBalanceTxt, unitBalance, sid, "trains");
@@ -503,7 +508,7 @@ CUnitData::CUnitData(const CGameplayConstants& gameplayConstants,
             emptyTargeted,
             defaultAcq, minAtkRange,
             buildsList, trainsList, researchesList,
-            emptyVec, emptyUpgradeMap, upgradesToList, itemsSoldList, emptyVec, defaultRace,
+            upgradesUsedList, emptyUpgradeMap, upgradesToList, itemsSoldList, emptyVec, defaultRace,
             goldCost, lumberCost, foodUsed, foodMade, buildTime,
             goldCost / 2, lumberCost / 2, buildTime / 2,
             emptyPathTypes, emptyPathTypes, propWindow, turnRate,
@@ -665,8 +670,10 @@ void CUnitData::AddDefaultAbilitiesToUnit(CSimulation& simulation, HandleIdAlloc
 
 void CUnitData::ApplyPlayerUpgradesToUnit(CSimulation& simulation, int playerIndex,
                                           const CUnitType& unitType, CUnit& unit) const {
-    (void)simulation;
-    (void)playerIndex;
     (void)unitType;
-    (void)unit;
+    if (auto* mod = simulation.GetSimulationModule()) {
+        if (CPlayer* player = simulation.GetPlayer(playerIndex)) {
+            mod->OnApplyPlayerUpgradesToUnit(simulation, *player, unit);
+        }
+    }
 }

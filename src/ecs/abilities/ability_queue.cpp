@@ -142,7 +142,7 @@ bool CAbilityQueue::QueueUnit(CSimulation& game, CUnit* building, War3ID unitTyp
             }
         }
         for (const auto& req : trainType->GetRequirementsTier(heroCount)) {
-            if (player->GetTechLevel(req.id) < (req.level > 0 ? req.level : 1)) {
+            if (player->GetEffectiveTechLevel(game, req.id) < (req.level > 0 ? req.level : 1)) {
                 return false;
             }
         }

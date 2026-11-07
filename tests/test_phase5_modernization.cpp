@@ -57,7 +57,10 @@
 #include "ecs/unit_type.h"
 #include "data/itemdata.h"
 #include "data/unitdata.h"
+#include "data/upgradedata.h"
+#include "ecs/tech_tree.h"
 #include "ecs/abilities/ability_harvest.h"
+#include "ecs/abilities/ability_upgrade.h"
 #include "render/camera.h"
 #include "render/math.h"
 #include "render/render_server.h"
@@ -4253,7 +4256,7 @@ bool TestPhase13StageII1DynamicModuleLoaderSharedLibraryDlopenAndHotReload() {
             auto dynGameMod = loader.CreateGameModule(pluginKey);
             TEST_ASSERT(dynSimMod != nullptr && dynGameMod != nullptr);
             TEST_ASSERT(std::string(dynSimMod->GetModuleId()) == war3::War3GameModule::kModuleId);
-            TEST_ASSERT(dynSimMod->GetModuleVersion() == 13u);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 13u);
             TEST_ASSERT(dynGameMod->GetCustomDestroyFn() != nullptr);
 
             // Attach dynamically loaded .so module to a live CSimulation and spawn a Footman
@@ -4331,5 +4334,732 @@ bool TestPhase13StageII2War3GameModuleRetailDriveMapsEndToEndSuite() {
         ++mapsVerified;
     }
 
+    return true;
+}
+
+// ============================================================================
+// Phase 14 Tests (Stage JJ1, JJ2, KK1, KK2):
+// CPlayer Techtree/Upgrade System & Victory/Defeat Rules Extracted into War3GameModule
+// ============================================================================
+
+bool TestPhase14StageJJ1War3TechtreeTierEquivalencesAndBuildingMorph() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // Town Hall (htow) -> Keep (hkee) -> Castle (hcas)
+    udTxt.SetString("htow", "race", "human");
+    udTxt.SetString("htow", "isbldg", "1");
+    ubTxt.SetString("htow", "HP", "1500");
+    ubTxt.SetString("htow", "fmade", "12");
+    ubTxt.SetString("htow", "Upgrade", "hkee");
+
+    udTxt.SetString("hkee", "race", "human");
+    udTxt.SetString("hkee", "isbldg", "1");
+    ubTxt.SetString("hkee", "HP", "1750");
+    ubTxt.SetString("hkee", "fmade", "12");
+    ubTxt.SetString("hkee", "goldcost", "320");
+    ubTxt.SetString("hkee", "lumbercost", "210");
+    ubTxt.SetString("hkee", "bldtm", "2");
+    ubTxt.SetString("hkee", "Upgrade", "hcas");
+
+    udTxt.SetString("hcas", "race", "human");
+    udTxt.SetString("hcas", "isbldg", "1");
+    ubTxt.SetString("hcas", "HP", "2000");
+    ubTxt.SetString("hcas", "fmade", "12");
+    ubTxt.SetString("hcas", "goldcost", "360");
+    ubTxt.SetString("hcas", "lumbercost", "210");
+    ubTxt.SetString("hcas", "bldtm", "2");
+
+    // Workshop (harm) requires Keep (hkee); Gryphon Aviary (hgra) requires Castle (hcas)
+    udTxt.SetString("harm", "race", "human");
+    udTxt.SetString("harm", "isbldg", "1");
+    udTxt.SetString("harm", "Requires", "hkee");
+    ubTxt.SetString("harm", "HP", "1200");
+
+    udTxt.SetString("hgra", "race", "human");
+    udTxt.SetString("hgra", "isbldg", "1");
+    udTxt.SetString("hgra", "Requires", "hcas");
+    ubTxt.SetString("hgra", "HP", "1200");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    auto playerPtr = std::make_unique<CPlayer>(0, "HumanP0", CMapControl::USER);
+    playerPtr->SetGold(5000);
+    playerPtr->SetLumber(5000);
+    sim.AddPlayer(std::move(playerPtr));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* hall = sim.CreateUnit(War3ID("htow"), 0, 0.0f, 0.0f, 0.0f);
+    TEST_ASSERT(hall != nullptr);
+    sim.Update();
+
+    CPlayer* p0 = sim.GetPlayer(0);
+    TEST_ASSERT(p0->GetTechLevel(War3ID("htow")) == 1);
+    TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("htow")) == 1);
+    TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("hkee")) == 0);
+    TEST_ASSERT(!TechTree::MeetsRequirements(sim, 0, War3ID("harm")));
+    TEST_ASSERT(!TechTree::MeetsRequirements(sim, 0, War3ID("hgra")));
+
+    // 1. Upgrade Town Hall (htow) -> Keep (hkee) via CAbilityUpgrade
+    auto* upgAbil = dynamic_cast<CAbilityUpgrade*>(hall->GetAbility(War3ID("Aupg")));
+    TEST_ASSERT(upgAbil != nullptr);
+    upgAbil->BeginNoTarget(sim, hall, static_cast<int>(War3ID("hkee").value));
+    for (int i = 0; i < 45; ++i) {
+        sim.Update();
+    }
+    TEST_ASSERT(hall->GetTypeId() == War3ID("hkee"));
+    TEST_ASSERT(war3Mod->GetModuleStats().unitsMorphed >= 1);
+
+    // Direct tech level for htow is now 0, hkee is 1, but EffectiveTechLevel(htow) is still 1 via War3 equivalence!
+    TEST_ASSERT(p0->GetTechLevel(War3ID("htow")) == 0);
+    TEST_ASSERT(p0->GetTechLevel(War3ID("hkee")) == 1);
+    TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("htow")) == 1);
+    TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("hkee")) == 1);
+    TEST_ASSERT(TechTree::MeetsRequirements(sim, 0, War3ID("harm")));
+    TEST_ASSERT(!TechTree::MeetsRequirements(sim, 0, War3ID("hgra")));
+
+    // 2. Morph Keep (hkee) -> Castle (hcas)
+    const CUnitType* oldKeepType = hall->GetUnitType();
+    CUnitType* castleType = unitData.GetUnitType(War3ID("hcas"));
+    hall->MorphTo(castleType, War3ID("hcas"));
+    war3Mod->OnUnitMorphed(sim, *hall, oldKeepType, War3ID("hkee").value, castleType, War3ID("hcas").value);
+
+    // Castle (hcas) satisfies requirements for Castle, Keep, AND Town Hall!
+    TEST_ASSERT(p0->GetTechLevel(War3ID("htow")) == 0);
+    TEST_ASSERT(p0->GetTechLevel(War3ID("hkee")) == 0);
+    TEST_ASSERT(p0->GetTechLevel(War3ID("hcas")) == 1);
+    TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("htow")) == 1);
+    TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("hkee")) == 1);
+    TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("hcas")) == 1);
+    TEST_ASSERT(TechTree::MeetsRequirements(sim, 0, War3ID("harm")));
+    TEST_ASSERT(TechTree::MeetsRequirements(sim, 0, War3ID("hgra")));
+
+    // 3. Switch to PureEngineMode (NullSimulationModule) -> War3 equivalences are disabled
+    sim.SetPureEngineMode(true);
+    TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("hkee")) == 0);
+    sim.SetSimulationModule(war3Mod);
+    TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("hkee")) == 1);
+
+    return true;
+}
+
+bool TestPhase14StageJJ2War3UpgradeEffectEngineLiveAndSpawnedUnits() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // Footman (hfoo) uses upgrades Rhme (melee attack), Rhar (armor), Rhac (HP + speed)
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "420");
+    ubTxt.SetString("hfoo", "spd", "270");
+    ubTxt.SetString("hfoo", "def", "2");
+    ubTxt.SetString("hfoo", "defUp", "2");
+    ubTxt.SetString("hfoo", "upgrades", "Rhme,Rhar,Rhac");
+    uwTxt.SetString("hfoo", "weapsOn", "1");
+    uwTxt.SetString("hfoo", "atkType1", "normal");
+    uwTxt.SetString("hfoo", "dmgplus1", "11");
+    uwTxt.SetString("hfoo", "dice1", "1");
+    uwTxt.SetString("hfoo", "sides1", "2");
+    uwTxt.SetString("hfoo", "dmgUp1", "2");
+
+    // Priest (hmpr) uses Rhpt (mana + heal ability level)
+    udTxt.SetString("hmpr", "race", "human");
+    udTxt.SetString("hmpr", "isbldg", "0");
+    ubTxt.SetString("hmpr", "HP", "290");
+    ubTxt.SetString("hmpr", "mana0", "200");
+    ubTxt.SetString("hmpr", "manaN", "200");
+    ubTxt.SetString("hmpr", "spd", "270");
+    ubTxt.SetString("hmpr", "upgrades", "Rhpt");
+    uaTxt.SetString("hmpr", "abilList", "Ahea");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+    CUpgradeData upgradeData;
+
+    // 1. Register Iron Plating (Rhar): rarm (+2 armor per level)
+    {
+        auto upg = std::make_unique<CUpgradeType>();
+        upg->id = War3ID("Rhar");
+        upg->name = "Iron Plating";
+        upg->upgradeClass = "armor";
+        upg->maxLevel = 3;
+        upg->race = 1;
+        upg->effects.push_back(CUpgradeEffectSpec{"rarm", 2.0f, 0.0f, ""});
+        const War3ID upgId = upg->id; upgradeData.RegisterUpgrade(upgId, std::move(upg));
+    }
+    // 2. Register Iron Forged Swords (Rhme): ratx (+3 dmg at L1, +6 at L2 -> cumulative +9)
+    {
+        auto upg = std::make_unique<CUpgradeType>();
+        upg->id = War3ID("Rhme");
+        upg->name = "Iron Forged Swords";
+        upg->upgradeClass = "melee";
+        upg->maxLevel = 3;
+        upg->race = 1;
+        upg->effects.push_back(CUpgradeEffectSpec{"ratx", 3.0f, 3.0f, ""});
+        const War3ID upgId = upg->id; upgradeData.RegisterUpgrade(upgId, std::move(upg));
+    }
+    // 3. Register War Training (Rhac): rhpx (+150 HP) + rmvx (+0.20 speed modifier)
+    {
+        auto upg = std::make_unique<CUpgradeType>();
+        upg->id = War3ID("Rhac");
+        upg->name = "War Training";
+        upg->maxLevel = 1;
+        upg->race = 1;
+        upg->effects.push_back(CUpgradeEffectSpec{"rhpx", 150.0f, 0.0f, ""});
+        upg->effects.push_back(CUpgradeEffectSpec{"rmvx", 0.20f, 0.0f, ""});
+        const War3ID upgId = upg->id; upgradeData.RegisterUpgrade(upgId, std::move(upg));
+    }
+    // 4. Register Priest Adept Training (Rhpt): rmnx (+100 mana per level) + rlev (Ahea)
+    {
+        auto upg = std::make_unique<CUpgradeType>();
+        upg->id = War3ID("Rhpt");
+        upg->name = "Priest Adept Training";
+        upg->maxLevel = 2;
+        upg->race = 1;
+        upg->effects.push_back(CUpgradeEffectSpec{"rmnx", 100.0f, 0.0f, ""});
+        upg->effects.push_back(CUpgradeEffectSpec{"rlev", 1.0f, 0.0f, "Ahea"});
+        const War3ID upgId = upg->id; upgradeData.RegisterUpgrade(upgId, std::move(upg));
+    }
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.SetUpgradeData(&upgradeData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "Upgrader", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->ResetModuleStats();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* foot1 = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* priest = sim.CreateUnit(War3ID("hmpr"), 0, 64.0f, 0.0f, 0.0f);
+    TEST_ASSERT(foot1 != nullptr && priest != nullptr);
+    sim.Update();
+
+    TEST_ASSERT(std::fabs(foot1->GetMaxLife() - 420.0f) < 0.01f);
+    TEST_ASSERT(std::fabs(static_cast<float>(foot1->GetBonusArmor()) - 0.0f) < 0.01f);
+    TEST_ASSERT(foot1->GetNonStackingDamageTotal() == 0);
+    TEST_ASSERT(priest->GetMaxMana() == 200);
+
+    // Research Rhar level 1 & level 2 -> foot1 gains +4 perm defense bonus (2 + 2)
+    sim.SetPlayerTechLevel(0, War3ID("Rhar"), 1);
+    TEST_ASSERT(std::fabs(static_cast<float>(foot1->GetBonusArmor()) - 2.0f) < 0.01f);
+    sim.SetPlayerTechLevel(0, War3ID("Rhar"), 2);
+    TEST_ASSERT(std::fabs(static_cast<float>(foot1->GetBonusArmor()) - 4.0f) < 0.01f);
+
+    // Research Rhme level 2 -> foot1 gains +9 attack damage bonus (3 + 6)
+    sim.SetPlayerTechLevel(0, War3ID("Rhme"), 2);
+    TEST_ASSERT(foot1->GetNonStackingDamageTotal() == 9);
+
+    // Research Rhac level 1 -> foot1 gains +150 max HP (420 -> 570) and +20% speed (270 -> 324)
+    sim.SetPlayerTechLevel(0, War3ID("Rhac"), 1);
+    TEST_ASSERT(std::fabs(foot1->GetMaxLife() - 570.0f) < 0.01f);
+    TEST_ASSERT(std::fabs(foot1->GetLife() - 570.0f) < 0.01f);
+    TEST_ASSERT(std::fabs(foot1->GetSpeed() - 324.0f) < 0.5f);
+
+    // Research Rhpt level 1 -> priest gains +100 max mana (200 -> 300) and Ahea level 2 (foot1 unaffected!)
+    sim.SetPlayerTechLevel(0, War3ID("Rhpt"), 1);
+    TEST_ASSERT(priest->GetMaxMana() == 300);
+    TEST_ASSERT(priest->GetAbility(War3ID("Ahea")) != nullptr);
+    TEST_ASSERT(priest->GetAbility(War3ID("Ahea"))->GetLevel() == 2);
+    TEST_ASSERT(std::fabs(foot1->GetMaxLife() - 570.0f) < 0.01f);
+
+    // Spawn a new Footman (foot2) AFTER upgrades are researched -> automatically receives Rhar(L2), Rhme(L2), Rhac(L1)!
+    CUnit* foot2 = sim.CreateUnit(War3ID("hfoo"), 0, 128.0f, 0.0f, 0.0f);
+    TEST_ASSERT(foot2 != nullptr);
+    sim.Update();
+    TEST_ASSERT(std::fabs(static_cast<float>(foot2->GetBonusArmor()) - 4.0f) < 0.01f);
+    TEST_ASSERT(foot2->GetNonStackingDamageTotal() == 9);
+    TEST_ASSERT(std::fabs(foot2->GetMaxLife() - 570.0f) < 0.01f);
+    TEST_ASSERT(std::fabs(foot2->GetSpeed() - 324.0f) < 0.5f);
+    TEST_ASSERT(war3Mod->GetModuleStats().unitUpgradesApplied >= 7);
+
+    return true;
+}
+
+bool TestPhase14StageKK1War3MeleeAndAlliedVictoryDefeatAndCrippledRules() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("htow", "race", "human");
+    udTxt.SetString("htow", "isbldg", "1");
+    ubTxt.SetString("htow", "HP", "1500");
+
+    udTxt.SetString("hbar", "race", "human");
+    udTxt.SetString("hbar", "isbldg", "1");
+    ubTxt.SetString("hbar", "HP", "1200");
+
+    udTxt.SetString("hpea", "race", "human");
+    udTxt.SetString("hpea", "isbldg", "0");
+    ubTxt.SetString("hpea", "HP", "220");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+
+    // 3 competitors: Player 0 & Player 1 (mutually allied with alliedVictory=true) vs Player 2 (enemy)
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "Ally0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "Ally1", CMapControl::COMPUTER));
+    sim.AddPlayer(std::make_unique<CPlayer>(2, "Enemy2", CMapControl::COMPUTER));
+
+    CPlayer* p0 = sim.GetPlayer(0);
+    CPlayer* p1 = sim.GetPlayer(1);
+    CPlayer* p2 = sim.GetPlayer(2);
+    p0->SetAlliance(1, CAllianceType::ALLIED, true);
+    p1->SetAlliance(0, CAllianceType::ALLIED, true);
+    p0->SetAlliedVictory(true);
+    p1->SetAlliedVictory(true);
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->SetMeleeVictoryRulesEnabled(true);
+    sim.SetSimulationModule(war3Mod);
+
+    int defeatedEvents = 0;
+    int victoriousEvents = 0;
+    int crippledEvents = 0;
+    bool gameEndedSignal = false;
+    sim.Events().onPlayerDefeated.Connect([&](int) { ++defeatedEvents; });
+    sim.Events().onPlayerVictorious.Connect([&](int) { ++victoriousEvents; });
+    sim.Events().onPlayerCrippled.Connect([&](int, bool c) { if (c) ++crippledEvents; });
+    sim.Events().onGameEnd.Connect([&](bool v, int) { if (v) gameEndedSignal = true; });
+
+    CUnit* p0Hall = sim.CreateUnit(War3ID("htow"), 0, -512.0f, 0.0f, 0.0f);
+    CUnit* p1Hall = sim.CreateUnit(War3ID("htow"), 1, 0.0f, 0.0f, 0.0f);
+    CUnit* p2Hall = sim.CreateUnit(War3ID("htow"), 2, 512.0f, 0.0f, 0.0f);
+    CUnit* p2Barracks = sim.CreateUnit(War3ID("hbar"), 2, 640.0f, 0.0f, 0.0f);
+    TEST_ASSERT(p0Hall && p1Hall && p2Hall && p2Barracks);
+    sim.Update();
+
+    TEST_ASSERT(!sim.IsPlayerCrippled(2));
+    TEST_ASSERT(!war3Mod->IsMatchEnded());
+
+    // 1. Destroy Player 2 Town Hall while leaving Player 2 Barracks standing (and 0 gold/workers)
+    // -> Player 2 becomes Crippled, but is not yet Defeated!
+    p2Hall->SetLife(sim, 0.0f);
+    sim.Update();
+    TEST_ASSERT(p2->IsCrippled());
+    TEST_ASSERT(sim.IsPlayerCrippled(2));
+    TEST_ASSERT(!p2->IsDefeated());
+    TEST_ASSERT(crippledEvents == 1);
+    TEST_ASSERT(!war3Mod->IsMatchEnded());
+
+    // 2. Destroy Player 2 remaining Barracks -> Player 2 has 0 living structures -> DEFEAT!
+    // And since surviving players P0 and P1 are mutually allied, both achieve VICTORY!
+    p2Barracks->SetLife(sim, 0.0f);
+    sim.Update();
+
+    TEST_ASSERT(p2->IsDefeated());
+    TEST_ASSERT(p0->IsVictorious());
+    TEST_ASSERT(p1->IsVictorious());
+    TEST_ASSERT(defeatedEvents == 1);
+    TEST_ASSERT(victoriousEvents == 2);
+    TEST_ASSERT(gameEndedSignal);
+    TEST_ASSERT(war3Mod->IsMatchEnded());
+    TEST_ASSERT(war3Mod->GetWinningPlayerIndex() == 0);
+
+    return true;
+}
+
+bool TestPhase14StageKK2DynamicPluginHotReloadAndCloudRetailMapsPhase14Suite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+
+    std::string soPath = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase14PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath));
+
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 14u);
+
+            CSimulation sim;
+            sim.AddPlayer(std::make_unique<CPlayer>(0, "PluginP0", CMapControl::USER));
+            sim.AddPlayer(std::make_unique<CPlayer>(1, "PluginP1", CMapControl::COMPUTER));
+            sim.SetSimulationModule(dynSimMod);
+
+            // Verify upkeep tax and techtree equivalence across the dynamic .so boundary
+            CPlayer* p0 = sim.GetPlayer(0);
+            p0->SetFoodUsed(60); // Low Upkeep (30% tax)
+            TEST_ASSERT(p0->GetUpkeepLevel(&sim) == 1);
+            TEST_ASSERT(p0->ApplyUpkeepGoldTax(100, &sim) == 70);
+
+            p0->SetTechLevel(sim, War3ID("hcas"), 1);
+            TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("htow")) == 1);
+            TEST_ASSERT(sim.GetEffectiveTechLevel(0, War3ID("hkee")) == 1);
+
+            sim.SetPureEngineMode(true);
+            TEST_ASSERT(p0->GetUpkeepLevel(&sim) == 0);
+            TEST_ASSERT(p0->ApplyUpkeepGoldTax(100, &sim) == 100);
+        }
+
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    return true;
+}
+
+// ============================================================================
+// Phase 15 Tests (Stage LL1, LL2, MM1, MM2):
+// CCombatSystem Armor/Attack Multiplier Matrix & MeleeAIController Tactical AI
+// Decoupled into War3GameModule Plugin
+// ============================================================================
+
+bool TestPhase15StageLL1War3CombatMatrixArmorCurveAndEtherealVsPureEngine() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // 1. Rifleman (hrif): Pierce attack, Medium armor
+    udTxt.SetString("hrif", "race", "human");
+    udTxt.SetString("hrif", "isbldg", "0");
+    ubTxt.SetString("hrif", "HP", "535");
+    ubTxt.SetString("hrif", "def", "0");
+    ubTxt.SetString("hrif", "defType", "medium");
+    uwTxt.SetString("hrif", "weapsOn", "1");
+    uwTxt.SetString("hrif", "atkType1", "pierce");
+    uwTxt.SetString("hrif", "dmgplus1", "20");
+
+    // 2. Gryphon Rider (hgry): Magic attack, Light armor (takes 200% from Pierce!)
+    udTxt.SetString("hgry", "race", "human");
+    udTxt.SetString("hgry", "isbldg", "0");
+    ubTxt.SetString("hgry", "HP", "825");
+    ubTxt.SetString("hgry", "def", "0");
+    ubTxt.SetString("hgry", "defType", "light");
+    uwTxt.SetString("hgry", "weapsOn", "1");
+    uwTxt.SetString("hgry", "atkType1", "magic");
+    uwTxt.SetString("hgry", "dmgplus1", "50");
+
+    // 3. Footman (hfoo): Normal attack, Heavy armor with 10 defense (takes 200% from Magic; 10 armor = 37.5% physical reduction)
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "1000");
+    ubTxt.SetString("hfoo", "def", "10");
+    ubTxt.SetString("hfoo", "defType", "heavy");
+    uwTxt.SetString("hfoo", "weapsOn", "1");
+    uwTxt.SetString("hfoo", "atkType1", "normal");
+    uwTxt.SetString("hfoo", "dmgplus1", "12");
+
+    // 4. Scout Tower (hwtw): Fortified armor (takes 35% from Pierce, 150% from Siege)
+    udTxt.SetString("hwtw", "race", "human");
+    udTxt.SetString("hwtw", "isbldg", "1");
+    ubTxt.SetString("hwtw", "HP", "1000");
+    ubTxt.SetString("hwtw", "def", "0");
+    ubTxt.SetString("hwtw", "defType", "fortified");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "AtkP0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "DefP1", CMapControl::COMPUTER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->ResetModuleStats();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* rifle   = sim.CreateUnit(War3ID("hrif"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* gryphon = sim.CreateUnit(War3ID("hgry"), 1, 100.0f, 0.0f, 0.0f);
+    CUnit* footman = sim.CreateUnit(War3ID("hfoo"), 1, 200.0f, 0.0f, 0.0f);
+    CUnit* tower   = sim.CreateUnit(War3ID("hwtw"), 1, 300.0f, 0.0f, 0.0f);
+    TEST_ASSERT(rifle && gryphon && footman && tower);
+    sim.Update();
+
+    CCombatSystem* combat = sim.GetCombatSystem();
+    TEST_ASSERT(combat != nullptr);
+
+    // A. War3GameModule active: verify canonical 7x8 counter multipliers & 0.06 armor curve
+    // Pierce (100 base) vs Light (gryphon, 0 armor) -> 200.0 damage (2.0x)
+    DamageResult rPierceVsLight = combat->CalculateDamage(
+        rifle, gryphon, true, true, CAttackType::PIERCE, CDamageType::NORMAL, 100.0f, 0.0f, 0, 0, false);
+    TEST_ASSERT(std::fabs(rPierceVsLight.multiplier - 2.0f) < 0.01f);
+    TEST_ASSERT(std::fabs(rPierceVsLight.damageDealt - 200.0f) < 0.1f);
+
+    // Pierce (100 base) vs Fortified (tower, 0 armor) -> 35.0 damage (0.35x)
+    DamageResult rPierceVsFort = combat->CalculateDamage(
+        rifle, tower, true, true, CAttackType::PIERCE, CDamageType::NORMAL, 100.0f, 0.0f, 0, 0, false);
+    TEST_ASSERT(std::fabs(rPierceVsFort.multiplier - 0.35f) < 0.01f);
+    TEST_ASSERT(std::fabs(rPierceVsFort.damageDealt - 35.0f) < 0.1f);
+
+    // Magic (100 base) vs Heavy (footman, 10 armor: reduction = 0.6 / 1.6 = 37.5%)
+    // Rolled = 100 * 2.0 (Magic vs Heavy) = 200; after 37.5% armor reduction = 125.0 damage!
+    DamageResult rMagicVsHeavy = combat->CalculateDamage(
+        gryphon, footman, true, true, CAttackType::MAGIC, CDamageType::NORMAL, 100.0f, 0.0f, 0, 0, false);
+    TEST_ASSERT(std::fabs(rMagicVsHeavy.multiplier - 2.0f) < 0.01f);
+    TEST_ASSERT(std::fabs(rMagicVsHeavy.damageDealt - 125.0f) < 0.1f);
+    TEST_ASSERT(war3Mod->GetModuleStats().combatDamageEvaluations >= 3);
+
+    // B. Switch to PureEngineMode (NullSimulationModule): all attack/defense multipliers become 1.0x and armor reduction is 0!
+    sim.SetPureEngineMode(true);
+    DamageResult rPurePierceVsLight = combat->CalculateDamage(
+        rifle, gryphon, true, true, CAttackType::PIERCE, CDamageType::NORMAL, 100.0f, 0.0f, 0, 0, false);
+    DamageResult rPureMagicVsHeavy = combat->CalculateDamage(
+        gryphon, footman, true, true, CAttackType::MAGIC, CDamageType::NORMAL, 100.0f, 0.0f, 0, 0, false);
+    TEST_ASSERT(std::fabs(rPurePierceVsLight.multiplier - 1.0f) < 0.01f);
+    TEST_ASSERT(std::fabs(rPurePierceVsLight.damageDealt - 100.0f) < 0.1f);
+    TEST_ASSERT(std::fabs(rPureMagicVsHeavy.multiplier - 1.0f) < 0.01f);
+    TEST_ASSERT(std::fabs(rPureMagicVsHeavy.damageDealt - 100.0f) < 0.1f);
+
+    return true;
+}
+
+bool TestPhase15StageLL2CustomCombatMatrixHotOverrideAndDynamicPluginCombat() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "1000");
+    ubTxt.SetString("hfoo", "def", "0");
+    ubTxt.SetString("hfoo", "defType", "heavy");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* atkUnit = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* defUnit = sim.CreateUnit(War3ID("hfoo"), 1, 64.0f, 0.0f, 0.0f);
+    TEST_ASSERT(atkUnit && defUnit);
+    sim.Update();
+
+    // 1. Default Normal vs Heavy multiplier is 1.0x
+    CCombatSystem* combat = sim.GetCombatSystem();
+    DamageResult baseRes = combat->CalculateDamage(
+        atkUnit, defUnit, true, false, CAttackType::NORMAL, CDamageType::NORMAL, 100.0f, 0.0f, 0, 0, false);
+    TEST_ASSERT(std::fabs(baseRes.damageDealt - 100.0f) < 0.1f);
+
+    // 2. Customize Normal vs Heavy multiplier on War3GameModule to 2.5x -> immediately takes effect in CCombatSystem!
+    war3Mod->SetAttackDefenseMultiplier(CAttackType::NORMAL, CDefenseType::HEAVY, 2.5f);
+    DamageResult customRes = combat->CalculateDamage(
+        atkUnit, defUnit, true, false, CAttackType::NORMAL, CDamageType::NORMAL, 100.0f, 0.0f, 0, 0, false);
+    TEST_ASSERT(std::fabs(customRes.multiplier - 2.5f) < 0.01f);
+    TEST_ASSERT(std::fabs(customRes.damageDealt - 250.0f) < 0.1f);
+
+    // Reset back to canonical War3 defaults
+    war3Mod->ResetCombatRulesToCanonicalDefaults();
+    DamageResult resetRes = combat->CalculateDamage(
+        atkUnit, defUnit, true, false, CAttackType::NORMAL, CDamageType::NORMAL, 100.0f, 0.0f, 0, 0, false);
+    TEST_ASSERT(std::fabs(resetRes.damageDealt - 100.0f) < 0.1f);
+
+    // 3. Verify dynamically loaded ./libwar3_module_plugin.so exports Version 15 and evaluates War3 combat rules
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase15CombatPluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() == 15u);
+            sim.SetSimulationModule(dynSimMod);
+
+            DamageResult pluginRes = combat->CalculateDamage(
+                atkUnit, defUnit, true, false, CAttackType::MAGIC, CDamageType::NORMAL, 100.0f, 0.0f, 0, 0, false);
+            TEST_ASSERT(std::fabs(pluginRes.multiplier - 2.0f) < 0.01f);
+            TEST_ASSERT(std::fabs(pluginRes.damageDealt - 200.0f) < 0.1f);
+            sim.SetPureEngineMode(true);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    return true;
+}
+
+bool TestPhase15StageMM1War3ModuleTacticalAiLifecycleAndArmorCounterScoring() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // Human Town Hall (htow), Peasant (hpea), Farm (hhou), Barracks (hbar), Rifleman (hrif)
+    udTxt.SetString("htow", "race", "human");
+    udTxt.SetString("htow", "isbldg", "1");
+    ubTxt.SetString("htow", "HP", "1500");
+    ubTxt.SetString("htow", "fmade", "12");
+    ubTxt.SetString("htow", "trains", "hpea");
+
+    udTxt.SetString("hpea", "race", "human");
+    udTxt.SetString("hpea", "isbldg", "0");
+    ubTxt.SetString("hpea", "HP", "220");
+    ubTxt.SetString("hpea", "goldcost", "75");
+    uaTxt.SetString("hpea", "abilList", "Ahar");
+
+    udTxt.SetString("hhou", "race", "human");
+    udTxt.SetString("hhou", "isbldg", "1");
+    ubTxt.SetString("hhou", "HP", "500");
+    ubTxt.SetString("hhou", "fmade", "6");
+    ubTxt.SetString("hhou", "goldcost", "80");
+
+    udTxt.SetString("hbar", "race", "human");
+    udTxt.SetString("hbar", "isbldg", "1");
+    ubTxt.SetString("hbar", "HP", "1200");
+    ubTxt.SetString("hbar", "trains", "hrif");
+
+    // Rifleman (Pierce attack)
+    udTxt.SetString("hrif", "race", "human");
+    udTxt.SetString("hrif", "isbldg", "0");
+    ubTxt.SetString("hrif", "HP", "535");
+    ubTxt.SetString("hrif", "goldcost", "205");
+    ubTxt.SetString("hrif", "defType", "medium");
+    uwTxt.SetString("hrif", "weapsOn", "1");
+    uwTxt.SetString("hrif", "atkType1", "pierce");
+    uwTxt.SetString("hrif", "dmgplus1", "21");
+    uwTxt.SetString("hrif", "range1", "400");
+
+    // Two enemy targets at identical distance & HP ratio:
+    // - Enemy Light Armor unit (hgry: takes 200% from Pierce!)
+    // - Enemy Fortified Armor unit (hfort: takes only 35% from Pierce!)
+    udTxt.SetString("hgry", "race", "orc");
+    udTxt.SetString("hgry", "isbldg", "0");
+    ubTxt.SetString("hgry", "HP", "500");
+    ubTxt.SetString("hgry", "defType", "light");
+    uwTxt.SetString("hgry", "weapsOn", "1");
+    uwTxt.SetString("hgry", "atkType1", "magic");
+    uwTxt.SetString("hgry", "dmgplus1", "20");
+
+    udTxt.SetString("hcrt", "race", "orc");
+    udTxt.SetString("hcrt", "isbldg", "0");
+    ubTxt.SetString("hcrt", "HP", "500");
+    ubTxt.SetString("hcrt", "defType", "fortified");
+    uwTxt.SetString("hcrt", "weapsOn", "1");
+    uwTxt.SetString("hcrt", "atkType1", "siege");
+    uwTxt.SetString("hcrt", "dmgplus1", "20");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "AiP0", CMapControl::COMPUTER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "EnemyP1", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->ResetModuleStats();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* hall  = sim.CreateUnit(War3ID("htow"), 0, -400.0f, 0.0f, 0.0f);
+    CUnit* rifle = sim.CreateUnit(War3ID("hrif"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* enemyFort  = sim.CreateUnit(War3ID("hcrt"), 1, 250.0f, 0.0f, 0.0f);
+    CUnit* enemyLight = sim.CreateUnit(War3ID("hgry"), 1, 250.0f, 0.0f, 0.0f);
+    TEST_ASSERT(hall && rifle && enemyFort && enemyLight);
+    sim.Update();
+
+    // 1. Create Player 0 AI through CSimulation -> War3GameModule
+    TEST_ASSERT(sim.CreatePlayerAI(0, 2)); // INSANE difficulty
+    TEST_ASSERT(war3Mod->GetActiveAICount() == 1);
+    MeleeAIController* ai = war3Mod->GetPlayerAI(0);
+    TEST_ASSERT(ai != nullptr);
+
+    // Step AI ticks -> discovers Human race build plan via War3GameModule::DiscoverRaceBuildPlan
+    for (int i = 0; i < 12; ++i) {
+        sim.TickPlayerAIs();
+    }
+    TEST_ASSERT(ai->HasPlan());
+    TEST_ASSERT(ai->GetPlan().townHall == War3ID("htow"));
+    TEST_ASSERT(ai->GetPlan().worker == War3ID("hpea"));
+    TEST_ASSERT(ai->GetPlan().farm == War3ID("hhou"));
+    TEST_ASSERT(ai->GetPlan().barracks == War3ID("hbar"));
+    TEST_ASSERT(ai->GetPlan().armyUnit == War3ID("hrif"));
+    TEST_ASSERT(war3Mod->GetModuleStats().aiControllerTicks >= 12);
+
+    // 2. Verify Armor-Counter Tactical Target Scoring:
+    // Rifleman (Pierce) scores Light-armored enemy (2.0x counter -> +90 bonus) much higher than Fortified enemy (0.35x -> -58.5 penalty)!
+    ai->RebuildThreatMap();
+    const float scoreLight = ai->GetThreatMap().ScoreTargetUtility(rifle, enemyLight);
+    const float scoreFort  = ai->GetThreatMap().ScoreTargetUtility(rifle, enemyFort);
+    TEST_ASSERT(scoreLight > scoreFort + 100.0f);
+
+    CUnit* bestFocus = ai->EvaluateBestFocusTarget(rifle, 600.0f);
+    TEST_ASSERT(bestFocus == enemyLight);
+    TEST_ASSERT(war3Mod->GetModuleStats().tacticalTargetEvaluations >= 2);
+
+    return true;
+}
+
+bool TestPhase15StageMM2RetailDriveMapsCombatAndTacticalAiEndToEndSuite() {
+    const std::string mapPath = "resources/Maps/FrozenThrone/(2)EchoIsles.w3x";
+    FILE* f = std::fopen(mapPath.c_str(), "rb");
+    if (!f) {
+        return true;
+    }
+    std::fclose(f);
+
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+
+    auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+    auto gameMod = loader.CreateGameModule(war3::War3GameModule::kModuleId);
+    TEST_ASSERT(simMod != nullptr && gameMod != nullptr);
+    TEST_ASSERT(simMod->GetModuleVersion() == 15u);
+
+    MpqManager mpq;
+    CSimulation sim;
+    sim.SetSimulationModule(simMod);
+    SceneManager scene;
+    UnitPresentationSystem presentation;
+    core::WorldSceneSession session;
+
+    TEST_ASSERT(session.LoadMap(mpq, sim, scene, presentation, mapPath));
+
+    auto* war3GameMod = dynamic_cast<war3::War3GameModule*>(gameMod.get());
+    TEST_ASSERT(war3GameMod != nullptr);
+    war3GameMod->BindSimulation(&sim);
+    TEST_ASSERT(war3GameMod->CreatePlayerAI(sim, 0, 1));
+    TEST_ASSERT(war3GameMod->GetActiveAICount() == 1);
+
+    engine::EngineKernel kernel;
+    TEST_ASSERT(kernel.BootstrapStandardSubsystems(2, 0.05f));
+    TEST_ASSERT(kernel.MountGameModule(std::move(gameMod)));
+
+    // Step 4 fixed ticks (200ms) -> EngineKernel ticks War3GameModule::OnFixedTick -> TickPlayerAIs + sim.Update()
+    const int ticksBefore = sim.GetGameTurnTick();
+    TEST_ASSERT(kernel.StepFrame(0.10f, 1280, 720) + kernel.StepFrame(0.10f, 1280, 720) == 4);
+    TEST_ASSERT(sim.GetGameTurnTick() == ticksBefore + 4);
+    TEST_ASSERT(war3GameMod->GetModuleStats().aiControllerTicks == 4);
+
+    session.TeardownCurrentSession(mpq, sim, scene, presentation);
+    kernel.Shutdown();
     return true;
 }

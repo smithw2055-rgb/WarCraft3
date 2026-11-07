@@ -26,6 +26,15 @@ enum class CPlayerState : uint8_t {
     ALLIED_VICTORY, GAME_RESULT, OBSERVER
 };
 
+// Phase 14 Match / Victory-Defeat outcome per player
+enum class CPlayerGameResult : uint8_t {
+    PLAYING = 0,
+    VICTORY = 1,
+    DEFEAT  = 2,
+    TIE     = 3,
+    NEUTRAL = 4
+};
+
 class CPlayer {
 public:
     CPlayer(int id, const std::string& name, CMapControl controller);
@@ -47,6 +56,36 @@ public:
     int GetTeam() const { return team_; }
     void SetTeam(int team) { team_ = team; }
 
+    // Phase 14 Victory / Defeat / Crippled / Slot state
+    CPlayerGameResult GetGameResult() const { return gameResult_; }
+    void SetGameResult(CPlayerGameResult result) {
+        gameResult_ = result;
+        gameResultCode_ = static_cast<int>(result);
+    }
+    int GetGameResultCode() const { return gameResultCode_; }
+    void SetGameResultCode(int code) {
+        gameResultCode_ = code;
+        if (code == 1) gameResult_ = CPlayerGameResult::VICTORY;
+        else if (code == 2) gameResult_ = CPlayerGameResult::DEFEAT;
+        else if (code == 3) gameResult_ = CPlayerGameResult::TIE;
+        else if (code == 4) gameResult_ = CPlayerGameResult::NEUTRAL;
+        else gameResult_ = CPlayerGameResult::PLAYING;
+    }
+    bool IsVictorious() const { return gameResult_ == CPlayerGameResult::VICTORY; }
+    bool IsDefeated() const { return gameResult_ == CPlayerGameResult::DEFEAT; }
+    bool IsPlaying() const { return slotActive_ && !observer_ && gameResult_ == CPlayerGameResult::PLAYING; }
+
+    bool HasAlliedVictory() const { return alliedVictory_; }
+    void SetAlliedVictory(bool v) { alliedVictory_ = v; }
+    bool IsCrippled() const { return crippled_; }
+    void SetCrippled(bool v) { crippled_ = v; }
+    bool IsSlotActive() const { return slotActive_; }
+    void SetSlotActive(bool v) { slotActive_ = v; }
+    bool IsNoVictoryCheat() const { return noVictoryCheat_; }
+    void SetNoVictoryCheat(bool v) { noVictoryCheat_ = v; }
+    bool IsNoDefeatCheat() const { return noDefeatCheat_; }
+    void SetNoDefeatCheat(bool v) { noDefeatCheat_ = v; }
+
     // Resources
     int GetGold() const { return gold_; }
     int GetLumber() const { return lumber_; }
@@ -66,36 +105,25 @@ public:
     void AddGold(int v) { gold_ += v; }
     void AddLumber(int v) { lumber_ += v; }
 
-    // Upkeep (ref CPlayer gold/lumberUpkeepRate + retail food thresholds):
-    // rates are percent points set via PLAYER_STATE_GOLD/LUMBER_UPKEEP_RATE;
-    // the food-derived level taxes gold income only (lumber untouched).
-    // 0 = none (food <= 50), 1 = low (51-80, 30% tax), 2 = high (81+, 60%).
+    // Upkeep (Phase 14: delegates to active ISimulationModule when CSimulation is passed;
+    // falls back to standard WarCraft 3 thresholds when called standalone without CSimulation).
     int GetGoldUpkeepRate() const { return goldUpkeepRate_; }
     int GetLumberUpkeepRate() const { return lumberUpkeepRate_; }
     void SetGoldUpkeepRate(int v) { goldUpkeepRate_ = v; }
     void SetLumberUpkeepRate(int v) { lumberUpkeepRate_ = v; }
-    int GetUpkeepLevel() const {
-        if (foodUsed_ > 80) return 2;
-        if (foodUsed_ > 50) return 1;
-        return 0;
-    }
-    int ApplyUpkeepGoldTax(int amount) const {
-        if (amount <= 0) return amount;
-        int taxPct = goldUpkeepRate_ > 0 ? goldUpkeepRate_
-                     : (GetUpkeepLevel() == 2 ? 60 : GetUpkeepLevel() == 1 ? 30 : 0);
-        if (taxPct <= 0) return amount;
-        if (taxPct >= 100) return 0;
-        return amount - amount * taxPct / 100;
-    }
+    int GetUpkeepLevel(const CSimulation* sim = nullptr) const;
+    int ApplyUpkeepGoldTax(int amount, const CSimulation* sim = nullptr) const;
 
-    // Tech tree
+    // Tech tree & Upgrade state (Phase 14: notifies ISimulationModule on level changes)
     bool IsTechUnlocked(War3ID id) const;
     void AddTechUnlocked(CSimulation& simulation, War3ID id);
     // Ref removeTechtreeUnlocked: possession counter, decremented on death
     // (non-heroes) and removal. Erased at zero so IsTechUnlocked flips.
     void RemoveTechUnlocked(CSimulation& simulation, War3ID id);
     int GetTechLevel(War3ID id) const;
+    int GetEffectiveTechLevel(const CSimulation& simulation, War3ID id) const;
     void SetTechLevel(War3ID id, int level);
+    void SetTechLevel(CSimulation& simulation, War3ID id, int level);
     int GetTechMaxAllowed(War3ID id) const;
     void SetTechMaxAllowed(War3ID id, int level);
     // Availability cap (ref CPlayer.isTechtreeAllowedByMax): banned or
@@ -104,6 +132,12 @@ public:
     // (queued-but-unbuilt items are not counted yet).
     bool IsTechtreeAllowedByMax(War3ID id) const;
     int GetTechCount() const { return (int)techtreeUnlocked_.size(); }
+    const std::unordered_map<uint32_t, int>& GetTechtreeUnlockedMap() const { return techtreeUnlocked_; }
+
+    // Per-unit applied upgrade level tracking (used by War3GameModule upgrade engine)
+    int GetAppliedUnitUpgradeLevel(int unitHandleId, War3ID upgradeId) const;
+    void SetAppliedUnitUpgradeLevel(int unitHandleId, War3ID upgradeId, int level);
+    void ClearAppliedUnitUpgrades(int unitHandleId);
 
     // Alliances
     bool HasAlliance(const CPlayer& other, CAllianceType type) const;
@@ -177,6 +211,7 @@ private:
 
     std::unordered_map<uint32_t, int> techtreeUnlocked_;
     std::unordered_map<uint32_t, int> techtreeMaxAllowed_;
+    std::unordered_map<uint64_t, int> appliedUnitUpgradeLevels_;
     std::unordered_set<War3ID> disabledAbilities_;
     float handicap_ = 1.0f;
     float handicapXP_ = 1.0f;
@@ -185,5 +220,12 @@ private:
     int color_ = 0;
     bool observer_ = false;
     int team_ = -1;
+    CPlayerGameResult gameResult_ = CPlayerGameResult::PLAYING;
+    int gameResultCode_ = 0;
+    bool alliedVictory_ = true;
+    bool crippled_ = false;
+    bool slotActive_ = true;
+    bool noVictoryCheat_ = false;
+    bool noDefeatCheat_ = false;
     int allianceData_[24] = {}; // bitfield per other player
 };

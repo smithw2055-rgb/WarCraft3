@@ -187,7 +187,7 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
                 CResourceType type = harvestAbility->GetCarriedResourceType();
 
                 if (type == CResourceType::GOLD) {
-                    player->AddGold(player->ApplyUpkeepGoldTax(amount));
+                    player->AddGold(player->ApplyUpkeepGoldTax(amount, &simulation));
                 } else if (type == CResourceType::LUMBER) {
                     player->AddLumber(amount);
                 }
@@ -302,7 +302,7 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
                 CResourceType type = harvestAbility->GetCarriedResourceType();
 
                 if (type == CResourceType::GOLD) {
-                    player->AddGold(player->ApplyUpkeepGoldTax(amount));
+                    player->AddGold(player->ApplyUpkeepGoldTax(amount, &simulation));
                 } else if (type == CResourceType::LUMBER) {
                     player->AddLumber(amount);
                 }

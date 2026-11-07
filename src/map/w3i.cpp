@@ -296,7 +296,7 @@ void ApplyW3iTechtreeAvailability(CSimulation& sim, const W3iInfo& w3i) {
                 player->SetTechMaxAllowed(id, -1);
                 const int level = up.levelAffected + 1; // 0-based -> researched level
                 if (level > 0 && player->GetTechLevel(id) < level) {
-                    player->SetTechLevel(id, level);
+                    player->SetTechLevel(sim, id, level);
                 }
             }
         }

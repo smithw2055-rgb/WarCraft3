@@ -68,7 +68,14 @@ void CAbilityUpgrade::OnTick(CSimulation& game, CUnit* unit) {
     unit->SetConstructing(false);
     CUnitData* data = game.GetUnitData();
     CUnitType* form = data ? data->GetUnitType(pendingId_) : nullptr;
-    if (form) unit->MorphTo(form, pendingId_);
+    if (form) {
+        const CUnitType* oldType = unit->GetUnitType();
+        const War3ID oldTypeId = unit->GetTypeId();
+        unit->MorphTo(form, pendingId_);
+        if (auto* mod = game.GetSimulationModule()) {
+            mod->OnUnitMorphed(game, *unit, oldType, oldTypeId.value, form, pendingId_.value);
+        }
+    }
     if (const auto& cb = game.GetQueueEventCallback()) {
         cb(unit->GetHandleId(), (int)pendingId_.value, 2, false);
     }

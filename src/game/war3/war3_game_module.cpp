@@ -5,9 +5,11 @@
 #include <string>
 #include <vector>
 
+#include <cmath>
 #include "data/destructabledata.h"
 #include "data/itemdata.h"
 #include "data/unitdata.h"
+#include "data/upgradedata.h"
 #include "ecs/abilities/ability_attack.h"
 #include "ecs/abilities/ability_build.h"
 #include "ecs/abilities/ability_builder.h"
@@ -102,7 +104,8 @@ War3ID BuildRaceAbilityCode(CBuildRace race) {
 
 } // namespace
 
-War3GameModule::War3GameModule() {
+War3GameModule::War3GameModule()
+    : combatTable_(GetCanonicalWar3AttackDefenseTable()) {
     EnsureRegisteredInDynamicLoader();
 }
 
@@ -455,7 +458,7 @@ bool War3GameModule::IsRepairAbilityAlias(War3ID abilityCode) {
 
 bool War3GameModule::IsTownHallReturnResourceType(War3ID typeId) {
     return typeId == War3ID("htow") || typeId == War3ID("hkee") || typeId == War3ID("hcas") ||
-           typeId == War3ID("ogre") || typeId == War3ID("ostr") || typeId == War3ID("ofrt") ||
+           typeId == War3ID("ogre") || typeId == War3ID("ostr") || typeId == War3ID("ofrt") || typeId == War3ID("ofor") ||
            typeId == War3ID("unpl") || typeId == War3ID("unp1") || typeId == War3ID("unp2") ||
            typeId == War3ID("etol") || typeId == War3ID("etoa") || typeId == War3ID("etoe");
 }
@@ -473,8 +476,9 @@ bool War3GameModule::OnInit(engine::EngineKernel& kernel) {
     return true;
 }
 
-void War3GameModule::OnFixedTick(engine::EngineKernel& /*kernel*/, float /*fixedDt*/) {
+void War3GameModule::OnFixedTick(engine::EngineKernel& /*kernel*/, float fixedDt) {
     if (boundSim_) {
+        TickPlayerAIs(*boundSim_, fixedDt);
         boundSim_->Update();
     }
 }
@@ -678,7 +682,80 @@ void War3GameModule::OnUnitCommittedToWorld(CSimulation& sim, CUnit& unit) {
         if (unit.IsBuilding() && unit.GetFoodMade() > 0 && !unit.IsConstructing()) {
             player->AddFoodCap(unit.GetFoodMade());
         }
+        // Apply any upgrades already researched by the owning player to the newly committed unit
+        OnApplyPlayerUpgradesToUnit(sim, *player, unit);
     }
+}
+
+void War3GameModule::OnUnitDied(CSimulation& sim, CUnit& unit) {
+    ++stats_.unitsDied;
+    if (CPlayer* player = sim.GetPlayer(unit.GetPlayerIndex())) {
+        // Non-heroes stop satisfying techtree requirements upon death (heroes retain possession while awaiting Altar/Tavern revival)
+        if (!unit.IsHero()) {
+            player->RemoveTechUnlocked(sim, unit.GetTypeId());
+        }
+        // Refund food cap & food used at death (and zero on the unit so subsequent removal does not double-refund)
+        const int made = unit.GetFoodMade();
+        if (made != 0) {
+            if (!unit.IsConstructing()) {
+                player->SetFoodCap(std::max(0, player->GetFoodCap() - made));
+            }
+            unit.SetFoodMade(0);
+        }
+        const int used = unit.GetFoodUsed();
+        if (used != 0) {
+            player->SetFoodUsed(std::max(0, player->GetFoodUsed() - used));
+            unit.SetFoodUsed(0);
+        }
+    }
+    if (meleeVictoryRulesEnabled_) {
+        EvaluateVictoryDefeat(sim);
+    }
+}
+
+void War3GameModule::OnUnitMorphed(CSimulation& sim,
+                                   CUnit& unit,
+                                   const CUnitType* oldType,
+                                   uint32_t oldTypeRawcode,
+                                   const CUnitType* newType,
+                                   uint32_t newTypeRawcode) {
+    ++stats_.unitsMorphed;
+    CPlayer* player = sim.GetPlayer(unit.GetPlayerIndex());
+    if (!player) return;
+
+    const War3ID oldId(oldTypeRawcode);
+    const War3ID newId(newTypeRawcode);
+    if (oldId != newId) {
+        if (oldId.value != 0) {
+            player->RemoveTechUnlocked(sim, oldId);
+        }
+        if (newId.value != 0) {
+            player->AddTechUnlocked(sim, newId);
+        }
+    }
+
+    if (oldType && newType) {
+        const int oldFoodMade = unit.GetFoodMade();
+        const int newFoodMade = newType->GetFoodMade();
+        if (newFoodMade != oldFoodMade) {
+            const int deltaMade = newFoodMade - oldFoodMade;
+            if (deltaMade > 0) {
+                player->AddFoodCap(deltaMade);
+            } else {
+                player->SetFoodCap(std::max(0, player->GetFoodCap() + deltaMade));
+            }
+            unit.SetFoodMade(newFoodMade);
+        }
+
+        const int oldFoodUsed = unit.GetFoodUsed();
+        const int newFoodUsed = newType->GetFoodUsed();
+        if (newFoodUsed != oldFoodUsed) {
+            player->SetFoodUsed(std::max(0, player->GetFoodUsed() + (newFoodUsed - oldFoodUsed)));
+            unit.SetFoodUsed(newFoodUsed);
+        }
+    }
+
+    OnApplyPlayerUpgradesToUnit(sim, *player, unit);
 }
 
 void War3GameModule::OnUnitRemovedFromWorld(CSimulation& sim,
@@ -701,6 +778,804 @@ void War3GameModule::OnUnitRemovedFromWorld(CSimulation& sim,
             player->AddFoodCap(-unit.GetFoodMade());
         }
     }
+    if (meleeVictoryRulesEnabled_) {
+        EvaluateVictoryDefeat(sim);
+    }
+}
+
+// ============================================================================
+// Phase 14: Techtree Equivalences, Upgrade Effect Engine & Upkeep Tax Rules
+// ============================================================================
+
+void War3GameModule::RegisterTechEquivalence(War3ID baseTechId, War3ID higherEquivalentId) {
+    if (baseTechId.value == 0 || higherEquivalentId.value == 0 || baseTechId == higherEquivalentId) return;
+    auto& list = customTechEquivalents_[baseTechId.value];
+    if (std::find(list.begin(), list.end(), higherEquivalentId) == list.end()) {
+        list.push_back(higherEquivalentId);
+    }
+}
+
+std::vector<War3ID> War3GameModule::GetTechEquivalents(War3ID baseTechId) const {
+    std::vector<War3ID> result;
+    // Canonical WarCraft 3 town hall / tree / citadel / altar tier equivalences:
+    // Owning a higher-tier hall satisfies techtree prerequisites for lower tiers.
+    if (baseTechId == War3ID("htow")) {
+        result.push_back(War3ID("hkee"));
+        result.push_back(War3ID("hcas"));
+    } else if (baseTechId == War3ID("hkee")) {
+        result.push_back(War3ID("hcas"));
+    } else if (baseTechId == War3ID("ogre")) {
+        result.push_back(War3ID("ostr"));
+        result.push_back(War3ID("ofor"));
+        result.push_back(War3ID("ofrt"));
+    } else if (baseTechId == War3ID("ostr")) {
+        result.push_back(War3ID("ofor"));
+        result.push_back(War3ID("ofrt"));
+    } else if (baseTechId == War3ID("unpl")) {
+        result.push_back(War3ID("unp1"));
+        result.push_back(War3ID("unp2"));
+    } else if (baseTechId == War3ID("unp1")) {
+        result.push_back(War3ID("unp2"));
+    } else if (baseTechId == War3ID("etol")) {
+        result.push_back(War3ID("etoa"));
+        result.push_back(War3ID("etoe"));
+    } else if (baseTechId == War3ID("etoa")) {
+        result.push_back(War3ID("etoe"));
+    } else if (baseTechId == War3ID("hatw")) {
+        result.push_back(War3ID("hwtw"));
+        result.push_back(War3ID("hgtw"));
+        result.push_back(War3ID("hctw"));
+    }
+
+    auto it = customTechEquivalents_.find(baseTechId.value);
+    if (it != customTechEquivalents_.end()) {
+        for (const War3ID& eq : it->second) {
+            if (std::find(result.begin(), result.end(), eq) == result.end()) {
+                result.push_back(eq);
+            }
+        }
+    }
+    return result;
+}
+
+int War3GameModule::GetEffectiveTechLevel(const CSimulation& sim,
+                                          int playerIndex,
+                                          uint32_t techRawcode) const {
+    const CPlayer* player = sim.GetPlayer(playerIndex);
+    if (!player) return 0;
+
+    const War3ID baseId(techRawcode);
+    int total = player->GetTechLevel(baseId);
+    for (const War3ID& eqId : GetTechEquivalents(baseId)) {
+        total += player->GetTechLevel(eqId);
+    }
+    return total;
+}
+
+bool War3GameModule::MeetsTechRequirements(const CSimulation& sim,
+                                           int playerIndex,
+                                           uint32_t targetRawcode) const {
+    const CUnitData* unitData = sim.GetUnitData();
+    if (!unitData) return true;
+
+    const CUnitType* unitType = unitData->GetUnitType(War3ID(targetRawcode));
+    if (!unitType) return true;
+
+    const CPlayer* player = sim.GetPlayer(playerIndex);
+    if (!player) return false;
+
+    for (const auto& req : unitType->GetRequirements()) {
+        const int requiredLevel = (req.level > 0) ? req.level : 1;
+        if (GetEffectiveTechLevel(sim, playerIndex, req.id.value) < requiredLevel) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<uint32_t> War3GameModule::GetMissingTechRequirements(const CSimulation& sim,
+                                                                 int playerIndex,
+                                                                 uint32_t targetRawcode) const {
+    std::vector<uint32_t> missing;
+    const CUnitData* unitData = sim.GetUnitData();
+    if (!unitData) return missing;
+
+    const CUnitType* unitType = unitData->GetUnitType(War3ID(targetRawcode));
+    if (!unitType) return missing;
+
+    const CPlayer* player = sim.GetPlayer(playerIndex);
+    if (!player) return missing;
+
+    for (const auto& req : unitType->GetRequirements()) {
+        const int requiredLevel = (req.level > 0) ? req.level : 1;
+        if (GetEffectiveTechLevel(sim, playerIndex, req.id.value) < requiredLevel) {
+            missing.push_back(req.id.value);
+        }
+    }
+    return missing;
+}
+
+bool War3GameModule::DoesUpgradeApplyToUnit(const CUnit& unit,
+                                            const CUnitType& unitType,
+                                            const CUpgradeType& upgrade) {
+    const auto& used = unitType.GetUpgradesUsed();
+    if (!used.empty()) {
+        return std::find(used.begin(), used.end(), upgrade.id) != used.end();
+    }
+    // When unitType does not specify an explicit upgradesUsed list (e.g., synthetic
+    // unit types in unit tests or universal upgrades), match by race or global scope:
+    if (upgrade.race == 0) {
+        return !unit.IsBuilding() || !upgrade.effects.empty();
+    }
+    const std::string& raceName = unitType.GetUnitRace().name;
+    int unitRaceIdx = 0;
+    if (raceName == "human" || raceName == "Human") unitRaceIdx = 1;
+    else if (raceName == "orc" || raceName == "Orc") unitRaceIdx = 2;
+    else if (raceName == "nightelf" || raceName == "night elf" || raceName == "NightElf") unitRaceIdx = 3;
+    else if (raceName == "undead" || raceName == "Undead") unitRaceIdx = 4;
+    if (unitRaceIdx == 0) return true;
+    return unitRaceIdx == upgrade.race;
+}
+
+void War3GameModule::ApplySingleUpgradeToUnit(CSimulation& sim,
+                                              CPlayer& player,
+                                              CUnit& unit,
+                                              const CUpgradeType& upgrade,
+                                              int targetLevel) {
+    if (targetLevel <= 0) return;
+    const CUnitType* unitType = unit.GetUnitType();
+    if (!unitType) return;
+    if (!DoesUpgradeApplyToUnit(unit, *unitType, upgrade)) return;
+
+    const int prevApplied = player.GetAppliedUnitUpgradeLevel(unit.GetHandleId(), upgrade.id);
+    if (targetLevel <= prevApplied) return;
+
+    const int deltaLevels = targetLevel - prevApplied;
+    player.SetAppliedUnitUpgradeLevel(unit.GetHandleId(), upgrade.id, targetLevel);
+    ++stats_.unitUpgradesApplied;
+
+    if (!upgrade.effects.empty()) {
+        for (const CUpgradeEffectSpec& eff : upgrade.effects) {
+            if (eff.effectCode == "rarm") {
+                const float perLevel = (eff.base != 0.0f || eff.mod != 0.0f)
+                    ? eff.base
+                    : static_cast<float>(std::max(1, unitType->GetDefenseUpgradeBonus()));
+                const float deltaArmor = (eff.mod != 0.0f)
+                    ? (eff.EvalCumulativeToLevel(targetLevel) - eff.EvalCumulativeToLevel(prevApplied))
+                    : (perLevel * static_cast<float>(deltaLevels));
+                unit.AddBonusArmor(static_cast<int>(std::round(deltaArmor)));
+            } else if (eff.effectCode == "ratx" || eff.effectCode == "ratd" || eff.effectCode == "ratc") {
+                int totalDmgBonus = 0;
+                if (eff.base != 0.0f || eff.mod != 0.0f) {
+                    totalDmgBonus = static_cast<int>(std::round(eff.EvalCumulativeToLevel(targetLevel)));
+                } else {
+                    int dmgUp = 2;
+                    if (!unitType->GetAttacks().empty() && unitType->GetAttacks()[0].damageUpgradeAmount > 0) {
+                        dmgUp = unitType->GetAttacks()[0].damageUpgradeAmount;
+                    }
+                    totalDmgBonus = dmgUp * targetLevel;
+                }
+                unit.Attrs().SetNonStackingDamageBonus(upgrade.id, totalDmgBonus);
+            } else if (eff.effectCode == "rhpx") {
+                const float deltaHp = eff.EvalCumulativeToLevel(targetLevel) - eff.EvalCumulativeToLevel(prevApplied);
+                unit.AddBonusMaxLife(deltaHp);
+                if (!unit.IsDead() && deltaHp > 0.0f) {
+                    unit.SetLife(sim, std::min(unit.GetMaxLife(), unit.GetLife() + deltaHp));
+                }
+            } else if (eff.effectCode == "rhpo") {
+                const float baseHp = static_cast<float>(unit.Attrs().GetBaseMaxLife());
+                const float deltaHp = baseHp * (eff.EvalCumulativeToLevel(targetLevel) - eff.EvalCumulativeToLevel(prevApplied));
+                unit.AddBonusMaxLife(deltaHp);
+                if (!unit.IsDead() && deltaHp > 0.0f) {
+                    unit.SetLife(sim, std::min(unit.GetMaxLife(), unit.GetLife() + deltaHp));
+                }
+            } else if (eff.effectCode == "rmnx" || eff.effectCode == "rmno") {
+                const float baseMana = static_cast<float>(unit.Attrs().GetBaseMaxMana());
+                const float rawDelta = (eff.effectCode == "rmno")
+                    ? (baseMana * (eff.EvalCumulativeToLevel(targetLevel) - eff.EvalCumulativeToLevel(prevApplied)))
+                    : (eff.EvalCumulativeToLevel(targetLevel) - eff.EvalCumulativeToLevel(prevApplied));
+                const int deltaMana = static_cast<int>(std::round(rawDelta));
+                unit.AddBonusMaxMana(deltaMana);
+                if (!unit.IsDead() && deltaMana > 0) {
+                    unit.SetMana(std::min(static_cast<float>(unit.GetMaxMana()),
+                                          unit.GetMana() + static_cast<float>(deltaMana)));
+                }
+            } else if (eff.effectCode == "rmvx") {
+                const float rawSpeedBonus = eff.EvalCumulativeToLevel(targetLevel);
+                const float pct = (rawSpeedBonus > 1.5f)
+                    ? (rawSpeedBonus / std::max(1.0f, static_cast<float>(unit.Attrs().GetBaseSpeed())))
+                    : rawSpeedBonus;
+                unit.Attrs().AddSpeedModifier(upgrade.id, pct);
+            } else if (eff.effectCode == "rats") {
+                unit.Attrs().SetNonStackingAttackSpeed(upgrade.id, eff.EvalCumulativeToLevel(targetLevel));
+            } else if (eff.effectCode == "rlev") {
+                if (eff.code.size() == 4) {
+                    if (CAbility* ab = unit.GetAbility(War3ID::FromString(eff.code))) {
+                        const int addLvl = std::max(deltaLevels,
+                            static_cast<int>(std::round(eff.EvalCumulativeToLevel(targetLevel))));
+                        ab->SetLevel(1 + addLvl);
+                        ab->OnLevelChanged(sim, &unit);
+                    }
+                }
+            }
+        }
+    } else if (upgrade.upgradeClass == "armor") {
+        const float perLevel = static_cast<float>(std::max(1, unitType->GetDefenseUpgradeBonus()));
+        unit.AddBonusArmor(static_cast<int>(std::round(perLevel * static_cast<float>(deltaLevels))));
+    } else if (upgrade.upgradeClass == "melee" || upgrade.upgradeClass == "ranged" ||
+               upgrade.upgradeClass == "artillery") {
+        int dmgUp = 2;
+        if (!unitType->GetAttacks().empty() && unitType->GetAttacks()[0].damageUpgradeAmount > 0) {
+            dmgUp = unitType->GetAttacks()[0].damageUpgradeAmount;
+        }
+        unit.Attrs().SetNonStackingDamageBonus(upgrade.id, dmgUp * targetLevel);
+    }
+}
+
+void War3GameModule::RefreshUnitAbilityRequirements(CSimulation& sim, CUnit& unit) {
+    for (CAbility* ab : unit.GetAbilities()) {
+        if (!ab) continue;
+        const bool wasDisabled = ab->IsDisabled();
+        const bool met = ab->IsRequirementsMet(sim, &unit);
+        ab->SetDisabled(!met, CAbilityDisableType::REQUIREMENTS);
+        if (wasDisabled && !ab->IsDisabled()) {
+            ab->OnAdd(sim, &unit);
+        }
+    }
+}
+
+void War3GameModule::OnPlayerTechLevelChanged(CSimulation& sim,
+                                              CPlayer& player,
+                                              uint32_t techRawcode,
+                                              int /*oldLevel*/,
+                                              int newLevel) {
+    ++stats_.techEventsProcessed;
+    const War3ID techId(techRawcode);
+    const CUpgradeData* upgradeData = sim.GetUpgradeData();
+    const CUpgradeType* upgrade = upgradeData ? upgradeData->GetUpgrade(techId) : nullptr;
+
+    for (CUnit* unit : player.GetUnits()) {
+        if (!unit || unit->IsDead()) continue;
+        if (upgrade && newLevel > 0) {
+            ApplySingleUpgradeToUnit(sim, player, *unit, *upgrade, newLevel);
+        }
+        RefreshUnitAbilityRequirements(sim, *unit);
+    }
+}
+
+void War3GameModule::OnApplyPlayerUpgradesToUnit(CSimulation& sim,
+                                                 CPlayer& player,
+                                                 CUnit& unit) {
+    const CUpgradeData* upgradeData = sim.GetUpgradeData();
+    if (upgradeData) {
+        for (const auto& [rawCode, level] : player.GetTechtreeUnlockedMap()) {
+            if (level <= 0) continue;
+            if (const CUpgradeType* upgrade = upgradeData->GetUpgrade(War3ID(rawCode))) {
+                ApplySingleUpgradeToUnit(sim, player, unit, *upgrade, level);
+            }
+        }
+    }
+    RefreshUnitAbilityRequirements(sim, unit);
+}
+
+int War3GameModule::ComputeUpkeepLevel(const CPlayer& player) const {
+    const int foodUsed = player.GetFoodUsed();
+    if (foodUsed > 80) return 2; // High Upkeep (60% tax)
+    if (foodUsed > 50) return 1; // Low Upkeep (30% tax)
+    return 0;                    // No Upkeep (0% tax)
+}
+
+int War3GameModule::ApplyUpkeepGoldTax(const CPlayer& player, int amount) const {
+    if (amount <= 0) return amount;
+    const int explicitRate = player.GetGoldUpkeepRate();
+    const int upkeepLvl = ComputeUpkeepLevel(player);
+    const int taxPct = explicitRate > 0 ? explicitRate
+                     : (upkeepLvl == 2 ? 60 : upkeepLvl == 1 ? 30 : 0);
+    if (taxPct <= 0) return amount;
+    if (taxPct >= 100) return 0;
+    return amount - (amount * taxPct) / 100;
+}
+
+// ============================================================================
+// Phase 14: Melee & Allied Victory/Defeat & Crippled Rules Engine
+// ============================================================================
+
+bool War3GameModule::ArePlayersAlliedForVictory(const CPlayer& a, const CPlayer& b) {
+    if (a.GetId() == b.GetId()) return true;
+    if (a.GetTeam() >= 0 && a.GetTeam() == b.GetTeam() &&
+        a.HasAlliedVictory() && b.HasAlliedVictory()) {
+        return true;
+    }
+    return a.HasAlliedVictory() && b.HasAlliedVictory() &&
+           a.HasAlliance(b, CAllianceType::ALLIED) &&
+           b.HasAlliance(a, CAllianceType::ALLIED);
+}
+
+bool War3GameModule::IsPlayerCrippled(const CSimulation& sim, int playerIndex) const {
+    const CPlayer* player = sim.GetPlayer(playerIndex);
+    if (!player || !player->IsPlaying()) return false;
+    const CMapControl ctrl = player->GetController();
+    if (ctrl != CMapControl::USER && ctrl != CMapControl::COMPUTER) return false;
+
+    int livingBuildings = 0;
+    int livingTownHalls = 0;
+    int livingWorkers = 0;
+
+    for (const CUnit* u : sim.GetUnits()) {
+        if (!u || u->IsDead() || u->GetPlayerIndex() != playerIndex) continue;
+        if (u->IsBuilding()) {
+            ++livingBuildings;
+            const CUnitType* ut = u->GetUnitType();
+            const bool isHall = IsTownHallReturnResourceType(u->GetTypeId()) ||
+                (ut && ut->GetClassifications().count(CUnitClassification::TOWNHALL) > 0);
+            if (isHall) {
+                ++livingTownHalls;
+            }
+        } else {
+            if (IsStandardRaceWorkerType(u->GetTypeId()) ||
+                u->GetAbility(War3ID("Ahar")) != nullptr ||
+                u->GetAbility(War3ID("AHbu")) != nullptr ||
+                u->GetAbility(War3ID("AObu")) != nullptr ||
+                u->GetAbility(War3ID("AUbu")) != nullptr ||
+                u->GetAbility(War3ID("AEbu")) != nullptr) {
+                ++livingWorkers;
+            }
+        }
+    }
+
+    if (livingBuildings <= 0 || livingTownHalls > 0) {
+        return false;
+    }
+
+    // Standard War3 melee crippled condition: no town hall standing, and either
+    // no worker alive to build one OR insufficient resources for a base hall (385g / 180l).
+    constexpr int kMinTownHallGold = 385;
+    constexpr int kMinTownHallLumber = 180;
+    if (livingWorkers == 0) return true;
+    return player->GetGold() < kMinTownHallGold || player->GetLumber() < kMinTownHallLumber;
+}
+
+void War3GameModule::OnPlayerRemoved(CSimulation& sim, int playerIndex, int gameResultCode) {
+    if (CPlayer* p = sim.GetPlayer(playerIndex)) {
+        p->SetSlotActive(false);
+        p->SetGameResultCode(gameResultCode);
+    }
+    if (meleeVictoryRulesEnabled_) {
+        EvaluateVictoryDefeat(sim);
+    }
+}
+
+void War3GameModule::EvaluateVictoryDefeat(CSimulation& sim) {
+    ++stats_.victoryEvaluations;
+    if (matchEnded_) return;
+
+    std::vector<CPlayer*> competitors;
+    for (int i = 0; i < sim.GetPlayerCount(); ++i) {
+        CPlayer* p = sim.GetPlayer(i);
+        if (!p || p->IsObserver()) continue;
+        const CMapControl ctrl = p->GetController();
+        if (ctrl == CMapControl::USER || ctrl == CMapControl::COMPUTER) {
+            competitors.push_back(p);
+        }
+    }
+
+    if (competitors.empty()) return;
+
+    // 1. Evaluate individual competitor elimination (Defeat) and Crippled status
+    for (CPlayer* p : competitors) {
+        if (p->GetGameResult() != CPlayerGameResult::PLAYING) continue;
+
+        int livingStructures = 0;
+        int livingUnits = 0;
+        for (const CUnit* u : sim.GetUnits()) {
+            if (!u || u->IsDead() || u->GetPlayerIndex() != p->GetId()) continue;
+            ++livingUnits;
+            if (u->IsBuilding()) {
+                ++livingStructures;
+            }
+        }
+        // Also count pending newly created units not yet committed to units_
+        for (const CUnit* u : p->GetUnits()) {
+            if (!u || u->IsDead()) continue;
+            if (std::find(sim.GetUnits().begin(), sim.GetUnits().end(), u) != sim.GetUnits().end()) continue;
+            ++livingUnits;
+            if (u->IsBuilding()) {
+                ++livingStructures;
+            }
+        }
+
+        const bool eliminated = !p->IsSlotActive() ||
+            (livingStructures == 0 && (!requireZeroUnitsForDefeat_ || livingUnits == 0));
+
+        if (eliminated) {
+            if (!p->IsNoDefeatCheat()) {
+                p->SetGameResult(CPlayerGameResult::DEFEAT);
+                p->SetCrippled(false);
+                sim.Events().onPlayerDefeated.Emit(p->GetId());
+            }
+        } else {
+            const bool nowCrippled = IsPlayerCrippled(sim, p->GetId());
+            if (nowCrippled != p->IsCrippled()) {
+                p->SetCrippled(nowCrippled);
+                sim.Events().onPlayerCrippled.Emit(p->GetId(), nowCrippled);
+            }
+        }
+    }
+
+    // 2. Evaluate surviving competitors for solo or allied Victory
+    std::vector<CPlayer*> survivors;
+    int defeatedCount = 0;
+    for (CPlayer* p : competitors) {
+        if (p->GetGameResult() == CPlayerGameResult::PLAYING && p->IsSlotActive()) {
+            survivors.push_back(p);
+        } else if (p->GetGameResult() == CPlayerGameResult::DEFEAT || !p->IsSlotActive()) {
+            ++defeatedCount;
+        }
+    }
+
+    if (survivors.empty()) {
+        if (defeatedCount > 0) {
+            matchEnded_ = true;
+            winningPlayerIndex_ = -1;
+            sim.Events().onGameEnd.Emit(false, -1);
+        }
+        return;
+    }
+
+    // Require at least 2 competitors (or at least 1 defeated opponent) to declare melee victory
+    if (competitors.size() < 2 && defeatedCount == 0) {
+        return;
+    }
+
+    bool allSurvivorsAllied = true;
+    for (size_t i = 0; i < survivors.size() && allSurvivorsAllied; ++i) {
+        for (size_t j = i + 1; j < survivors.size(); ++j) {
+            if (!ArePlayersAlliedForVictory(*survivors[i], *survivors[j])) {
+                allSurvivorsAllied = false;
+                break;
+            }
+        }
+    }
+
+    if (allSurvivorsAllied) {
+        bool anyBlockedByNoVictoryCheat = false;
+        for (CPlayer* s : survivors) {
+            if (s->IsNoVictoryCheat()) {
+                anyBlockedByNoVictoryCheat = true;
+                break;
+            }
+        }
+        if (!anyBlockedByNoVictoryCheat) {
+            winningPlayerIndex_ = survivors.front()->GetId();
+            matchEnded_ = true;
+            for (CPlayer* s : survivors) {
+                s->SetGameResult(CPlayerGameResult::VICTORY);
+                sim.Events().onPlayerVictorious.Emit(s->GetId());
+            }
+            sim.Events().onGameEnd.Emit(true, winningPlayerIndex_);
+        }
+    }
+}
+
+// ============================================================================
+// Phase 15: Combat Armor/Attack Type Multiplier Matrix & Damage Formula Engine
+// ============================================================================
+
+const AttackDefenseTable& War3GameModule::GetCanonicalWar3AttackDefenseTable() {
+    // Canonical WarCraft III: The Frozen Throne Attack-vs-Defense multiplier matrix
+    // Columns indexed by CCombatSystem::DefenseTypeToIndex:
+    // [0]=NONE, [1]=LIGHT, [2]=MEDIUM, [3]=HEAVY, [4]=FORTIFIED, [5]=HERO, [6]=DIVINE, [7]=UNARMORED
+    static const AttackDefenseTable kCanonicalWar3Table = {
+        // Normal: 100 / 100 / 150 / 100 / 70 / 100 / 5 / 100
+        { 1.0f, 1.0f, 1.5f, 1.0f, 0.7f, 1.0f, 0.05f, 1.0f },
+        // Pierce: 100 / 200 / 75 / 100 / 35 / 50 / 5 / 150
+        { 1.0f, 2.0f, 0.75f, 1.0f, 0.35f, 0.5f, 0.05f, 1.5f },
+        // Siege:  100 / 100 / 50 / 100 / 150 / 50 / 5 / 150
+        { 1.0f, 1.0f, 0.5f, 1.0f, 1.5f, 0.5f, 0.05f, 1.5f },
+        // Magic:  100 / 125 / 75 / 200 / 35 / 50 / 5 / 100
+        { 1.0f, 1.25f, 0.75f, 2.0f, 0.35f, 0.5f, 0.05f, 1.0f },
+        // Chaos:  100% across all armor types
+        { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
+        // Hero:   100% except Fortified 50%, Divine 5%
+        { 1.0f, 1.0f, 1.0f, 1.0f, 0.5f, 1.0f, 0.05f, 1.0f },
+        // Spells: 100% except Hero 70%, Divine 5%
+        { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.05f, 1.0f }
+    };
+    return kCanonicalWar3Table;
+}
+
+void War3GameModule::OnConfigureCombatSystem(CSimulation& /*sim*/, CCombatSystem& combat) {
+    combat.SetDefenseArmorFactor(defenseArmorFactor_);
+    combat.ResetTableToModuleDefault(combatTable_);
+}
+
+float War3GameModule::GetAttackDefenseMultiplier(CAttackType atk, CDefenseType def) const {
+    return GetAttackDefenseMultiplier(static_cast<int>(atk), static_cast<int>(def));
+}
+
+float War3GameModule::GetAttackDefenseMultiplier(int attackTypeOrd, int defenseTypeOrd) const {
+    const auto atk = static_cast<CAttackType>(attackTypeOrd);
+    const auto def = static_cast<CDefenseType>(defenseTypeOrd);
+    int di = CCombatSystem::DefenseTypeToIndex(def);
+    if (di < 0 || di > 7) di = 0;
+
+    switch (atk) {
+        case CAttackType::NORMAL: return combatTable_.normal[di];
+        case CAttackType::PIERCE: return combatTable_.pierce[di];
+        case CAttackType::SIEGE:  return combatTable_.siege[di];
+        case CAttackType::MAGIC:  return combatTable_.magic[di];
+        case CAttackType::SPELLS: return combatTable_.spells[di];
+        case CAttackType::CHAOS:  return combatTable_.chaos[di];
+        case CAttackType::HERO:   return combatTable_.hero[di];
+        default: return 1.0f;
+    }
+}
+
+void War3GameModule::SetAttackDefenseMultiplier(CAttackType atk, CDefenseType def, float multiplier) {
+    int di = CCombatSystem::DefenseTypeToIndex(def);
+    if (di < 0 || di > 7) return;
+    switch (atk) {
+        case CAttackType::NORMAL: combatTable_.normal[di] = multiplier; break;
+        case CAttackType::PIERCE: combatTable_.pierce[di] = multiplier; break;
+        case CAttackType::SIEGE:  combatTable_.siege[di]  = multiplier; break;
+        case CAttackType::MAGIC:  combatTable_.magic[di]  = multiplier; break;
+        case CAttackType::SPELLS: combatTable_.spells[di] = multiplier; break;
+        case CAttackType::CHAOS:  combatTable_.chaos[di]  = multiplier; break;
+        case CAttackType::HERO:   combatTable_.hero[di]   = multiplier; break;
+        default: break;
+    }
+    if (boundSim_ && boundSim_->GetCombatSystem()) {
+        boundSim_->GetCombatSystem()->ResetTableToModuleDefault(combatTable_);
+    }
+}
+
+void War3GameModule::SetCombatTable(const AttackDefenseTable& table) {
+    combatTable_ = table;
+    if (boundSim_ && boundSim_->GetCombatSystem()) {
+        boundSim_->GetCombatSystem()->ResetTableToModuleDefault(combatTable_);
+    }
+}
+
+void War3GameModule::ResetCombatRulesToCanonicalDefaults() {
+    combatTable_ = GetCanonicalWar3AttackDefenseTable();
+    defenseArmorFactor_ = 0.06f;
+    if (boundSim_ && boundSim_->GetCombatSystem()) {
+        OnConfigureCombatSystem(*boundSim_, *boundSim_->GetCombatSystem());
+    }
+}
+
+float War3GameModule::ComputeArmorDamageReduction(int defense,
+                                                  int attackerLevel,
+                                                  float defenseArmorFactor) const {
+    ++stats_.combatDamageEvaluations;
+    const float k = (defenseArmorFactor > 0.0f) ? defenseArmorFactor : defenseArmorFactor_;
+    return CDefenseTypeInfo::CalcDamageReduction(defense, attackerLevel, k);
+}
+
+bool War3GameModule::ShouldResistMagicDamage(int attackTypeOrd,
+                                             int damageTypeOrd,
+                                             bool targetIsMagicImmune,
+                                             bool magicImmuneResistsDamage,
+                                             bool magicImmuneResistsUltimates) const {
+    if (!targetIsMagicImmune) return false;
+    const auto atk = static_cast<CAttackType>(attackTypeOrd);
+    const auto dmg = static_cast<CDamageType>(damageTypeOrd);
+    if (atk == CAttackType::MAGIC && magicImmuneResistsDamage) {
+        return true;
+    }
+    if (atk == CAttackType::SPELLS && dmg != CDamageType::NORMAL) {
+        if (dmg != CDamageType::UNIVERSAL && magicImmuneResistsUltimates) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool War3GameModule::EvaluateEtherealDamageFactor(int attackTypeOrd,
+                                                  int damageTypeOrd,
+                                                  bool targetIsEthereal,
+                                                  bool allied,
+                                                  bool etherealBonusAlly,
+                                                  float etherealBonusMagic,
+                                                  float etherealBonusSpells,
+                                                  float& outMultiplier) const {
+    outMultiplier = 1.0f;
+    if (!targetIsEthereal) return true;
+    const auto atk = static_cast<CAttackType>(attackTypeOrd);
+    const auto dmg = static_cast<CDamageType>(damageTypeOrd);
+    const bool grantBonus = !allied || etherealBonusAlly;
+    if (grantBonus && atk == CAttackType::MAGIC) {
+        outMultiplier = etherealBonusMagic;
+    } else if (grantBonus && atk == CAttackType::SPELLS) {
+        outMultiplier = etherealBonusSpells;
+    }
+    if (dmg == CDamageType::NORMAL && atk != CAttackType::MAGIC) {
+        return false; // Ethereal units are immune to normal physical attacks
+    }
+    return true;
+}
+
+// ============================================================================
+// Phase 15: Tactical AI Controller Lifecycle, Build-Order Discovery & Counter-Scoring
+// ============================================================================
+
+bool War3GameModule::CreatePlayerAI(CSimulation& sim, int playerIndex, int difficulty) {
+    if (playerIndex < 0 || playerIndex >= 24) return false;
+    auto controller = std::make_shared<MeleeAIController>(&sim, playerIndex);
+    controller->SetDifficulty(difficulty);
+    aiControllers_[playerIndex] = std::move(controller);
+    ++stats_.aiControllersCreated;
+    return true;
+}
+
+void War3GameModule::AttachPlayerAI(int playerIndex, std::shared_ptr<MeleeAIController> controller) {
+    if (playerIndex < 0 || playerIndex >= 24 || !controller) return;
+    aiControllers_[playerIndex] = std::move(controller);
+    ++stats_.aiControllersCreated;
+}
+
+MeleeAIController* War3GameModule::GetPlayerAI(int playerIndex) const {
+    auto it = aiControllers_.find(playerIndex);
+    return (it != aiControllers_.end()) ? it->second.get() : nullptr;
+}
+
+bool War3GameModule::RemovePlayerAI(int playerIndex) {
+    return aiControllers_.erase(playerIndex) > 0;
+}
+
+void War3GameModule::SetPlayerAIEnabled(int playerIndex, bool enabled) {
+    if (MeleeAIController* ai = GetPlayerAI(playerIndex)) {
+        ai->SetEnabled(enabled);
+    }
+}
+
+void War3GameModule::CommandPlayerAI(int playerIndex, int command, int data) {
+    if (MeleeAIController* ai = GetPlayerAI(playerIndex)) {
+        ai->Command(command, data);
+    }
+}
+
+void War3GameModule::TickPlayerAIs(CSimulation& /*sim*/, float /*dt*/) {
+    for (auto& [playerId, controller] : aiControllers_) {
+        (void)playerId;
+        if (controller && controller->IsEnabled()) {
+            controller->Update();
+            ++stats_.aiControllerTicks;
+        }
+    }
+}
+
+float War3GameModule::EvaluateTacticalTargetScore(const CSimulation& /*sim*/,
+                                                  const CUnit& attacker,
+                                                  const CUnit& candidateTarget,
+                                                  float baseScore) const {
+    ++stats_.tacticalTargetEvaluations;
+    const CUnitType* atkUnitType = attacker.GetUnitType();
+    if (!atkUnitType || atkUnitType->GetAttacks().empty()) {
+        return baseScore;
+    }
+
+    const CAttackType atkType = atkUnitType->GetAttacks()[0].attackType;
+    const CDefenseType defType = candidateTarget.GetDefenseType();
+    const float counterMult = GetAttackDefenseMultiplier(atkType, defType);
+
+    // Reward hard armor-vs-attack counters (e.g., Pierce 2.0x vs Light -> +90 pts,
+    // Magic 2.0x vs Heavy -> +90 pts, Normal 1.5x vs Medium -> +45 pts) and penalize
+    // heavily resisted targets (e.g., Pierce 0.35x vs Fortified -> -58.5 pts).
+    const float counterBonus = (counterMult - 1.0f) * 90.0f;
+    return std::max(0.01f, baseScore + counterBonus);
+}
+
+bool War3GameModule::DiscoverRaceBuildPlan(const CSimulation& sim,
+                                           int playerIndex,
+                                           AIRacePlan& outPlan) {
+    outPlan = AIRacePlan{};
+    CUnitData* unitData = sim.GetUnitData();
+    if (!unitData) return false;
+
+    std::string race;
+    const CUnitType* townHallType = nullptr;
+    for (CUnit* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex) continue;
+        const CUnitType* type = unit->GetUnitType();
+        if (!type || !type->IsBuilding() || type->GetUnitsTrained().empty()) continue;
+        townHallType = type;
+        race = type->GetUnitRace().name;
+        outPlan.townHall = unit->GetTypeId();
+        break;
+    }
+    if (!townHallType || race.empty()) return false;
+
+    War3ID worker;
+    int bestWorkerCost = INT32_MAX;
+    for (War3ID id : townHallType->GetUnitsTrained()) {
+        const CUnitType* type = unitData->GetUnitType(id);
+        if (!type) continue;
+        if (MeleeAIController::IsWorkerType(type) || IsStandardRaceWorkerType(id)) {
+            worker = id;
+            break;
+        }
+        const int cost = type->GetGoldCost() + type->GetLumberCost();
+        if (cost < bestWorkerCost) {
+            bestWorkerCost = cost;
+            worker = id;
+        }
+    }
+    if (worker.value == 0) return false;
+    outPlan.worker = worker;
+
+    int bestFarmCost = INT32_MAX;
+    for (const auto& [id, type] : unitData->GetAllTypes()) {
+        if (!type || !type->IsBuilding()) continue;
+        if (type->GetUnitRace().name != race) continue;
+        if (id != outPlan.townHall && type->GetFoodMade() > 0) {
+            const int cost = type->GetGoldCost() + type->GetLumberCost();
+            if (cost < bestFarmCost) {
+                bestFarmCost = cost;
+                outPlan.farm = id;
+            }
+        }
+        if (id == outPlan.townHall || outPlan.barracks.value != 0) continue;
+        for (War3ID trainedId : type->GetUnitsTrained()) {
+            const CUnitType* trained = unitData->GetUnitType(trainedId);
+            if (MeleeAIController::IsCombatType(trained)) {
+                outPlan.barracks = id;
+                break;
+            }
+        }
+    }
+
+    if (outPlan.barracks.value != 0) {
+        const CUnitType* barracksType = unitData->GetUnitType(outPlan.barracks);
+        int bestArmyCost = INT32_MAX;
+        if (barracksType) {
+            for (War3ID id : barracksType->GetUnitsTrained()) {
+                const CUnitType* type = unitData->GetUnitType(id);
+                if (!MeleeAIController::IsCombatType(type)) continue;
+                const int cost = type->GetGoldCost() + type->GetLumberCost();
+                if (cost < bestArmyCost) {
+                    bestArmyCost = cost;
+                    outPlan.armyUnit = id;
+                }
+            }
+        }
+    }
+
+    for (const auto& [id, type] : unitData->GetAllTypes()) {
+        if (!type || !type->IsBuilding()) continue;
+        if (type->GetUnitRace().name != race) continue;
+        if (id == outPlan.townHall) continue;
+        int bestHeroCost = INT32_MAX;
+        War3ID bestHero;
+        for (War3ID trainedId : type->GetUnitsTrained()) {
+            const CUnitType* trained = unitData->GetUnitType(trainedId);
+            if (!trained || !trained->IsHero()) continue;
+            const int cost = trained->GetGoldCost() + trained->GetLumberCost();
+            if (cost < bestHeroCost) {
+                bestHeroCost = cost;
+                bestHero = trainedId;
+            }
+        }
+        if (bestHero.value != 0) {
+            outPlan.altar = id;
+            outPlan.hero = bestHero;
+            break;
+        }
+    }
+
+    int bestTowerCost = INT32_MAX;
+    for (const auto& [id, type] : unitData->GetAllTypes()) {
+        if (!MeleeAIController::IsTowerType(type.get())) continue;
+        if (type->GetUnitRace().name != race) continue;
+        const int cost = type->GetGoldCost() + type->GetLumberCost();
+        if (cost < bestTowerCost) {
+            bestTowerCost = cost;
+            outPlan.tower = id;
+        }
+    }
+
+    outPlan.valid = true;
+    return true;
 }
 
 } // namespace war3

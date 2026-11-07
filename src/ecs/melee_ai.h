@@ -85,6 +85,7 @@ private:
     int gridH_ = kDefaultGridSize;
     float minX_ = -8192.0f, minY_ = -8192.0f;
     float maxX_ = 8192.0f, maxY_ = 8192.0f;
+    const CSimulation* boundSim_ = nullptr;
     std::vector<TacticalThreatCell> cells_;
     TacticalThreatCell emptyCell_{};
     int activeThreatCells_ = 0;
@@ -125,6 +126,10 @@ public:
     int GetKitingRetreatCount() const { return kitingRetreatCount_; }
     int GetFocusFireOrderCount() const { return focusFireOrderCount_; }
 
+    static bool IsWorkerType(const CUnitType* type);
+    static bool IsCombatType(const CUnitType* type);
+    static bool IsTowerType(const CUnitType* type);
+
 private:
     void Think();
     void DiscoverPlan();
@@ -160,7 +165,6 @@ private:
     // town hall up to the difficulty cap. Ranged towers outrange melee
     // harass; melee-only battlements still body-block.
     bool TryBuildTowers();
-    static bool IsTowerType(const CUnitType* type);
     // Expansion: when the main mine runs dry, plant the town hall at the
     // nearest rich unowned mine and walk harvesters over. One expo at a
     // time; new halls join worker training automatically (FindOwnedHalls).
@@ -178,8 +182,6 @@ private:
                         float& outX, float& outY) const;
     bool FindAttackTarget(float& outX, float& outY) const;
     bool IsEnemyPlayer(int index) const;
-    static bool IsWorkerType(const CUnitType* type);
-    static bool IsCombatType(const CUnitType* type);
     // Route one AI decision through the sim lockstep log (replayable,
     // UI-visible, and identical on every peer since the AI is
     // deterministic). Falls back to a direct issue when sim_ is null.
