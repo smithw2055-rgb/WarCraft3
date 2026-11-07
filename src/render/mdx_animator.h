@@ -2,6 +2,7 @@
 #include "third_party/sokol/sokol_gfx.h"
 #include "model/mdx.h"
 #include "math.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -30,6 +31,20 @@ struct MdxAnimNode {
 
     // Timelines from MdxModel (non-owning pointers, valid while model is alive)
     const std::vector<MdxTimeline>* timelines = nullptr;
+
+    // Stage Y1: Pre-resolved timeline pointers (eliminates per-frame linear tag scan)
+    const MdxTimeline* tlTranslation = nullptr;
+    const MdxTimeline* tlRotation = nullptr;
+    const MdxTimeline* tlScale = nullptr;
+    const MdxTimeline* tlVisibility = nullptr;
+    const MdxTimeline* tlGeosetAlpha = nullptr;
+
+    // Stage Y1: KeyframeCursorCache indices for O(1) sequential frame advancement
+    int cursorTranslation = 0;
+    int cursorRotation = 0;
+    int cursorScale = 0;
+    int cursorVisibility = 0;
+    int cursorGeosetAlpha = 0;
 };
 
 struct SequenceState {
@@ -67,6 +82,11 @@ public:
     bool SetSequence(int index, bool loop = true, float speed = 1.0f);
     int FindSequence(const std::string& name) const;
     bool PlaySequence(const std::string& name, bool loop = true, float speed = 1.0f);
+
+    // Stage Y2: Smooth Cross-Fade sequence transition (Slerp rotation + Lerp translation/scale)
+    bool CrossFadeToSequence(int index, bool loop = true, float blendSeconds = 0.15f, float speed = 1.0f);
+    bool CrossFadeToSequence(const std::string& name, bool loop = true, float blendSeconds = 0.15f, float speed = 1.0f);
+
     // Seconds to blend from the previous pose when the sequence changes.
     void SetBlendTime(float seconds) { blendTime_ = std::max(0.0f, seconds); }
     float GetBlendTime() const { return blendTime_; }
@@ -84,7 +104,8 @@ public:
     bool GetObjectWorldLocationYUp(int objectId, Vec3& outPosition) const;
     // Ribbon emitters need the node pivot (as a Y-up point, untransformed)
     // plus the Y-up world matrix to freeze above/below verts at emit time.
-    bool GetObjectPivotAndWorldTransformYUp(int objectId, Vec3& outPivot, Mat4& outMatrix) const;    bool GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const;
+    bool GetObjectPivotAndWorldTransformYUp(int objectId, Vec3& outPivot, Mat4& outMatrix) const;
+    bool GetObjectWorldPositionYUp(int objectId, Vec3& outPosition) const;
     const std::vector<MdxEventTrigger>& GetTriggeredEvents() const { return triggeredEvents_; }
 
     // Attachment points (JASS "hand"/"head"/"chest"/... names): resolved
@@ -107,6 +128,15 @@ public:
     int GetBoneCount() const { return boneCount_; }
     bool HasAnimations() const { return boneCount_ > 0; }
 
+    // Stage Y1 & Y2: Animation LOD & KeyframeCursorCache telemetry
+    void SetAnimationLodStride(int stride) { lodStride_ = std::max(1, stride); }
+    int GetAnimationLodStride() const { return lodStride_; }
+    uint64_t GetLodSkippedUpdateCount() const { return lodSkippedUpdates_; }
+    uint64_t GetCursorHitCount() const { return cursorHitCount_; }
+    uint64_t GetCursorMissCount() const { return cursorMissCount_; }
+    uint64_t GetSampleHeapAllocations() const { return sampleHeapAllocations_; }
+    bool IsTopologicalOrderValid() const;
+
 private:
     void BuildSkeleton(const MdxModel& model);
     void BuildEventTracks(const MdxModel& model);
@@ -120,7 +150,7 @@ private:
     static void ConvertMatrixToYUp(const Mat4& mdxMat, Mat4& out);
 
     std::vector<MdxAnimNode> nodes_;
-    std::vector<int> nodeOrder_; // parent-first traversal order
+    std::vector<int> nodeOrder_; // parent-first topological traversal order
     // Lowercased attachment node name -> objectId (rebuilt in BuildSkeleton).
     std::unordered_map<std::string, int> attachNameToObjectId_;
     std::vector<Mat4> boneMatrices_;
@@ -159,4 +189,13 @@ private:
     int boneTexHeight_ = 0;
     bool needsBoneUpload_ = false;
     Vec3 cameraForward_ = {0, 0, -1};
+
+    // Stage Y1 & Y2 state
+    int lodStride_ = 1;
+    uint32_t lodFrameCounter_ = 0;
+    float lodAccumulatedDt_ = 0.0f;
+    uint64_t lodSkippedUpdates_ = 0;
+    uint64_t cursorHitCount_ = 0;
+    uint64_t cursorMissCount_ = 0;
+    uint64_t sampleHeapAllocations_ = 0;
 };

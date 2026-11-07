@@ -277,6 +277,7 @@ static bool sampleGlobalTimelineLooped(const MdxTimeline& timeline, uint32_t fra
     return true;
 }
 
+// Stage Y1: Zero-allocation in-place timeline sampler with O(1) KeyframeCursorCache
 static bool sampleTimelineForAnimator(const MdxTimeline& timeline,
                                       const std::vector<uint32_t>* globalSequences,
                                       const MdxSequence* currentSequence,
@@ -284,7 +285,10 @@ static bool sampleTimelineForAnimator(const MdxTimeline& timeline,
                                       float elapsedMs,
                                       float* out,
                                       int elemCount,
-                                      float defaultVal) {
+                                      float defaultVal,
+                                      int& ioCursor,
+                                      uint64_t& cursorHits,
+                                      uint64_t& cursorMisses) {
     if (timeline.globalSequenceId >= 0 && globalSequences
         && timeline.globalSequenceId < (int)globalSequences->size()) {
         const uint32_t duration = (*globalSequences)[(size_t)timeline.globalSequenceId];
@@ -297,80 +301,103 @@ static bool sampleTimelineForAnimator(const MdxTimeline& timeline,
         return MdxSampleTimeline(timeline, sequenceFrame, out, elemCount, defaultVal);
     }
 
-    MdxTimeline sequenceTimeline;
-    sequenceTimeline.tag = timeline.tag;
-    sequenceTimeline.interpolationType = timeline.interpolationType;
-    sequenceTimeline.globalSequenceId = timeline.globalSequenceId;
-
-    const bool needsTangents = timeline.interpolationType == MdxInterpolation::Hermite
-        || timeline.interpolationType == MdxInterpolation::Bezier;
-    for (size_t i = 0; i < timeline.frames.size(); ++i) {
-        const uint32_t keyFrame = timeline.frames[i];
-        if (keyFrame < currentSequence->startFrame || keyFrame > currentSequence->endFrame) {
-            continue;
-        }
-        const size_t valueOffset = i * (size_t)elemCount;
-        if (timeline.values.size() < valueOffset + (size_t)elemCount) {
-            continue;
-        }
-        sequenceTimeline.frames.push_back(keyFrame);
-        for (int elem = 0; elem < elemCount; ++elem) {
-            sequenceTimeline.values.push_back(timeline.values[valueOffset + (size_t)elem]);
-        }
-        if (needsTangents
-            && timeline.inTans.size() >= valueOffset + (size_t)elemCount
-            && timeline.outTans.size() >= valueOffset + (size_t)elemCount) {
-            for (int elem = 0; elem < elemCount; ++elem) {
-                sequenceTimeline.inTans.push_back(timeline.inTans[valueOffset + (size_t)elem]);
-                sequenceTimeline.outTans.push_back(timeline.outTans[valueOffset + (size_t)elem]);
-            }
-        }
-    }
-
-    if (sequenceTimeline.frames.empty()) {
+    const size_t validCount = (elemCount > 0)
+        ? std::min(timeline.frames.size(), timeline.values.size() / (size_t)elemCount)
+        : 0;
+    if (validCount == 0) {
         for (int elem = 0; elem < elemCount; ++elem) {
             out[elem] = defaultVal;
         }
         return false;
     }
 
-    if (elemCount == 4 && timeline.tag == TAG_KGRT) {
-        if (sequenceTimeline.frames.size() == 1 || sequenceFrame <= sequenceTimeline.frames.front()) {
-            out[0] = sequenceTimeline.values[0];
-            out[1] = sequenceTimeline.values[1];
-            out[2] = sequenceTimeline.values[2];
-            out[3] = sequenceTimeline.values[3];
-            return true;
-        }
-        if (sequenceFrame >= sequenceTimeline.frames.back()) {
-            size_t lastIdx = sequenceTimeline.frames.size() - 1;
-            out[0] = sequenceTimeline.values[lastIdx * 4 + 0];
-            out[1] = sequenceTimeline.values[lastIdx * 4 + 1];
-            out[2] = sequenceTimeline.values[lastIdx * 4 + 2];
-            out[3] = sequenceTimeline.values[lastIdx * 4 + 3];
-            return true;
-        }
-        size_t keyA = 0, keyB = 1;
-        for (size_t i = 1; i < sequenceTimeline.frames.size(); ++i) {
-            if (sequenceTimeline.frames[i] > sequenceFrame) {
-                keyA = i - 1;
-                keyB = i;
-                break;
+    const uint32_t seqStart = currentSequence->startFrame;
+    const uint32_t seqEnd = currentSequence->endFrame;
+
+    // Fast path: check cached cursor interval [ioCursor, ioCursor + 1] or single-step [ioCursor + 1, ioCursor + 2]
+    int keyA = -1;
+    int keyB = -1;
+    if (ioCursor >= 0 && (size_t)(ioCursor + 1) < validCount) {
+        const uint32_t f0 = timeline.frames[(size_t)ioCursor];
+        const uint32_t f1 = timeline.frames[(size_t)ioCursor + 1];
+        if (f0 >= seqStart && f1 <= seqEnd && f0 <= sequenceFrame && sequenceFrame < f1) {
+            keyA = ioCursor;
+            keyB = ioCursor + 1;
+            ++cursorHits;
+        } else if ((size_t)(ioCursor + 2) < validCount) {
+            const uint32_t f2 = timeline.frames[(size_t)ioCursor + 2];
+            if (f1 >= seqStart && f2 <= seqEnd && f1 <= sequenceFrame && sequenceFrame < f2) {
+                ioCursor = ioCursor + 1;
+                keyA = ioCursor;
+                keyB = ioCursor + 1;
+                ++cursorHits;
             }
         }
-        uint32_t fA = sequenceTimeline.frames[keyA];
-        uint32_t fB = sequenceTimeline.frames[keyB];
-        float t = (fB > fA) ? ((float)(sequenceFrame - fA) / (float)(fB - fA)) : 0.0f;
-        Vec4 qA = {sequenceTimeline.values[keyA * 4 + 0], sequenceTimeline.values[keyA * 4 + 1],
-                   sequenceTimeline.values[keyA * 4 + 2], sequenceTimeline.values[keyA * 4 + 3]};
-        Vec4 qB = {sequenceTimeline.values[keyB * 4 + 0], sequenceTimeline.values[keyB * 4 + 1],
-                   sequenceTimeline.values[keyB * 4 + 2], sequenceTimeline.values[keyB * 4 + 3]};
-        Vec4 q = (sequenceTimeline.interpolationType == MdxInterpolation::None) ? qA : SlerpQuat(qA, qB, t);
+    }
+
+    if (keyA < 0) {
+        const auto beginIt = timeline.frames.begin();
+        const auto validEndIt = beginIt + (std::ptrdiff_t)validCount;
+        const auto firstIt = std::lower_bound(beginIt, validEndIt, seqStart);
+        const auto lastEndIt = std::upper_bound(firstIt, validEndIt, seqEnd);
+        if (firstIt == lastEndIt) {
+            for (int elem = 0; elem < elemCount; ++elem) {
+                out[elem] = defaultVal;
+            }
+            return false;
+        }
+
+        const int firstIdx = (int)(firstIt - beginIt);
+        const int lastIdx = (int)(lastEndIt - beginIt) - 1;
+
+        if (firstIdx == lastIdx || sequenceFrame <= timeline.frames[(size_t)firstIdx]) {
+            if (ioCursor == firstIdx) ++cursorHits;
+            else ++cursorMisses;
+            ioCursor = firstIdx;
+            const size_t baseOff = (size_t)firstIdx * (size_t)elemCount;
+            for (int elem = 0; elem < elemCount; ++elem) {
+                out[elem] = timeline.values[baseOff + (size_t)elem];
+            }
+            return true;
+        }
+        if (sequenceFrame >= timeline.frames[(size_t)lastIdx]) {
+            if (ioCursor == lastIdx) ++cursorHits;
+            else ++cursorMisses;
+            ioCursor = lastIdx;
+            const size_t baseOff = (size_t)lastIdx * (size_t)elemCount;
+            for (int elem = 0; elem < elemCount; ++elem) {
+                out[elem] = timeline.values[baseOff + (size_t)elem];
+            }
+            return true;
+        }
+
+        const auto upperIt = std::upper_bound(firstIt, lastEndIt, sequenceFrame);
+        keyB = (int)(upperIt - beginIt);
+        keyA = keyB - 1;
+        ioCursor = keyA;
+        ++cursorMisses;
+    }
+
+    const uint32_t fA = timeline.frames[(size_t)keyA];
+    const uint32_t fB = timeline.frames[(size_t)keyB];
+    const float t = (fB > fA) ? ((float)(sequenceFrame - fA) / (float)(fB - fA)) : 0.0f;
+
+    if (elemCount == 4 && timeline.tag == TAG_KGRT) {
+        const size_t offA = (size_t)keyA * 4;
+        const size_t offB = (size_t)keyB * 4;
+        Vec4 qA = {timeline.values[offA + 0], timeline.values[offA + 1],
+                   timeline.values[offA + 2], timeline.values[offA + 3]};
+        Vec4 qB = {timeline.values[offB + 0], timeline.values[offB + 1],
+                   timeline.values[offB + 2], timeline.values[offB + 3]};
+        Vec4 q = (timeline.interpolationType == MdxInterpolation::None) ? qA : SlerpQuat(qA, qB, t);
         out[0] = q.x; out[1] = q.y; out[2] = q.z; out[3] = q.w;
         return true;
     }
 
-    return MdxSampleTimeline(sequenceTimeline, sequenceFrame, out, elemCount, defaultVal);
+    for (int elem = 0; elem < elemCount; ++elem) {
+        out[elem] = interpolateTimelineValue(timeline, elem, elemCount, keyA, keyB, t);
+    }
+    return true;
 }
 
 static bool sampleVisibilityTimelineForAnimator(const MdxTimeline& timeline,
@@ -378,23 +405,55 @@ static bool sampleVisibilityTimelineForAnimator(const MdxTimeline& timeline,
                                                 const MdxSequence* currentSequence,
                                                 uint32_t sequenceFrame,
                                                 float elapsedMs,
-                                                float* out) {
+                                                float* out,
+                                                int& ioCursor,
+                                                uint64_t& cursorHits,
+                                                uint64_t& cursorMisses) {
     if (!out || timeline.frames.empty() || timeline.values.empty()) {
         return false;
     }
-    MdxTimeline steppedTimeline = timeline;
-    steppedTimeline.interpolationType = MdxInterpolation::None;
-    if (timeline.globalSequenceId >= 0) {
-        return sampleTimelineForAnimator(steppedTimeline, globalSequences, currentSequence,
-                                         sequenceFrame, elapsedMs, out, 1, 1.0f);
+    if (timeline.globalSequenceId >= 0 && globalSequences
+        && timeline.globalSequenceId < (int)globalSequences->size()) {
+        const uint32_t duration = (*globalSequences)[(size_t)timeline.globalSequenceId];
+        if (duration > 0) {
+            const uint32_t frame = (uint32_t)std::max(0.0f, elapsedMs) % duration;
+            const size_t validCount = std::min(timeline.frames.size(), timeline.values.size());
+            size_t key = validCount - 1;
+            if (frame >= timeline.frames[0] && frame < timeline.frames[validCount - 1]) {
+                for (size_t i = 1; i < validCount; ++i) {
+                    if (timeline.frames[i] > frame) {
+                        key = i - 1;
+                        break;
+                    }
+                }
+            }
+            out[0] = timelineValueOrDefault(timeline, (int)key, 0, 1, 1.0f);
+            return true;
+        }
     }
 
+    const size_t validCount = std::min(timeline.frames.size(), timeline.values.size());
     if (currentSequence) {
+        const uint32_t seqStart = currentSequence->startFrame;
+        const uint32_t seqEnd = currentSequence->endFrame;
+        if (ioCursor >= 0 && (size_t)ioCursor < validCount) {
+            const uint32_t f0 = timeline.frames[(size_t)ioCursor];
+            if (f0 >= seqStart && f0 <= seqEnd && f0 <= sequenceFrame) {
+                const bool nextAfter = ((size_t)(ioCursor + 1) >= validCount) ||
+                                       (timeline.frames[(size_t)ioCursor + 1] > sequenceFrame) ||
+                                       (timeline.frames[(size_t)ioCursor + 1] > seqEnd);
+                if (nextAfter) {
+                    ++cursorHits;
+                    out[0] = timelineValueOrDefault(timeline, ioCursor, 0, 1, 1.0f);
+                    return true;
+                }
+            }
+        }
         bool found = false;
         size_t key = 0;
-        for (size_t i = 0; i < timeline.frames.size(); ++i) {
+        for (size_t i = 0; i < validCount; ++i) {
             const uint32_t keyFrame = timeline.frames[i];
-            if (keyFrame < currentSequence->startFrame || keyFrame > currentSequence->endFrame) {
+            if (keyFrame < seqStart || keyFrame > seqEnd) {
                 continue;
             }
             if (!found || keyFrame <= sequenceFrame) {
@@ -406,18 +465,21 @@ static bool sampleVisibilityTimelineForAnimator(const MdxTimeline& timeline,
             out[0] = 1.0f;
             return false;
         }
-        out[0] = timelineValueOrDefault(steppedTimeline, (int)key, 0, 1, 1.0f);
+        ioCursor = (int)key;
+        ++cursorMisses;
+        out[0] = timelineValueOrDefault(timeline, (int)key, 0, 1, 1.0f);
         return true;
     }
 
     size_t key = 0;
-    for (size_t i = 1; i < timeline.frames.size(); ++i) {
+    for (size_t i = 1; i < validCount; ++i) {
         if (timeline.frames[i] > sequenceFrame) {
             break;
         }
         key = i;
     }
-    out[0] = timelineValueOrDefault(steppedTimeline, (int)key, 0, 1, 1.0f);
+    ioCursor = (int)key;
+    out[0] = timelineValueOrDefault(timeline, (int)key, 0, 1, 1.0f);
     return true;
 }
 
@@ -799,6 +861,17 @@ void MdxAnimator::BuildSkeleton(const MdxModel& model) {
         n.timelines = e.timelines;
         n.visibilityGeosetAnim = e.visibilityGeosetAnim;
         n.visibilityTimelineTag = e.visibilityTimelineTag;
+        if (n.timelines) {
+            n.tlTranslation = findTimeline(*n.timelines, TAG_KGTR);
+            n.tlRotation = findTimeline(*n.timelines, TAG_KGRT);
+            n.tlScale = findTimeline(*n.timelines, TAG_KGSC);
+            if (n.visibilityTimelineTag != 0) {
+                n.tlVisibility = findTimeline(*n.timelines, n.visibilityTimelineTag);
+            }
+        }
+        if (n.visibilityGeosetAnim) {
+            n.tlGeosetAlpha = findTimeline(n.visibilityGeosetAnim->timelines, TAG_KGAO);
+        }
         objectIdToNodeIndex.push_back({e.objectId, (int)i});
         builtNodeOrder[i] = (int)i;
     }
@@ -859,6 +932,7 @@ bool MdxAnimator::SetSequence(int index, bool loop, float speed) {
     sequenceState_.speed = speed;
     sequenceState_.loop = loop;
     sequenceState_.finished = false;
+    lodAccumulatedDt_ = 0.0f;
     ResetEventEmitters();
     if (!previous.empty() && previous.size() == nodes_.size()) {
         blendFromPoses_ = std::move(previous);
@@ -911,6 +985,29 @@ bool MdxAnimator::PlaySequence(const std::string& name, bool loop, float speed) 
     return SetSequence(idx, loop, speed);
 }
 
+bool MdxAnimator::CrossFadeToSequence(int index, bool loop, float blendSeconds, float speed) {
+    const float prevBlendTime = blendTime_;
+    blendTime_ = std::max(0.0f, blendSeconds);
+    const bool ok = SetSequence(index, loop, speed);
+    blendTime_ = prevBlendTime;
+    return ok;
+}
+
+bool MdxAnimator::CrossFadeToSequence(const std::string& name, bool loop, float blendSeconds, float speed) {
+    const int idx = FindSequence(name);
+    if (idx < 0) return false;
+    return CrossFadeToSequence(idx, loop, blendSeconds, speed);
+}
+
+bool MdxAnimator::IsTopologicalOrderValid() const {
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        if (nodes_[i].parentIndex >= (int)i) {
+            return false;
+        }
+    }
+    return true;
+}
+
 float MdxAnimator::GetSequenceProgress() const {
     if (sequenceState_.sequenceIndex < 0 || !sequences_) return 0;
     const auto& seq = (*sequences_)[sequenceState_.sequenceIndex];
@@ -954,6 +1051,17 @@ void MdxAnimator::Update(float dt) {
         return;
     }
     if (!sequences_ || sequenceState_.sequenceIndex >= (int)sequences_->size()) return;
+
+    if (lodStride_ > 1 && blendLeft_ <= 0.0f) {
+        ++lodFrameCounter_;
+        if ((lodFrameCounter_ % (uint32_t)lodStride_) != 0) {
+            lodAccumulatedDt_ += dt;
+            ++lodSkippedUpdates_;
+            return;
+        }
+        dt += lodAccumulatedDt_;
+        lodAccumulatedDt_ = 0.0f;
+    }
 
     const auto& seq = (*sequences_)[sequenceState_.sequenceIndex];
     uint32_t start = seq.startFrame;
@@ -1060,7 +1168,6 @@ void MdxAnimator::SampleAnimations(uint32_t frame) {
 
     for (auto& node : nodes_) {
         float tmp[4] = {};
-        const MdxTimeline* tl;
 
         node.localTranslation = {0, 0, 0};
         node.localRotation = {0, 0, 0, 1};
@@ -1069,51 +1176,46 @@ void MdxAnimator::SampleAnimations(uint32_t frame) {
 
         if (node.visibilityGeosetAnim) {
             node.localVisibility = node.visibilityGeosetAnim->alpha;
-            for (const MdxTimeline& timeline : node.visibilityGeosetAnim->timelines) {
-                if (timeline.tag == TAG_KGAO
-                    && sampleTimelineForAnimator(timeline, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 1,
-                                                 node.visibilityGeosetAnim->alpha)) {
-                    node.localVisibility = std::isfinite(tmp[0]) ? tmp[0] : node.visibilityGeosetAnim->alpha;
-                    break;
-                }
+            if (node.tlGeosetAlpha && !node.tlGeosetAlpha->frames.empty()
+                && sampleTimelineForAnimator(*node.tlGeosetAlpha, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 1,
+                                             node.visibilityGeosetAnim->alpha, node.cursorGeosetAlpha, cursorHitCount_, cursorMissCount_)) {
+                node.localVisibility = std::isfinite(tmp[0]) ? tmp[0] : node.visibilityGeosetAnim->alpha;
             }
         }
 
         if (!node.timelines || node.timelines->empty()) continue;
 
-        tl = findTimeline(*node.timelines, TAG_KGTR);
-        if (tl && !tl->frames.empty()
-            && sampleTimelineForAnimator(*tl, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 3, 0.0f)) {
+        if (node.tlTranslation && !node.tlTranslation->frames.empty()
+            && sampleTimelineForAnimator(*node.tlTranslation, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 3, 0.0f,
+                                         node.cursorTranslation, cursorHitCount_, cursorMissCount_)) {
             Vec3 sampled = {tmp[0], tmp[1], tmp[2]};
             if (IsFiniteVec3(sampled)) {
                 node.localTranslation = sampled;
             }
         }
 
-        tl = findTimeline(*node.timelines, TAG_KGRT);
-        if (tl && !tl->frames.empty()
-            && sampleTimelineForAnimator(*tl, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 4, 0.0f)) {
+        if (node.tlRotation && !node.tlRotation->frames.empty()
+            && sampleTimelineForAnimator(*node.tlRotation, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 4, 0.0f,
+                                         node.cursorRotation, cursorHitCount_, cursorMissCount_)) {
             Vec4 sampled = NormalizeQuat({tmp[0], tmp[1], tmp[2], tmp[3]});
             if (IsFiniteVec4(sampled)) {
                 node.localRotation = sampled;
             }
         }
 
-        tl = findTimeline(*node.timelines, TAG_KGSC);
-        if (tl && !tl->frames.empty()
-            && sampleTimelineForAnimator(*tl, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 3, 1.0f)) {
+        if (node.tlScale && !node.tlScale->frames.empty()
+            && sampleTimelineForAnimator(*node.tlScale, globalSequences_, currentSequence, frame, elapsedMs_, tmp, 3, 1.0f,
+                                         node.cursorScale, cursorHitCount_, cursorMissCount_)) {
             Vec3 sampled = {tmp[0], tmp[1], tmp[2]};
             if (IsFiniteVec3(sampled)) {
                 node.localScale = sampled;
             }
         }
 
-        if (!node.visibilityGeosetAnim && node.visibilityTimelineTag != 0) {
-            tl = findTimeline(*node.timelines, node.visibilityTimelineTag);
-            if (tl && !tl->frames.empty()) {
-                if (sampleVisibilityTimelineForAnimator(*tl, globalSequences_, currentSequence, frame, elapsedMs_, tmp)) {
-                    node.localVisibility = std::isfinite(tmp[0]) ? tmp[0] : 1.0f;
-                }
+        if (!node.visibilityGeosetAnim && node.tlVisibility && !node.tlVisibility->frames.empty()) {
+            if (sampleVisibilityTimelineForAnimator(*node.tlVisibility, globalSequences_, currentSequence, frame, elapsedMs_, tmp,
+                                                    node.cursorVisibility, cursorHitCount_, cursorMissCount_)) {
+                node.localVisibility = std::isfinite(tmp[0]) ? tmp[0] : 1.0f;
             }
         }
     }

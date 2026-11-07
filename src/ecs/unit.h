@@ -225,6 +225,13 @@ public:
     bool HasBuff(War3ID buffId) const;
     const std::vector<std::unique_ptr<CBuff>>& GetBuffs() const { return buffs_; }
     void UpdateBuffs(CSimulation& game);
+
+    // Stage Z1: Zero-allocation data-driven buff pool (Unity DOTS GameplayEffect style)
+    bool ApplyDataDrivenBuff(const DataDrivenBuffSpec& spec, CSimulation& game);
+    bool RemoveDataDrivenBuff(War3ID buffId, CSimulation& game);
+    const DataDrivenBuffRecord* GetDataDrivenBuff(War3ID buffId) const;
+    const std::vector<DataDrivenBuffRecord>& GetDataDrivenBuffs() const { return dataDrivenBuffs_; }
+    uint64_t GetZeroAllocBuffAppliedCount() const { return zeroAllocBuffAppliedCount_; }
     // Predicate removal for UnitRemoveBuffs(Ex): matched buffs get OnRemove
     // then erase. positive/negative/timedLife filter; pass -1/ignore flags
     // through for categories without backing (documented at call sites).
@@ -581,6 +588,9 @@ private:
 
     // Buffs
     std::vector<std::unique_ptr<CBuff>> buffs_;
+    std::vector<DataDrivenBuffRecord> dataDrivenBuffs_;
+    uint64_t zeroAllocBuffAppliedCount_ = 0;
+    void SyncDataDrivenBuffModifiers(DataDrivenBuffRecord& rec, bool apply);
 
     // Instance unit-type flag overrides (UnitAddType/UnitRemoveType).
     std::unordered_set<int> addedUnitTypes_;

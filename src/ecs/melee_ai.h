@@ -40,6 +40,56 @@ struct AIRacePlan {
     bool valid = false;
 };
 
+// ============================================================
+// Stage Z2: Spatial Threat & Utility Grid (Godot LimboAI / RTS
+// Influence & Threat Map architecture).
+// ============================================================
+struct TacticalThreatCell {
+    float enemyThreat = 0.0f;      // Aggregated combat danger of enemy units in cell
+    float friendlyPower = 0.0f;    // Aggregated combat strength of friendly units in cell
+    float highValueScore = 0.0f;   // Priority score for wounded/high-value targets
+    int enemyCount = 0;
+    int friendlyCount = 0;
+};
+
+class TacticalThreatMap {
+public:
+    static constexpr int kDefaultGridSize = 32;
+
+    TacticalThreatMap(int gridW = kDefaultGridSize, int gridH = kDefaultGridSize,
+                      float minX = -8192.0f, float minY = -8192.0f,
+                      float maxX = 8192.0f, float maxY = 8192.0f);
+
+    void Rebuild(const CSimulation& sim, int aiPlayerIndex);
+    const TacticalThreatCell& GetCellAtWorld(float x, float y) const;
+    float SampleThreatAt(float x, float y) const;
+    float SampleFriendlyPowerAt(float x, float y) const;
+
+    // Utility AI target scoring: evaluates focus-fire priority of candidateTarget
+    // relative to attacker (higher score = higher priority: low HP ratio, hero/combat threat, proximity).
+    float ScoreTargetUtility(const CUnit* attacker, const CUnit* candidateTarget) const;
+
+    // Computes a normalized safe retreat/kiting direction vector (outDirX, outDirY)
+    // away from local enemy threat gradient toward safer / allied cells.
+    bool ComputeRetreatVector(float unitX, float unitY, float& outDirX, float& outDirY) const;
+
+    int GetGridWidth() const { return gridW_; }
+    int GetGridHeight() const { return gridH_; }
+    int GetActiveThreatCellCount() const { return activeThreatCells_; }
+
+private:
+    int WorldToCol(float x) const;
+    int WorldToRow(float y) const;
+
+    int gridW_ = kDefaultGridSize;
+    int gridH_ = kDefaultGridSize;
+    float minX_ = -8192.0f, minY_ = -8192.0f;
+    float maxX_ = 8192.0f, maxY_ = 8192.0f;
+    std::vector<TacticalThreatCell> cells_;
+    TacticalThreatCell emptyCell_{};
+    int activeThreatCells_ = 0;
+};
+
 class MeleeAIController {
 public:
     MeleeAIController(CSimulation* sim, int playerIndex);
@@ -66,6 +116,14 @@ public:
     int GetWaveCooldownTicks() const;
     bool HasPlan() const { return plan_.valid; }
     const AIRacePlan& GetPlan() const { return plan_; }
+
+    // Stage Z2: Tactical Threat Map & Utility AI Micro APIs
+    void RebuildThreatMap();
+    const TacticalThreatMap& GetThreatMap() const { return threatMap_; }
+    CUnit* EvaluateBestFocusTarget(const CUnit* attacker, float searchRadius = 900.0f) const;
+    int ExecuteTacticalMicro(float retreatHpRatioThreshold = 0.30f, float retreatStepDist = 280.0f);
+    int GetKitingRetreatCount() const { return kitingRetreatCount_; }
+    int GetFocusFireOrderCount() const { return focusFireOrderCount_; }
 
 private:
     void Think();
@@ -138,4 +196,9 @@ private:
     int waveNumber_ = 0;
     int lastWaveTick_ = -100000;
     AIRacePlan plan_;
+
+    // Stage Z2 state
+    TacticalThreatMap threatMap_;
+    int kitingRetreatCount_ = 0;
+    int focusFireOrderCount_ = 0;
 };

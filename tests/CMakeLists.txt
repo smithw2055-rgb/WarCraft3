@@ -207,6 +207,7 @@ add_executable(warsmash_tests
     ../src/ecs/attribute_aggregator.cpp
     ../src/ecs/unit.cpp
     ../src/ecs/fog_state.cpp
+    ../src/render/fog_of_war.cpp
     ../src/ecs/unit_type.cpp
     ../src/ecs/player.cpp
     ../src/ecs/csimulation.cpp

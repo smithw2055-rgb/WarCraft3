@@ -846,9 +846,240 @@ void MeleeAIController::AssignIdleWorkers() {
     }
 }
 
+TacticalThreatMap::TacticalThreatMap(int gridW, int gridH,
+                                     float minX, float minY,
+                                     float maxX, float maxY)
+    : gridW_(std::max(1, gridW))
+    , gridH_(std::max(1, gridH))
+    , minX_(minX)
+    , minY_(minY)
+    , maxX_(maxX)
+    , maxY_(maxY)
+    , cells_((size_t)gridW_ * gridH_) {}
+
+int TacticalThreatMap::WorldToCol(float x) const {
+    const float spanX = (maxX_ > minX_) ? (maxX_ - minX_) : 1.0f;
+    return std::clamp((int)((x - minX_) / spanX * gridW_), 0, gridW_ - 1);
+}
+
+int TacticalThreatMap::WorldToRow(float y) const {
+    const float spanY = (maxY_ > minY_) ? (maxY_ - minY_) : 1.0f;
+    return std::clamp((int)((y - minY_) / spanY * gridH_), 0, gridH_ - 1);
+}
+
+void TacticalThreatMap::Rebuild(const CSimulation& sim, int aiPlayerIndex) {
+    std::fill(cells_.begin(), cells_.end(), TacticalThreatCell{});
+    activeThreatCells_ = 0;
+
+    const CPlayer* selfPlayer = sim.GetPlayer(aiPlayerIndex);
+    for (const CUnit* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->IsHidden()) continue;
+        const int owner = unit->GetPlayerIndex();
+        if (owner < 0) continue;
+
+        bool isAlly = (owner == aiPlayerIndex);
+        if (!isAlly && selfPlayer) {
+            if (const CPlayer* other = sim.GetPlayer(owner)) {
+                isAlly = selfPlayer->HasAlliance(*other, CAllianceType::PASSIVE);
+            }
+        }
+
+        const int col = WorldToCol(unit->GetX());
+        const int row = WorldToRow(unit->GetY());
+        TacticalThreatCell& cell = cells_[(size_t)row * gridW_ + col];
+
+        float unitPower = 15.0f;
+        if (const CUnitType* ut = unit->GetUnitType()) {
+            if (!ut->GetAttacks().empty()) {
+                const auto& atk = ut->GetAttacks()[0];
+                const float avgDmg = (float)atk.damageBase + 0.5f * (float)(atk.damageDice * (atk.damageSidesPerDie + 1));
+                const float cd = std::max(0.25f, atk.cooldown);
+                unitPower = (avgDmg / cd) * 2.0f + (float)unit->GetTotalDefense() * 1.5f;
+            } else if (ut->IsBuilding()) {
+                unitPower = 5.0f;
+            }
+        }
+        if (unit->IsHero()) {
+            unitPower *= 1.75f;
+        }
+
+        if (isAlly) {
+            cell.friendlyPower += unitPower;
+            cell.friendlyCount++;
+        } else {
+            cell.enemyThreat += unitPower;
+            cell.enemyCount++;
+            const float maxHp = std::max(1.0f, unit->GetMaxLife());
+            const float missingHpRatio = std::clamp(1.0f - (unit->GetLife() / maxHp), 0.0f, 1.0f);
+            const float valueWeight = (unit->IsHero() ? 50.0f : 20.0f) * (1.0f + missingHpRatio * 1.5f);
+            cell.highValueScore = std::max(cell.highValueScore, valueWeight);
+        }
+    }
+
+    for (const auto& cell : cells_) {
+        if (cell.enemyThreat > 0.0f || cell.friendlyPower > 0.0f) {
+            ++activeThreatCells_;
+        }
+    }
+}
+
+const TacticalThreatCell& TacticalThreatMap::GetCellAtWorld(float x, float y) const {
+    if (cells_.empty()) return emptyCell_;
+    const int col = WorldToCol(x);
+    const int row = WorldToRow(y);
+    return cells_[(size_t)row * gridW_ + col];
+}
+
+float TacticalThreatMap::SampleThreatAt(float x, float y) const {
+    return GetCellAtWorld(x, y).enemyThreat;
+}
+
+float TacticalThreatMap::SampleFriendlyPowerAt(float x, float y) const {
+    return GetCellAtWorld(x, y).friendlyPower;
+}
+
+float TacticalThreatMap::ScoreTargetUtility(const CUnit* attacker, const CUnit* candidateTarget) const {
+    if (!attacker || !candidateTarget || candidateTarget->IsDead() || candidateTarget->IsHidden() ||
+        candidateTarget->IsInvulnerable()) {
+        return -1.0f;
+    }
+
+    const float dx = candidateTarget->GetX() - attacker->GetX();
+    const float dy = candidateTarget->GetY() - attacker->GetY();
+    const float dist = std::sqrt(dx * dx + dy * dy);
+
+    // 1. Low-health execution utility (up to +120 pts for nearly dead targets)
+    const float maxHp = std::max(1.0f, candidateTarget->GetMaxLife());
+    const float hpRatio = std::clamp(candidateTarget->GetLife() / maxHp, 0.0f, 1.0f);
+    const float executionBonus = (1.0f - hpRatio) * 120.0f;
+
+    // 2. Target tactical role value (Hero > Combat Unit > Worker > Passive Building)
+    float roleBonus = 25.0f;
+    if (candidateTarget->IsHero()) {
+        roleBonus = 85.0f;
+    } else if (const CUnitType* ut = candidateTarget->GetUnitType()) {
+        if (!ut->GetAttacks().empty()) {
+            roleBonus = 50.0f;
+        } else if (ut->IsBuilding()) {
+            roleBonus = 15.0f;
+        }
+    }
+
+    // 3. Distance penalty (prefer in-range or nearby targets)
+    const float atkRange = std::max(100.0f, attacker->GetAttackRange(0));
+    const float distPenalty = (dist <= atkRange) ? (dist * 0.02f) : (20.0f + (dist - atkRange) * 0.08f);
+
+    return std::max(0.01f, roleBonus + executionBonus - distPenalty);
+}
+
+bool TacticalThreatMap::ComputeRetreatVector(float unitX, float unitY, float& outDirX, float& outDirY) const {
+    if (cells_.empty()) {
+        outDirX = 0.0f;
+        outDirY = 0.0f;
+        return false;
+    }
+    const int centerCol = WorldToCol(unitX);
+    const int centerRow = WorldToRow(unitY);
+    const float centerThreat = cells_[(size_t)centerRow * gridW_ + centerCol].enemyThreat;
+
+    float gradX = 0.0f;
+    float gradY = 0.0f;
+    for (int dr = -1; dr <= 1; ++dr) {
+        for (int dc = -1; dc <= 1; ++dc) {
+            if (dr == 0 && dc == 0) continue;
+            const int r = std::clamp(centerRow + dr, 0, gridH_ - 1);
+            const int c = std::clamp(centerCol + dc, 0, gridW_ - 1);
+            const TacticalThreatCell& neighbor = cells_[(size_t)r * gridW_ + c];
+            // Push away from higher enemyThreat and toward higher friendlyPower
+            const float safetyDelta = (centerThreat - neighbor.enemyThreat) + 0.35f * neighbor.friendlyPower;
+            gradX += (float)dc * safetyDelta;
+            gradY += (float)dr * safetyDelta;
+        }
+    }
+
+    const float len = std::sqrt(gradX * gradX + gradY * gradY);
+    if (len > 1e-4f) {
+        outDirX = gradX / len;
+        outDirY = gradY / len;
+        return true;
+    }
+    // Fallback deterministic retreat direction (-X) if threat is uniform
+    if (centerThreat > 0.0f) {
+        outDirX = -1.0f;
+        outDirY = 0.0f;
+        return true;
+    }
+    outDirX = 0.0f;
+    outDirY = 0.0f;
+    return false;
+}
+
+void MeleeAIController::RebuildThreatMap() {
+    if (!sim_) return;
+    threatMap_.Rebuild(*sim_, playerIndex_);
+}
+
+CUnit* MeleeAIController::EvaluateBestFocusTarget(const CUnit* attacker, float searchRadius) const {
+    if (!sim_ || !attacker) return nullptr;
+    const float r2 = searchRadius * searchRadius;
+    CUnit* bestTarget = nullptr;
+    float bestScore = -1.0f;
+
+    for (CUnit* cand : sim_->GetUnits()) {
+        if (!cand || cand->IsDead() || cand->IsHidden() || !IsEnemyPlayer(cand->GetPlayerIndex()) ||
+            cand->IsInvisibleTo(attacker)) continue;
+        const float d2 = Dist2(attacker->GetX(), attacker->GetY(), cand->GetX(), cand->GetY());
+        if (d2 > r2) continue;
+        const float score = threatMap_.ScoreTargetUtility(attacker, cand);
+        if (score > bestScore) {
+            bestScore = score;
+            bestTarget = cand;
+        }
+    }
+    return bestTarget;
+}
+
+int MeleeAIController::ExecuteTacticalMicro(float retreatHpRatioThreshold, float retreatStepDist) {
+    if (!sim_) return 0;
+    RebuildThreatMap();
+    int microActions = 0;
+
+    for (CUnit* unit : sim_->GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
+        const CUnitType* ut = unit->GetUnitType();
+        if (!ut || ut->IsBuilding() || IsWorkerType(ut)) continue;
+
+        const float maxHp = std::max(1.0f, unit->GetMaxLife());
+        const float hpRatio = unit->GetLife() / maxHp;
+        const float localThreat = threatMap_.SampleThreatAt(unit->GetX(), unit->GetY());
+
+        // 1. Wounded unit under active threat -> kite/retreat along safety gradient
+        if (hpRatio <= retreatHpRatioThreshold && localThreat > 0.0f) {
+            float dirX = 0.0f, dirY = 0.0f;
+            if (threatMap_.ComputeRetreatVector(unit->GetX(), unit->GetY(), dirX, dirY)) {
+                const float retreatX = unit->GetX() + dirX * retreatStepDist;
+                const float retreatY = unit->GetY() + dirY * retreatStepDist;
+                IssueAiOrder(unit, std::make_unique<COrderTargetPoint>(OrderIds::MOVE, retreatX, retreatY));
+                ++kitingRetreatCount_;
+                ++microActions;
+                continue;
+            }
+        }
+
+        // 2. Healthy combat unit -> focus-fire highest-utility enemy target in range
+        if (CUnit* focusTarget = EvaluateBestFocusTarget(unit, 900.0f)) {
+            IssueAiOrder(unit, std::make_unique<COrderTargetWidget>(OrderIds::ATTACK, focusTarget));
+            ++focusFireOrderCount_;
+            ++microActions;
+        }
+    }
+    return microActions;
+}
+
 void MeleeAIController::Think() {
     thinkCount_++;
     if (!sim_ || !sim_->GetUnitData()) return;
+    RebuildThreatMap();
     if (!plan_.valid) DiscoverPlan();
     // Research is building-driven, not plan-driven: a surviving lab keeps
     // working even when the base plan collapsed (or never formed).

@@ -122,6 +122,7 @@ CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
     flyHeight_ = unitType->GetDefaultFlyingHeight();
     foodUsed_ = unitType->GetFoodUsed();
     foodMade_ = unitType->GetFoodMade();
+    dataDrivenBuffs_.reserve(16);
 }
 
 CUnit::~CUnit() {
@@ -592,7 +593,122 @@ void CUnit::AddBuff(std::unique_ptr<CBuff> buff, CSimulation& game) {
     buffs_.push_back(std::move(buff));
 }
 
+void CUnit::SyncDataDrivenBuffModifiers(DataDrivenBuffRecord& rec, bool apply) {
+    const float stacks = static_cast<float>(std::max(1, rec.stackCount));
+    if (apply) {
+        if (rec.spec.moveSpeedPercent != 0.0f) {
+            attrs_.AddSpeedModifier(rec.spec.id, rec.spec.moveSpeedPercent * stacks);
+        }
+        if (rec.spec.attackSpeedBonus != 0.0f) {
+            attrs_.SetNonStackingAttackSpeed(rec.spec.id, rec.spec.attackSpeedBonus * stacks);
+        }
+        if (rec.spec.armorDelta != 0.0f) {
+            const float newArmor = rec.spec.armorDelta * stacks;
+            const float diff = newArmor - rec.appliedArmorTotal;
+            attrs_.AddTempDefenseBonus(diff);
+            rec.appliedArmorTotal = newArmor;
+        }
+        if (rec.spec.flatDamageBonus != 0) {
+            attrs_.SetNonStackingDamageBonus(rec.spec.id, rec.spec.flatDamageBonus * rec.stackCount);
+        }
+    } else {
+        if (rec.spec.moveSpeedPercent != 0.0f) {
+            attrs_.RemoveSpeedModifier(rec.spec.id);
+        }
+        if (rec.spec.attackSpeedBonus != 0.0f) {
+            attrs_.ClearNonStackingAttackSpeed(rec.spec.id);
+        }
+        if (rec.appliedArmorTotal != 0.0f) {
+            attrs_.AddTempDefenseBonus(-rec.appliedArmorTotal);
+            rec.appliedArmorTotal = 0.0f;
+        }
+        if (rec.spec.flatDamageBonus != 0) {
+            attrs_.ClearNonStackingDamageBonus(rec.spec.id);
+        }
+    }
+}
+
+bool CUnit::ApplyDataDrivenBuff(const DataDrivenBuffSpec& spec, CSimulation& game) {
+    (void)game;
+    if (spec.id.value == 0 || spec.duration <= 0.0f) return false;
+
+    float effectiveDuration = spec.duration;
+    if (!spec.isPositive && HasBuff(War3ID("Brsk"))) {
+        effectiveDuration *= 0.25f;
+    }
+
+    for (auto& existing : dataDrivenBuffs_) {
+        if (existing.active && existing.spec.id == spec.id) {
+            ++zeroAllocBuffAppliedCount_;
+            if (existing.spec.stackType == CBuffStackType::REPLACE ||
+                spec.stackType == CBuffStackType::REPLACE) {
+                SyncDataDrivenBuffModifiers(existing, false);
+                existing.spec = spec;
+                existing.spec.duration = effectiveDuration;
+                existing.remaining = effectiveDuration;
+                existing.periodicTimer = 0.0f;
+                existing.stackCount = 1;
+                SyncDataDrivenBuffModifiers(existing, true);
+                return true;
+            }
+            if (existing.spec.stackType == CBuffStackType::STACK) {
+                const int maxSt = std::max(1, spec.maxStacks);
+                if (existing.stackCount < maxSt) {
+                    existing.stackCount++;
+                }
+                existing.remaining = effectiveDuration;
+                SyncDataDrivenBuffModifiers(existing, true);
+                return true;
+            }
+            existing.remaining = effectiveDuration;
+            return true;
+        }
+    }
+
+    const size_t prevCap = dataDrivenBuffs_.capacity();
+    DataDrivenBuffRecord rec;
+    rec.spec = spec;
+    rec.spec.duration = effectiveDuration;
+    rec.remaining = effectiveDuration;
+    rec.periodicTimer = 0.0f;
+    rec.stackCount = 1;
+    rec.appliedArmorTotal = 0.0f;
+    rec.suspended = false;
+    rec.active = true;
+    SyncDataDrivenBuffModifiers(rec, true);
+    dataDrivenBuffs_.push_back(rec);
+    if (dataDrivenBuffs_.capacity() == prevCap) {
+        ++zeroAllocBuffAppliedCount_;
+    }
+    return true;
+}
+
+bool CUnit::RemoveDataDrivenBuff(War3ID buffId, CSimulation& game) {
+    (void)game;
+    for (size_t i = 0; i < dataDrivenBuffs_.size(); ++i) {
+        if (dataDrivenBuffs_[i].active && dataDrivenBuffs_[i].spec.id == buffId) {
+            SyncDataDrivenBuffModifiers(dataDrivenBuffs_[i], false);
+            dataDrivenBuffs_[i] = dataDrivenBuffs_.back();
+            dataDrivenBuffs_.pop_back();
+            return true;
+        }
+    }
+    return false;
+}
+
+const DataDrivenBuffRecord* CUnit::GetDataDrivenBuff(War3ID buffId) const {
+    for (const auto& rec : dataDrivenBuffs_) {
+        if (rec.active && rec.spec.id == buffId) {
+            return &rec;
+        }
+    }
+    return nullptr;
+}
+
 void CUnit::RemoveBuff(War3ID buffId, CSimulation& game) {
+    if (RemoveDataDrivenBuff(buffId, game)) {
+        return;
+    }
     for (auto it = buffs_.begin(); it != buffs_.end(); ++it) {
         if (it->get() && it->get()->GetId() == buffId) {
             it->get()->OnRemove(game, this);
@@ -603,6 +719,15 @@ void CUnit::RemoveBuff(War3ID buffId, CSimulation& game) {
 }
 
 void CUnit::RemoveBuffByIdAndCaster(War3ID buffId, int caster, CSimulation& game) {
+    for (size_t i = 0; i < dataDrivenBuffs_.size(); ++i) {
+        if (dataDrivenBuffs_[i].active && dataDrivenBuffs_[i].spec.id == buffId &&
+            dataDrivenBuffs_[i].spec.casterHandleId == caster) {
+            SyncDataDrivenBuffModifiers(dataDrivenBuffs_[i], false);
+            dataDrivenBuffs_[i] = dataDrivenBuffs_.back();
+            dataDrivenBuffs_.pop_back();
+            return;
+        }
+    }
     for (auto it = buffs_.begin(); it != buffs_.end(); ++it) {
         if (it->get() && it->get()->GetId() == buffId &&
             it->get()->GetCasterHandleId() == caster) {
@@ -615,6 +740,21 @@ void CUnit::RemoveBuffByIdAndCaster(War3ID buffId, int caster, CSimulation& game
 
 void CUnit::RemoveBuffsIf(CSimulation& game, bool removePositive, bool removeNegative,
                           bool timedLifeOnly, bool keepTimedLife) {
+    if (!timedLifeOnly) {
+        for (size_t i = 0; i < dataDrivenBuffs_.size();) {
+            auto& rec = dataDrivenBuffs_[i];
+            bool match = rec.active;
+            if (match && rec.spec.isPositive && !removePositive) match = false;
+            if (match && !rec.spec.isPositive && !removeNegative) match = false;
+            if (match) {
+                SyncDataDrivenBuffModifiers(rec, false);
+                dataDrivenBuffs_[i] = dataDrivenBuffs_.back();
+                dataDrivenBuffs_.pop_back();
+            } else {
+                ++i;
+            }
+        }
+    }
     for (auto it = buffs_.begin(); it != buffs_.end();) {
         CBuff* buff = it->get();
         bool match = buff != nullptr;
@@ -644,7 +784,7 @@ CBuff* CUnit::GetBuff(War3ID buffId) const {
 }
 
 bool CUnit::HasBuff(War3ID buffId) const {
-    return GetBuff(buffId) != nullptr;
+    return GetBuff(buffId) != nullptr || GetDataDrivenBuff(buffId) != nullptr;
 }
 
 bool CUnit::CheckSpellEffectReaction(CSimulation& game, CUnit* caster) {
@@ -773,6 +913,52 @@ float CUnit::GetNonStackingAttackSpeedTotal() const {
 }
 
 void CUnit::UpdateBuffs(CSimulation& game) {
+    const float dt = game.GetSimStepTime();
+    for (size_t i = 0; i < dataDrivenBuffs_.size();) {
+        DataDrivenBuffRecord& rec = dataDrivenBuffs_[i];
+        if (!rec.active) {
+            dataDrivenBuffs_[i] = dataDrivenBuffs_.back();
+            dataDrivenBuffs_.pop_back();
+            continue;
+        }
+        const War3ID buffId = rec.spec.id;
+        bool removedDuringCallback = false;
+        if (!rec.suspended) {
+            rec.remaining -= dt;
+            if (rec.spec.periodic && rec.spec.periodicInterval > 0.0f) {
+                rec.periodicTimer += dt;
+                while (dataDrivenBuffs_[i].periodicTimer >= dataDrivenBuffs_[i].spec.periodicInterval) {
+                    dataDrivenBuffs_[i].periodicTimer -= dataDrivenBuffs_[i].spec.periodicInterval;
+                    const float totalDmg = dataDrivenBuffs_[i].spec.periodicDamage *
+                                           static_cast<float>(std::max(1, dataDrivenBuffs_[i].stackCount));
+                    const int casterId = dataDrivenBuffs_[i].spec.casterHandleId;
+                    if (totalDmg > 0.0f) {
+                        CUnit* caster = (casterId >= 0) ? game.GetUnit(casterId) : nullptr;
+                        Damage(game, caster, false, false, CAttackType::SPELLS, CDamageType::MAGIC, "", totalDmg, 0.0f);
+                        if (IsDead()) return;
+                        if (i >= dataDrivenBuffs_.size() || !dataDrivenBuffs_[i].active ||
+                            dataDrivenBuffs_[i].spec.id != buffId) {
+                            removedDuringCallback = true;
+                            break;
+                        }
+                    } else if (totalDmg < 0.0f) {
+                        SetLife(game, std::min(GetMaxLife(), GetLife() - totalDmg));
+                    }
+                }
+            }
+        }
+        if (removedDuringCallback) {
+            continue;
+        }
+        if (dataDrivenBuffs_[i].remaining <= 0.0f) {
+            SyncDataDrivenBuffModifiers(dataDrivenBuffs_[i], false);
+            dataDrivenBuffs_[i] = dataDrivenBuffs_.back();
+            dataDrivenBuffs_.pop_back();
+        } else {
+            ++i;
+        }
+    }
+
     for (auto it = buffs_.begin(); it != buffs_.end();) {
         auto& buff = *it;
         if (!buff) {

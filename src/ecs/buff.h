@@ -21,6 +21,40 @@ enum class CBuffTargetType : uint8_t {
 };
 
 // ============================================================
+// Stage Z1: Zero-allocation POD descriptor for data-driven
+// numerical/periodic buffs (Unity DOTS GameplayEffect style).
+// ============================================================
+struct DataDrivenBuffSpec {
+    War3ID id = War3ID(0u);
+    float duration = 0.0f;
+    bool isPositive = true;
+    CBuffStackType stackType = CBuffStackType::NONE;
+    int maxStacks = 1;
+    int casterHandleId = -1;
+
+    // Stat modifiers applied via UnitAttributeAggregator
+    float moveSpeedPercent = 0.0f;     // e.g. -0.25f for 25% slow, +0.30f for 30% haste
+    float attackSpeedBonus = 0.0f;     // e.g. +0.40f for 40% IAS, -0.25f for slow
+    float armorDelta = 0.0f;           // e.g. +5.0f or -4.0f armor
+    int flatDamageBonus = 0;           // e.g. +15 attack damage
+
+    // Periodic tick effect (periodicDamage > 0 deals damage, < 0 heals target)
+    bool periodic = false;
+    float periodicInterval = 1.0f;
+    float periodicDamage = 0.0f;
+};
+
+struct DataDrivenBuffRecord {
+    DataDrivenBuffSpec spec;
+    float remaining = 0.0f;
+    float periodicTimer = 0.0f;
+    int stackCount = 1;
+    float appliedArmorTotal = 0.0f;
+    bool suspended = false;
+    bool active = false;
+};
+
+// ============================================================
 // CBuff - base class for all buffs/debuffs
 // ============================================================
 class CBuff {

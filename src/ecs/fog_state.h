@@ -3,6 +3,10 @@
 #include <functional>
 #include <vector>
 
+namespace core {
+class JobSystem;
+}
+
 // Fog states use the common.j ConvertFogState ordinals
 // (FOG_OF_WAR_MASKED=0, FOG_OF_WAR_FOGGED=1, FOG_OF_WAR_VISIBLE=2).
 enum class CFogState : uint8_t {
@@ -66,6 +70,8 @@ public:
     static constexpr int kMaxPlayers = 12;
     // Recompute cadence for the sight pass (sim ticks).
     static constexpr int kSightTickPeriod = 10;
+    // Tile size for dirty-region tracking (Stage X1).
+    static constexpr int kFogTileSize = 16;
 
     CFogSystem();
 
@@ -90,6 +96,10 @@ public:
     void EnsureGrid(int width, int height,
                     float minX, float minY, float maxX, float maxY);
     void UpdateSight(const CFogSightSource* sources, int count);
+    // Stage X2: Multi-player parallel sight update via JobSystem::ParallelFor.
+    // Produces bit-identical results to UpdateSight().
+    void UpdateSightParallel(const CFogSightSource* sources, int count,
+                             core::JobSystem* jobSystem = nullptr);
 
     CFogState GetState(int player, float x, float y) const;
     bool IsVisibleTo(int player, float x, float y) const;
@@ -97,12 +107,20 @@ public:
 
     // Rasterize one player's fog for the renderer: 0 = visible,
     // 127 = fogged, 255 = masked (matches the terrain shader).
+    // Stage X1: Single-pass base bitmap synthesis + AABB-clipped modifier stamp.
     void Rasterize(int player, int width, int height,
                    float minX, float minY, float maxX, float maxY,
                    unsigned char* out) const;
 
     // Bumped on every mutation; the renderer re-uploads on change.
     uint64_t Version() const { return version_; }
+
+    // Stage X1: Dirty 16x16 tile tracking and rasterization telemetry.
+    int GetDirtyTileCount(int player) const;
+    void ClearDirtyTiles(int player);
+    int GetTilesX() const { return tilesX_; }
+    int GetTilesY() const { return tilesY_; }
+    uint64_t GetLastRasterizeModifierChecks() const { return lastRasterizeModifierChecks_; }
 
     // Line of sight occlusion checker (returns true if LoS between from and to is blocked).
     using FogOcclusionChecker = std::function<bool(float fromX, float fromY, float toX, float toY, bool isFlying)>;
@@ -112,6 +130,9 @@ public:
 private:
     bool ScriptedState(int player, float x, float y, CFogState& out) const;
     int CellIndex(int player, float x, float y) const;
+    void UpdateSightForPlayer(int player, const CFogSightSource* sources, int count);
+    void MarkAreaTilesDirty(int player, const CFogArea& area);
+    void MarkAllTilesDirty(int player);
 
     FogOcclusionChecker occlusionChecker_;
     std::vector<CFogModifier> modifiers_;
@@ -120,7 +141,11 @@ private:
     uint64_t version_ = 0;
 
     int gridW_ = 0, gridH_ = 0;
+    int tilesX_ = 0, tilesY_ = 0;
     float gridMinX_ = 0, gridMinY_ = 0, gridMaxX_ = 0, gridMaxY_ = 0;
     std::vector<uint8_t> explored_;
     std::vector<uint8_t> visible_;
+    std::vector<uint8_t> prevVisible_;
+    std::vector<uint8_t> dirtyTiles_;
+    mutable uint64_t lastRasterizeModifierChecks_ = 0;
 };

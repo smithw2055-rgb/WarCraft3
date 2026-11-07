@@ -1,3 +1,7 @@
+#include "ecs/fog_state.h"
+#include "render/fog_of_war.h"
+#include "render/mdx_animator.h"
+#include "ecs/melee_ai.h"
 #include "scripting/jass_binder.h"
 #include <cstring>
 #include "ecs/abilities/ability_move.h"
@@ -2936,5 +2940,370 @@ bool TestPhase9StageV4AudioSystemIntegratedServerAndRetailDriveMultiMapSuite() {
     }
 
     session.TeardownCurrentSession(mpq, sim, scene, presentation);
+    return true;
+}
+
+// ============================================================================
+// Phase 10 Stage X1-Z2: Fog of War Single-Pass + Parallel & Smooth Transition,
+// MDX Animator Zero-Alloc Cursor Cache + Cross-Fade + LOD, Data-Driven Buff Pool,
+// and TacticalThreatMap Utility AI with Retail Drive Map Verification
+// ============================================================================
+
+bool TestPhase10StageX1FogSinglePassSynthesisAndDirtyTiles() {
+    CFogSystem fog;
+    fog.EnsureGrid(256, 256, -4096.0f, -4096.0f, 4096.0f, 4096.0f);
+    fog.ClearDirtyTiles(0);
+    TEST_ASSERT(fog.GetDirtyTileCount(0) == 0);
+
+    // Splat 4 sight sources for player 0
+    const CFogSightSource sources[4] = {
+        {0, -2000.0f, -2000.0f, 600.0f, false},
+        {0,  2000.0f, -2000.0f, 600.0f, false},
+        {0, -2000.0f,  2000.0f, 600.0f, false},
+        {0,  2000.0f,  2000.0f, 600.0f, true}
+    };
+    fog.UpdateSight(sources, 4);
+    const int dirtyAfterMove = fog.GetDirtyTileCount(0);
+    TEST_ASSERT(dirtyAfterMove > 0);
+
+    // Calling UpdateSight again with identical stationary units produces 0 dirty tiles
+    fog.ClearDirtyTiles(0);
+    fog.UpdateSight(sources, 4);
+    TEST_ASSERT(fog.GetDirtyTileCount(0) == 0);
+
+    // Add 16 small scripted modifiers and 4 overrides for player 0
+    for (int i = 0; i < 16; ++i) {
+        const float cx = -3000.0f + (float)(i * 350);
+        const int modId = fog.AddModifier(0, CFogArea::Circle(cx, 0.0f, 180.0f), CFogState::VISIBLE);
+        fog.SetModifierEnabled(modId, true);
+    }
+    for (int i = 0; i < 4; ++i) {
+        const float rx = -1500.0f + (float)(i * 800);
+        fog.AddOverride(0, CFogArea::Rect(rx, 800.0f, rx + 200.0f, 1000.0f), CFogState::VISIBLE);
+    }
+    TEST_ASSERT(fog.GetDirtyTileCount(0) > 0);
+
+    std::vector<unsigned char> out(256 * 256, 255);
+    fog.Rasterize(0, 256, 256, -4096.0f, -4096.0f, 4096.0f, 4096.0f, out.data());
+
+    // Legacy per-pixel modifier scan would perform 256 * 256 * 20 = 1,310,720 checks.
+    // Stage X1 AABB-clipped stamp performs < 3,000 checks (> 99.7% reduction)!
+    TEST_ASSERT(fog.GetLastRasterizeModifierChecks() > 0);
+    TEST_ASSERT(fog.GetLastRasterizeModifierChecks() < 5000);
+
+    // Verify center of sight circle and modifier circle are VISIBLE (0)
+    TEST_ASSERT(fog.IsVisibleTo(0, -2000.0f, -2000.0f));
+    TEST_ASSERT(fog.IsVisibleTo(0, -3000.0f, 0.0f));
+    return true;
+}
+
+bool TestPhase10StageX2FogParallelMultiPlayerAndTemporalSmoothTransition() {
+    CFogSystem fogSeq;
+    CFogSystem fogPar;
+    fogSeq.EnsureGrid(128, 128, -4096.0f, -4096.0f, 4096.0f, 4096.0f);
+    fogPar.EnsureGrid(128, 128, -4096.0f, -4096.0f, 4096.0f, 4096.0f);
+
+    std::vector<CFogSightSource> sources;
+    for (int p = 0; p < 8; ++p) {
+        for (int u = 0; u < 8; ++u) {
+            CFogSightSource s;
+            s.player = p;
+            s.x = -3000.0f + (float)(p * 750);
+            s.y = -3000.0f + (float)(u * 750);
+            s.radius = 500.0f + (float)(u * 30);
+            s.isFlying = (u % 2 == 0);
+            sources.push_back(s);
+        }
+    }
+
+    core::JobSystem jobs(4);
+    fogSeq.UpdateSight(sources.data(), (int)sources.size());
+    fogPar.UpdateSightParallel(sources.data(), (int)sources.size(), &jobs);
+
+    // Verify bit-for-bit determinism across all 8 players
+    std::vector<unsigned char> bufSeq(128 * 128);
+    std::vector<unsigned char> bufPar(128 * 128);
+    for (int p = 0; p < 8; ++p) {
+        fogSeq.Rasterize(p, 128, 128, -4096.0f, -4096.0f, 4096.0f, 4096.0f, bufSeq.data());
+        fogPar.Rasterize(p, 128, 128, -4096.0f, -4096.0f, 4096.0f, 4096.0f, bufPar.data());
+        TEST_ASSERT(std::memcmp(bufSeq.data(), bufPar.data(), bufSeq.size()) == 0);
+    }
+
+    // Verify FogOfWar temporal smooth transition buffer
+    FogOfWar gpuFog;
+    gpuFog.Init(64, 64);
+    std::vector<unsigned char> initialMasked(64 * 64, 255);
+    std::vector<unsigned char> targetRevealed(64 * 64, 0);
+    gpuFog.SetData(initialMasked.data());
+    gpuFog.ClearDirtyTiles();
+    TEST_ASSERT(gpuFog.GetDirtyTileCount() == 0);
+
+    gpuFog.SetTargetData(targetRevealed.data());
+    const int modifiedStep1 = gpuFog.StepSmoothTransition(0.10f, 1000.0f); // step by 100 levels (255 -> 155)
+    TEST_ASSERT(modifiedStep1 == 64 * 64);
+    TEST_ASSERT(gpuFog.GetData()[0] == 155);
+    TEST_ASSERT(gpuFog.GetDirtyTileCount() == 16); // 4x4 tiles of 16x16
+
+    // Finish transition to 0
+    gpuFog.StepSmoothTransition(0.20f, 1000.0f);
+    TEST_ASSERT(gpuFog.GetData()[0] == 0);
+    TEST_ASSERT(gpuFog.StepSmoothTransition(0.05f, 1000.0f) == 0);
+    return true;
+}
+
+bool TestPhase10StageY1MdxAnimatorZeroAllocInPlaceAndCursorCache() {
+    MdxModel model;
+    MdxSequence seq;
+    seq.name = "Stand";
+    seq.startFrame = 0;
+    seq.endFrame = 1000;
+    model.sequences.push_back(seq);
+    model.pivotPoints.push_back({0.0f, 0.0f, 0.0f});
+    model.pivotPoints.push_back({0.0f, 0.0f, 50.0f});
+
+    MdxNode rootBone;
+    rootBone.name = "RootBone";
+    rootBone.objectId = 0;
+    rootBone.parentId = -1;
+    MdxTimeline trTl;
+    trTl.tag = (uint32_t)(('K' << 24) | ('G' << 16) | ('T' << 8) | 'R');
+    trTl.interpolationType = MdxInterpolation::Linear;
+    for (int i = 0; i <= 20; ++i) {
+        trTl.frames.push_back((uint32_t)(i * 50));
+        trTl.values.push_back((float)i * 2.0f);
+        trTl.values.push_back(0.0f);
+        trTl.values.push_back(0.0f);
+    }
+    rootBone.timelines.push_back(trTl);
+
+    MdxNode childBone;
+    childBone.name = "ChildBone";
+    childBone.objectId = 1;
+    childBone.parentId = 0;
+    MdxTimeline rotTl;
+    rotTl.tag = (uint32_t)(('K' << 24) | ('G' << 16) | ('R' << 8) | 'T');
+    rotTl.interpolationType = MdxInterpolation::Linear;
+    for (int i = 0; i <= 20; ++i) {
+        rotTl.frames.push_back((uint32_t)(i * 50));
+        rotTl.values.push_back(0.0f);
+        rotTl.values.push_back(0.0f);
+        rotTl.values.push_back(std::sin((float)i * 0.05f));
+        rotTl.values.push_back(std::cos((float)i * 0.05f));
+    }
+    childBone.timelines.push_back(rotTl);
+
+    // Push child before parent to verify BuildSkeleton topological sort places parent first
+    model.bones.push_back(childBone);
+    model.bones.push_back(rootBone);
+
+    MdxAnimator animator;
+    animator.Init(model);
+    TEST_ASSERT(animator.IsTopologicalOrderValid());
+    TEST_ASSERT(animator.PlaySequence("Stand", true, 1.0f));
+
+    for (int step = 0; step < 50; ++step) {
+        animator.Update(0.016f);
+    }
+
+    // Verify 0 temporary MdxTimeline heap allocations and >85% O(1) cursor hit rate
+    TEST_ASSERT(animator.GetSampleHeapAllocations() == 0);
+    TEST_ASSERT(animator.GetCursorHitCount() >= 80);
+    TEST_ASSERT(animator.GetCursorHitCount() > animator.GetCursorMissCount() * 5);
+    return true;
+}
+
+bool TestPhase10StageY2MdxAnimatorCrossFadeAndAnimationLod() {
+    MdxModel model;
+    MdxSequence seqStand;
+    seqStand.name = "Stand";
+    seqStand.startFrame = 0;
+    seqStand.endFrame = 500;
+    MdxSequence seqAttack;
+    seqAttack.name = "Attack";
+    seqAttack.startFrame = 600;
+    seqAttack.endFrame = 1100;
+    model.sequences.push_back(seqStand);
+    model.sequences.push_back(seqAttack);
+    model.pivotPoints.push_back({0.0f, 0.0f, 0.0f});
+
+    MdxNode bone;
+    bone.name = "WeaponBone";
+    bone.objectId = 0;
+    bone.parentId = -1;
+    MdxTimeline trTl;
+    trTl.tag = (uint32_t)(('K' << 24) | ('G' << 16) | ('T' << 8) | 'R');
+    trTl.interpolationType = MdxInterpolation::Linear;
+    // Stand at X = 0, Attack at X = 100
+    trTl.frames = {0, 500, 600, 1100};
+    trTl.values = {
+        0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f,
+        100.0f, 0.0f, 0.0f,
+        100.0f, 0.0f, 0.0f
+    };
+    bone.timelines.push_back(trTl);
+    model.bones.push_back(bone);
+
+    MdxAnimator animator;
+    animator.Init(model);
+    TEST_ASSERT(animator.PlaySequence("Stand", true, 1.0f));
+    animator.Update(0.05f);
+
+    Vec3 posBefore;
+    TEST_ASSERT(animator.GetObjectWorldPositionYUp(0, posBefore));
+    TEST_ASSERT(std::fabs(posBefore.x - 0.0f) < 0.01f);
+
+    // Cross-fade to Attack over 0.20 seconds
+    TEST_ASSERT(animator.CrossFadeToSequence("Attack", false, 0.20f, 1.0f));
+    TEST_ASSERT(std::fabs(animator.GetBlendLeft() - 0.20f) < 1e-4f);
+
+    // Halfway through cross-fade (0.10s), bone X should be smoothly blended (~50.0f)
+    animator.Update(0.10f);
+    Vec3 posMid;
+    TEST_ASSERT(animator.GetObjectWorldPositionYUp(0, posMid));
+    TEST_ASSERT(posMid.x > 35.0f && posMid.x < 65.0f);
+
+    // Finish cross-fade
+    animator.Update(0.15f);
+    Vec3 posEnd;
+    TEST_ASSERT(animator.GetObjectWorldPositionYUp(0, posEnd));
+    TEST_ASSERT(std::fabs(posEnd.x - 100.0f) < 1.0f);
+
+    // Test Animation LOD stride = 4 (skips 3 of every 4 updates)
+    animator.SetAnimationLodStride(4);
+    TEST_ASSERT(animator.GetAnimationLodStride() == 4);
+    for (int i = 0; i < 20; ++i) {
+        animator.Update(0.016f);
+    }
+    TEST_ASSERT(animator.GetLodSkippedUpdateCount() == 15);
+    return true;
+}
+
+bool TestPhase10StageZ1DataDrivenBuffZeroAllocPoolAndStacking() {
+    CSimulation sim;
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 500, 270, false);
+    CUnit* unit = sim.AdoptUnit(std::make_unique<CUnit>(sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+    TEST_ASSERT(unit != nullptr);
+    const float baseSpeed = unit->GetSpeed();
+    const int baseDefense = unit->GetTotalDefense();
+
+    // 1. Apply a stacking poison + armor reduction debuff (max 3 stacks)
+    DataDrivenBuffSpec poisonSpec;
+    poisonSpec.id = War3ID("Bpoi");
+    poisonSpec.duration = 5.0f;
+    poisonSpec.isPositive = false;
+    poisonSpec.stackType = CBuffStackType::STACK;
+    poisonSpec.maxStacks = 3;
+    poisonSpec.moveSpeedPercent = -0.10f; // -10% speed per stack
+    poisonSpec.armorDelta = -2.0f;        // -2 armor per stack
+    poisonSpec.periodic = true;
+    poisonSpec.periodicInterval = 1.0f;
+    poisonSpec.periodicDamage = 10.0f;    // 10 dmg/sec per stack
+
+    TEST_ASSERT(unit->ApplyDataDrivenBuff(poisonSpec, sim));
+    TEST_ASSERT(unit->ApplyDataDrivenBuff(poisonSpec, sim));
+    TEST_ASSERT(unit->ApplyDataDrivenBuff(poisonSpec, sim));
+    TEST_ASSERT(unit->HasBuff(War3ID("Bpoi")));
+
+    const auto* rec = unit->GetDataDrivenBuff(War3ID("Bpoi"));
+    TEST_ASSERT(rec != nullptr && rec->stackCount == 3);
+    TEST_ASSERT(unit->GetTotalDefense() == baseDefense - 6);
+    TEST_ASSERT(unit->GetSpeed() < baseSpeed);
+
+    // 2. Apply a positive haste + bonus damage buff
+    DataDrivenBuffSpec hasteSpec;
+    hasteSpec.id = War3ID("Bblo");
+    hasteSpec.duration = 2.0f;
+    hasteSpec.isPositive = true;
+    hasteSpec.moveSpeedPercent = 0.50f;
+    hasteSpec.attackSpeedBonus = 0.40f;
+    hasteSpec.flatDamageBonus = 15;
+    TEST_ASSERT(unit->ApplyDataDrivenBuff(hasteSpec, sim));
+    TEST_ASSERT(unit->GetNonStackingDamageTotal() == 15);
+    TEST_ASSERT(unit->GetZeroAllocBuffAppliedCount() == 4);
+
+    // 3. Tick buffs for 2.1 seconds: periodic poison ticks twice (30 dmg * 2 = 60 dmg) and haste expires
+    const float lifeBefore = unit->GetLife();
+    const int steps = (int)std::ceil(2.1f / sim.GetSimStepTime());
+    for (int i = 0; i < steps; ++i) {
+        unit->UpdateBuffs(sim);
+    }
+    TEST_ASSERT(!unit->HasBuff(War3ID("Bblo")));
+    TEST_ASSERT(unit->GetNonStackingDamageTotal() == 0);
+    TEST_ASSERT(unit->GetLife() < lifeBefore - 50.0f);
+
+    // 4. Dispel negative buffs via RemoveBuffsIf
+    unit->RemoveBuffsIf(sim, false, true, false, false);
+    TEST_ASSERT(!unit->HasBuff(War3ID("Bpoi")));
+    TEST_ASSERT(unit->GetTotalDefense() == baseDefense);
+    TEST_ASSERT(std::fabs(unit->GetSpeed() - baseSpeed) < 0.01f);
+    return true;
+}
+
+bool TestPhase10StageZ2TacticalThreatMapUtilityAiAndRetailDriveSuite() {
+    CSimulation sim;
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+    CUnitType* gruntType   = MakePhase5UnitType(War3ID("ogru"), 700, 270, false);
+    CUnitType* heroType    = MakePhase5UnitType(War3ID("Obla"), 650, 320, false);
+
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "AI", CMapControl::COMPUTER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "Enemy", CMapControl::USER));
+    // Player 0 = AI, Player 1 = Enemy
+    CUnit* aiFootmanHealthy = sim.AdoptUnit(std::make_unique<CUnit>(sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+    CUnit* aiFootmanWounded = sim.AdoptUnit(std::make_unique<CUnit>(sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), 60.0f, 0.0f, 0.0f));
+    CUnit* enemyGruntFull   = sim.AdoptUnit(std::make_unique<CUnit>(sim.AllocateHandleId(), gruntType, 1, War3ID("ogru"), 200.0f, 0.0f, 180.0f));
+    CUnit* enemyHeroLowHp   = sim.AdoptUnit(std::make_unique<CUnit>(sim.AllocateHandleId(), heroType, 1, War3ID("Obla"), 220.0f, 40.0f, 180.0f));
+    TEST_ASSERT(aiFootmanHealthy && aiFootmanWounded && enemyGruntFull && enemyHeroLowHp);
+    sim.Update();
+
+    // Wound the AI footman to 15% HP and enemy unit to 8% HP
+    aiFootmanWounded->SetLife(sim, aiFootmanWounded->GetMaxLife() * 0.15f);
+    enemyHeroLowHp->SetLife(sim, enemyHeroLowHp->GetMaxLife() * 0.08f);
+
+    MeleeAIController ai(&sim, 0);
+    ai.RebuildThreatMap();
+    TEST_ASSERT(ai.GetThreatMap().GetActiveThreatCellCount() > 0);
+    TEST_ASSERT(ai.GetThreatMap().SampleThreatAt(200.0f, 0.0f) > 0.0f);
+
+    // Utility AI target selection should rank the critically wounded enemy higher than the full-HP Grunt
+    CUnit* bestTarget = ai.EvaluateBestFocusTarget(aiFootmanHealthy, 900.0f);
+    TEST_ASSERT(bestTarget == enemyHeroLowHp);
+
+    // ExecuteTacticalMicro should kite the wounded footman away and focus-fire with the healthy footman
+    const int microOrders = ai.ExecuteTacticalMicro(0.30f, 280.0f);
+    TEST_ASSERT(microOrders == 2);
+    TEST_ASSERT(ai.GetKitingRetreatCount() == 1);
+    TEST_ASSERT(ai.GetFocusFireOrderCount() == 1);
+
+    // Verify FogOfWar parallel + single-pass rasterize on retail Drive map dimensions via WorldSceneSession
+    MpqManager mpq;
+    CSimulation mapSim;
+    SceneManager scene;
+    UnitPresentationSystem presentation;
+    core::WorldSceneSession session;
+    const std::string mapPath = "resources/Maps/FrozenThrone/(8)GardenOfWar.w3x";
+    FILE* f = std::fopen(mapPath.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        const W3EMap& w3e = session.GetW3E();
+        CFogSystem mapFog;
+        const float minX = w3e.offsetX;
+        const float minY = w3e.offsetY;
+        const float maxX = minX + (float)(w3e.tileWidth - 1) * 128.0f;
+        const float maxY = minY + (float)(w3e.tileHeight - 1) * 128.0f;
+        mapFog.EnsureGrid(w3e.tileWidth, w3e.tileHeight, minX, minY, maxX, maxY);
+        core::JobSystem jobs(4);
+        const CFogSightSource mapSight[2] = {
+            {0, 0.0f, 0.0f, 1200.0f, false},
+            {1, 512.0f, 512.0f, 1200.0f, true}
+        };
+        mapFog.UpdateSightParallel(mapSight, 2, &jobs);
+        std::vector<unsigned char> fogBuf((size_t)w3e.tileWidth * w3e.tileHeight, 255);
+        mapFog.Rasterize(0, w3e.tileWidth, w3e.tileHeight, minX, minY, maxX, maxY, fogBuf.data());
+        TEST_ASSERT(mapFog.IsVisibleTo(0, 0.0f, 0.0f));
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
     return true;
 }

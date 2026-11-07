@@ -811,6 +811,12 @@ bool TestPhase9StageV1ZeroAllocProcessorAndSquadFlowFieldMove();
 bool TestPhase9StageV2SceneManagerIntegratedRenderGraphAndSharedMeshes();
 bool TestPhase9StageV3JassZeroAllocNativeCallsAndFastStructSlots();
 bool TestPhase9StageV4AudioSystemIntegratedServerAndRetailDriveMultiMapSuite();
+bool TestPhase10StageX1FogSinglePassSynthesisAndDirtyTiles();
+bool TestPhase10StageX2FogParallelMultiPlayerAndTemporalSmoothTransition();
+bool TestPhase10StageY1MdxAnimatorZeroAllocInPlaceAndCursorCache();
+bool TestPhase10StageY2MdxAnimatorCrossFadeAndAnimationLod();
+bool TestPhase10StageZ1DataDrivenBuffZeroAllocPoolAndStacking();
+bool TestPhase10StageZ2TacticalThreatMapUtilityAiAndRetailDriveSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1617,6 +1623,12 @@ int main(int argc, char** argv) {
         {"Phase9 Stage V2 SceneManager integrated RenderGraph and SharedMeshRegistry", TestPhase9StageV2SceneManagerIntegratedRenderGraphAndSharedMeshes},
         {"Phase9 Stage V3 JassVM zero-alloc native calls and O(1) fast struct slots", TestPhase9StageV3JassZeroAllocNativeCallsAndFastStructSlots},
         {"Phase9 Stage V4 AudioSystem server routing and 12-map retail Drive suite", TestPhase9StageV4AudioSystemIntegratedServerAndRetailDriveMultiMapSuite},
+        {"Phase10 Stage X1 Fog single-pass synthesis and dirty tiles", TestPhase10StageX1FogSinglePassSynthesisAndDirtyTiles},
+        {"Phase10 Stage X2 Fog parallel multi-player and smooth transition", TestPhase10StageX2FogParallelMultiPlayerAndTemporalSmoothTransition},
+        {"Phase10 Stage Y1 MdxAnimator zero-alloc in-place and cursor cache", TestPhase10StageY1MdxAnimatorZeroAllocInPlaceAndCursorCache},
+        {"Phase10 Stage Y2 MdxAnimator cross-fade and animation LOD", TestPhase10StageY2MdxAnimatorCrossFadeAndAnimationLod},
+        {"Phase10 Stage Z1 DataDrivenBuff zero-alloc pool and stacking", TestPhase10StageZ1DataDrivenBuffZeroAllocPoolAndStacking},
+        {"Phase10 Stage Z2 TacticalThreatMap utility AI and retail Drive suite", TestPhase10StageZ2TacticalThreatMapUtilityAiAndRetailDriveSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif
