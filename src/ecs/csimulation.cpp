@@ -6,21 +6,6 @@
 #include "item.h"
 #include "handle_id.h"
 #include "ability.h"
-#include "ability_factory.h"
-#include "abilities/ability_attack.h"
-#include "abilities/ability_move.h"
-#include "abilities/ability_hero.h"
-#include "abilities/ability_inventory.h"
-#include "abilities/ability_queue.h"
-#include "abilities/ability_rally.h"
-#include "abilities/ability_revive_hero.h"
-#include "abilities/ability_upgrade.h"
-#include "abilities/ability_harvest.h"
-#include "abilities/ability_gold_mine.h"
-#include "abilities/ability_return_resources.h"
-#include "abilities/ability_sell_items.h"
-#include "abilities/ability_build.h"
-#include "abilities/ability_repair.h"
 #include "pathing/world_collision.h"
 #include "pathing/pathfinding.h"
 #include "pathing/pathfinding_server.h"
@@ -29,11 +14,11 @@
 #include "data/destructabledata.h"
 #include "data/itemdata.h"
 #include "ecs/orders/order.h"
+#include "game/war3/war3_game_module.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <optional>
 
 CSimulation::CSimulation() {
     worldCollision_ = std::make_unique<CWorldCollision>();
@@ -45,88 +30,36 @@ CSimulation::CSimulation() {
         return IsLineOfSightBlocked(fromX, fromY, toX, toY, isFlying);
     });
     RegisterBuiltInSystems();
+    SetSimulationModule(war3::War3GameModule::GetSharedDefaultInstance());
 }
 
-CSimulation::~CSimulation() = default;
-
-namespace {
-
-static bool IsRepairAbilityAlias(War3ID abilityCode) {
-    return (abilityCode == War3ID("Arep")) || (abilityCode == War3ID("Ahrp"))
-        || (abilityCode == War3ID("Aren")) || (abilityCode == War3ID("Arst"));
-}
-
-static std::optional<CBuildRace> BuildRaceFromUnitType(const CUnitType* unitType) {
-    if (!unitType) {
-        return std::nullopt;
-    }
-    const std::string& raceName = unitType->GetUnitRace().name;
-    if (raceName == "human") {
-        return CBuildRace::HUMAN;
-    }
-    if (raceName == "orc") {
-        return CBuildRace::ORC;
-    }
-    if (raceName == "undead") {
-        return CBuildRace::UNDEAD;
-    }
-    if (raceName == "nightelf" || raceName == "night elf") {
-        return CBuildRace::NIGHT_ELF;
-    }
-    return std::nullopt;
-}
-
-static War3ID BuildRaceAbilityCode(CBuildRace race) {
-    switch (race) {
-    case CBuildRace::ORC:
-        return War3ID("AObu");
-    case CBuildRace::UNDEAD:
-        return War3ID("AUbu");
-    case CBuildRace::NIGHT_ELF:
-        return War3ID("AEbu");
-    case CBuildRace::HUMAN:
-    default:
-        return War3ID("AHbu");
+CSimulation::~CSimulation() {
+    if (simModule_) {
+        simModule_->OnDetachFromSimulation(*this);
     }
 }
 
-static bool IsTownHallReturnResourceType(War3ID typeId) {
-    return typeId == War3ID("htow") || typeId == War3ID("hkee") || typeId == War3ID("hcas")
-        || typeId == War3ID("ogre") || typeId == War3ID("ostr") || typeId == War3ID("ofrt")
-        || typeId == War3ID("unpl") || typeId == War3ID("unp1") || typeId == War3ID("unp2")
-        || typeId == War3ID("etol") || typeId == War3ID("etoa") || typeId == War3ID("etoe");
-}
-
-static void ApplyItemTypeData(CItem& item, CSimulation& simulation) {
-    const CItemData* itemData = simulation.GetItemData();
-    if (!itemData) {
-        return;
+void CSimulation::SetSimulationModule(std::shared_ptr<engine::ISimulationModule> module) {
+    if (simModule_ == module) return;
+    if (simModule_) {
+        simModule_->OnDetachFromSimulation(*this);
     }
-    const CItemType* itemType = itemData->GetItem(item.GetTypeId());
-    if (!itemType) {
-        return;
-    }
-    item.SetName(itemType->name);
-    item.SetIcon(itemType->iconPath);
-    item.SetAbilityList(itemType->abilityList);
-    item.SetMaxLife((float)itemType->maxLife);
-    item.SetLife(simulation, (float)itemType->maxLife);
-    item.SetGoldValue(itemType->goldCost);
-    item.SetLumberValue(itemType->lumberCost);
-    item.SetItemClass(itemType->itemClass);
-    item.SetCharges(itemType->charges);
-    item.SetPerishable(itemType->perishable);
-    item.SetPowerup(itemType->powerup);
-    item.SetUseAutomatically(itemType->useOnly);
-    item.SetDroppable(itemType->droppable);
-    item.SetPawnable(itemType->pawnable);
-    item.SetDroppedOnDeath(itemType->dropOnDeath);
-    if (itemType->charges > 0) {
-        item.SetCharged(true);
+    simModule_ = std::move(module);
+    pureEngineMode_ = (dynamic_cast<engine::NullSimulationModule*>(simModule_.get()) != nullptr);
+    if (simModule_) {
+        simModule_->OnAttachToSimulation(*this);
     }
 }
 
-} // namespace
+void CSimulation::SetPureEngineMode(bool pureEngine) {
+    if (pureEngine) {
+        SetSimulationModule(std::make_shared<engine::NullSimulationModule>());
+        pureEngineMode_ = true;
+    } else {
+        SetSimulationModule(war3::War3GameModule::GetSharedDefaultInstance());
+        pureEngineMode_ = false;
+    }
+}
 
 void CSimulation::RegisterBuiltInSystems() {
     systemPipeline_.RegisterLambda("FogTimerSystem", SimSystemPhase::PreTick,
@@ -599,141 +532,13 @@ CUnit* CSimulation::CreateUnit(War3ID typeId, int playerIndex,
 
     auto unit = std::make_unique<CUnit>(handleId, unitType, playerIndex,
                                          typeId, x, y, facing);
-
-    // Add default abilities based on unit type
-    // All units get attack; only movable units get move.
-    int abilityHandle = handleIdAlloc_.CreateId();
-    unit->AddAbility(*this, std::make_unique<CAbilityAttack>(abilityHandle));
-
-    if (!unitType->IsBuilding()) {
-        abilityHandle = handleIdAlloc_.CreateId();
-        unit->AddAbility(*this, std::make_unique<CAbilityMove>(abilityHandle));
-    }
-
-    // Heroes get the hero ability
-    if (unitType->IsHero()) {
-        abilityHandle = handleIdAlloc_.CreateId();
-        auto heroAbility = std::make_unique<CAbilityHero>(abilityHandle);
-        unit->AddAbility(*this, std::move(heroAbility));
-    }
-
-    // Buildings get queue, rally, and upgrade abilities
-    if (unitType->IsBuilding()) {
-        abilityHandle = handleIdAlloc_.CreateId();
-        unit->AddAbility(*this, std::make_unique<CAbilityQueue>(abilityHandle));
-
-        abilityHandle = handleIdAlloc_.CreateId();
-        unit->AddAbility(*this, std::make_unique<CAbilityRally>(abilityHandle));
-
-        abilityHandle = handleIdAlloc_.CreateId();
-        unit->AddAbility(*this, std::make_unique<CAbilityUpgrade>(abilityHandle));
-
-        // Check if building has unitsTrained and populate queue
-        auto* queueAbility = dynamic_cast<CAbilityQueue*>(unit->GetAbility(War3ID("Aque")));
-        if (queueAbility) {
-            for (auto& trainId : unitType->GetUnitsTrained()) {
-                queueAbility->AddTrainedUnit(trainId);
-            }
-            for (auto& researchId : unitType->GetResearchesAvailable()) {
-                queueAbility->AddResearch(researchId);
-            }
-        }
-        if (auto* upgradeAbility = dynamic_cast<CAbilityUpgrade*>(unit->GetAbility(War3ID("Aupg")))) {
-            for (auto& upgradeId : unitType->GetUpgradesTo()) {
-                upgradeAbility->AddUpgradeTo(upgradeId);
-            }
-        }
-
-        if (!unitType->GetItemsSold().empty()) {
-            abilityHandle = handleIdAlloc_.CreateId();
-            unit->AddAbility(*this, std::make_unique<CAbilitySellItems>(
-                abilityHandle, unitType->GetItemsSold()));
-        }
-
-        // Check if building is a gold mine
-        for (auto& abilityCode : unitType->GetAbilityList()) {
-            if (abilityCode == War3ID("Agld")) {
-                abilityHandle = handleIdAlloc_.CreateId();
-                unit->AddAbility(*this, std::make_unique<CAbilityGoldMine>(abilityHandle));
-                break;
-            }
-        }
-
-        // Check if building is a town hall (has return resources)
-        bool hasReturnResources = IsTownHallReturnResourceType(typeId) || (unitType->GetClassifications().count(CUnitClassification::TOWNHALL) > 0);
-        for (auto& abilityCode : unitType->GetAbilityList()) {
-            if (abilityCode == War3ID("Aret")) {
-                hasReturnResources = true;
-                break;
-            }
-        }
-        if (hasReturnResources) {
-            abilityHandle = handleIdAlloc_.CreateId();
-            unit->AddAbility(*this, std::make_unique<CAbilityReturnResources>(abilityHandle));
-        }
-    }
-
-    // Workers get harvest and build abilities
-    if (!unitType->IsBuilding()) {
-        // Check for harvest ability
-        for (auto& abilityCode : unitType->GetAbilityList()) {
-            if (abilityCode == War3ID("Ahar")) {
-                abilityHandle = handleIdAlloc_.CreateId();
-                unit->AddAbility(*this, std::make_unique<CAbilityHarvest>(abilityHandle));
-                break;
-            }
-        }
-        // Race workers always harvest (ref melee economy): data rows for
-        // some workers (e.g. acolyte) lack Ahar, which would leave AI and
-        // player harvest orders permanently rejected. Acolytes cannot chop
-        // lumber (retail), so their lumber capacity stays zero.
-        if (!unit->GetAbility(War3ID("Ahar")) &&
-            (typeId == War3ID("hpea") || typeId == War3ID("opeo") ||
-             typeId == War3ID("uaco") || typeId == War3ID("ewsp"))) {
-            abilityHandle = handleIdAlloc_.CreateId();
-            auto harvest = std::make_unique<CAbilityHarvest>(abilityHandle);
-            if (typeId == War3ID("uaco")) harvest->SetLumberCapacity(0);
-            unit->AddAbility(*this, std::move(harvest));
-        }
-
-        if (!unitType->GetStructuresBuilt().empty() && !unit->GetAbility(War3ID("AHbu"))
-            && !unit->GetAbility(War3ID("AObu")) && !unit->GetAbility(War3ID("AUbu"))
-            && !unit->GetAbility(War3ID("AEbu"))) {
-            if (const auto buildRace = BuildRaceFromUnitType(unitType)) {
-                abilityHandle = handleIdAlloc_.CreateId();
-                auto buildAbility = std::make_unique<CAbilityBuild>(
-                    abilityHandle, BuildRaceAbilityCode(*buildRace), *buildRace);
-                for (auto& structureId : unitType->GetStructuresBuilt()) {
-                    buildAbility->AddBuildableStructure(structureId);
-                }
-                unit->AddAbility(*this, std::move(buildAbility));
-            }
-        }
-
-        for (auto& abilityCode : unitType->GetAbilityList()) {
-            if (IsRepairAbilityAlias(abilityCode)) {
-                abilityHandle = handleIdAlloc_.CreateId();
-                auto repairAbility = std::make_unique<CAbilityRepair>(abilityHandle);
-                repairAbility->SetAlias(abilityCode);
-                unit->AddAbility(*this, std::move(repairAbility));
-                break;
-            }
-        }
-    }
-
-    // Units with inventory get inventory ability
-    for (auto& abilityCode : unitType->GetAbilityList()) {
-        if (abilityCode == War3ID("AInv")) {
-            abilityHandle = handleIdAlloc_.CreateId();
-            unit->AddAbility(*this, std::make_unique<CAbilityInventory>(abilityHandle));
-            break;
-        }
-    }
-
     CUnit* ptr = unit.get();
 
-    // Attach default abilities from the unit type (spells, passives, auras, transports, etc.)
-    AbilityFactory::AddDefaultAbilities(*this, ptr, unitType->GetAbilityList());
+    // Phase 13: Delegate game-specific unit/building/worker/hero ability assembly
+    // to the active ISimulationModule (e.g., War3GameModule or a dynamic plugin).
+    if (simModule_) {
+        simModule_->OnAssembleUnitAbilities(*this, *ptr, *unitType);
+    }
     InstallUnitHooks(ptr);
 
     unitMap_[handleId] = std::move(unit);
@@ -754,15 +559,8 @@ CDestructable* CSimulation::CreateDestructable(War3ID typeId, float x, float y, 
                                                  int rotationDeg) {
     int handleId = handleIdAlloc_.CreateId();
     auto destructable = std::make_unique<CDestructable>(handleId, typeId, x, y, life);
-    if (destructableData_) {
-        if (const auto* type = destructableData_->GetDestructable(typeId)) {
-            destructable->SetMaxLife(static_cast<float>(type->maxLife));
-            destructable->SetLife(*this, std::clamp(life, 0.0f, static_cast<float>(type->maxLife)));
-            // Instance occluder starts at the type value (ref
-            // destType.getOcclusionHeight), not zero: GetOccluderHeight must
-            // agree with the vision block stamped by BindPathing.
-            destructable->SetOccluderHeight(type->occlusionHeight);
-        }
+    if (simModule_) {
+        simModule_->OnConfigureCreatedDestructable(*this, *destructable, life, rotationDeg);
     }
     CDestructable* ptr = destructable.get();
     destructableMap_[handleId] = std::move(destructable);
@@ -785,7 +583,7 @@ CItem* CSimulation::CreateItem(War3ID typeId, float x, float y) {
     }
     int handleId = handleIdAlloc_.CreateId();
     auto item = std::make_unique<CItem>(handleId, typeId, x, y);
-    ApplyItemTypeData(*item, *this);
+    if (simModule_) simModule_->OnConfigureCreatedItem(*this, *item);
     CItem* ptr = item.get();
     itemMap_[handleId] = std::move(item);
     items_.push_back(ptr);
@@ -878,24 +676,8 @@ void CSimulation::ProcessUnitRemovals() {
         auto mit = std::find(newUnits_.begin(), newUnits_.end(), unit);
         if (mit != newUnits_.end()) newUnits_.erase(mit);
 
-        if (wasActiveUnit) {
-            if (CPlayer* player = GetPlayer(unit->GetPlayerIndex())) {
-                player->RemoveUnit(unit);
-                if (unit->IsHero()) {
-                    player->RemoveHero(unit);
-                }
-                // Ref removal path: live removals drop the unlock (the dead
-                // already dropped it on death, heroes keep theirs).
-                if (!unit->IsDead()) {
-                    player->RemoveTechUnlocked(*this, unit->GetTypeId());
-                }
-                if (unit->GetFoodUsed() > 0) {
-                    player->SetFoodUsed(std::max(0, player->GetFoodUsed() - unit->GetFoodUsed()));
-                }
-                if (unit->IsBuilding() && unit->GetFoodMade() > 0 && !unit->IsConstructing() && !unit->IsDead()) {
-                    player->AddFoodCap(-unit->GetFoodMade());
-                }
-            }
+        if (simModule_ && unit) {
+            simModule_->OnUnitRemovedFromWorld(*this, *unit, wasActiveUnit);
         }
 
         const int removedHandle = unit->GetHandleId();
@@ -912,22 +694,8 @@ void CSimulation::ProcessNewUnits() {
         if (worldCollision_) {
             worldCollision_->AddUnit(unit);
         }
-        // Register with player
-        CPlayer* player = GetPlayer(unit->GetPlayerIndex());
-        if (player) {
-            player->AddUnit(unit);
-            if (unit->IsHero()) {
-                player->AddHero(unit);
-            }
-            // Ref createUnit: every entering unit unlocks its type for
-            // techtree requirements (possession, not research history).
-            player->AddTechUnlocked(*this, unit->GetTypeId());
-            if (unit->GetFoodUsed() > 0) {
-                player->SetFoodUsed(player->GetFoodUsed() + unit->GetFoodUsed());
-            }
-            if (unit->IsBuilding() && unit->GetFoodMade() > 0 && !unit->IsConstructing()) {
-                player->AddFoodCap(unit->GetFoodMade());
-            }
+        if (simModule_ && unit) {
+            simModule_->OnUnitCommittedToWorld(*this, *unit);
         }
         events_.onUnitSpawned.Emit(unit->GetHandleId());
     }

@@ -353,6 +353,9 @@ set(SOURCES
     src/ui/ui_data_binder.cpp
     # ===== Core / State Machine =====
     src/engine/engine_kernel.cpp
+    src/engine/dynamic_module_loader.cpp
+    src/game/war3/war3_game_module.cpp
+    src/game/war3/war3_module_plugin_export.cpp
     src/core/game_controller.cpp
     src/core/world_scene_session.cpp
     src/core/input_action_map.cpp

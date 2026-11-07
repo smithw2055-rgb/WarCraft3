@@ -829,6 +829,10 @@ bool TestPhase12StageEE1EngineSubsystemRegistryAndPhaseLifecycle();
 bool TestPhase12StageEE2FixedTimestepStepperAndInterpolationAlpha();
 bool TestPhase12StageFF1EngineKernelPluggableGameModuleAndRetailDriveMap();
 bool TestPhase12StageGG1UnifiedSlkMergeAndColdUnitScriptOverridesPool();
+bool TestPhase13StageHH1War3GameModuleDecoupledUnitAndAbilityAssembly();
+bool TestPhase13StageHH2ModuleScopedAbilityCatalogMountAndUnload();
+bool TestPhase13StageII1DynamicModuleLoaderSharedLibraryDlopenAndHotReload();
+bool TestPhase13StageII2War3GameModuleRetailDriveMapsEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1652,7 +1656,11 @@ int main(int argc, char** argv) {
         {"Phase12 Stage EE1 EngineSubsystemRegistry phase lifecycle and locator", TestPhase12StageEE1EngineSubsystemRegistryAndPhaseLifecycle},
         {"Phase12 Stage EE2 FixedTimestepStepper and interpolation alpha", TestPhase12StageEE2FixedTimestepStepperAndInterpolationAlpha},
         {"Phase12 Stage FF1 EngineKernel pluggable IGameModule and retail Drive map", TestPhase12StageFF1EngineKernelPluggableGameModuleAndRetailDriveMap},
-        {"Phase12 Stage GG1 Unified SlkMerge engine and cold UnitScriptOverrides pool", TestPhase12StageGG1UnifiedSlkMergeAndColdUnitScriptOverridesPool},
+                {"Phase12 Stage GG1 Unified SlkMerge engine and cold UnitScriptOverrides pool", TestPhase12StageGG1UnifiedSlkMergeAndColdUnitScriptOverridesPool},
+        {"Phase13 Stage HH1 War3GameModule decoupled unit and ability assembly", TestPhase13StageHH1War3GameModuleDecoupledUnitAndAbilityAssembly},
+        {"Phase13 Stage HH2 Module-scoped ability catalog mount and unload", TestPhase13StageHH2ModuleScopedAbilityCatalogMountAndUnload},
+        {"Phase13 Stage II1 DynamicModuleLoader shared library dlopen and hot-reload", TestPhase13StageII1DynamicModuleLoaderSharedLibraryDlopenAndHotReload},
+        {"Phase13 Stage II2 War3GameModule retail Drive maps end-to-end suite", TestPhase13StageII2War3GameModuleRetailDriveMapsEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

@@ -1,3 +1,5 @@
+#include "engine/dynamic_module_loader.h"
+#include "game/war3/war3_game_module.h"
 #include "engine/engine_kernel.h"
 #include "data/slk_merge.h"
 #include "data/object_mod_meta.h"
@@ -54,6 +56,8 @@
 #include "ecs/unit_components.h"
 #include "ecs/unit_type.h"
 #include "data/itemdata.h"
+#include "data/unitdata.h"
+#include "ecs/abilities/ability_harvest.h"
 #include "render/camera.h"
 #include "render/math.h"
 #include "render/render_server.h"
@@ -4040,6 +4044,292 @@ bool TestPhase12StageGG1UnifiedSlkMergeAndColdUnitScriptOverridesPool() {
     sim.RemoveUnit(specialUnit);
     sim.Update();
     TEST_ASSERT(sim.Registry().Pool<UnitScriptOverridesComponent>().Size() == 0);
+
+    return true;
+}
+
+
+// ============================================================================
+// Phase 13 Stage HH1-II2: Independent War3GameModule Decomposition,
+// Module-Scoped Ability Catalog Mount/Unload & Dynamic Shared Library (.so) Loader
+// ============================================================================
+
+bool TestPhase13StageHH1War3GameModuleDecoupledUnitAndAbilityAssembly() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // Populate synthetic unit types in TxtTables: Human Peasant (hpea), Town Hall (htow), Paladin Hero (Hpal), Undead Acolyte (uaco)
+    udTxt.SetString("hpea", "race", "human");
+    udTxt.SetString("hpea", "isbldg", "0");
+    ubTxt.SetString("hpea", "HP", "220");
+    ubTxt.SetString("hpea", "spd", "190");
+    ubTxt.SetString("hpea", "fused", "1");
+    ubTxt.SetString("hpea", "builds", "htow,hbar");
+    uwTxt.SetString("hpea", "weapsOn", "1");
+    uwTxt.SetString("hpea", "atkType1", "normal");
+    uaTxt.SetString("hpea", "abilList", "Ahar,Arep");
+
+    udTxt.SetString("uaco", "race", "undead");
+    udTxt.SetString("uaco", "isbldg", "0");
+    ubTxt.SetString("uaco", "HP", "220");
+    ubTxt.SetString("uaco", "spd", "220");
+    ubTxt.SetString("uaco", "fused", "1");
+
+    udTxt.SetString("htow", "race", "human");
+    udTxt.SetString("htow", "isbldg", "1");
+    ubTxt.SetString("htow", "HP", "1500");
+    ubTxt.SetString("htow", "fmade", "12");
+    ubTxt.SetString("htow", "trains", "hpea");
+    ubTxt.SetString("htow", "Upgrade", "hkee");
+
+    udTxt.SetString("Hpal", "race", "human");
+    udTxt.SetString("Hpal", "isbldg", "0");
+    ubTxt.SetString("Hpal", "HP", "650");
+    ubTxt.SetString("Hpal", "spd", "270");
+    ubTxt.SetString("Hpal", "fused", "5");
+    ubTxt.SetString("Hpal", "isHero", "1");
+    ubTxt.SetString("Hpal", "primary", "STR");
+    uaTxt.SetString("Hpal", "abilList", "AInv");
+    uaTxt.SetString("Hpal", "heroAbilList", "AHhb,AHds,AHad,AHre");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    // 1. Test Pure Engine Mode (NullSimulationModule): CSimulation creates bare ECS CUnits with 0 War3 abilities!
+    CSimulation pureSim;
+    pureSim.SetUnitData(&unitData);
+    pureSim.AddPlayer(std::make_unique<CPlayer>(0, "PureP0", CMapControl::USER));
+    pureSim.SetPureEngineMode(true);
+    TEST_ASSERT(pureSim.IsPureEngineMode());
+    TEST_ASSERT(std::string(pureSim.GetSimulationModule()->GetModuleId()) == "NullPureEngineModule");
+
+    CUnit* barePeasant = pureSim.CreateUnit(War3ID("hpea"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* bareHall    = pureSim.CreateUnit(War3ID("htow"), 0, 200.0f, 0.0f, 0.0f);
+    TEST_ASSERT(barePeasant != nullptr && bareHall != nullptr);
+    TEST_ASSERT(barePeasant->GetAbilities().empty());
+    TEST_ASSERT(bareHall->GetAbilities().empty());
+    pureSim.Update();
+    // In Pure Engine Mode, War3 food & techtree rules are not applied
+    TEST_ASSERT(pureSim.GetPlayer(0)->GetFoodUsed() == 0);
+    TEST_ASSERT(pureSim.GetPlayer(0)->GetFoodCap() == 0);
+
+    // 2. Mount War3GameModule dynamically onto CSimulation and verify full War3 archetype assembly!
+    CSimulation war3Sim;
+    war3Sim.SetUnitData(&unitData);
+    war3Sim.AddPlayer(std::make_unique<CPlayer>(0, "War3P0", CMapControl::USER));
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->ResetModuleStats();
+    war3Sim.SetSimulationModule(war3Mod);
+    TEST_ASSERT(!war3Sim.IsPureEngineMode());
+    TEST_ASSERT(war3Sim.GetSimulationModule() == war3Mod.get());
+
+    CUnit* peasant = war3Sim.CreateUnit(War3ID("hpea"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* acolyte = war3Sim.CreateUnit(War3ID("uaco"), 0, 64.0f, 0.0f, 0.0f);
+    CUnit* hall    = war3Sim.CreateUnit(War3ID("htow"), 0, 256.0f, 0.0f, 0.0f);
+    CUnit* paladin = war3Sim.CreateUnit(War3ID("Hpal"), 0, -128.0f, 0.0f, 0.0f);
+    TEST_ASSERT(peasant && acolyte && hall && paladin);
+
+    // Verify War3GameModule assembled peasant's Attack, Move, Harvest, Human Build (AHbu), and Repair (Arep)
+    TEST_ASSERT(peasant->GetAbility(War3ID("Aatk")) != nullptr);
+    TEST_ASSERT(peasant->GetAbility(War3ID("Amov")) != nullptr);
+    TEST_ASSERT(peasant->GetAbility(War3ID("Ahar")) != nullptr);
+    TEST_ASSERT(peasant->GetAbility(War3ID("AHbu")) != nullptr);
+    TEST_ASSERT(peasant->GetAbility(War3ID("Arep")) != nullptr);
+
+    // Verify Undead Acolyte got auto-harvest with 0 lumber capacity
+    auto* acoHarvest = dynamic_cast<CAbilityHarvest*>(acolyte->GetAbility(War3ID("Ahar")));
+    TEST_ASSERT(acoHarvest != nullptr && acoHarvest->GetLumberCapacity() == 0);
+
+    // Verify Town Hall got Queue (Aque), Rally (ARal), Upgrade (Aupg), and ReturnResources (Aret)
+    TEST_ASSERT(hall->GetAbility(War3ID("Aque")) != nullptr);
+    TEST_ASSERT(hall->GetAbility(War3ID("ARal")) != nullptr);
+    TEST_ASSERT(hall->GetAbility(War3ID("Aupg")) != nullptr);
+    TEST_ASSERT(hall->GetAbility(War3ID("Aret")) != nullptr);
+
+    // Verify Paladin got Hero (AHer) and Inventory (AInv)
+    TEST_ASSERT(paladin->GetAbility(War3ID("AHer")) != nullptr);
+    TEST_ASSERT(paladin->GetAbility(War3ID("AInv")) != nullptr);
+
+    war3Sim.Update();
+    // Food used = 1 (peasant) + 1 (acolyte) + 5 (paladin) = 7; Food cap = 12 (town hall)
+    TEST_ASSERT(war3Sim.GetPlayer(0)->GetFoodUsed() == 7);
+    TEST_ASSERT(war3Sim.GetPlayer(0)->GetFoodCap() == 12);
+
+    const engine::SimulationModuleStats& mStats = war3Mod->GetModuleStats();
+    TEST_ASSERT(mStats.unitsAssembled == 4);
+    TEST_ASSERT(mStats.abilitiesAttached >= 14);
+    TEST_ASSERT(mStats.unitsCommitted == 4);
+
+    // Remove peasant and step -> War3GameModule::OnUnitRemovedFromWorld refunds 1 food
+    war3Sim.RemoveUnit(peasant);
+    war3Sim.Update();
+    TEST_ASSERT(war3Sim.GetPlayer(0)->GetFoodUsed() == 6);
+    TEST_ASSERT(war3Mod->GetModuleStats().unitsRemoved == 1);
+
+    return true;
+}
+
+bool TestPhase13StageHH2ModuleScopedAbilityCatalogMountAndUnload() {
+    // 1. Verify War3GameModule owns the ~190 standard WarCraft 3 ability creators
+    AbilityFactory::EnsureDefaultCatalogRegistered();
+    const size_t war3Count = AbilityFactory::GetModuleRegisteredCount(war3::War3GameModule::kModuleId);
+    TEST_ASSERT(war3Count >= 180);
+    TEST_ASSERT(AbilityFactory::GetCreatorModuleId(War3ID("AHbz")) == war3::War3GameModule::kModuleId);
+    TEST_ASSERT(AbilityFactory::GetCreatorModuleId(War3ID("Aatk")) == war3::War3GameModule::kModuleId);
+
+    // 2. Register a custom expansion module's abilities ("SciFiTerranModule")
+    const std::string customMod = "SciFiTerranModule";
+    const War3ID stimCode("Stmp");
+    const War3ID empCode("EmpB");
+    AbilityFactory::RegisterModuleSpellDescriptor(
+        customMod,
+        ABSpellDescriptor::MakeAreaHealAndDispel(empCode, 300.0f, 150.0f, true, 600.0f, 12.0f, 75));
+    AbilityFactory::RegisterModuleAlias(customMod, stimCode, War3ID("Absk"));
+
+    TEST_ASSERT(AbilityFactory::GetModuleRegisteredCount(customMod) == 2);
+    TEST_ASSERT(AbilityFactory::GetCreatorModuleId(empCode) == customMod);
+    TEST_ASSERT(AbilityFactory::GetCreatorModuleId(stimCode) == customMod);
+
+    auto empAbil = AbilityFactory::CreateAbility(9001, empCode);
+    TEST_ASSERT(empAbil != nullptr && empAbil->GetAlias() == empCode);
+
+    // 3. Unload "SciFiTerranModule" -> its 2 creators are cleanly removed while War3GameModule remains intact
+    const size_t removedCustom = AbilityFactory::UnregisterModuleCreators(customMod);
+    TEST_ASSERT(removedCustom == 2);
+    TEST_ASSERT(AbilityFactory::GetModuleRegisteredCount(customMod) == 0);
+    TEST_ASSERT(AbilityFactory::GetModuleRegisteredCount(war3::War3GameModule::kModuleId) == war3Count);
+
+    // 4. Test unloading and re-mounting War3GameModule's catalog with auto-bootstrap disabled
+    AbilityFactory::SetAutoBootstrapDefaultCatalog(false);
+    const size_t unloadedWar3 = war3::War3GameModule::UnregisterWar3AbilityCatalog();
+    TEST_ASSERT(unloadedWar3 == war3Count);
+    TEST_ASSERT(AbilityFactory::GetModuleRegisteredCount(war3::War3GameModule::kModuleId) == 0);
+
+    // Re-register War3GameModule catalog and restore auto-bootstrap
+    war3::War3GameModule::RegisterWar3AbilityCatalog();
+    AbilityFactory::SetAutoBootstrapDefaultCatalog(true);
+    TEST_ASSERT(AbilityFactory::GetModuleRegisteredCount(war3::War3GameModule::kModuleId) == war3Count);
+
+    return true;
+}
+
+bool TestPhase13StageII1DynamicModuleLoaderSharedLibraryDlopenAndHotReload() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+
+    // 1. Verify built-in factory registration for "War3GameModule"
+    TEST_ASSERT(loader.HasModule(war3::War3GameModule::kModuleId));
+    auto builtInSimMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+    auto builtInGameMod = loader.CreateGameModule(war3::War3GameModule::kModuleId);
+    TEST_ASSERT(builtInSimMod != nullptr && builtInGameMod != nullptr);
+    TEST_ASSERT(std::string(builtInSimMod->GetModuleId()) == war3::War3GameModule::kModuleId);
+    TEST_ASSERT(std::string(builtInGameMod->GetModuleName()) == war3::War3GameModule::kModuleId);
+
+    // 2. Load the compiled shared library plugin ./libwar3_module_plugin.so via OS dlopen/dlsym
+    std::string soPath = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3DynamicPluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath));
+        TEST_ASSERT(loader.IsSharedLibraryLoaded(pluginKey));
+        TEST_ASSERT(loader.GetModuleGeneration(pluginKey) == 1u);
+
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            auto dynGameMod = loader.CreateGameModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr && dynGameMod != nullptr);
+            TEST_ASSERT(std::string(dynSimMod->GetModuleId()) == war3::War3GameModule::kModuleId);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() == 13u);
+            TEST_ASSERT(dynGameMod->GetCustomDestroyFn() != nullptr);
+
+            // Attach dynamically loaded .so module to a live CSimulation and spawn a Footman
+            CSimulation sim;
+            sim.AddPlayer(std::make_unique<CPlayer>(0, "DynPlayer", CMapControl::USER));
+            sim.SetSimulationModule(dynSimMod);
+
+            CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+            CUnit u(sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f);
+            dynSimMod->OnAssembleUnitAbilities(sim, u, *footmanType);
+            TEST_ASSERT(u.GetAbility(War3ID("Aatk")) != nullptr);
+            TEST_ASSERT(u.GetAbility(War3ID("Amov")) != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleStats().unitsAssembled == 1);
+            sim.SetPureEngineMode(true); // Detach before unloading .so
+        }
+
+        // Perform live hot-reload of the shared library and verify generation bumps 1 -> 2
+        TEST_ASSERT(loader.HotReloadSharedLibrary(pluginKey));
+        TEST_ASSERT(loader.GetModuleGeneration(pluginKey) == 2u);
+        TEST_ASSERT(loader.GetStats().totalHotReloads >= 1);
+
+        // Unload shared library cleanly via dlclose
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+        TEST_ASSERT(!loader.IsSharedLibraryLoaded(pluginKey));
+    }
+
+    return true;
+}
+
+bool TestPhase13StageII2War3GameModuleRetailDriveMapsEndToEndSuite() {
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TurtleRock.w3x",
+        "resources/Maps/FrozenThrone/(8)GardenOfWar.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(6)BlizzardTD.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(8)AzerothGrandPrix.w3x"
+    };
+
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+
+    int mapsVerified = 0;
+    for (const char* mapPath : kCloudMaps) {
+        FILE* f = std::fopen(mapPath, "rb");
+        if (!f) continue;
+        std::fclose(f);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        auto gameMod = loader.CreateGameModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod != nullptr && gameMod != nullptr);
+
+        MpqManager mpq;
+        CSimulation sim;
+        sim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, sim, scene, presentation, mapPath));
+
+        auto* war3GameMod = dynamic_cast<war3::War3GameModule*>(gameMod.get());
+        TEST_ASSERT(war3GameMod != nullptr);
+        war3GameMod->BindSimulation(&sim);
+
+        engine::EngineKernel kernel;
+        TEST_ASSERT(kernel.BootstrapStandardSubsystems(2, 0.05f));
+        TEST_ASSERT(kernel.MountGameModule(std::move(gameMod)));
+
+        const int ticksBefore = sim.GetGameTurnTick();
+        TEST_ASSERT(kernel.StepFrame(0.10f, 1280, 720) == 2);
+        TEST_ASSERT(sim.GetGameTurnTick() == ticksBefore + 2);
+
+        session.TeardownCurrentSession(mpq, sim, scene, presentation);
+        kernel.Shutdown();
+        ++mapsVerified;
+    }
 
     return true;
 }

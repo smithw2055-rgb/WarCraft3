@@ -139,6 +139,9 @@ add_executable(warsmash_tests
     ../src/asset/stb_image.cpp
     ../src/core/map_path_resolver.cpp
     ../src/engine/engine_kernel.cpp
+    ../src/engine/dynamic_module_loader.cpp
+    ../src/game/war3/war3_game_module.cpp
+    ../src/game/war3/war3_module_plugin_export.cpp
     ../src/core/job_system.cpp
     ../src/core/world_scene_session.cpp
     ../src/core/input_action_map.cpp

@@ -9,6 +9,7 @@
 #include "ecs/ecs_registry.h"
 #include "ecs/spatial_grid.h"
 #include "ecs/sim_systems.h"
+#include "engine/simulation_module.h"
 #include "ecs/fog_state.h"
 #include "ecs/lockstep.h"
 #include "ecs/unit.h"
@@ -61,6 +62,12 @@ public:
     // Modular Simulation System Pipeline access (Phase 5 Stage C modernization)
     SimulationSystemPipeline& SystemPipeline() { return systemPipeline_; }
     const SimulationSystemPipeline& SystemPipeline() const { return systemPipeline_; }
+
+    // Phase 13 Dynamic Simulation Module (War3GameModule vs Pure Engine / Custom Module)
+    void SetSimulationModule(std::shared_ptr<engine::ISimulationModule> module);
+    engine::ISimulationModule* GetSimulationModule() const { return simModule_.get(); }
+    void SetPureEngineMode(bool pureEngine);
+    bool IsPureEngineMode() const { return pureEngineMode_; }
 
     // System registration
     void SetUnitData(CUnitData* data) { unitData_ = data; }
@@ -525,4 +532,6 @@ private:
     SimEcsRegistry ecsRegistry_;
     SpatialHashGrid spatialGrid_{256.0f};
     SimulationSystemPipeline systemPipeline_;
+    std::shared_ptr<engine::ISimulationModule> simModule_;
+    bool pureEngineMode_ = false;
 };
