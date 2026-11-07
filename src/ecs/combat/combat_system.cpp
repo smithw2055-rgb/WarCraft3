@@ -379,7 +379,14 @@ float CCombatSystem::ApplySplashDamageAtPoint(CSimulation& simulation, CUnit* at
     if (attacker) {
         ownerPlayer = simulation.GetPlayer(attacker->GetPlayerIndex());
     }
-    for (CUnit* other : simulation.GetUnits()) {
+    const float maxSplashRadius = std::max({attack.areaFull, attack.areaHalf, attack.areaQuarter});
+    std::vector<CUnit*> spatialCandidates;
+    const std::vector<CUnit*>* unitList = &simulation.GetUnits();
+    if (simulation.GetUnits().size() > 32 && simulation.SpatialGrid().IndexedEntityCount() > 0) {
+        spatialCandidates = simulation.QueryUnitsInRadius(x, y, maxSplashRadius + 64.0f);
+        unitList = &spatialCandidates;
+    }
+    for (CUnit* other : *unitList) {
         if (!other || other == excludeWidget || other == attacker || other->IsDead()) continue;
         // Allies (and the attacker itself) are immune to friendly splash.
         bool isAlly = false;
@@ -436,7 +443,16 @@ float CCombatSystem::ApplyLineDamage(CSimulation& simulation, CUnit* attacker,
     if (attacker) {
         ownerPlayer = simulation.GetPlayer(attacker->GetPlayerIndex());
     }
-    for (CUnit* other : simulation.GetUnits()) {
+    std::vector<CUnit*> lineCandidates;
+    const std::vector<CUnit*>* lineUnitList = &simulation.GetUnits();
+    if (simulation.GetUnits().size() > 32 && simulation.SpatialGrid().IndexedEntityCount() > 0) {
+        const float midX = x0 + nx * (0.5f * spillDistance);
+        const float midY = y0 + ny * (0.5f * spillDistance);
+        const float boundRadius = 0.5f * spillDistance + spillRadius + 64.0f;
+        lineCandidates = simulation.QueryUnitsInRadius(midX, midY, boundRadius);
+        lineUnitList = &lineCandidates;
+    }
+    for (CUnit* other : *lineUnitList) {
         if (!other || other == excludeWidget || other == attacker || other->IsDead()) continue;
         bool isAlly = false;
         if (attacker) {

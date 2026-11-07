@@ -42,14 +42,73 @@ float JassNativesData::TerrainDeformOffset(float x, float y) const {
     return offset;
 }
 
+namespace {
+inline bool IsPersistentSimEntityHandleType(JassHandleInfo::Type type) {
+    return type == JassHandleInfo::UNIT ||
+           type == JassHandleInfo::PLAYER ||
+           type == JassHandleInfo::ITEM ||
+           type == JassHandleInfo::DESTRUCTABLE;
+}
+
+inline uint64_t MakeSimEntityHandleKey(JassHandleInfo::Type type, int id) {
+    return (static_cast<uint64_t>(static_cast<uint32_t>(type)) << 32) |
+           static_cast<uint32_t>(id);
+}
+} // namespace
+
 int JassNativesData::AllocHandle(JassHandleInfo::Type type, int id) {
-    int h = nextHandleId++;
+    if (id >= 0 && IsPersistentSimEntityHandleType(type)) {
+        const uint64_t key = MakeSimEntityHandleKey(type, id);
+        auto it = simEntityToHandle.find(key);
+        if (it != simEntityToHandle.end() && handles.find(it->second) != handles.end()) {
+            ++handleCacheHits;
+            return it->second;
+        }
+        const int h = nextHandleId++;
+        handles[h] = {type, id};
+        simEntityToHandle[key] = h;
+        ++handleAllocations;
+        return h;
+    }
+    const int h = nextHandleId++;
     handles[h] = {type, id};
+    ++handleAllocations;
     return h;
 }
 
 void JassNativesData::FreeHandle(int handle) {
-    handles.erase(handle);
+    auto it = handles.find(handle);
+    if (it != handles.end()) {
+        if (it->second.id >= 0 && IsPersistentSimEntityHandleType(it->second.type)) {
+            simEntityToHandle.erase(MakeSimEntityHandleKey(it->second.type, it->second.id));
+        }
+        handles.erase(it);
+    }
+}
+
+void JassNativesData::IndexTriggerUnitEvent(int triggerId, int eventType) {
+    auto& vec = unitEventToTriggers[eventType];
+    if (std::find(vec.begin(), vec.end(), triggerId) == vec.end()) {
+        vec.push_back(triggerId);
+    }
+}
+
+void JassNativesData::IndexTriggerTimerEvent(int triggerId, int timerSimId) {
+    auto& vec = timerEventToTriggers[timerSimId];
+    if (std::find(vec.begin(), vec.end(), triggerId) == vec.end()) {
+        vec.push_back(triggerId);
+    }
+}
+
+void JassNativesData::UnindexTrigger(int triggerId) {
+    for (auto& [ev, vec] : unitEventToTriggers) {
+        (void)ev;
+        vec.erase(std::remove(vec.begin(), vec.end(), triggerId), vec.end());
+    }
+    for (auto& [tid, vec] : timerEventToTriggers) {
+        (void)tid;
+        vec.erase(std::remove(vec.begin(), vec.end(), triggerId), vec.end());
+    }
 }
 
 int JassNativesData::GetSimHandle(int jassHandle, JassHandleInfo::Type type) const {
@@ -362,7 +421,29 @@ void JassNatives::QueueTriggerActions(JassTrigger& trigger, const JassQueuedCont
 }
 
 void JassNatives::FireUnitEvent(int unitSimHandle, int eventType, int playerEventType) {
-    for (auto& [id, trigger] : data_->triggers) {
+    if (!data_) return;
+    std::vector<int> candidateIds;
+    if (auto it = data_->unitEventToTriggers.find(eventType); it != data_->unitEventToTriggers.end()) {
+        candidateIds.insert(candidateIds.end(), it->second.begin(), it->second.end());
+    }
+    if (playerEventType >= 0) {
+        if (auto it = data_->unitEventToTriggers.find(playerEventType); it != data_->unitEventToTriggers.end()) {
+            for (int tid : it->second) {
+                if (std::find(candidateIds.begin(), candidateIds.end(), tid) == candidateIds.end()) {
+                    candidateIds.push_back(tid);
+                }
+            }
+        }
+    }
+    data_->indexedTriggerDispatches++;
+    data_->triggersEvaluatedByIndex += candidateIds.size();
+    if (data_->triggers.size() > candidateIds.size()) {
+        data_->triggersSkippedByIndex += (data_->triggers.size() - candidateIds.size());
+    }
+    for (int id : candidateIds) {
+        auto trigIt = data_->triggers.find(id);
+        if (trigIt == data_->triggers.end() || !trigIt->second) continue;
+        auto& trigger = trigIt->second;
         for (size_t i = 0; i < trigger->registeredUnitHandles.size(); i++) {
             int regUnitHandle = trigger->registeredUnitHandles[i];
             int regEventType = trigger->eventTypes[i];
@@ -1126,7 +1207,14 @@ int JassNatives::UpdateTimers(float dt) {
                 QueueFunctionWithContext(timer->callbackFunc, context);
                 firedCount++;
             }
-            for (auto& [triggerId, trigger] : data_->triggers) {
+            std::vector<int> timerTrigIds;
+            if (auto tit = data_->timerEventToTriggers.find(id); tit != data_->timerEventToTriggers.end()) {
+                timerTrigIds = tit->second;
+            }
+            for (int triggerId : timerTrigIds) {
+                auto trigIt = data_->triggers.find(triggerId);
+                if (trigIt == data_->triggers.end() || !trigIt->second) continue;
+                auto& trigger = trigIt->second;
                 bool matches = false;
                 for (const auto& event : trigger->registeredEvents) {
                     if ((event.first == id && event.second == 1001) ||
@@ -1517,7 +1605,6 @@ void JassNatives::FireStateTriggers() {
                         data_->filterUnitHandle = uh;
                         const bool accepted = JassValueToBool(CallSyncFunction(vmPtr_, ev.filterFunc));
                         data_->filterUnitHandle = prev;
-                        data_->FreeHandle(uh);
                         if (!accepted) continue;
                     }
                     inside = true;

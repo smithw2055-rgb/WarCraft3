@@ -1,3 +1,11 @@
+#include <cstring>
+#include "ecs/abilities/ability_move.h"
+#include "scripting/JassNatives.h"
+#include "ecs/pathing/crowd_steering.h"
+#include "core/input_action_map.h"
+#include "net/snapshot_resync.h"
+#include "render/texture_atlas_packer.h"
+#include "core/engine_profiler.h"
 #include "scripting/JassLexer.h"
 #include "scripting/JassParser.h"
 #include "scripting/JassVM.h"
@@ -2012,6 +2020,606 @@ bool TestPhase7StageOUIDataBinderReactiveDirtyOnlySync() {
     TEST_ASSERT(goldTxt.GetText() == "625");
     TEST_ASSERT(binder.GetStats().dirtyFieldUpdates == prevDirtyUpdates + 1);
     TEST_ASSERT(binder.GetStats().layoutPassesTriggered == 2);
+
+    return true;
+}
+
+
+// ============================================================================
+// Stage P — JASS Handle Deduplication & O(1) TriggerEventIndex Dispatch
+// ============================================================================
+bool TestPhase8StagePJassHandleDeduplicationAndTriggerIndex() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 500, 270, false);
+
+    CUnit* u1 = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+    CUnit* u2 = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 1, War3ID("hfoo"), 64.0f, 0.0f, 180.0f));
+    sim.Update();
+
+    JassVM vm;
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    auto data = natives.GetData();
+    TEST_ASSERT(data != nullptr);
+
+    // 1. Verify persistent entity handle deduplication (UNIT, PLAYER, ITEM, DESTRUCTABLE)
+    const int u1JassFirst = data->AllocHandle(JassHandleInfo::UNIT, u1->GetHandleId());
+    const int p0JassFirst = data->AllocHandle(JassHandleInfo::PLAYER, 0);
+    const uint64_t hitsBefore = data->handleCacheHits;
+    for (int i = 0; i < 100; ++i) {
+        TEST_ASSERT(data->AllocHandle(JassHandleInfo::UNIT, u1->GetHandleId()) == u1JassFirst);
+        TEST_ASSERT(data->AllocHandle(JassHandleInfo::PLAYER, 0) == p0JassFirst);
+    }
+    TEST_ASSERT(data->handleCacheHits == hitsBefore + 200);
+
+    // 2. Register 40 unrelated death/order triggers and 2 damage triggers via JASS script
+    const std::string script = R"(
+        globals
+            integer g_damageHits = 0
+        endglobals
+        function OnUnitDamagedAction takes nothing returns nothing
+            set g_damageHits = g_damageHits + 1
+        endfunction
+    )";
+    TEST_ASSERT(vm.LoadScript(script));
+
+    for (int i = 0; i < 40; ++i) {
+        int trigId = data->nextTriggerId++;
+        auto trig = std::make_shared<JassTrigger>();
+        trig->id = trigId;
+        trig->registeredUnitHandles.push_back(u1JassFirst);
+        trig->eventTypes.push_back(JASS_EVENT_UNIT_DEATH);
+        trig->registeredEvents.push_back({u1JassFirst, JASS_EVENT_UNIT_DEATH});
+        data->triggers[trigId] = trig;
+        data->IndexTriggerUnitEvent(trigId, JASS_EVENT_UNIT_DEATH);
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        int trigId = data->nextTriggerId++;
+        auto trig = std::make_shared<JassTrigger>();
+        trig->id = trigId;
+        trig->registeredUnitHandles.push_back(u1JassFirst);
+        trig->eventTypes.push_back(JASS_EVENT_UNIT_DAMAGED);
+        trig->registeredEvents.push_back({u1JassFirst, JASS_EVENT_UNIT_DAMAGED});
+        trig->actionFuncNames.push_back("OnUnitDamagedAction");
+        data->triggers[trigId] = trig;
+        data->IndexTriggerUnitEvent(trigId, JASS_EVENT_UNIT_DAMAGED);
+    }
+
+    for (int k = 0; k < 5; ++k) {
+        natives.FireDamageEvent(u1->GetHandleId(), u2->GetHandleId(), 25.0f, JASS_EVENT_UNIT_DAMAGED);
+    }
+    natives.PumpQueuedThreads();
+
+    TEST_ASSERT(vm.GetGlobal("g_damageHits").AsInt() == 10); // 5 events * 2 subscribed triggers
+    TEST_ASSERT(data->indexedTriggerDispatches >= 5);
+    TEST_ASSERT(data->triggersEvaluatedByIndex == 10);
+    TEST_ASSERT(data->triggersSkippedByIndex >= 5 * 40); // 200 unrelated triggers skipped!
+
+    return true;
+}
+
+bool TestPhase8StagePTimerEventIndexAndDestroyTriggerCleanup() {
+    CSimulation sim;
+    JassVM vm;
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+
+    const std::string script = R"(
+        globals
+            integer g_timerFires = 0
+            trigger g_tempTrig = null
+        endglobals
+
+        function OnTimerExpire takes nothing returns nothing
+            set g_timerFires = g_timerFires + 1
+        endfunction
+
+        function SetupTimers takes nothing returns nothing
+            local trigger tKeep = CreateTrigger()
+            local integer i = 0
+            loop
+                exitwhen i >= 20
+                call CreateTrigger()
+                set i = i + 1
+            endloop
+            call TriggerRegisterTimerEvent(tKeep, 0.10, true)
+            call TriggerAddAction(tKeep, function OnTimerExpire)
+
+            set g_tempTrig = CreateTrigger()
+            call TriggerRegisterTimerEvent(g_tempTrig, 0.10, true)
+            call TriggerAddAction(g_tempTrig, function OnTimerExpire)
+            call DestroyTrigger(g_tempTrig)
+        endfunction
+    )";
+    TEST_ASSERT(vm.LoadScript(script));
+    vm.Execute("SetupTimers");
+
+    // Step 0.12s -> tKeep fires once; destroyed g_tempTrig was unindexed and does not fire
+    natives.UpdateTimers(0.12f);
+    natives.PumpQueuedThreads();
+    TEST_ASSERT(vm.GetGlobal("g_timerFires").AsInt() == 1);
+
+    natives.UpdateTimers(0.12f);
+    natives.PumpQueuedThreads();
+    TEST_ASSERT(vm.GetGlobal("g_timerFires").AsInt() == 2);
+
+    return true;
+}
+
+// ============================================================================
+// Stage Q — Spatial-Accelerated Combat AoE & Predictive CrowdSteeringSystem
+// ============================================================================
+bool TestPhase8StageQSpatialAcceleratedSplashAndLineDamage() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 500, 270, false);
+
+    CUnit* attacker = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), -200.0f, 0.0f, 0.0f));
+
+    // Spawn 45 enemy units: 3 near (0, 0) for splash/line corridor, 42 far away (> 2000 units away)
+    CUnit* eCenter = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 1, War3ID("hfoo"), 0.0f, 0.0f, 180.0f));
+    CUnit* eHalf = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 1, War3ID("hfoo"), 100.0f, 0.0f, 180.0f));
+    CUnit* eLine = sim.AdoptUnit(std::make_unique<CUnit>(
+        sim.AllocateHandleId(), footmanType, 1, War3ID("hfoo"), 220.0f, 0.0f, 180.0f));
+
+    for (int i = 0; i < 42; ++i) {
+        sim.AdoptUnit(std::make_unique<CUnit>(
+            sim.AllocateHandleId(), footmanType, 1, War3ID("hfoo"),
+            3000.0f + (i % 7) * 150.0f, 3000.0f + (i / 7) * 150.0f, 0.0f));
+    }
+    sim.Update();
+    TEST_ASSERT(sim.SpatialGrid().IndexedEntityCount() == 46);
+
+    CUnitAttack splashAtk;
+    splashAtk.weaponType = CWeaponType::ARTILLERY;
+    splashAtk.areaFull = 50.0f;
+    splashAtk.areaHalf = 150.0f;
+    splashAtk.areaQuarter = 250.0f;
+    splashAtk.damageFactorHalf = 0.5f;
+    splashAtk.damageFactorQuarter = 0.25f;
+
+    // 1. Splash at (0, 0) with 100 base chaos damage -> eCenter takes 100, eHalf (d=100) takes 50, eLine (d=220) takes 25
+    sim.GetCombatSystem()->ApplySplashDamageAtPoint(
+        sim, attacker, 0.0f, 0.0f, false, true,
+        CAttackType::CHAOS, CDamageType::UNIVERSAL,
+        100.0f, 0.0f, 0, 0, splashAtk, nullptr, 1.0f, false);
+
+    TEST_NEAR(eCenter->GetLife(), 400.0f, 1e-2f);
+    TEST_NEAR(eHalf->GetLife(), 450.0f, 1e-2f);
+    TEST_NEAR(eLine->GetLife(), 475.0f, 1e-2f);
+
+    // 2. Line spill damage along +X from (0, 0) distance 260, radius 40 -> hits eCenter, eHalf, eLine for 60 damage
+    sim.GetCombatSystem()->ApplyLineDamage(
+        sim, attacker, 0.0f, 0.0f, 1.0f, 0.0f, false, true,
+        CAttackType::CHAOS, CDamageType::UNIVERSAL,
+        60.0f, 0.0f, 0, 0, 260.0f, 40.0f, nullptr);
+
+    TEST_NEAR(eCenter->GetLife(), 340.0f, 1e-2f);
+    TEST_NEAR(eHalf->GetLife(), 390.0f, 1e-2f);
+    TEST_NEAR(eLine->GetLife(), 415.0f, 1e-2f);
+
+    return true;
+}
+
+bool TestPhase8StageQCrowdSteeringRvoAndFlowFieldBlending() {
+    WpmData wpm;
+    wpm.width = 64;
+    wpm.height = 64;
+    wpm.pathing.assign(64 * 64, 0x00);
+
+    CSimulation sim;
+    sim.SetPathingMap(&wpm, -1024.0f, -1024.0f);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+
+    // Spawn 6 closely packed units near (-300, 0)
+    std::vector<int> handles;
+    for (int i = 0; i < 6; ++i) {
+        const float x = -300.0f + (i % 3) * 18.0f;
+        const float y = -10.0f + (i / 3) * 18.0f;
+        CUnit* u = sim.AdoptUnit(std::make_unique<CUnit>(
+            sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"), x, y, 0.0f));
+        handles.push_back(u->GetHandleId());
+    }
+    sim.Update();
+
+    pathfinding::FlowFieldGrid flow;
+    TEST_ASSERT(flow.Build(*sim.GetPathfinding(), 400.0f, 0.0f, 48, PathingGridMovementType::FOOT));
+
+    pathfinding::CrowdSteeringSystem steering;
+    for (int step = 0; step < 10; ++step) {
+        auto outputs = steering.StepGroupSteering(sim, handles, 400.0f, 0.0f, 0.05f, &flow);
+        TEST_ASSERT(outputs.size() == 6);
+    }
+
+    const auto& st = steering.GetStats();
+    TEST_ASSERT(st.totalAgentsSteered == 60);
+    TEST_ASSERT(st.flowFieldSamples == 60);
+    TEST_ASSERT(st.avoidanceAdjustments > 0);
+
+    // Verify the squad advanced toward +X (goal = 400) while spreading out laterally
+    float avgX = 0.0f;
+    for (int h : handles) {
+        avgX += sim.GetUnit(h)->GetX();
+    }
+    avgX /= 6.0f;
+    TEST_ASSERT(avgX > -250.0f);
+
+    return true;
+}
+
+// ============================================================================
+// Stage R — Declarative InputActionMap & Formation CommandBufferPipeline
+// ============================================================================
+bool TestPhase8StageRInputActionMapChordsAndSerialization() {
+    core::InputActionMap map;
+    map.RegisterStandardWarcraftDefaults();
+    TEST_ASSERT(map.ActionCount() >= 23);
+    TEST_ASSERT(map.FindChordConflicts().empty());
+
+    std::vector<std::string> triggered;
+    TEST_ASSERT(map.ResolveTriggeredActions(83, core::kInputModNone, triggered) == 1);
+    TEST_ASSERT(triggered[0] == "order_stop");
+
+    TEST_ASSERT(map.ResolveTriggeredActions(51, core::kInputModCtrl, triggered) == 1);
+    TEST_ASSERT(triggered[0] == "control_group_assign_3");
+
+    // Rebind order_attack to Q and add a secondary chord Alt+A
+    TEST_ASSERT(map.RebindPrimary("order_attack", core::InputKeyChord{81, core::kInputModNone}));
+    TEST_ASSERT(map.RebindSecondary("order_attack", core::InputKeyChord{65, core::kInputModAlt}));
+    TEST_ASSERT(map.ResolveTriggeredActions(81, core::kInputModNone, triggered) == 1);
+    TEST_ASSERT(triggered[0] == "order_attack");
+    TEST_ASSERT(map.ResolveTriggeredActions(65, core::kInputModAlt, triggered) == 1);
+    TEST_ASSERT(triggered[0] == "order_attack");
+
+    // Round-trip through config text serialization
+    const std::string cfgText = map.SerializeToText();
+    core::InputActionMap restored;
+    TEST_ASSERT(restored.DeserializeFromText(cfgText));
+    TEST_ASSERT(restored.ActionCount() == map.ActionCount());
+    TEST_ASSERT(restored.ResolveTriggeredActions(81, core::kInputModNone, triggered) == 1);
+    TEST_ASSERT(triggered[0] == "order_attack");
+
+    return true;
+}
+
+bool TestPhase8StageRCommandBufferPipelineBoxFormationAndReplay() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+
+    std::vector<int> handles;
+    for (int i = 0; i < 9; ++i) {
+        CUnit* u = sim.AdoptUnit(std::make_unique<CUnit>(
+            sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"),
+            static_cast<float>((i % 3) * 40), static_cast<float>((i / 3) * 40), 0.0f));
+        int abH = sim.AllocateHandleId();
+        u->AddAbility(sim, std::make_unique<CAbilityMove>(abH));
+        handles.push_back(u->GetHandleId());
+    }
+    sim.Update();
+
+    ReplayLog replay;
+    replay.Begin(12345u);
+
+    core::CommandBufferPipeline pipeline;
+    const int count = pipeline.IssueGroupPointOrder(
+        sim, 0, handles, OrderIds::MOVE, 600.0f, 400.0f, true, 80.0f, &replay);
+    TEST_ASSERT(count == 9);
+    TEST_ASSERT(pipeline.GetStats().totalGroupOrdersIssued == 1);
+    TEST_ASSERT(pipeline.GetStats().formationOrdersComputed == 1);
+    TEST_ASSERT(pipeline.GetStats().totalUnitCommandsDispatched == 9);
+    TEST_ASSERT(replay.Commands().size() == 9);
+
+    // Verify the 9 formation destinations are distinct and centered around (600, 400)
+    float sumX = 0.0f, sumY = 0.0f;
+    for (size_t i = 0; i < replay.Commands().size(); ++i) {
+        sumX += replay.Commands()[i].x;
+        sumY += replay.Commands()[i].y;
+        for (size_t j = i + 1; j < replay.Commands().size(); ++j) {
+            const float dx = replay.Commands()[i].x - replay.Commands()[j].x;
+            const float dy = replay.Commands()[i].y - replay.Commands()[j].y;
+            TEST_ASSERT(dx * dx + dy * dy > 100.0f);
+        }
+    }
+    TEST_NEAR(sumX / 9.0f, 600.0f, 1e-2f);
+    TEST_NEAR(sumY / 9.0f, 400.0f, 1e-2f);
+
+    return true;
+}
+
+// ============================================================================
+// Stage S — Compressed Keyframe + Tail Lockstep Fast-Resync & Delta Codec
+// ============================================================================
+bool TestPhase8StageSFastResyncKeyframePackageAndZlibWire() {
+    auto setupSim = [](CSimulation& s, std::vector<int>& outHandles) {
+        s.SeedRng(0xCAFEBABEu);
+        s.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+        CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+        for (int i = 0; i < 6; ++i) {
+            CUnit* u = s.AdoptUnit(std::make_unique<CUnit>(
+                s.AllocateHandleId(), footmanType, 0, War3ID("hfoo"),
+                static_cast<float>(i * 50), 0.0f, 0.0f));
+            u->AddAbility(s, std::make_unique<CAbilityMove>(s.AllocateHandleId()));
+            outHandles.push_back(u->GetHandleId());
+        }
+        s.Update();
+    };
+
+    CSimulation hostSim;
+    std::vector<int> hostHandles;
+    setupSim(hostSim, hostHandles);
+
+    net::RollingSnapshotRingBuffer ring(8, 10);
+    std::vector<TurnBatch> history;
+
+    // Run 25 turns on host, recording keyframes every 10 turns and issuing orders at Turn 12 and Turn 22
+    for (int t = 1; t <= 25; ++t) {
+        ring.RecordIfDue(hostSim);
+        TurnBatch batch;
+        batch.turn = hostSim.GetGameTurnTick();
+        if (batch.turn == 12 || batch.turn == 22) {
+            SimCommand cmd;
+            cmd.turn = batch.turn;
+            cmd.player = 0;
+            cmd.unit = hostHandles[0];
+            cmd.orderId = OrderIds::MOVE;
+            cmd.targetKind = static_cast<int32_t>(COrder::TargetKind::POINT);
+            cmd.x = (batch.turn == 12) ? 300.0f : 600.0f;
+            cmd.y = 200.0f;
+            batch.commands.push_back(cmd);
+            ApplyBatch(hostSim, batch);
+        }
+        hostSim.Update();
+        batch.stateHash = hostSim.HashState();
+        history.push_back(batch);
+    }
+
+    const SimStateSnapshot* kf20 = ring.FindKeyframeAtOrBefore(20);
+    TEST_ASSERT(kf20 != nullptr && kf20->gameTurnTick == 20);
+
+    net::FastResyncKeyframePackage pkg;
+    TEST_ASSERT(net::FastResyncKeyframePackage::Build(
+        *kf20, history, hostSim.GetGameTurnTick(), hostSim.HashState(), pkg));
+    TEST_ASSERT(pkg.trailingBatches.size() == 6); // only turns 20..25!
+    TEST_ASSERT(pkg.compressedSnapshot.size() < pkg.uncompressedSnapshotBytes);
+
+    // Serialize over wire and decode on a late-joining peer simulation
+    std::vector<uint8_t> wire = pkg.SerializeWire();
+    net::FastResyncKeyframePackage decodedPkg;
+    TEST_ASSERT(net::FastResyncKeyframePackage::DeserializeWire(wire.data(), wire.size(), decodedPkg));
+
+    CSimulation peerSim;
+    std::vector<int> peerHandles;
+    setupSim(peerSim, peerHandles);
+    // Peer is at Turn 1; jump directly to Turn 20 via compressed keyframe and replay only 6 trailing turns!
+    TEST_ASSERT(decodedPkg.ApplyToSimulation(peerSim));
+    TEST_ASSERT(peerSim.GetGameTurnTick() == hostSim.GetGameTurnTick());
+    TEST_ASSERT(peerSim.HashState() == hostSim.HashState());
+
+    return true;
+}
+
+bool TestPhase8StageSSnapshotDeltaXorZlibCompression() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+
+    std::vector<CUnit*> units;
+    for (int i = 0; i < 20; ++i) {
+        units.push_back(sim.AdoptUnit(std::make_unique<CUnit>(
+            sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"),
+            static_cast<float>(i * 30), 100.0f, 0.0f)));
+    }
+    sim.Update();
+
+    SimStateSnapshot baseSnap = SimStateSnapshot::Capture(sim);
+    // Mutate only 2 of the 20 units over 3 ticks
+    units[0]->SetPosition(555.0f, 666.0f);
+    units[1]->SetLife(sim, 210.0f);
+    sim.Update();
+
+    SimStateSnapshot targetSnap = SimStateSnapshot::Capture(sim);
+    net::SnapshotDeltaPacket delta;
+    TEST_ASSERT(net::SnapshotDeltaPacket::EncodeDelta(baseSnap, targetSnap, delta));
+    // XOR + Zlib delta across 90% unchanged state compresses to a tiny fraction of raw size
+    TEST_ASSERT(delta.compressedXorDelta.size() * 2 < delta.targetUncompressedSize);
+
+    SimStateSnapshot reconstructed;
+    TEST_ASSERT(net::SnapshotDeltaPacket::DecodeDelta(baseSnap, delta, reconstructed));
+    TEST_ASSERT(reconstructed.stateHash == targetSnap.stateHash);
+    TEST_ASSERT(reconstructed.units.size() == 20);
+
+    return true;
+}
+
+// ============================================================================
+// Stage T — BlpMipTextureResource Pipeline & 2D TextureAtlasPacker
+// ============================================================================
+bool TestPhase8StageTBlpMipTextureResourceAndSiblingFallback() {
+    // Build a valid minimal 4x4 paletted BLP1 image in memory (header = 156 bytes + palette = 1024 bytes)
+    constexpr uint32_t kBlpHeaderBytes = 156;
+    constexpr uint32_t kPaletteBytes = 256 * 4;
+    constexpr uint32_t kMip0Offset = kBlpHeaderBytes + kPaletteBytes;
+    std::vector<uint8_t> blpBytes(kMip0Offset + 16 + 16, 0);
+    auto poke32 = [&](size_t at, uint32_t v) {
+        blpBytes[at + 0] = static_cast<uint8_t>(v & 0xFFu);
+        blpBytes[at + 1] = static_cast<uint8_t>((v >> 8) & 0xFFu);
+        blpBytes[at + 2] = static_cast<uint8_t>((v >> 16) & 0xFFu);
+        blpBytes[at + 3] = static_cast<uint8_t>((v >> 24) & 0xFFu);
+    };
+    std::memcpy(blpBytes.data(), "BLP1", 4);
+    poke32(4, 1);  // compression = 1 (Paletted)
+    poke32(8, 8);  // alphaBits = 8
+    poke32(12, 4); // width = 4
+    poke32(16, 4); // height = 4
+    poke32(20, 3); // imageType = 3
+    poke32(24, 1); // hasMips = 1
+    poke32(28, kMip0Offset); // mipOffset[0]
+    poke32(92, 32);          // mipSize[0] = 16 indices + 16 alpha bytes
+
+    // Palette entry 1 at offset 156: R=240, G=120, B=20, A=255
+    uint8_t* pal = blpBytes.data() + kBlpHeaderBytes;
+    pal[4 + 0] = 240;
+    pal[4 + 1] = 120;
+    pal[4 + 2] = 20;
+    pal[4 + 3] = 255;
+
+    uint8_t* indices = blpBytes.data() + kMip0Offset;
+    for (int i = 0; i < 16; ++i) indices[i] = 1;
+    uint8_t* alphas = indices + 16;
+    for (int i = 0; i < 16; ++i) alphas[i] = 255;
+
+    resource::ResourceServer server;
+    // Mount under .blp, but request via .dds URI to verify automatic sibling extension fallback!
+    server.MountMemoryFile("ReplaceableTextures\\CommandButtons\\BTNFootman.blp", blpBytes);
+
+    auto tex = render::BlpMipTextureResource::LoadFromVfs(
+        server, "mpq://ReplaceableTextures/CommandButtons/BTNFootman.dds", true);
+    TEST_ASSERT(tex != nullptr);
+    TEST_ASSERT(tex->width == 4 && tex->height == 4);
+    TEST_ASSERT(!tex->loadedFromDds);
+    // 4x4 -> 2x2 -> 1x1 = 3 mip levels
+    TEST_ASSERT(tex->GetMipLevelCount() == 3);
+    TEST_ASSERT(tex->GetBasePixels().size() == 4 * 4 * 4);
+    TEST_ASSERT(tex->GetBasePixels()[0] == 240); // R
+    TEST_ASSERT(tex->GetBasePixels()[1] == 120); // G
+    TEST_ASSERT(tex->GetBasePixels()[2] == 20);  // B
+
+    return true;
+}
+
+bool TestPhase8StageTTextureAtlasPackerBorderExtrusionAndMips() {
+    render::TextureAtlasPacker packer(128, 128, 1);
+
+    for (int i = 0; i < 8; ++i) {
+        std::vector<uint8_t> icon(16 * 16 * 4, 0);
+        const uint8_t r = static_cast<uint8_t>(20 + i * 25);
+        const uint8_t g = static_cast<uint8_t>(100 + i * 10);
+        const uint8_t b = static_cast<uint8_t>(200 - i * 15);
+        for (size_t p = 0; p < 16 * 16; ++p) {
+            icon[p * 4 + 0] = r;
+            icon[p * 4 + 1] = g;
+            icon[p * 4 + 2] = b;
+            icon[p * 4 + 3] = 255;
+        }
+        render::AtlasRegionUV reg;
+        TEST_ASSERT(packer.PackSprite("Icon_" + std::to_string(i), 16, 16, icon.data(), &reg));
+        TEST_ASSERT(reg.width == 16 && reg.height == 16);
+        TEST_ASSERT(reg.u1 > reg.u0 && reg.v1 > reg.v0);
+
+        // Verify 1px extruded border pixel at (reg.pageX - 1, reg.pageY) matches the icon edge color!
+        uint8_t borderPx[4] = {};
+        TEST_ASSERT(packer.SamplePixel(reg.pageX - 1, reg.pageY, borderPx));
+        TEST_ASSERT(borderPx[0] == r && borderPx[1] == g && borderPx[2] == b && borderPx[3] == 255);
+    }
+
+    TEST_ASSERT(packer.GetStats().packedSpriteCount == 8);
+    TEST_ASSERT(packer.GetStats().occupancyRatio > 0.10f);
+
+    MipChain chain = packer.BuildAtlasMipChain();
+    TEST_ASSERT(chain.levels.size() == 8); // 128 -> 64 -> 32 -> 16 -> 8 -> 4 -> 2 -> 1
+    return true;
+}
+
+// ============================================================================
+// Stage U — Hierarchical EngineProfiler & Retail W3X End-to-End Benchmark
+// ============================================================================
+bool TestPhase8StageUEngineProfilerPercentilesAndChromeTrace() {
+    core::EngineProfiler profiler;
+    profiler.Reset();
+
+    for (uint64_t f = 1; f <= 16; ++f) {
+        profiler.BeginFrame(f);
+        profiler.RecordZoneSample("SimulationStep", "ECS", f * 1000, 200 + (f * 15), 1, 1);
+        profiler.RecordZoneSample("RenderGraphExecute", "Render", f * 1000 + 300, 120 + (f * 10), 1, 1);
+        {
+            WARSMASH_PROFILE_SCOPE(profiler, "JassVmTick", "Scripting");
+            profiler.AddCounter("JassInstructions", 500);
+        }
+        profiler.EndFrame();
+    }
+
+    TEST_ASSERT(profiler.GetCompletedFrameCount() == 16);
+    TEST_ASSERT(profiler.GetCounter("JassInstructions") == 8000);
+
+    core::ProfileZoneSummary simSummary;
+    TEST_ASSERT(profiler.GetZoneSummary("SimulationStep", simSummary));
+    TEST_ASSERT(simSummary.callCount == 16);
+    TEST_ASSERT(simSummary.minMicros >= 215.0);
+    TEST_ASSERT(simSummary.maxMicros >= simSummary.p95Micros);
+    TEST_ASSERT(simSummary.p95Micros >= simSummary.p50Micros);
+
+    const std::string traceJson = profiler.ExportChromeTraceJson();
+    TEST_ASSERT(traceJson.find("\"traceEvents\":[") != std::string::npos);
+    TEST_ASSERT(traceJson.find("\"SimulationStep\"") != std::string::npos);
+    TEST_ASSERT(traceJson.find("\"RenderGraphExecute\"") != std::string::npos);
+
+    return true;
+}
+
+bool TestPhase8StageURetailW3xEndToEndModernizedPipelineBenchmark() {
+    const std::string mapPath = "resources/Maps/FrozenThrone/(8)GardenOfWar.w3x";
+    FILE* f = std::fopen(mapPath.c_str(), "rb");
+    if (!f) return true;
+    std::fclose(f);
+
+    core::EngineProfiler profiler;
+    profiler.Reset();
+
+    MpqManager mpq;
+    CSimulation sim;
+    SceneManager scene;
+    UnitPresentationSystem presentation;
+    core::WorldSceneSession session;
+
+    profiler.BeginFrame(1);
+    {
+        WARSMASH_PROFILE_SCOPE(profiler, "WorldSceneSession::LoadMap", "MapLoad");
+        TEST_ASSERT(session.LoadMap(mpq, sim, scene, presentation, mapPath));
+    }
+
+    CUnitType* footmanType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+    std::vector<int> squadHandles;
+    for (int i = 0; i < 8; ++i) {
+        CUnit* u = sim.AdoptUnit(std::make_unique<CUnit>(
+            sim.AllocateHandleId(), footmanType, 0, War3ID("hfoo"),
+            static_cast<float>(i * 32 - 128), 0.0f, 0.0f));
+        u->AddAbility(sim, std::make_unique<CAbilityMove>(sim.AllocateHandleId()));
+        squadHandles.push_back(u->GetHandleId());
+    }
+
+    {
+        WARSMASH_PROFILE_SCOPE(profiler, "SimulationStep", "ECS");
+        sim.Update();
+    }
+
+    pathfinding::CrowdSteeringSystem steering;
+    {
+        WARSMASH_PROFILE_SCOPE(profiler, "CrowdSteeringStep", "Navigation");
+        steering.StepGroupSteering(sim, squadHandles, 256.0f, 256.0f, 0.05f, nullptr);
+    }
+
+    SimStateSnapshot snap;
+    {
+        WARSMASH_PROFILE_SCOPE(profiler, "SimSnapshotCapture", "Netcode");
+        snap = SimStateSnapshot::Capture(sim);
+    }
+    profiler.EndFrame();
+
+    TEST_ASSERT(session.GetStats().terrainChunksBuilt > 0);
+    TEST_ASSERT(snap.units.size() == 8);
+    TEST_ASSERT(profiler.GetCompletedFrameCount() == 1);
+    TEST_ASSERT(profiler.GetAllZoneSummaries().size() >= 4);
 
     return true;
 }

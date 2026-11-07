@@ -154,6 +154,7 @@ void JassNatives::RegisterTriggerNatives() {
     });
     vm_.RegisterNative("DestroyTrigger", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
+        data->UnindexTrigger(args[0].intVal);
         data->triggers.erase(args[0].intVal);
         data->onTickTriggers.erase(args[0].intVal);
         data->onUnitTickTriggers.erase(args[0].intVal);
@@ -185,6 +186,7 @@ void JassNatives::RegisterTriggerNatives() {
             it->second->registeredUnitHandles.push_back(args[1].intVal);
             it->second->eventTypes.push_back(args[2].intVal);
             it->second->registeredEvents.push_back({args[1].intVal, args[2].intVal});
+            data->IndexTriggerUnitEvent(args[0].intVal, args[2].intVal);
         }
         return JassValue::Null();
     });
@@ -195,6 +197,7 @@ void JassNatives::RegisterTriggerNatives() {
             it->second->registeredUnitHandles.push_back(args[1].intVal);
             it->second->eventTypes.push_back(JASS_EVENT_UNIT_DEATH);
             it->second->registeredEvents.push_back({args[1].intVal, JASS_EVENT_UNIT_DEATH});
+            data->IndexTriggerUnitEvent(args[0].intVal, JASS_EVENT_UNIT_DEATH);
         }
         return JassValue::Null();
     });
@@ -212,6 +215,7 @@ void JassNatives::RegisterTriggerNatives() {
         int timerId = data->nextTimerId++;
         data->timers[timerId] = timer;
         it->second->registeredEvents.push_back({-1, 1000 + timerId});
+        data->IndexTriggerTimerEvent(args[0].intVal, timerId);
         return JassValue::Null();
     });
     vm_.RegisterNative("TriggerRegisterTimerExpireEvent", [data = data_](const std::vector<JassValue>& args) -> JassValue {
@@ -221,6 +225,7 @@ void JassNatives::RegisterTriggerNatives() {
         int timerSim = data->GetSimHandle(args[1].intVal, JassHandleInfo::TIMER);
         if (timerSim < 0) return JassValue::Null();
         it->second->registeredEvents.push_back({timerSim, 1001});
+        data->IndexTriggerTimerEvent(args[0].intVal, timerSim);
         return JassValue::Null();
     });
     // Per-tick triggers (ref registerOnTickEvent): fired once per
@@ -287,6 +292,7 @@ void JassNatives::RegisterTriggerNatives() {
             it->second->registeredUnitHandles.push_back(args[1].intVal);
             it->second->eventTypes.push_back(5001);
             it->second->registeredEvents.push_back({args[1].intVal, 5001});
+            data->IndexTriggerUnitEvent(args[0].intVal, 5001);
             JassTrigger::JassUnitInRangeEvent ev;
             ev.unitHandle = args[1].intVal;
             ev.range = args[2].type == JassValue::REAL ? args[2].realVal : (float)args[2].intVal;
@@ -302,6 +308,7 @@ void JassNatives::RegisterTriggerNatives() {
         it->second->registeredUnitHandles.push_back(args[1].intVal);
         it->second->eventTypes.push_back(args[2].intVal);
         it->second->registeredEvents.push_back({args[1].intVal, args[2].intVal});
+        data->IndexTriggerUnitEvent(args[0].intVal, args[2].intVal);
         return JassValue::Null();
     });
     vm_.RegisterNative("TriggerRegisterPlayerEvent", [data = data_](const std::vector<JassValue>& args) -> JassValue {
@@ -3319,6 +3326,7 @@ void JassNatives::RegisterTriggerSoundNatives() {
         it->second->registeredUnitHandles.push_back(args[1].intVal);
         it->second->eventTypes.push_back(args[2].intVal);
         it->second->registeredEvents.emplace_back(args[1].intVal, args[2].intVal);
+        data->IndexTriggerUnitEvent(args[0].intVal, args[2].intVal);
         // The filter runs as an extra condition (ref filtered unit events).
         if (args[3].type == JassValue::STRING && !args[3].strVal.empty()) {
             it->second->conditionFuncNames.push_back(args[3].strVal);

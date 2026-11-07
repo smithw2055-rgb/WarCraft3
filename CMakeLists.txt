@@ -146,6 +146,7 @@ set(SOURCES
     src/render/renderer.cpp
     src/render/render_server.cpp
     src/render/render_graph.cpp
+    src/render/texture_atlas_packer.cpp
     src/render/shader.cpp
     src/render/camera.cpp
     src/render/terrain.cpp
@@ -236,6 +237,7 @@ set(SOURCES
     src/net/turn_batch.cpp
     src/net/turn_manager.cpp
     src/net/lockstep_host.cpp
+    src/net/snapshot_resync.cpp
     src/ecs/melee_ai.cpp
     src/ecs/ability.cpp
     src/ecs/abilities/ability_attack.cpp
@@ -314,6 +316,7 @@ set(SOURCES
     src/ecs/pathing/world_collision.cpp
     src/ecs/pathing/pathfinding.cpp
     src/ecs/pathing/pathfinding_server.cpp
+    src/ecs/pathing/crowd_steering.cpp
     src/ecs/combat/combat_system.cpp
     src/ecs/combat/projectile.cpp
     # ===== Scripting =====
@@ -362,6 +365,8 @@ set(SOURCES
     # ===== Core / State Machine =====
     src/core/game_controller.cpp
     src/core/world_scene_session.cpp
+    src/core/input_action_map.cpp
+    src/core/engine_profiler.cpp
     src/core/world_presentation_bridge.cpp
     src/core/input_selection_controller.cpp
     src/core/game_bootstrap_diagnostics.cpp
@@ -436,7 +441,7 @@ if(BUILD_APP)
             ${X11_LIBRARIES}
             ${XI_LIBRARY}
             ${XCURSOR_LIBRARY}
-            dl pthread m
+            dl pthread m z
         )
         link_stormlib(warsmash)
         link_casclib(warsmash)

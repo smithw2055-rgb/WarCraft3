@@ -795,6 +795,18 @@ bool TestPhase7StageNTerrainChunkGridAndParticleRibbonBatcher();
 bool TestPhase7StageNMdxSharedMeshRegistryAndDeclarativeRenderGraph();
 bool TestPhase7StageOWorldSceneSessionHotMapSwitchAndHeroCarry();
 bool TestPhase7StageOUIDataBinderReactiveDirtyOnlySync();
+bool TestPhase8StagePJassHandleDeduplicationAndTriggerIndex();
+bool TestPhase8StagePTimerEventIndexAndDestroyTriggerCleanup();
+bool TestPhase8StageQSpatialAcceleratedSplashAndLineDamage();
+bool TestPhase8StageQCrowdSteeringRvoAndFlowFieldBlending();
+bool TestPhase8StageRInputActionMapChordsAndSerialization();
+bool TestPhase8StageRCommandBufferPipelineBoxFormationAndReplay();
+bool TestPhase8StageSFastResyncKeyframePackageAndZlibWire();
+bool TestPhase8StageSSnapshotDeltaXorZlibCompression();
+bool TestPhase8StageTBlpMipTextureResourceAndSiblingFallback();
+bool TestPhase8StageTTextureAtlasPackerBorderExtrusionAndMips();
+bool TestPhase8StageUEngineProfilerPercentilesAndChromeTrace();
+bool TestPhase8StageURetailW3xEndToEndModernizedPipelineBenchmark();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1585,6 +1597,18 @@ int main(int argc, char** argv) {
         {"Phase7 Stage N2 MdxSharedMeshRegistry and declarative RenderGraph", TestPhase7StageNMdxSharedMeshRegistryAndDeclarativeRenderGraph},
         {"Phase7 Stage O1 WorldSceneSession hot map switch and hero carry", TestPhase7StageOWorldSceneSessionHotMapSwitchAndHeroCarry},
         {"Phase7 Stage O2 UIDataBinder reactive dirty-only HUD sync", TestPhase7StageOUIDataBinderReactiveDirtyOnlySync},
+        {"Phase8 Stage P1 JASS handle deduplication and O(1) TriggerEventIndex", TestPhase8StagePJassHandleDeduplicationAndTriggerIndex},
+        {"Phase8 Stage P2 Timer event index and DestroyTrigger cleanup", TestPhase8StagePTimerEventIndexAndDestroyTriggerCleanup},
+        {"Phase8 Stage Q1 SpatialHashGrid accelerated splash and line damage", TestPhase8StageQSpatialAcceleratedSplashAndLineDamage},
+        {"Phase8 Stage Q2 CrowdSteeringSystem RVO and FlowField blending", TestPhase8StageQCrowdSteeringRvoAndFlowFieldBlending},
+        {"Phase8 Stage R1 InputActionMap chords conflict check and serialization", TestPhase8StageRInputActionMapChordsAndSerialization},
+        {"Phase8 Stage R2 CommandBufferPipeline box formation and ReplayLog", TestPhase8StageRCommandBufferPipelineBoxFormationAndReplay},
+        {"Phase8 Stage S1 FastResyncKeyframePackage Zlib wire and tail catch-up", TestPhase8StageSFastResyncKeyframePackageAndZlibWire},
+        {"Phase8 Stage S2 SnapshotDeltaPacket XOR+Zlib differential codec", TestPhase8StageSSnapshotDeltaXorZlibCompression},
+        {"Phase8 Stage T1 BlpMipTextureResource mip chain and sibling fallback", TestPhase8StageTBlpMipTextureResourceAndSiblingFallback},
+        {"Phase8 Stage T2 TextureAtlasPacker 1px border extrusion and mips", TestPhase8StageTTextureAtlasPackerBorderExtrusionAndMips},
+        {"Phase8 Stage U1 EngineProfiler percentiles and Chrome Trace JSON", TestPhase8StageUEngineProfilerPercentilesAndChromeTrace},
+        {"Phase8 Stage U2 Retail W3X end-to-end modernized pipeline benchmark", TestPhase8StageURetailW3xEndToEndModernizedPipelineBenchmark},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

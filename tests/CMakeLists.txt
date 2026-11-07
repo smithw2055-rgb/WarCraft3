@@ -120,6 +120,7 @@ add_executable(warsmash_tests
     test_phase5_modernization.cpp
     ../src/render/render_server.cpp
     ../src/render/render_graph.cpp
+    ../src/render/texture_atlas_packer.cpp
     ../src/render/scene.cpp
     ../src/render/mdx_viewer.cpp
     ../src/render/mdx_particles.cpp
@@ -139,6 +140,8 @@ add_executable(warsmash_tests
     ../src/core/map_path_resolver.cpp
     ../src/core/job_system.cpp
     ../src/core/world_scene_session.cpp
+    ../src/core/input_action_map.cpp
+    ../src/core/engine_profiler.cpp
     ../src/model/mdx.cpp
     ../src/model/mdl.cpp
     ../src/render/mdx_animator.cpp
@@ -215,6 +218,7 @@ add_executable(warsmash_tests
     ../src/net/turn_batch.cpp
     ../src/net/turn_manager.cpp
     ../src/net/lockstep_host.cpp
+    ../src/net/snapshot_resync.cpp
     ../src/ecs/melee_ai.cpp
     ../src/ecs/ability.cpp
     ../src/ecs/ability_factory.cpp
@@ -230,6 +234,7 @@ add_executable(warsmash_tests
     ../src/ecs/combat/projectile.cpp
     ../src/ecs/pathing/pathfinding.cpp
     ../src/ecs/pathing/pathfinding_server.cpp
+    ../src/ecs/pathing/crowd_steering.cpp
     ../src/ecs/pathing/world_collision.cpp
     ../src/ecs/behaviors/behavior_move.cpp
     ../src/ecs/behaviors/behavior_attack.cpp
@@ -334,6 +339,10 @@ if(CascLib_FOUND)
 else()
     message(STATUS "CascLib not found for tests")
     target_compile_definitions(warsmash_tests PRIVATE WITHOUT_CASCLIB=1)
+endif()
+
+if(ZLIB_FOUND)
+    target_link_libraries(warsmash_tests PRIVATE ${ZLIB_LIBRARIES})
 endif()
 
 add_test(NAME warsmash_tests COMMAND warsmash_tests)

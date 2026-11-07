@@ -1200,6 +1200,21 @@ public:
 
     // Camera field enum mapping
     int GetCameraFieldId(const std::string& name) const;
+
+    // Stage P: Canonical handle deduplication for persistent simulation entities
+    // (UNIT, PLAYER, ITEM, DESTRUCTABLE) & O(1) TriggerEventIndex dispatch table
+    std::unordered_map<uint64_t, int> simEntityToHandle;
+    std::unordered_map<int, std::vector<int>> unitEventToTriggers;
+    std::unordered_map<int, std::vector<int>> timerEventToTriggers;
+    uint64_t handleCacheHits = 0;
+    uint64_t handleAllocations = 0;
+    uint64_t indexedTriggerDispatches = 0;
+    uint64_t triggersEvaluatedByIndex = 0;
+    uint64_t triggersSkippedByIndex = 0;
+
+    void IndexTriggerUnitEvent(int triggerId, int eventType);
+    void IndexTriggerTimerEvent(int triggerId, int timerSimId);
+    void UnindexTrigger(int triggerId);
 };
 
 
