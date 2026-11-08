@@ -841,6 +841,10 @@ bool TestPhase15StageLL1War3CombatMatrixArmorCurveAndEtherealVsPureEngine();
 bool TestPhase15StageLL2CustomCombatMatrixHotOverrideAndDynamicPluginCombat();
 bool TestPhase15StageMM1War3ModuleTacticalAiLifecycleAndArmorCounterScoring();
 bool TestPhase15StageMM2RetailDriveMapsCombatAndTacticalAiEndToEndSuite();
+bool TestPhase16StageNN1UnitStateBitfieldPackingAndZeroAbilityHeaderCoupling();
+bool TestPhase16StageNN2War3ModuleCombatReactionsAndPassiveProcsVsPureEngine();
+bool TestPhase16StageOO1War3ModuleBountyDiceHeroXpSplitItemBonusesAndHeroCarry();
+bool TestPhase16StageOO2DynamicPluginVersion16AndRetailDriveMapsEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1677,6 +1681,10 @@ int main(int argc, char** argv) {
         {"Phase15 Stage LL2 Custom combat matrix hot override and dynamic plugin SO", TestPhase15StageLL2CustomCombatMatrixHotOverrideAndDynamicPluginCombat},
         {"Phase15 Stage MM1 War3Module tactical AI lifecycle and armor counter scoring", TestPhase15StageMM1War3ModuleTacticalAiLifecycleAndArmorCounterScoring},
         {"Phase15 Stage MM2 Retail Drive maps combat and tactical AI end-to-end suite", TestPhase15StageMM2RetailDriveMapsCombatAndTacticalAiEndToEndSuite},
+        {"Phase16 Stage NN1 CUnit 16-bit state bitmask and zero ability header coupling", TestPhase16StageNN1UnitStateBitfieldPackingAndZeroAbilityHeaderCoupling},
+        {"Phase16 Stage NN2 War3Module combat reactions and passive procs vs PureEngine", TestPhase16StageNN2War3ModuleCombatReactionsAndPassiveProcsVsPureEngine},
+        {"Phase16 Stage OO1 War3Module bounty dice hero XP item bonuses and hero carry", TestPhase16StageOO1War3ModuleBountyDiceHeroXpSplitItemBonusesAndHeroCarry},
+        {"Phase16 Stage OO2 Dynamic plugin SO v16 and retail Drive maps end-to-end suite", TestPhase16StageOO2DynamicPluginVersion16AndRetailDriveMapsEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

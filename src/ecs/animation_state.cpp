@@ -1,4 +1,6 @@
 #include "animation_utils.h"
+#include "ecs/abilities/ability_gold_mine.h"
+#include "ecs/abilities/ability_queue.h"
 #include <algorithm>
 #include <cctype>
 

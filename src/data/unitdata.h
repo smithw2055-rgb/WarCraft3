@@ -10,15 +10,16 @@ class MpqManager;
 class TxtTable;
 class SlkTable;
 struct CGameplayConstants;
-
-// Forward declare simulation types
-class CUnit;
 class CUnitType;
-class CSimulation;
-class HandleIdAllocator;
-class CAbility;
-class CUpgradeData;
 
+// ============================================================================
+// CUnitData — Pure Data-Driven Unit Archetype Table (Unity ScriptableObject /
+// Godot Resource Catalog style).
+//
+// Phase 16 Simplification: Removed obsolete ECS-coupled factory/upgrade stubs
+// (`CreateUnit`, `AddDefaultAbilitiesToUnit`, `ApplyPlayerUpgradesToUnit`) so
+// the `src/data/` layer has zero dependencies on `CUnit` or `CSimulation`.
+// ============================================================================
 class CUnitData {
 public:
     CUnitData() = default;
@@ -29,23 +30,12 @@ public:
               const SlkTable& unitWeaponsSlk, const TxtTable& unitWeaponsTxt,
               const SlkTable& unitUISlk, const TxtTable& unitUITxt);
 
-    CUnit* CreateUnit(CSimulation& simulation, int playerIndex,
-                      War3ID typeId, float x, float y, float facing,
-                      HandleIdAllocator& handleIdAllocator,
-                      const std::vector<uint8_t>* buildingPathing = nullptr) const;
-
     CUnitType* GetUnitType(War3ID typeId) const;
     bool HasUnitType(War3ID typeId) const;
     // Test and script registration. Replaces an existing row for the same id.
     void RegisterUnitType(War3ID typeId, std::unique_ptr<CUnitType> type);
 
     const std::unordered_map<War3ID, std::unique_ptr<CUnitType>>& GetAllTypes() const { return types_; }
-
-    void AddDefaultAbilitiesToUnit(CSimulation& simulation, HandleIdAllocator& handleIdAllocator,
-                                   const CUnitType& unitType, bool addDefault, int manaInitial,
-                                   int speed, CUnit& unit) const;
-    void ApplyPlayerUpgradesToUnit(CSimulation& simulation, int playerIndex,
-                                   const CUnitType& unitType, CUnit& unit) const;
 
     static CUnitData LoadFromMpq(const MpqManager& mpq, const CGameplayConstants& gameplayConstants);
     static CUnitData LoadFromMpq(const MpqManager& mpq, const CGameplayConstants& gameplayConstants,

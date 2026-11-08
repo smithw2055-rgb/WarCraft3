@@ -66,6 +66,7 @@ struct SimUnitSnapshot {
     bool isInvulnerable = false;
     bool isPaused = false;
     bool pathingEnabled = true;
+    uint16_t stateFlagsBitmask = kDefaultUnitStateFlags;
 
     bool hasVisualComp = false;
     UnitVisualComponent visualComp{};

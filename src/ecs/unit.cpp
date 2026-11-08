@@ -2,19 +2,8 @@
 #include "ecs/pathing/pathfinding.h"
 #include "csimulation.h"
 #include "ecs/buffs.h"
-#include "ecs/abilities/ability_spell_base.h"
-#include "ecs/abilities/ability_hero.h"
-#include "ecs/abilities/ability_transport.h"
-#include "ecs/abilities/spells28.h"
-#include "data/abilitydata.h"
 #include "data/unitdata.h"
 #include "data/itemdata.h"
-#include "ecs/abilities/spells4.h"
-#include "ecs/abilities/spells5.h"
-#include "ecs/abilities/spells9.h"
-#include "ecs/abilities/spells10.h"
-#include "ecs/abilities/spells14.h"
-#include "ecs/abilities/spells16.h"
 #include "behaviors/behavior_move.h"
 #include "behaviors/behavior_attack.h"
 #include "behaviors/behavior_build.h"
@@ -68,9 +57,10 @@ CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
     , turnRate_(unitType->GetTurnRate())
     , movementType_(unitType->GetMovementType())
     , collisionSize_(unitType->GetCollisionSize())
-    , isBuilding_(unitType->IsBuilding())
-    , isHero_(unitType->IsHero())
+    , stateFlags_(kDefaultUnitStateFlags)
 {
+    SetStateFlag(UnitStateFlag::Building, unitType->IsBuilding());
+    SetStateFlag(UnitStateFlag::Hero, unitType->IsHero());
     attrs_.InitFromUnitType(unitType);
     maxLife_ = (float)unitType->GetMaxLife();
     mana_ = (float)unitType->GetManaInitial();
@@ -179,12 +169,8 @@ void CUnit::PopoutWorker(CSimulation& game) {
     worker->SetInvulnerable(false);
     worker->SetHidden(false);
     worker->SetPaused(false);
-    // Step out beside the ruin (ref nudgeAround -> setPointAndCheckUnstuck).
     worker->SetPositionAndCheckUnstuck(GetX(), GetY(), game);
     if (ConstructionComp().constructionConsumesWorker) {
-        // Night-elf wisps were zeroed at build start (see
-        // CBehaviorBuild::CreateBuilding); give their food back (ref
-        // popoutWorker restores worker type foodUsed to its player).
         int restore = 0;
         if (auto* data = game.GetUnitData()) {
             if (auto* type = data->GetUnitType(worker->GetTypeId())) {
@@ -224,7 +210,7 @@ void CUnit::MorphTo(CUnitType* form, War3ID formId) {
         MorphComp().savedTurnRate = turnRate_;
         MorphComp().savedMovementType = movementType_;
         MorphComp().savedCollisionSize = collisionSize_;
-        MorphComp().savedBuilding = isBuilding_;
+        MorphComp().savedBuilding = IsBuilding();
         MorphComp().savedFlyHeight = GetFlyHeight();
     }
     const float oldMaxLife = maxLife_;
@@ -241,7 +227,7 @@ void CUnit::MorphTo(CUnitType* form, War3ID formId) {
     turnRate_ = form->GetTurnRate();
     movementType_ = form->GetMovementType();
     collisionSize_ = form->GetCollisionSize();
-    isBuilding_ = form->IsBuilding();
+    SetStateFlag(UnitStateFlag::Building, form->IsBuilding());
     SetFlyHeight(form->GetDefaultFlyingHeight());
     RefreshMaxLifeTotal();
     RefreshMaxManaTotal();
@@ -266,7 +252,7 @@ void CUnit::Unmorph() {
     turnRate_ = MorphComp().savedTurnRate;
     movementType_ = MorphComp().savedMovementType;
     collisionSize_ = MorphComp().savedCollisionSize;
-    isBuilding_ = MorphComp().savedBuilding;
+    SetStateFlag(UnitStateFlag::Building, MorphComp().savedBuilding);
     SetFlyHeight(MorphComp().savedFlyHeight);
     RefreshMaxLifeTotal();
     RefreshMaxManaTotal();
@@ -347,7 +333,8 @@ void CUnit::SetHeroBonusMana(int v) {
     RefreshMaxManaTotal();
 }
 
-void CUnit::SetPositionAndCheckUnstuck(float x, float y, CSimulation& simulation) {    CPathfindingProcessor* path = simulation.GetPathfinding();
+void CUnit::SetPositionAndCheckUnstuck(float x, float y, CSimulation& simulation) {
+    CPathfindingProcessor* path = simulation.GetPathfinding();
     if (path && path->HasPathingMap()) {
         const float radius = std::max(0.0f, collisionSize_);
         auto fits = [&](float px, float py) {
@@ -427,12 +414,10 @@ bool CUnit::TurnTowardPoint(float targetX, float targetY) {
 void CUnit::AddAbility(CSimulation& game, std::unique_ptr<CAbility> ability) {
     if (!ability) return;
 
-    // Check requirements
     if (!ability->IsRequirementsMet(game, this)) {
         ability->SetDisabled(true, CAbilityDisableType::REQUIREMENTS);
     }
 
-    // Check player-level disable
     auto* player = game.GetPlayer(playerIndex_);
     if (player && player->IsAbilityDisabled(ability->GetAlias())) {
         ability->SetDisabled(true, CAbilityDisableType::PLAYER);
@@ -442,39 +427,12 @@ void CUnit::AddAbility(CSimulation& game, std::unique_ptr<CAbility> ability) {
     ownedAbilities_.push_back(std::move(ability));
     abilities_.push_back(rawPtr);
 
-    // Retail per-level numbers override the hardcoded constructor
-    // defaults when ability data is loaded (ref AbilityData.slk).
-    if (auto* spell = dynamic_cast<CAbilitySpellBase*>(rawPtr)) {
-        if (CAbilityData* data = game.GetAbilityData()) {
-            if (const CAbilityDefFull* def = data->GetAbility(spell->GetAlias())) {
-                spell->ApplyData(*def);
-            }
-        }
-    }
-    // Cargo capacity from data (ref CAbilityTypeDefinitionCargoHold:
-    // DATA_A = capacity). Load range mirrors the ability Range.
-    if (CAbilityData* data = game.GetAbilityData()) {
-        if (const CAbilityDefFull* def = data->GetAbility(rawPtr->GetAlias())) {
-            if (auto* cargo = dynamic_cast<CAbilityCargoHold*>(rawPtr)) {
-                const int cap = def->DataIntAt(1, 0, cargo->GetCapacity());
-                cargo->SetCapacity(cap);
-            }
-            if (auto* load = dynamic_cast<CAbilityLoad*>(rawPtr)) {
-                const float range = def->RangeAt(1);
-                if (range > 0) load->SetLoadRange(range);
-                // Mirror the holder's CargoHold capacity so Load gating
-                // matches the data-driven hold (default 8 covers ships
-                // when data is absent).
-                if (auto* hold = GetAbility(War3ID("Acar"))) {
-                    if (auto* h = dynamic_cast<CAbilityCargoHold*>(hold)) {
-                        load->SetCargoCapacity(h->GetCapacity());
-                    }
-                }
-            }
-        }
+    // Phase 16: Delegate game-specific ability data binding (AbilityData.slk
+    // spell scaling, CargoHold capacity, and Load range) to ISimulationModule.
+    if (auto* mod = game.GetSimulationModule()) {
+        mod->OnUnitAbilityAdded(game, *this, *rawPtr);
     }
 
-    // Call OnAdd if not disabled
     if (!rawPtr->IsDisabled()) {
         rawPtr->OnAdd(game, this);
     }
@@ -522,24 +480,23 @@ CAbility* CUnit::GetAbility(War3ID code) const {
 void CUnit::AddBuff(std::unique_ptr<CBuff> buff, CSimulation& game) {
     if (!buff) return;
 
-    // Resistant Skin (Arsk): negative effects wear off in a quarter of
-    // the usual time. The marker itself is positive and is not shortened.
-    if (buff->IsNegative() && HasBuff(War3ID("Brsk"))) {
-        buff->ScaleDuration(0.25f);
+    // Phase 16: Delegate negative buff duration scaling (e.g., Resistant Skin 0.25x)
+    // to the active ISimulationModule.
+    if (buff->IsNegative()) {
+        if (const auto* mod = game.GetSimulationModule()) {
+            const float durMult = mod->GetNegativeBuffDurationMultiplier(*this);
+            if (durMult != 1.0f) {
+                buff->ScaleDuration(durMult);
+            }
+        }
     }
 
-    // Check if buff already exists (by ID)
     for (auto& existing : buffs_) {
         if (existing && existing->GetId() == buff->GetId()) {
-            // Aura buffs merge per caster (ref per-source aura buffs):
-            // a different caster's twin is skipped so the scan can still
-            // find (and refresh) our own; with no twin found the new
-            // source coexists and strongest-wins applies in the table.
             if (existing->MergeByCaster() && buff->MergeByCaster() &&
                 existing->GetCasterHandleId() != buff->GetCasterHandleId()) {
                 continue;
             }
-            // REPLACE, stack, or refresh
             if (existing->GetStackType() == CBuffStackType::REPLACE ||
                 buff->GetStackType() == CBuffStackType::REPLACE) {
                 existing->OnRemove(game, this);
@@ -556,7 +513,6 @@ void CUnit::AddBuff(std::unique_ptr<CBuff> buff, CSimulation& game) {
         }
     }
 
-    // New buff
     buff->OnApply(game, this);
     buffs_.push_back(std::move(buff));
 }
@@ -597,12 +553,13 @@ void CUnit::SyncDataDrivenBuffModifiers(DataDrivenBuffRecord& rec, bool apply) {
 }
 
 bool CUnit::ApplyDataDrivenBuff(const DataDrivenBuffSpec& spec, CSimulation& game) {
-    (void)game;
     if (spec.id.value == 0 || spec.duration <= 0.0f) return false;
 
     float effectiveDuration = spec.duration;
-    if (!spec.isPositive && HasBuff(War3ID("Brsk"))) {
-        effectiveDuration *= 0.25f;
+    if (!spec.isPositive) {
+        if (const auto* mod = game.GetSimulationModule()) {
+            effectiveDuration *= mod->GetNegativeBuffDurationMultiplier(*this);
+        }
     }
 
     for (auto& existing : dataDrivenBuffs_) {
@@ -756,16 +713,10 @@ bool CUnit::HasBuff(War3ID buffId) const {
 }
 
 bool CUnit::CheckSpellEffectReaction(CSimulation& game, CUnit* caster) {
-    if (!caster || caster == this) return true;
-    // Allied casters bypass the shield; missing players count as hostile.
-    CPlayer* self = game.GetPlayer(GetPlayerIndex());
-    CPlayer* foe = game.GetPlayer(caster->GetPlayerIndex());
-    if (self && foe && self->HasAlliance(*foe, CAllianceType::PASSIVE)) {
-        return true;
+    if (auto* mod = game.GetSimulationModule()) {
+        return mod->OnCheckSpellEffectReaction(game, *this, caster);
     }
-    if (!HasBuff(War3ID("BNss"))) return true;
-    RemoveBuff(War3ID("BNss"), game);
-    return false;
+    return true;
 }
 
 bool CUnit::IsHexed() const {
@@ -785,7 +736,7 @@ void CUnit::SetSharesVisionWith(int player, bool share) {
 }
 
 bool CUnit::IsStealthed() const {
-    if (invisible_) return true;
+    if (IsInvisible()) return true;
     for (const auto& buff : buffs_) {
         if (buff && dynamic_cast<const CBuffWindWalk*>(buff.get())) return true;
     }
@@ -794,9 +745,8 @@ bool CUnit::IsStealthed() const {
 
 bool CUnit::IsInvisibleTo(const CUnit* viewer) const {
     if (!viewer || viewer->GetPlayerIndex() == playerIndex_) return false;
-    // Faerie Fire reveals invisible units (ref reveal-invisible half).
     if (GetBuff(War3ID("Bfae"))) return false;
-    bool hidden = invisible_;
+    bool hidden = IsInvisible();
     if (!hidden) {
         for (const auto& buff : buffs_) {
             if (buff && dynamic_cast<const CBuffWindWalk*>(buff.get())) {
@@ -806,8 +756,6 @@ bool CUnit::IsInvisibleTo(const CUnit* viewer) const {
         }
     }
     if (!hidden) return false;
-    // Detectors (shades, sentry wards) pierce stealth within their
-    // sight range (ref true sight).
     if (viewer->IsDetector() && viewer->GetUnitType()) {
         const float sight = static_cast<float>(viewer->GetUnitType()->GetSightRadiusDay());
         const float dx = GetX() - viewer->GetX();
@@ -992,7 +940,7 @@ void CUnit::SetCurrentBehavior(std::unique_ptr<CBehavior> behavior) {
 bool CUnit::LoadUnit(CUnit* passenger) {
     if (!passenger || passenger == this || passenger->IsDead()) return false;
     for (auto* loaded : CargoComp().cargoUnits) {
-        if (loaded == passenger) return true; // already aboard
+        if (loaded == passenger) return true;
     }
     passenger->CargoComp().loadedAboard = true;
     passenger->SetHidden(true);
@@ -1015,7 +963,7 @@ void CUnit::UnloadUnitAt(CUnit* passenger, float x, float y) {
 
 bool CUnit::CanBeTargetedBy(CSimulation& simulation, CUnit* source,
                             const std::vector<CTargetType>& targetsAllowed) const {
-    if (CargoComp().loadedAboard) return false; // hidden cargo can't be targeted
+    if (CargoComp().loadedAboard) return false;
     return CWidget::CanBeTargetedBy(simulation, source, targetsAllowed);
 }
 
@@ -1107,7 +1055,7 @@ void CUnit::Revive(CSimulation& game, float x, float y) {
     CorpseDropComp().corpse = false;
     CorpseDropComp().boneCorpse = false;
     CorpseDropComp().deathTurnTick = 0;
-    hidden_ = false;
+    SetHidden(false);
     SetPosition(x, y);
     RefreshMaxLifeTotal();
     RefreshMaxManaTotal();
@@ -1125,7 +1073,6 @@ void CUnit::ApplyRegen(CSimulation& simulation) {
     bool isNight = simulation.IsNighttime();
     CRegenType regenType = unitType_->GetLifeRegenType();
 
-    // HP regen
     bool canRegen = (regenType == CRegenType::ALWAYS) ||
                     (regenType == CRegenType::ONLY_AT_NIGHT && isNight);
     if (canRegen && life_ < maxLife_) {
@@ -1133,7 +1080,6 @@ void CUnit::ApplyRegen(CSimulation& simulation) {
         if (life_ > maxLife_) life_ = maxLife_;
     }
 
-    // Mana regen
     if (mana_ < (float)maxMana_) {
         mana_ += (unitType_->GetManaRegen() + attrs_.GetBonusManaRegen()) * dt;
         if (mana_ > (float)maxMana_) mana_ = (float)maxMana_;
@@ -1160,19 +1106,13 @@ bool CUnit::Update(CSimulation& simulation) {
             CorpseDropComp().boneCorpse = false;
             // Retail death clears the building footprint (ref killPathingInstance).
             KillPathingInstance(simulation);
-            // The fallen drop their orders with their behavior (ref kill:
-            // beginBehavior(null) + orderQueue.clear()).
             if (currentBehavior_) {
                 currentBehavior_->End(simulation);
                 currentBehavior_ = nullptr;
                 ownedCurrentBehavior_.reset();
             }
             while (!orderQueue_.empty()) orderQueue_.pop();
-            // Hidden construction workers emerge from the ruin (ref
-            // popoutWorker; no-op without a worker link).
             PopoutWorker(simulation);
-            // Death reveal (ref CUnitDeathVisionFogModifier for owner +
-            // killer): a short timed VISIBLE circle on the fog grid.
             {
                 const auto& gc = simulation.GetGameplayConstants();
                 if (gc.dyingRevealRadius > 0.0f && gc.fogFlashTime > 0.0f) {
@@ -1196,16 +1136,10 @@ bool CUnit::Update(CSimulation& simulation) {
             if (IsConstructing()) {
                 simulation.FireDeathExplode(handleId_, explodeBuffId_);
             }
-            // Phase 14: Delegate game-specific unit death rules (techtree possession
-            // decrement, food cap/used refund, and melee victory/defeat evaluation)
-            // to the active ISimulationModule.
             if (auto* mod = simulation.GetSimulationModule()) {
                 mod->OnUnitDied(simulation, *this);
             }
-            // Death drops (units.doo dropSets + w3i droppedItemTable): won
-            // items materialize at the corpse on the death tick.
             DropDeathItems(simulation);
-            // Cargo goes down with the transport (WC3 rule).
             auto passengers = std::move(CargoComp().cargoUnits);
             CargoComp().cargoUnits.clear();
             const float dropX = GetX();
@@ -1222,12 +1156,9 @@ bool CUnit::Update(CSimulation& simulation) {
                     }
                 }
             }
-            // Notify abilities of death
             for (auto* ab : abilities_) {
                 if (ab) ab->OnDeath(simulation, this);
             }
-            // Notify buffs of death (ref ability death listeners; e.g.
-            // Doom raises its guard when the bearer dies, not on expiry).
             for (const auto& buff : buffs_) {
                 if (buff) buff->OnDeath(simulation, this);
             }
@@ -1247,8 +1178,6 @@ bool CUnit::Update(CSimulation& simulation) {
                     return true;
                 }
                 CorpseDropComp().deathTurnTick = currentTick;
-                // Decay begins (retail EVENT_UNIT_DECAY); one-shot by
-                // construction (CorpseDropComp().corpse flips, this branch never reruns).
                 if (auto& decayCb = simulation.GetUnitDecayCallback()) {
                     decayCb(handleId_);
                 }
@@ -1270,7 +1199,7 @@ bool CUnit::Update(CSimulation& simulation) {
             GetEndingDecayTime(simulation) / simulation.GetSimStepTime()));
         if ((currentTick - CorpseDropComp().deathTurnTick) > endingDecayTicks) {
             if (IsHero()) {
-                hidden_ = true;
+                SetHidden(true);
                 return false;
             }
             return true;
@@ -1278,23 +1207,16 @@ bool CUnit::Update(CSimulation& simulation) {
         return false;
     }
 
-    if (paused_) return false;
+    if (IsPaused()) return false;
 
-    // Apply health/mana regen
     ApplyRegen(simulation);
 
-    // ESC-cancel interrupts an unfinished construction immediately (queued
-    // orders otherwise wait for the active behavior to finish; ref
-    // cancel-build refunds, removes the foundation, fires the event).
     if (!orderQueue_.empty() && currentBehavior_) {
         const int frontId =
             orderQueue_.front() ? orderQueue_.front()->GetOrderId() : -1;
         if (frontId == OrderIds::CANCEL || frontId == OrderIds::CANCEL_BUILD) {
             if (auto* build = dynamic_cast<CBehaviorBuild*>(currentBehavior_)) {
                 if (build->IsActivelyBuilding() || build->IsMovingToSite()) {
-                    // NOTE: no order callback here; it fired when the CANCEL
-                    // order was issued (AdoptUnit hook), and the queue has a
-                    // single push site (IssueOrder).
                     orderQueue_.pop();
                     build->CancelConstruction(simulation);
                 }
@@ -1302,9 +1224,6 @@ bool CUnit::Update(CSimulation& simulation) {
         }
     }
 
-    // Process behavior. New orders preempt an interruptable behavior
-    // immediately (ref order()); while stunned they collapse to the
-    // latest single order and run when the stun expires.
     if (currentBehavior_ && !orderQueue_.empty() && currentBehavior_->IsInterruptable()) {
         currentBehavior_->End(simulation);
         if (currentBehavior_ == ownedCurrentBehavior_.get()) {
@@ -1325,7 +1244,6 @@ bool CUnit::Update(CSimulation& simulation) {
                     ownedCurrentBehavior_.reset();
                 }
                 currentBehavior_ = nullptr;
-                // Try to get next behavior from order queue
                 PollNextOrderBehavior(simulation);
             }
         }
@@ -1335,29 +1253,23 @@ bool CUnit::Update(CSimulation& simulation) {
         PerformDefaultBehavior(simulation);
     }
 
-    // Cargo rides along with the transport.
     for (auto* passenger : CargoComp().cargoUnits) {
         if (passenger) passenger->SetPosition(x_, y_);
     }
 
-    // Tick all abilities
     for (auto* ab : abilities_) {
         if (ab && !ab->IsDisabled()) {
             ab->OnTick(simulation, this);
         }
     }
 
-    // Update buffs (tick, expire, remove)
     UpdateBuffs(simulation);
 
     return false;
 }
 
 void CUnit::PerformDefaultBehavior(CSimulation& simulation) {
-    // Idle autocast first (ref autoAcquireAutocastTargets): wounded-ally
-    // heals and nearest-enemy debuffs fire while standing idle.
     if (TryAutocast(simulation)) return;
-    // Use default behavior (usually stop/idle)
     if (defaultBehavior_) {
         ownedCurrentBehavior_.reset();
         currentBehavior_ = defaultBehavior_.get();
@@ -1366,75 +1278,9 @@ void CUnit::PerformDefaultBehavior(CSimulation& simulation) {
     }
 }
 
-// Autocast target acquisition (ref CUnit.autoAcquireAutocastTargets +
-// AutocastTargetFinderEnum). Only idle units with an enabled autocast
-// ability, mana, and cooldown ready participate.
 bool CUnit::TryAutocast(CSimulation& simulation) {
-    if (IsDead() || IsBuilding() || IsPaused()) return false;
-    if (!orderQueue_.empty() || currentBehavior_) return false;
-    if (IsSilenced() || IsHexed() || IsAsleep()) return false;
-
-    CPlayer* self = simulation.GetPlayer(GetPlayerIndex());
-    const War3ID defaultAuto =
-        unitType_ ? unitType_->GetDefaultAutocastAbility() : War3ID(0u);
-
-    for (auto* ab : abilities_) {
-        auto* spell = dynamic_cast<CAbilitySpellBase*>(ab);
-        if (!spell || spell->IsDisabled() || spell->IsOnCooldown()) continue;
-        CAutocastKind kind = GetAutocastKind(spell->GetAlias());
-        if (kind == CAutocastKind::NONE) kind = GetAutocastKind(spell->GetCode());
-        if (kind == CAutocastKind::NONE) continue;
-        if (!spell->IsAutocastActive() && defaultAuto != spell->GetAlias() &&
-            defaultAuto != spell->GetCode()) continue;
-        if ((int)GetMana() < spell->GetManaCost()) continue;
-        const int orderId = spell->GetBaseOrderId();
-        if (orderId <= 0) continue;
-        if (!spell->CheckCanUse(simulation, this, orderId)) continue;
-
-        const float range = spell->GetCastRange() + 400.0f;
-        const float rangeSq = range * range;
-        CUnit* best = nullptr;
-        if (kind == CAutocastKind::LOWEST_HP_ALLY) {
-            float bestFrac = 1.0f;
-            for (CUnit* other : simulation.GetUnits()) {
-                if (!other || other->IsDead() || other->IsHidden() ||
-                    other->IsLoadedAboard() || other->IsBuilding()) continue;
-                CPlayer* foe = simulation.GetPlayer(other->GetPlayerIndex());
-                const bool ally = (other == this) ||
-                    (self && foe && self->HasAlliance(*foe, CAllianceType::PASSIVE));
-                if (!ally) continue;
-                if (other->GetLife() >= other->GetMaxLife()) continue;
-                const float dx = other->GetX() - GetX();
-                const float dy = other->GetY() - GetY();
-                if (dx * dx + dy * dy > rangeSq) continue;
-                if (!spell->CheckCanTarget(simulation, this, orderId, other)) continue;
-                const float frac = other->GetLife() / other->GetMaxLife();
-                if (!best || frac < bestFrac) {
-                    best = other;
-                    bestFrac = frac;
-                }
-            }
-        } else {
-            float bestDist = rangeSq;
-            for (CUnit* other : simulation.GetUnits()) {
-                if (!other || other->IsDead() || other->IsHidden() ||
-                    other->IsLoadedAboard() || other == this) continue;
-                CPlayer* foe = simulation.GetPlayer(other->GetPlayerIndex());
-                if (self && foe && self->HasAlliance(*foe, CAllianceType::PASSIVE)) continue;
-                const float dx = other->GetX() - GetX();
-                const float dy = other->GetY() - GetY();
-                const float d2 = dx * dx + dy * dy;
-                if (d2 > rangeSq || (best && d2 >= bestDist)) continue;
-                if (!spell->CheckCanTarget(simulation, this, orderId, other)) continue;
-                best = other;
-                bestDist = d2;
-            }
-        }
-        if (best) {
-            IssueOrder(std::make_unique<COrderTargetWidget>(orderId, best));
-            PollNextOrderBehavior(simulation);
-            return currentBehavior_ != nullptr;
-        }
+    if (auto* mod = simulation.GetSimulationModule()) {
+        return mod->OnTryUnitIdleAutocast(simulation, *this);
     }
     return false;
 }
@@ -1444,78 +1290,30 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                     CAttackType attackType, CDamageType damageType,
                     const std::string& weaponSoundType,
                     float damage, float bonusDamage) {
-    // Incoming base for damage-taken listeners (ref thorns scales the raw
-    // base damage): snapshotted before mana shield / weaken mods below
-    // mutate the `damage` parameter.
     const float incomingBaseDamage = damage;
     const float incomingBaseBonus = bonusDamage;
-    // Drunken Haze (Brewmaster): the swing may miss outright and land
-    // nothing at all (ref miss chance). Checked before everything,
-    // including invulnerability and callbacks.
-    if (isAttack && source && source != this) {
-        if (auto* haze = dynamic_cast<CBuffHaze*>(source->GetBuff(War3ID("BNdh")))) {
-            if (simulation.SimRand01() < haze->GetMissChance()) return 0;
-        }
-        if (auto* curse = dynamic_cast<CBuffCurse*>(source->GetBuff(War3ID("Bcrs")))) {
-            if (simulation.SimRand01() < curse->GetMissChance()) return 0;
+    const bool invulnerableTarget = IsInvulnerable();
+
+    auto* simMod = simulation.GetSimulationModule();
+
+    // Phase 16: Delegate pre-mitigation miss rolls (Drunken Haze, Curse, Highland cliff miss),
+    // Mana Shield absorption, attacker damage-dealt modifiers (Howl of Terror, AIdd), and
+    // Avatar spell immunity to the active ISimulationModule.
+    if (simMod) {
+        if (!simMod->OnEvaluatePreMitigationDamage(
+                simulation, source, *this, isAttack, isRanged,
+                static_cast<int>(attackType), static_cast<int>(damageType),
+                invulnerableTarget, damage)) {
+            return 0.0f;
         }
     }
-    // Uphill accuracy (ref CUnitDefaultAccuracyCheckListener): firing up
-    // a cliff layer misses with ChanceToMiss. Same early gate as the
-    // buff miss rolls above (no RNG consumed on flat ground).
-    if (simulation.CheckHighlandMiss(source, this, isAttack)) {
-        simulation.FireCombatText(source ? source->GetHandleId() : -1, handleId_,
-                                  CSimulation::CombatTextKind::MISS, 0.0f);
-        return 0;
-    }
 
-    // Retail invulnerability suppresses only the taken-mods, the life
-    // change and the kill (ref CUnit.damage guard); taken-listeners, the
-    // damage event and return-fire below still run. CalculateDamage rolls
-    // evasion/crit regardless and reports 0 dealt for invulnerable targets.
-    const bool invulnerableTarget = invulnerable_;
-
-    // Mana Shield (Sea Witch): incoming damage drains mana first.
-    // A taken-mod: suppressed while invulnerable (no mana should burn).
-    if (!invulnerableTarget && damage > 0 && GetMana() > 0 && GetBuff(War3ID("BNms"))) {
-        float absorbed = damage;
-        if (absorbed > GetMana()) absorbed = GetMana();
-        SetMana(GetMana() - absorbed);
-        damage -= absorbed;
-        if (damage <= 0) return 0;
-    }
-
-    // Howl of Terror (Pit Lord): the attacker's blows land weakened.
-    if (isAttack && source && source != this) {
-        if (auto* howl = dynamic_cast<CBuffHowl*>(source->GetBuff(War3ID("BNht")))) {
-            damage *= howl->GetDamageFactor();
-        }
-        // Item reaction AIdd: addDamageDealtMultiplier on the attacker's
-        // pre-damage listener, before armor.
-        float dealt = 1.0f;
-        for (const auto& buff : source->GetBuffs()) {
-            if (auto* mod = dynamic_cast<CBuffDamageMod*>(buff.get())) {
-                dealt += mod->GetAttackDealtAdd();
-            }
-        }
-        if (dealt < 0.0f) dealt = 0.0f;
-        damage *= dealt;
-    }
-
-    // Avatar (Mountain King): spell immunity while the god-rage holds.
-    // A taken-mod gate, so it only short-circuits live targets; an
-    // invulnerable target falls through to the listener path below.
-    if (!invulnerableTarget && attackType == CAttackType::SPELLS && GetBuff(War3ID("BAvt"))) return 0;
-
-    // Single shared formula (ref CUnit.damage): attack-type table always
-    // applies; armor value only matters for Normal damage type.
+    // Core armor/attack-type damage calculation (delegated via CCombatSystem -> ISimulationModule)
     DamageResult result = simulation.GetCombatSystem()->CalculateDamage(
         source, this, isAttack, isRanged, attackType, damageType,
         damage, bonusDamage, 0, 0);
     float actualDamage = result.damageDealt;
-    // Floating combat text (ref spawnTextTag): evasion shows "miss",
-    // crits show the final number. Fired here for the direct-damage path
-    // (ApplyDamage covers the splash/JASS path).
+
     if (result.isEvaded) {
         simulation.FireCombatText(source ? source->GetHandleId() : -1, handleId_,
                                   CSimulation::CombatTextKind::MISS, 0.0f);
@@ -1524,229 +1322,34 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
                                   CSimulation::CombatTextKind::CRIT, actualDamage);
     }
 
-    // Defend (Footman/Knight): timed-buff stand-in for the defend toggle;
-    // halves weapon-attack damage before it lands (ref Defend reduction).
-    // Berserk runs the same gate with the opposite sign (ref Beserk).
-    if (isAttack && actualDamage > 0) {
-        for (const auto& buff : buffs_) {
-            if (dynamic_cast<CBuffDefend*>(buff.get())) {
-                actualDamage *= 0.5f;
-                break;
-            }
-        }
-        for (const auto& buff : buffs_) {
-            if (auto* berserk = dynamic_cast<CBuffBerserk*>(buff.get())) {
-                actualDamage *= berserk->GetDamageTakenMultiplier();
-                break;
-            }
-        }
-    }
-
-    // Runed Bracers / item reaction: per-attack-type damage taken.
-    if (actualDamage > 0) {
-        for (const auto& buff : buffs_) {
-            auto* mod = dynamic_cast<CBuffDamageMod*>(buff.get());
-            if (!mod) continue;
-            float mul = 1.0f;
-            if (attackType == CAttackType::SPELLS) mul = mod->GetSpellsTaken();
-            else if (attackType == CAttackType::MAGIC) mul = mod->GetMagicTaken();
-            else if (attackType == CAttackType::PIERCE) mul = mod->GetPierceTaken();
-            actualDamage *= mul;
-        }
+    // Phase 16: Delegate post-mitigation damage-taken modifiers (Defend 0.5x,
+    // Berserk taken multiplier, Runed Bracers per-attack-type reduction) to ISimulationModule.
+    if (simMod && actualDamage > 0.0f) {
+        simMod->OnModifyPostMitigationDamage(
+            simulation, source, *this, isAttack, isRanged,
+            static_cast<int>(attackType), static_cast<int>(damageType),
+            actualDamage);
     }
 
     float oldLife = life_;
     if (!invulnerableTarget) {
         life_ -= actualDamage;
-        if (life_ < 0) life_ = 0;
-        // Retail heals on negative damage, capped at max life (unless the
-        // unit was already above max, ref CUnit.damage).
-        if (actualDamage < 0 && oldLife <= GetMaxLife() && life_ > GetMaxLife()) {
+        if (life_ < 0.0f) life_ = 0.0f;
+        if (actualDamage < 0.0f && oldLife <= GetMaxLife() && life_ > GetMaxLife()) {
             life_ = GetMaxLife();
         }
     }
 
-    // Sleep breaks on damage (ref sleep listener runs on every damage call,
-    // even vs invulnerable targets). Missed/zero swings stay asleep.
-    if ((invulnerableTarget || actualDamage != 0) && IsAsleep()) {
-        RemoveBuff(War3ID("BUsl"), simulation);
-    }
-
-    // Thorns aura: reflect a share of melee NORMAL-damage attacks back to
-    // the attacker (ref CUnitDefaultThornsListener: NORMAL type, melee,
-    // victim targetable-as-enemy, ResistsThorns gate). Scales the incoming
-    // BASE (pre-armor, pre-crit), not the sustained actual; the strongest
-    // thorns buff wins when several apply, and Spiked Carapace reflects on
-    // top as its own passive. Reflected hits are sourceless non-attacks of
-    // DEFENSIVE type, so they never re-reflect (no ping-pong) and never
-    // re-proc attacker listeners.
-    // Any CBuffThorns counts, whatever its id (Bthr item buff, BEah aura).
-    // Runs even vs invulnerable targets (ref damageTakenListeners outside
-    // the invulnerability guard), but never on an evaded swing (retail
-    // zeroes the base first) and never on zero/negative actuals beyond the
-    // reflected>0 guard below.
-    if (isAttack && !isRanged && source && source != this &&
-        damageType == CDamageType::NORMAL &&
-        (invulnerableTarget ? !result.isEvaded : actualDamage != 0)) {
-        // Enemy gate (ref ENEMY_TARGET check): no reflection for allies.
-        // Mapless tests (no players) stay permissive.
-        bool enemy = true;
-        if (CPlayer* self = simulation.GetPlayer(GetPlayerIndex())) {
-            if (CPlayer* foe = simulation.GetPlayer(source->GetPlayerIndex())) {
-                enemy = !self->HasAlliance(*foe, CAllianceType::ALLIED);
-            }
-        }
-        const bool resisted = simulation.GetGameplayConstants().magicImmuneResistsThorns &&
-                              source->IsMagicImmune();
-        if (enemy && !resisted) {
-            float bestPercent = 0.0f;
-            for (const auto& buff : buffs_) {
-                if (auto* thorns = dynamic_cast<CBuffThorns*>(buff.get())) {
-                    bestPercent = std::max(bestPercent, thorns->GetReflectPercent());
-                }
-            }
-            if (bestPercent > 0.0f) {
-                const float reflected = (incomingBaseDamage + incomingBaseBonus) * bestPercent;
-                if (reflected > 0) {
-                    source->Damage(simulation, nullptr, false, false,
-                                   CAttackType::SPELLS, CDamageType::DEFENSIVE,
-                                   "", reflected, 0);
-                }
-            }
-            // Spiked Carapace (Crypt Lord passive): same melee-only reflect
-            // terms as thorns; the armor half rides the unit bonus field.
-            if (auto* carapace = dynamic_cast<CAbilitySpikedCarapace*>(GetAbility(War3ID("AUts")))) {
-                const float reflected = (incomingBaseDamage + incomingBaseBonus) *
-                                        carapace->GetReflectPercent();
-                if (reflected > 0) {
-                    source->Damage(simulation, nullptr, false, false,
-                                   CAttackType::SPELLS, CDamageType::DEFENSIVE,
-                                   "", reflected, 0);
-                }
-            }
-        }
-    }
-
-    // Vampiric aura: heal the attacker for a share of attack damage DEALT
-    // (post-mitigation actual, ref lifesteal listener). No leech from
-    // buildings or mechanical units, none across a PASSIVE alliance, none
-    // from magic-immune victims while ResistsLeech is set. Strongest leech
-    // wins when several apply.
-    if (isAttack && source && source != this && actualDamage > 0 && !IsBuilding()) {
-        bool mechanical = false;
-        if (unitType_) {
-            const auto& classes = unitType_->GetClassifications();
-            mechanical = classes.find(CUnitClassification::MECHANICAL) != classes.end();
-        }
-        // PASSIVE-alliance gate (ref): mapless tests stay permissive.
-        bool passiveAlly = false;
-        if (CPlayer* atk = simulation.GetPlayer(source->GetPlayerIndex())) {
-            if (CPlayer* vic = simulation.GetPlayer(GetPlayerIndex())) {
-                passiveAlly = atk->HasAlliance(*vic, CAllianceType::PASSIVE);
-            }
-        }
-        const bool resisted = simulation.GetGameplayConstants().magicImmuneResistsLeech &&
-                              IsMagicImmune();
-        if (!mechanical && !passiveAlly && !resisted) {
-            float bestPercent = 0.0f;
-            for (const auto& buff : source->GetBuffs()) {
-                if (auto* leech = dynamic_cast<CBuffLifesteal*>(buff.get())) {
-                    bestPercent = std::max(bestPercent, leech->GetStealPercent());
-                }
-            }
-            if (bestPercent > 0.0f) {
-                float healed = source->GetLife() + actualDamage * bestPercent;
-                if (healed > source->GetMaxLife()) healed = source->GetMaxLife();
-                source->SetLife(simulation, healed);
-            }
-        }
-    }
-
-    // Bash (Mountain King passive): chance to stun on attack landed.
-    // Lives here next to the thorns/lifesteal listeners (ref attack
-    // listeners); deterministic roll via the sim RNG.
-    if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
-        if (auto* bash = dynamic_cast<CAbilityBash*>(source->GetAbility(War3ID("AHbh")))) {
-            if (simulation.SimRand01() < bash->GetChance()) {
-                AddBuff(std::make_unique<CBuffStun>(bash->GetDuration()), simulation);
-                simulation.FireCombatText(source->GetHandleId(), handleId_,
-                                          CSimulation::CombatTextKind::BASH, 0.0f);
-            }
-        }
-    }
-
-    // Attack modifier slot (ref attackReplacement): orb/arrow procs are
-    // data-driven effects installed by their abilities, not hardcoded
-    // branches. Exactly one family fires per attack (installing a second
-    // modifier replaces the first); procs deal non-attack damage so they
-    // never re-proc.
-    if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
-        source->FireAttackModifiers(simulation, this, actualDamage);
-    }
-    // Cleaving Attack (Pit Lord): share of the landed damage splashes
-    // to the victim's neighbors (ref cleave). Non-attack damage so the
-    // splash itself never re-procs.
-    if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
-        if (auto* cleave = dynamic_cast<CAbilityCleavingAttack*>(source->GetAbility(War3ID("ANca")))) {
-            const float splash = actualDamage * cleave->GetSplashFraction();
-            const float radius = cleave->GetSplashRadius();
-            if (splash > 0) {
-                CPlayer* srcPlayer = simulation.GetPlayer(source->GetPlayerIndex());
-                for (auto* unit : simulation.GetUnits()) {
-                    if (!unit || unit->IsDead() || unit == this || unit == source) continue;
-                    CPlayer* tgtPlayer = simulation.GetPlayer(unit->GetPlayerIndex());
-                    const bool isAlly = (unit->GetPlayerIndex() == source->GetPlayerIndex()) ||
-                        (srcPlayer && tgtPlayer && (srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::ALLIED) ||
-                                                    srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::PASSIVE)));
-                    if (isAlly) continue;
-                    const float dx = unit->GetX() - GetX();
-                    const float dy = unit->GetY() - GetY();
-                    if (dx * dx + dy * dy <= radius * radius) {
-                        unit->Damage(simulation, source, false, false,
-                                     CAttackType::SPELLS, CDamageType::NORMAL,
-                                     "", splash, 0);
-                    }
-                }
-            }
-        }
-    }
-    // Wind Walk break (ref): landing an attack reveals the attacker;
-    // the strike carries a backstab bonus while the victim stands.
-    if (isAttack && source && source != this && actualDamage > 0) {
-        if (auto* walk = dynamic_cast<CBuffWindWalk*>(source->GetBuff(War3ID("BOwk")))) {
-            const float backstab = walk->GetBackstabDamage();
-            source->RemoveBuff(War3ID("BOwk"), simulation);
-            if (backstab > 0 && !IsDead()) {
-                Damage(simulation, source, false, false,
-                       CAttackType::SPELLS, CDamageType::NORMAL,
-                       "", backstab, 0);
-            }
-        }
-    }
-    // Pulverize (Mountain Giant): chance for the landed damage to
-    // slam the victim's neighbors too (ref). Non-attack, no re-proc.
-    if (isAttack && source && source != this && actualDamage > 0 && !IsDead()) {
-        if (auto* pulv = dynamic_cast<CAbilityPulverize*>(source->GetAbility(War3ID("Awar")))) {
-            if (simulation.SimRand01() < pulv->GetChance()) {
-                const float radius = pulv->GetRadius();
-                CPlayer* srcPlayer = simulation.GetPlayer(source->GetPlayerIndex());
-                for (auto* unit : simulation.GetUnits()) {
-                    if (!unit || unit->IsDead() || unit == this || unit == source) continue;
-                    CPlayer* tgtPlayer = simulation.GetPlayer(unit->GetPlayerIndex());
-                    const bool isAlly = (unit->GetPlayerIndex() == source->GetPlayerIndex()) ||
-                        (srcPlayer && tgtPlayer && (srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::ALLIED) ||
-                                                    srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::PASSIVE)));
-                    if (isAlly) continue;
-                    const float dx = unit->GetX() - GetX();
-                    const float dy = unit->GetY() - GetY();
-                    if (dx * dx + dy * dy <= radius * radius) {
-                        unit->Damage(simulation, source, false, false,
-                                     CAttackType::SPELLS, CDamageType::NORMAL,
-                                     "", actualDamage, 0);
-                    }
-                }
-            }
-        }
+    // Phase 16: Delegate post-hit combat reactions & passive procs (Sleep wake-up,
+    // Thorns/Spiked Carapace melee reflection, Vampiric Aura lifesteal, Bash stun proc,
+    // Orb/Arrow attack modifiers, Cleaving Attack splash, Wind Walk backstab, Pulverize slam)
+    // to ISimulationModule.
+    if (simMod) {
+        simMod->OnPostDamageLanded(
+            simulation, source, *this, isAttack, isRanged,
+            static_cast<int>(attackType), static_cast<int>(damageType),
+            incomingBaseDamage, incomingBaseBonus, actualDamage,
+            result.isEvaded, invulnerableTarget);
     }
 
     auto& dmgCb = simulation.GetUnitDamageCallback();
@@ -1757,91 +1360,23 @@ float CUnit::Damage(CSimulation& simulation, CUnit* source,
 
     (void)weaponSoundType;
 
-    if (oldLife > 0 && life_ <= 0) {
-        // Killer side-channel for the death tick (ref kill(source): killer
-        // gets its own death-vision reveal next to the owner's).
+    if (oldLife > 0.0f && life_ <= 0.0f) {
         CorpseDropComp().deathKillerPlayer = source ? source->GetPlayerIndex() : -1;
-        AwardBountyAndXP(simulation, source);
+        if (simMod) {
+            simMod->OnAwardKillBountyAndXP(simulation, source, *this);
+        }
         auto& deathCb = simulation.GetUnitDeathCallback();
         int srcHandle = source ? source->GetHandleId() : -1;
         if (deathCb) deathCb(handleId_, srcHandle, playerIndex_);
-    } else if (life_ > 0) {
+    } else if (life_ > 0.0f) {
         MaybeReturnFire(simulation, source);
     }
 
     return oldLife - life_;
 }
 
-// Kill rewards (ref CUnit.killUnit bounty/XP block): creep bounties pay
-// the killer's player, and nearby allied heroes split the kill's XP.
-void CUnit::AwardBountyAndXP(CSimulation& simulation, CUnit* source) {
-    if (!source || !unitType_) return;
-    CPlayer* victimOwner = simulation.GetPlayer(GetPlayerIndex());
-    CPlayer* sourcePlayer = simulation.GetPlayer(source->GetPlayerIndex());
-    if (!sourcePlayer) return;
-    if (victimOwner && sourcePlayer->HasAlliance(*victimOwner, CAllianceType::PASSIVE)) return;
-
-    // Gold/lumber bounty dice (ref base + dice d sides, seeded sim RNG).
-    if (victimOwner && victimOwner->GetGivesBounty()) {
-        int gold = unitType_->GetGoldBountyAwardedBase();
-        const int goldDice = unitType_->GetGoldBountyAwardedDice();
-        const int goldSides = unitType_->GetGoldBountyAwardedSides();
-        for (int i = 0; i < goldDice; ++i) {
-            gold += goldSides <= 0 ? 0 : (int)(simulation.SimRand01() * goldSides) + 1;
-        }
-        if (gold > 0) sourcePlayer->AddGold(gold);
-        int lumber = unitType_->GetLumberBountyAwardedBase();
-        const int lumberDice = unitType_->GetLumberBountyAwardedDice();
-        const int lumberSides = unitType_->GetLumberBountyAwardedSides();
-        for (int i = 0; i < lumberDice; ++i) {
-            lumber += lumberSides <= 0 ? 0 : (int)(simulation.SimRand01() * lumberSides) + 1;
-        }
-        if (lumber > 0) sourcePlayer->AddLumber(lumber);
-    }
-
-    // Hero XP split (ref grant tables + heroExpRange + global fallback).
-    const auto& gc = simulation.GetGameplayConstants();
-    if (!gc.buildingKillsGiveExp && source->IsBuilding()) return;
-    const int availableXp = IsHero()
-        ? gc.GetGrantHeroXP(GetHeroLevel() > 0 ? GetHeroLevel() : 1)
-        : gc.GetGrantNormalXP(unitType_->GetLevel());
-    if (availableXp <= 0) return;
-
-    std::vector<CUnit*> receivers;
-    const float range = (float)gc.heroExpRange;
-    const float rangeSq = range * range;
-    for (CUnit* other : simulation.GetUnits()) {
-        if (!other || other->IsDead() || !other->IsHero()) continue;
-        CPlayer* ally = simulation.GetPlayer(other->GetPlayerIndex());
-        if (!ally || !sourcePlayer->HasAlliance(*ally, CAllianceType::SHARED_XP)) continue;
-        const float dx = other->GetX() - GetX();
-        const float dy = other->GetY() - GetY();
-        if (dx * dx + dy * dy > rangeSq) continue;
-        receivers.push_back(other);
-    }
-    if (receivers.empty() && gc.globalExperience) {
-        for (int pi = 0; pi < simulation.GetPlayerCount(); ++pi) {
-            CPlayer* ally = simulation.GetPlayer(pi);
-            if (!ally || !sourcePlayer->HasAlliance(*ally, CAllianceType::SHARED_XP)) continue;
-            for (CUnit* hero : ally->GetHeroes()) {
-                if (hero && !hero->IsDead()) receivers.push_back(hero);
-            }
-        }
-    }
-    if (receivers.empty()) return;
-    for (CUnit* hero : receivers) {
-        auto* heroAbility = dynamic_cast<CAbilityHero*>(hero->GetAbility(War3ID("AHer")));
-        if (!heroAbility) continue;
-        const int share = (int)(availableXp * (1.0f / (float)receivers.size()) *
-                                gc.GetHeroFactorXp(hero->GetHeroLevel()));
-        if (share > 0) heroAbility->AddXP(simulation, hero, share);
-    }
-}
-
 void CUnit::MaybeReturnFire(CSimulation& simulation, CUnit* source) {
     if (!source || source == this || !unitType_) return;
-    // Idle or interruptable-default units only (ref damage() else branch:
-    // null, or default behavior that is itself interruptable).
     if (currentBehavior_ &&
         (currentBehavior_ != defaultBehavior_.get() || !currentBehavior_->IsInterruptable())) {
         return;
@@ -1872,7 +1407,6 @@ void CUnit::MaybeReturnFire(CSimulation& simulation, CUnit* source) {
         isPeon = classes.find(CUnitClassification::PEON) != classes.end();
     }
 
-    // Return fire: first attack that can target the attacker.
     if (hostile && !isPeon && !unitType_->GetAttacks().empty()) {
         if (source->CanBeTargetedBy(simulation, this, {}) && !source->IsDead()) {
             if (CBehaviorAttack* attack = GetAttackBehavior()) {
@@ -1883,7 +1417,6 @@ void CUnit::MaybeReturnFire(CSimulation& simulation, CUnit* source) {
         }
     }
 
-    // Flee: workers run one speed-step away from the attacker.
     if (unitType_->CanFlee() && !IsRooted() && GetPlayerIndex() != source->GetPlayerIndex()) {
         if (CBehaviorMove* move = GetMoveBehavior()) {
             const float dx = GetX() - source->GetX();
@@ -1986,7 +1519,6 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
         return;
     }
 
-    // If no ability handled a SMART order targeting a widget, fall back to moving to that widget's position
     if (orderId == OrderIds::SMART) {
         if (auto* widgetOrder = dynamic_cast<COrderTargetWidget*>(order.get())) {
             auto* tgt = widgetOrder->GetTarget();
@@ -1997,7 +1529,6 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
         }
     }
 
-    // If explicit stop / hold position or preemptive targeted/smart order was unhandled:
     if (orderId == OrderIds::STOP || orderId == OrderIds::HOLD_POSITION ||
         dynamic_cast<COrderTargetPoint*>(order.get()) ||
         dynamic_cast<COrderTargetWidget*>(order.get())) {

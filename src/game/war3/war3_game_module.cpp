@@ -6,7 +6,11 @@
 #include <vector>
 
 #include <cmath>
+#include "data/abilitydata.h"
 #include "data/destructabledata.h"
+#include "ecs/buffs.h"
+#include "ecs/hero_carry.h"
+#include "ecs/item_bonuses.h"
 #include "data/itemdata.h"
 #include "data/unitdata.h"
 #include "data/upgradedata.h"
@@ -441,6 +445,12 @@ void War3GameModule::RegisterWar3AbilityCatalog() {
     REG_T("AEah", CAbilityThornsAura);
     REG_T("AEar", CAbilityTrueshotAura);
 
+    // Batch 22 retail aliases (formerly special-cased in AbilityFactory)
+    REG_ALIAS("Afod", CAbilityFingerOfDeath);
+    REG_ALIAS("Acht", CAbilityHowlOfTerror);
+    REG_ALIAS("ANin", CAbilityInferno);
+    REG_ALIAS("Aams", CAbilityAntiMagicShell);
+
     #undef REG_T
     #undef REG_ALIAS
 
@@ -523,9 +533,13 @@ void War3GameModule::OnAssembleUnitAbilities(CSimulation& sim,
         unit.AddAbility(sim, std::make_unique<CAbilityMove>(sim.AllocateHandleId()));
     }
 
-    // 2. Heroes receive the Hero ability (attributes, XP, skill points)
+    // 2. Heroes receive the Hero ability (attributes, XP, skill points, and learnable heroAbilList)
     if (unitType.IsHero()) {
-        unit.AddAbility(sim, std::make_unique<CAbilityHero>(sim.AllocateHandleId()));
+        auto heroAbility = std::make_unique<CAbilityHero>(sim.AllocateHandleId());
+        for (const auto& skillCode : unitType.GetHeroAbilityList()) {
+            heroAbility->AddLearnableSkill(skillCode);
+        }
+        unit.AddAbility(sim, std::move(heroAbility));
     }
 
     // 3. Buildings receive Queue, Rally, Upgrade, Shop SellItems, GoldMine, and ReturnResources
@@ -1576,6 +1590,671 @@ bool War3GameModule::DiscoverRaceBuildPlan(const CSimulation& sim,
 
     outPlan.valid = true;
     return true;
+}
+
+
+// ============================================================================
+// Phase 16: Unit Combat Reactions, Passive Procs, Kill Bounty & Hero XP,
+//           Idle Spell Autocast, Item Bonuses & Campaign Hero Carry-Over
+// ============================================================================
+
+void War3GameModule::OnUnitAbilityAdded(CSimulation& sim,
+                                        CUnit& unit,
+                                        CAbility& ability) {
+    CAbilityData* data = sim.GetAbilityData();
+    if (!data) return;
+
+    if (auto* spell = dynamic_cast<CAbilitySpellBase*>(&ability)) {
+        if (const CAbilityDefFull* def = data->GetAbility(spell->GetAlias())) {
+            spell->ApplyData(*def);
+        }
+    }
+
+    if (const CAbilityDefFull* def = data->GetAbility(ability.GetAlias())) {
+        if (auto* cargo = dynamic_cast<CAbilityCargoHold*>(&ability)) {
+            const int cap = def->DataIntAt(1, 0, cargo->GetCapacity());
+            cargo->SetCapacity(cap);
+        }
+        if (auto* load = dynamic_cast<CAbilityLoad*>(&ability)) {
+            const float range = def->RangeAt(1);
+            if (range > 0.0f) load->SetLoadRange(range);
+            if (auto* hold = unit.GetAbility(War3ID("Acar"))) {
+                if (auto* h = dynamic_cast<CAbilityCargoHold*>(hold)) {
+                    load->SetCargoCapacity(h->GetCapacity());
+                }
+            }
+        }
+    }
+}
+
+float War3GameModule::GetNegativeBuffDurationMultiplier(const CUnit& target) const {
+    // Resistant Skin (Arsk / Brsk): negative effects wear off in 25% of normal time.
+    return target.HasBuff(War3ID("Brsk")) ? 0.25f : 1.0f;
+}
+
+bool War3GameModule::OnCheckSpellEffectReaction(CSimulation& sim,
+                                                CUnit& target,
+                                                CUnit* caster) {
+    if (!caster || caster == &target) return true;
+    CPlayer* self = sim.GetPlayer(target.GetPlayerIndex());
+    CPlayer* foe = sim.GetPlayer(caster->GetPlayerIndex());
+    if (self && foe && self->HasAlliance(*foe, CAllianceType::PASSIVE)) {
+        return true;
+    }
+    if (!target.HasBuff(War3ID("BNss"))) return true;
+    target.RemoveBuff(War3ID("BNss"), sim);
+    return false;
+}
+
+bool War3GameModule::OnEvaluatePreMitigationDamage(CSimulation& sim,
+                                                   CUnit* attacker,
+                                                   CUnit& target,
+                                                   bool isAttack,
+                                                   bool /*isRanged*/,
+                                                   int attackTypeOrd,
+                                                   int /*damageTypeOrd*/,
+                                                   bool invulnerableTarget,
+                                                   float& inOutDamage) {
+    ++stats_.preMitigationEvaluations;
+    const auto attackType = static_cast<CAttackType>(attackTypeOrd);
+
+    // 1. Drunken Haze (BNdh) & Curse (Bcrs): attacker swing may miss outright
+    if (isAttack && attacker && attacker != &target) {
+        if (auto* haze = dynamic_cast<CBuffHaze*>(attacker->GetBuff(War3ID("BNdh")))) {
+            if (sim.SimRand01() < haze->GetMissChance()) return false;
+        }
+        if (auto* curse = dynamic_cast<CBuffCurse*>(attacker->GetBuff(War3ID("Bcrs")))) {
+            if (sim.SimRand01() < curse->GetMissChance()) return false;
+        }
+    }
+
+    // 2. Highland cliff accuracy check (25% miss firing uphill)
+    if (sim.CheckHighlandMiss(attacker, &target, isAttack)) {
+        sim.FireCombatText(attacker ? attacker->GetHandleId() : -1,
+                           target.GetHandleId(),
+                           CSimulation::CombatTextKind::MISS,
+                           0.0f);
+        return false;
+    }
+
+    // 3. Mana Shield (BNms): incoming damage drains mana first (suppressed while invulnerable)
+    if (!invulnerableTarget && inOutDamage > 0.0f && target.GetMana() > 0.0f &&
+        target.GetBuff(War3ID("BNms"))) {
+        float absorbed = inOutDamage;
+        if (absorbed > target.GetMana()) absorbed = target.GetMana();
+        target.SetMana(target.GetMana() - absorbed);
+        inOutDamage -= absorbed;
+        if (inOutDamage <= 0.0f) return false;
+    }
+
+    // 4. Howl of Terror (BNht) & Item reaction AIdd attacker damage-dealt multiplier
+    if (isAttack && attacker && attacker != &target) {
+        if (auto* howl = dynamic_cast<CBuffHowl*>(attacker->GetBuff(War3ID("BNht")))) {
+            inOutDamage *= howl->GetDamageFactor();
+        }
+        float dealt = 1.0f;
+        for (const auto& buff : attacker->GetBuffs()) {
+            if (auto* mod = dynamic_cast<CBuffDamageMod*>(buff.get())) {
+                dealt += mod->GetAttackDealtAdd();
+            }
+        }
+        if (dealt < 0.0f) dealt = 0.0f;
+        inOutDamage *= dealt;
+    }
+
+    // 5. Avatar (BAvt): spell immunity while Mountain King's Avatar is active
+    if (!invulnerableTarget && attackType == CAttackType::SPELLS &&
+        target.GetBuff(War3ID("BAvt"))) {
+        return false;
+    }
+
+    return true;
+}
+
+void War3GameModule::OnModifyPostMitigationDamage(CSimulation& /*sim*/,
+                                                  CUnit* /*attacker*/,
+                                                  CUnit& target,
+                                                  bool isAttack,
+                                                  bool /*isRanged*/,
+                                                  int attackTypeOrd,
+                                                  int /*damageTypeOrd*/,
+                                                  float& inOutActualDamage) {
+    ++stats_.postMitigationEvaluations;
+    if (inOutActualDamage <= 0.0f) return;
+
+    const auto attackType = static_cast<CAttackType>(attackTypeOrd);
+
+    // 1. Defend (0.5x weapon attack reduction) & Berserk (damage-taken amplification)
+    if (isAttack) {
+        for (const auto& buff : target.GetBuffs()) {
+            if (dynamic_cast<CBuffDefend*>(buff.get())) {
+                inOutActualDamage *= 0.5f;
+                break;
+            }
+        }
+        for (const auto& buff : target.GetBuffs()) {
+            if (auto* berserk = dynamic_cast<CBuffBerserk*>(buff.get())) {
+                inOutActualDamage *= berserk->GetDamageTakenMultiplier();
+                break;
+            }
+        }
+    }
+
+    // 2. Runed Bracers / item per-attack-type damage-taken modifiers
+    for (const auto& buff : target.GetBuffs()) {
+        auto* mod = dynamic_cast<CBuffDamageMod*>(buff.get());
+        if (!mod) continue;
+        float mul = 1.0f;
+        if (attackType == CAttackType::SPELLS) mul = mod->GetSpellsTaken();
+        else if (attackType == CAttackType::MAGIC) mul = mod->GetMagicTaken();
+        else if (attackType == CAttackType::PIERCE) mul = mod->GetPierceTaken();
+        inOutActualDamage *= mul;
+    }
+}
+
+void War3GameModule::OnPostDamageLanded(CSimulation& sim,
+                                        CUnit* attacker,
+                                        CUnit& target,
+                                        bool isAttack,
+                                        bool isRanged,
+                                        int /*attackTypeOrd*/,
+                                        int damageTypeOrd,
+                                        float incomingBaseDamage,
+                                        float incomingBaseBonus,
+                                        float actualDamage,
+                                        bool wasEvaded,
+                                        bool invulnerableTarget) {
+    ++stats_.postDamageReactions;
+    const auto damageType = static_cast<CDamageType>(damageTypeOrd);
+
+    // 1. Sleep (BUsl) breaks on damage
+    if ((invulnerableTarget || actualDamage != 0.0f) && target.IsAsleep()) {
+        target.RemoveBuff(War3ID("BUsl"), sim);
+    }
+
+    // 2. Thorns Aura (CBuffThorns) & Spiked Carapace (AUts) melee reflection
+    if (isAttack && !isRanged && attacker && attacker != &target &&
+        damageType == CDamageType::NORMAL &&
+        (invulnerableTarget ? !wasEvaded : actualDamage != 0.0f)) {
+        bool enemy = true;
+        if (CPlayer* self = sim.GetPlayer(target.GetPlayerIndex())) {
+            if (CPlayer* foe = sim.GetPlayer(attacker->GetPlayerIndex())) {
+                enemy = !self->HasAlliance(*foe, CAllianceType::ALLIED);
+            }
+        }
+        const bool resisted = sim.GetGameplayConstants().magicImmuneResistsThorns &&
+                              attacker->IsMagicImmune();
+        if (enemy && !resisted) {
+            float bestPercent = 0.0f;
+            for (const auto& buff : target.GetBuffs()) {
+                if (auto* thorns = dynamic_cast<CBuffThorns*>(buff.get())) {
+                    bestPercent = std::max(bestPercent, thorns->GetReflectPercent());
+                }
+            }
+            if (bestPercent > 0.0f) {
+                const float reflected = (incomingBaseDamage + incomingBaseBonus) * bestPercent;
+                if (reflected > 0.0f) {
+                    attacker->Damage(sim, nullptr, false, false,
+                                     CAttackType::SPELLS, CDamageType::DEFENSIVE,
+                                     "", reflected, 0.0f);
+                }
+            }
+            if (auto* carapace = dynamic_cast<CAbilitySpikedCarapace*>(target.GetAbility(War3ID("AUts")))) {
+                const float reflected = (incomingBaseDamage + incomingBaseBonus) *
+                                        carapace->GetReflectPercent();
+                if (reflected > 0.0f) {
+                    attacker->Damage(sim, nullptr, false, false,
+                                     CAttackType::SPELLS, CDamageType::DEFENSIVE,
+                                     "", reflected, 0.0f);
+                }
+            }
+        }
+    }
+
+    // 3. Vampiric Aura / Item Lifesteal (CBuffLifesteal)
+    if (isAttack && attacker && attacker != &target && actualDamage > 0.0f && !target.IsBuilding()) {
+        bool mechanical = false;
+        if (const CUnitType* ut = target.GetUnitType()) {
+            const auto& classes = ut->GetClassifications();
+            mechanical = classes.find(CUnitClassification::MECHANICAL) != classes.end();
+        }
+        bool passiveAlly = false;
+        if (CPlayer* atkP = sim.GetPlayer(attacker->GetPlayerIndex())) {
+            if (CPlayer* vicP = sim.GetPlayer(target.GetPlayerIndex())) {
+                passiveAlly = atkP->HasAlliance(*vicP, CAllianceType::PASSIVE);
+            }
+        }
+        const bool resisted = sim.GetGameplayConstants().magicImmuneResistsLeech &&
+                              target.IsMagicImmune();
+        if (!mechanical && !passiveAlly && !resisted) {
+            float bestPercent = 0.0f;
+            for (const auto& buff : attacker->GetBuffs()) {
+                if (auto* leech = dynamic_cast<CBuffLifesteal*>(buff.get())) {
+                    bestPercent = std::max(bestPercent, leech->GetStealPercent());
+                }
+            }
+            if (bestPercent > 0.0f) {
+                float healed = attacker->GetLife() + actualDamage * bestPercent;
+                if (healed > attacker->GetMaxLife()) healed = attacker->GetMaxLife();
+                attacker->SetLife(sim, healed);
+            }
+        }
+    }
+
+    // 4. Bash (AHbh) stun proc
+    if (isAttack && attacker && attacker != &target && actualDamage > 0.0f && !target.IsDead()) {
+        if (auto* bash = dynamic_cast<CAbilityBash*>(attacker->GetAbility(War3ID("AHbh")))) {
+            if (sim.SimRand01() < bash->GetChance()) {
+                target.AddBuff(std::make_unique<CBuffStun>(bash->GetDuration()), sim);
+                sim.FireCombatText(attacker->GetHandleId(), target.GetHandleId(),
+                                   CSimulation::CombatTextKind::BASH, 0.0f);
+            }
+        }
+    }
+
+    // 5. Orb / Arrow attack modifier slot
+    if (isAttack && attacker && attacker != &target && actualDamage > 0.0f && !target.IsDead()) {
+        attacker->FireAttackModifiers(sim, &target, actualDamage);
+    }
+
+    // 6. Cleaving Attack (ANca) splash
+    if (isAttack && attacker && attacker != &target && actualDamage > 0.0f && !target.IsDead()) {
+        if (auto* cleave = dynamic_cast<CAbilityCleavingAttack*>(attacker->GetAbility(War3ID("ANca")))) {
+            const float splash = actualDamage * cleave->GetSplashFraction();
+            const float radius = cleave->GetSplashRadius();
+            if (splash > 0.0f) {
+                CPlayer* srcPlayer = sim.GetPlayer(attacker->GetPlayerIndex());
+                for (auto* unit : sim.GetUnits()) {
+                    if (!unit || unit->IsDead() || unit == &target || unit == attacker) continue;
+                    CPlayer* tgtPlayer = sim.GetPlayer(unit->GetPlayerIndex());
+                    const bool isAlly = (unit->GetPlayerIndex() == attacker->GetPlayerIndex()) ||
+                        (srcPlayer && tgtPlayer && (srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::ALLIED) ||
+                                                    srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::PASSIVE)));
+                    if (isAlly) continue;
+                    const float dx = unit->GetX() - target.GetX();
+                    const float dy = unit->GetY() - target.GetY();
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        unit->Damage(sim, attacker, false, false,
+                                     CAttackType::SPELLS, CDamageType::NORMAL,
+                                     "", splash, 0.0f);
+                    }
+                }
+            }
+        }
+    }
+
+    // 7. Wind Walk (BOwk) break & backstab bonus damage
+    if (isAttack && attacker && attacker != &target && actualDamage > 0.0f) {
+        if (auto* walk = dynamic_cast<CBuffWindWalk*>(attacker->GetBuff(War3ID("BOwk")))) {
+            const float backstab = walk->GetBackstabDamage();
+            attacker->RemoveBuff(War3ID("BOwk"), sim);
+            if (backstab > 0.0f && !target.IsDead()) {
+                target.Damage(sim, attacker, false, false,
+                              CAttackType::SPELLS, CDamageType::NORMAL,
+                              "", backstab, 0.0f);
+            }
+        }
+    }
+
+    // 8. Pulverize (Awar) AoE slam proc
+    if (isAttack && attacker && attacker != &target && actualDamage > 0.0f && !target.IsDead()) {
+        if (auto* pulv = dynamic_cast<CAbilityPulverize*>(attacker->GetAbility(War3ID("Awar")))) {
+            if (sim.SimRand01() < pulv->GetChance()) {
+                const float radius = pulv->GetRadius();
+                CPlayer* srcPlayer = sim.GetPlayer(attacker->GetPlayerIndex());
+                for (auto* unit : sim.GetUnits()) {
+                    if (!unit || unit->IsDead() || unit == &target || unit == attacker) continue;
+                    CPlayer* tgtPlayer = sim.GetPlayer(unit->GetPlayerIndex());
+                    const bool isAlly = (unit->GetPlayerIndex() == attacker->GetPlayerIndex()) ||
+                        (srcPlayer && tgtPlayer && (srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::ALLIED) ||
+                                                    srcPlayer->HasAlliance(*tgtPlayer, CAllianceType::PASSIVE)));
+                    if (isAlly) continue;
+                    const float dx = unit->GetX() - target.GetX();
+                    const float dy = unit->GetY() - target.GetY();
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        unit->Damage(sim, attacker, false, false,
+                                     CAttackType::SPELLS, CDamageType::NORMAL,
+                                     "", actualDamage, 0.0f);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void War3GameModule::OnAwardKillBountyAndXP(CSimulation& sim,
+                                            CUnit* killer,
+                                            CUnit& victim) {
+    const CUnitType* victimType = victim.GetUnitType();
+    if (!killer || !victimType) return;
+
+    CPlayer* victimOwner = sim.GetPlayer(victim.GetPlayerIndex());
+    CPlayer* killerPlayer = sim.GetPlayer(killer->GetPlayerIndex());
+    if (!killerPlayer) return;
+    if (victimOwner && killerPlayer->HasAlliance(*victimOwner, CAllianceType::PASSIVE)) return;
+
+    // 1. Gold/lumber bounty dice (base + dice d sides, scaled by bountyMultiplier_)
+    if (victimOwner && victimOwner->GetGivesBounty()) {
+        int gold = victimType->GetGoldBountyAwardedBase();
+        const int goldDice = victimType->GetGoldBountyAwardedDice();
+        const int goldSides = victimType->GetGoldBountyAwardedSides();
+        for (int i = 0; i < goldDice; ++i) {
+            gold += goldSides <= 0 ? 0 : static_cast<int>(sim.SimRand01() * goldSides) + 1;
+        }
+        gold = static_cast<int>(std::round(static_cast<float>(gold) * bountyMultiplier_));
+        if (gold > 0) killerPlayer->AddGold(gold);
+
+        int lumber = victimType->GetLumberBountyAwardedBase();
+        const int lumberDice = victimType->GetLumberBountyAwardedDice();
+        const int lumberSides = victimType->GetLumberBountyAwardedSides();
+        for (int i = 0; i < lumberDice; ++i) {
+            lumber += lumberSides <= 0 ? 0 : static_cast<int>(sim.SimRand01() * lumberSides) + 1;
+        }
+        lumber = static_cast<int>(std::round(static_cast<float>(lumber) * bountyMultiplier_));
+        if (lumber > 0) killerPlayer->AddLumber(lumber);
+
+        if (gold > 0 || lumber > 0) {
+            ++stats_.bountiesAwarded;
+        }
+    }
+
+    // 2. Hero XP split (grant tables + heroExpRange + globalExperience fallback, scaled by experienceMultiplier_)
+    const auto& gc = sim.GetGameplayConstants();
+    if (!gc.buildingKillsGiveExp && killer->IsBuilding()) return;
+    const int baseAvailableXp = victim.IsHero()
+        ? gc.GetGrantHeroXP(victim.GetHeroLevel() > 0 ? victim.GetHeroLevel() : 1)
+        : gc.GetGrantNormalXP(victimType->GetLevel());
+    const int availableXp = static_cast<int>(std::round(static_cast<float>(baseAvailableXp) * experienceMultiplier_));
+    if (availableXp <= 0) return;
+
+    std::vector<CUnit*> receivers;
+    const float range = static_cast<float>(gc.heroExpRange);
+    const float rangeSq = range * range;
+    for (CUnit* other : sim.GetUnits()) {
+        if (!other || other->IsDead() || !other->IsHero()) continue;
+        CPlayer* ally = sim.GetPlayer(other->GetPlayerIndex());
+        if (!ally || !killerPlayer->HasAlliance(*ally, CAllianceType::SHARED_XP)) continue;
+        const float dx = other->GetX() - victim.GetX();
+        const float dy = other->GetY() - victim.GetY();
+        if (dx * dx + dy * dy > rangeSq) continue;
+        receivers.push_back(other);
+    }
+    if (receivers.empty() && gc.globalExperience) {
+        for (int pi = 0; pi < sim.GetPlayerCount(); ++pi) {
+            CPlayer* ally = sim.GetPlayer(pi);
+            if (!ally || !killerPlayer->HasAlliance(*ally, CAllianceType::SHARED_XP)) continue;
+            for (CUnit* hero : ally->GetHeroes()) {
+                if (hero && !hero->IsDead()) receivers.push_back(hero);
+            }
+        }
+    }
+    if (receivers.empty()) return;
+
+    bool anyXpAwarded = false;
+    for (CUnit* hero : receivers) {
+        auto* heroAbility = dynamic_cast<CAbilityHero*>(hero->GetAbility(War3ID("AHer")));
+        if (!heroAbility) continue;
+        const int share = static_cast<int>(availableXp * (1.0f / static_cast<float>(receivers.size())) *
+                                           gc.GetHeroFactorXp(hero->GetHeroLevel()));
+        if (share > 0) {
+            heroAbility->AddXP(sim, hero, share);
+            anyXpAwarded = true;
+        }
+    }
+    if (anyXpAwarded) {
+        ++stats_.heroXpDistributions;
+    }
+}
+
+bool War3GameModule::OnTryUnitIdleAutocast(CSimulation& sim, CUnit& unit) {
+    ++stats_.autocastEvaluations;
+    if (unit.IsDead() || unit.IsBuilding() || unit.IsPaused()) return false;
+    if (unit.HasQueuedOrders() || unit.GetCurrentBehavior() != nullptr) return false;
+    if (unit.IsSilenced() || unit.IsHexed() || unit.IsAsleep()) return false;
+
+    CPlayer* self = sim.GetPlayer(unit.GetPlayerIndex());
+    const CUnitType* uType = unit.GetUnitType();
+    const War3ID defaultAuto = uType ? uType->GetDefaultAutocastAbility() : War3ID(0u);
+
+    for (CAbility* ab : unit.GetAbilities()) {
+        auto* spell = dynamic_cast<CAbilitySpellBase*>(ab);
+        if (!spell || spell->IsDisabled() || spell->IsOnCooldown()) continue;
+        CAutocastKind kind = GetAutocastKind(spell->GetAlias());
+        if (kind == CAutocastKind::NONE) kind = GetAutocastKind(spell->GetCode());
+        if (kind == CAutocastKind::NONE) continue;
+        if (!spell->IsAutocastActive() && defaultAuto != spell->GetAlias() &&
+            defaultAuto != spell->GetCode()) continue;
+        if (static_cast<int>(unit.GetMana()) < spell->GetManaCost()) continue;
+        const int orderId = spell->GetBaseOrderId();
+        if (orderId <= 0) continue;
+        if (!spell->CheckCanUse(sim, &unit, orderId)) continue;
+
+        const float range = spell->GetCastRange() + 400.0f;
+        const float rangeSq = range * range;
+        CUnit* best = nullptr;
+
+        if (kind == CAutocastKind::LOWEST_HP_ALLY) {
+            float bestFrac = 1.0f;
+            for (CUnit* other : sim.GetUnits()) {
+                if (!other || other->IsDead() || other->IsHidden() ||
+                    other->IsLoadedAboard() || other->IsBuilding()) continue;
+                CPlayer* foe = sim.GetPlayer(other->GetPlayerIndex());
+                const bool ally = (other == &unit) ||
+                    (self && foe && self->HasAlliance(*foe, CAllianceType::PASSIVE));
+                if (!ally) continue;
+                if (other->GetLife() >= other->GetMaxLife()) continue;
+                const float dx = other->GetX() - unit.GetX();
+                const float dy = other->GetY() - unit.GetY();
+                if (dx * dx + dy * dy > rangeSq) continue;
+                if (!spell->CheckCanTarget(sim, &unit, orderId, other)) continue;
+                const float frac = other->GetLife() / other->GetMaxLife();
+                if (!best || frac < bestFrac) {
+                    best = other;
+                    bestFrac = frac;
+                }
+            }
+        } else {
+            float bestDist = rangeSq;
+            for (CUnit* other : sim.GetUnits()) {
+                if (!other || other->IsDead() || other->IsHidden() ||
+                    other->IsLoadedAboard() || other == &unit) continue;
+                CPlayer* foe = sim.GetPlayer(other->GetPlayerIndex());
+                if (self && foe && self->HasAlliance(*foe, CAllianceType::PASSIVE)) continue;
+                const float dx = other->GetX() - unit.GetX();
+                const float dy = other->GetY() - unit.GetY();
+                const float d2 = dx * dx + dy * dy;
+                if (d2 > rangeSq || (best && d2 >= bestDist)) continue;
+                if (!spell->CheckCanTarget(sim, &unit, orderId, other)) continue;
+                best = other;
+                bestDist = d2;
+            }
+        }
+        if (best) {
+            unit.IssueOrder(std::make_unique<COrderTargetWidget>(orderId, best));
+            unit.PollNextOrderBehavior(sim);
+            if (unit.GetCurrentBehavior() != nullptr) {
+                ++stats_.autocastOrdersIssued;
+                return true;
+            }
+            return false;
+        }
+    }
+    return false;
+}
+
+void War3GameModule::OnApplyUnitItemBonus(CSimulation& sim,
+                                          CUnit& unit,
+                                          int bonusTypeOrd,
+                                          int signedDelta) {
+    ++stats_.itemBonusesApplied;
+    const auto bonusType = static_cast<CItemBonusType>(bonusTypeOrd);
+    auto findHeroAbility = [](CUnit& u) -> CAbilityHero* {
+        if (!u.IsHero()) return nullptr;
+        return dynamic_cast<CAbilityHero*>(u.GetAbility(War3ID("AHer")));
+    };
+
+    switch (bonusType) {
+        case CItemBonusType::STRENGTH:
+            if (auto* hero = findHeroAbility(unit)) {
+                hero->AddStrengthBonus(sim, &unit, signedDelta);
+            } else {
+                unit.AddBonusMaxLife(static_cast<float>(signedDelta) * 25.0f);
+            }
+            break;
+        case CItemBonusType::AGILITY:
+            if (auto* hero = findHeroAbility(unit)) {
+                hero->AddAgilityBonus(sim, &unit, signedDelta);
+            } else {
+                unit.AddBonusArmor(signedDelta >= 0 ? (signedDelta * 33 + 50) / 100
+                                                    : -((-signedDelta * 33 + 50) / 100));
+            }
+            break;
+        case CItemBonusType::INTELLIGENCE:
+            if (auto* hero = findHeroAbility(unit)) {
+                hero->AddIntelligenceBonus(sim, &unit, signedDelta);
+            } else {
+                unit.AddBonusMaxMana(signedDelta * 15);
+            }
+            break;
+        case CItemBonusType::DAMAGE:
+            unit.AddBonusDamage(signedDelta);
+            break;
+        case CItemBonusType::ARMOR:
+            unit.AddBonusArmor(signedDelta);
+            break;
+        case CItemBonusType::ATTACK_SPEED:
+            unit.AddStackingAttackSpeed(static_cast<float>(signedDelta) / 100.0f);
+            break;
+        case CItemBonusType::MAX_LIFE:
+            unit.AddBonusMaxLife(static_cast<float>(signedDelta));
+            break;
+        case CItemBonusType::MAX_MANA:
+            unit.AddBonusMaxMana(signedDelta);
+            break;
+        case CItemBonusType::MOVE_SPEED:
+            unit.AddBonusSpeed(signedDelta);
+            break;
+        case CItemBonusType::LIFE_REGEN:
+            unit.AddBonusLifeRegen(static_cast<float>(signedDelta));
+            break;
+        case CItemBonusType::MANA_REGEN:
+            unit.AddBonusManaRegen(static_cast<float>(signedDelta));
+            break;
+        case CItemBonusType::SIGHT_RADIUS:
+        case CItemBonusType::NONE:
+        default:
+            break;
+    }
+}
+
+bool War3GameModule::IsCarriableHero(const CSimulation& sim, CUnit& unit) const {
+    if (unit.IsHidden()) return false;
+    const CUnitType* type = unit.GetUnitType();
+    if (!type || !type->IsHero()) return false;
+    CPlayer* owner = sim.GetPlayer(unit.GetPlayerIndex());
+    if (!owner || owner->GetController() != CMapControl::USER) return false;
+    for (CAbility* ab : unit.GetAbilities()) {
+        if (dynamic_cast<CAbilityHero*>(ab) != nullptr) return true;
+    }
+    return false;
+}
+
+bool War3GameModule::OnSnapshotCarriedHero(const CSimulation& sim,
+                                           CUnit& unit,
+                                           CarriedHero& outCarried) const {
+    outCarried = CarriedHero{};
+    if (!IsCarriableHero(sim, unit)) return false;
+
+    CAbilityHero* hero = nullptr;
+    for (CAbility* ab : unit.GetAbilities()) {
+        if (auto* h = dynamic_cast<CAbilityHero*>(ab)) {
+            hero = h;
+            break;
+        }
+    }
+    if (!hero) return false;
+
+    outCarried.typeId = unit.GetTypeId();
+    outCarried.ownerPlayer = unit.GetPlayerIndex();
+    outCarried.level = hero->GetHeroLevel();
+    outCarried.xp = hero->GetXP();
+    outCarried.skillPoints = hero->GetSkillPoints();
+    outCarried.properName = hero->GetProperName();
+    const auto& learnable = hero->GetLearnableSkills();
+    for (CAbility* ab : unit.GetAbilities()) {
+        if (!ab || learnable.count(ab->GetCode()) == 0) continue;
+        outCarried.learnedSkills.emplace_back(ab->GetCode(), ab->GetLevel());
+    }
+    if (auto* inv = dynamic_cast<CAbilityInventory*>(unit.GetAbility(War3ID("AInv")))) {
+        for (int slot = 0; slot < inv->GetItemCapacity(); ++slot) {
+            CItem* item = inv->GetItem(slot);
+            if (!item) continue;
+            CarriedHero::CarriedItem ci;
+            ci.typeId = item->GetTypeId();
+            ci.charges = item->GetCharges();
+            outCarried.items.push_back(ci);
+        }
+    }
+    return true;
+}
+
+CUnit* War3GameModule::OnRespawnCarriedHero(CSimulation& sim,
+                                            const CarriedHero& carried,
+                                            float x,
+                                            float y) {
+    if (carried.typeId.value == 0) return nullptr;
+    CPlayer* owner = sim.GetPlayer(carried.ownerPlayer);
+    if (!owner) return nullptr;
+    if (!sim.GetUnitData() || !sim.GetUnitData()->GetUnitType(carried.typeId)) {
+        return nullptr;
+    }
+    CUnit* hero = sim.CreateUnit(carried.typeId, carried.ownerPlayer, x, y, 0.0f);
+    if (!hero) return nullptr;
+
+    CAbilityHero* heroAb = nullptr;
+    for (CAbility* ab : hero->GetAbilities()) {
+        if (auto* h = dynamic_cast<CAbilityHero*>(ab)) {
+            heroAb = h;
+            break;
+        }
+    }
+    if (heroAb) {
+        heroAb->SetHeroLevel(sim, hero, carried.level);
+        heroAb->SetXP(sim, hero, carried.xp);
+        heroAb->SetSkillPoints(carried.skillPoints);
+        if (!carried.properName.empty()) heroAb->SetProperName(carried.properName);
+    }
+
+    for (const auto& [code, level] : carried.learnedSkills) {
+        if (level <= 0) continue;
+        if (CAbility* existing = hero->GetAbility(code)) {
+            existing->SetLevel(level);
+            continue;
+        }
+        auto created = AbilityFactory::CreateAbility(sim.AllocateHandleId(), code);
+        if (!created) continue;
+        created->SetLevel(level);
+        hero->AddAbility(sim, std::move(created));
+    }
+
+    if (!carried.items.empty()) {
+        if (auto* inv = dynamic_cast<CAbilityInventory*>(hero->GetAbility(War3ID("AInv")))) {
+            for (const auto& ci : carried.items) {
+                CItem* item = sim.CreateItem(ci.typeId, x, y);
+                if (!item) continue;
+                item->SetCharges(ci.charges);
+                if (!inv->PickUpItem(sim, hero, item)) {
+                    break;
+                }
+            }
+        } else {
+            for (const auto& ci : carried.items) {
+                sim.CreateItem(ci.typeId, x, y);
+            }
+        }
+    }
+    ++stats_.heroesCarriedOver;
+    return hero;
 }
 
 } // namespace war3

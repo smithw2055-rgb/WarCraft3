@@ -11,9 +11,6 @@
 #include "ecs/behaviors/behavior_repair.h"
 #include "ecs/behaviors/behavior_return_resources.h"
 #include "ecs/behaviors/behavior_spell.h"
-#include "ecs/abilities/ability_harvest.h"
-#include "ecs/abilities/ability_gold_mine.h"
-#include "ecs/abilities/ability_queue.h"
 #include "render/splat_metadata.h"
 #include "render/mdx_viewer.h"
 #include <string>

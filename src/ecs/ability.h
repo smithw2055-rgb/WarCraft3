@@ -10,6 +10,11 @@ class COrderTargetPoint;
 class COrderTargetWidget;
 class COrderNoTarget;
 
+// Resource types carried by workers or harvested from resource nodes
+enum class CResourceType : uint8_t {
+    NONE, GOLD, LUMBER
+};
+
 // Ability category (matches Java CAbilityCategory)
 enum class CAbilityCategory : uint8_t {
     CORE, ATTACK, MOVEMENT, BUFF, ITEM, HERO, BUILD, INVENTORY,

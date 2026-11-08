@@ -25,7 +25,6 @@
 #include "../ecs/csimulation.h"
 #include "../ecs/unit.h"
 #include "../ecs/player.h"
-#include "../ecs/abilities/ability_harvest.h"
 #include "../data/unitdata.h"
 #include "../data/abilitydata.h"
 #include "../data/destructabledata.h"

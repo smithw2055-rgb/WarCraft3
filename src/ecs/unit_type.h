@@ -195,6 +195,7 @@ public:
     int GetStartingIntelligence() const { return startingIntelligence_; }
     float GetIntelligencePerLevel() const { return intelligencePerLevel_; }
     CPrimaryAttribute GetPrimaryAttribute() const { return primaryAttribute_; }
+    const std::vector<War3ID>& GetHeroAbilityList() const { return heroAbilityList_; }
     const std::vector<std::string>& GetHeroProperNames() const { return heroProperNames_; }
     int GetSightRadiusDay() const { return sightRadiusDay_; }
     int GetSightRadiusNight() const { return sightRadiusNight_; }

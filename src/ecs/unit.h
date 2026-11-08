@@ -18,6 +18,7 @@
 #include "ecs/attribute_aggregator.h"
 #include "ecs/unit_components.h"
 #include "ecs/ecs_registry.h"
+#include <cstdint>
 #include <vector>
 #include <queue>
 #include <functional>
@@ -27,10 +28,36 @@
 #include <unordered_set>
 #include <utility>
 
-class CAbilityAttack;
-class CAbilityMove;
-class CAbilityHero;
-class CAbilityInventory;
+// ============================================================================
+// Phase 16 Compact Entity State Bitfield (UnitStateFlag : uint16_t)
+// Packs 16 boolean entity state flags into a single 2-byte word (87.5% reduction
+// from 16 scattered bool bytes) with O(1) bitmask inspection & serialization.
+// ============================================================================
+enum class UnitStateFlag : uint16_t {
+    None            = 0,
+    Building        = 1u << 0,
+    Hero            = 1u << 1,
+    Hidden          = 1u << 2,
+    Paused          = 1u << 3,
+    Invulnerable    = 1u << 4,
+    Rooted          = 1u << 5,
+    Invisible       = 1u << 6,
+    Detector        = 1u << 7,
+    Ethereal        = 1u << 8,
+    MagicImmune     = 1u << 9,
+    Illusion        = 1u << 10,
+    UseFood         = 1u << 11,
+    PathingEnabled  = 1u << 12,
+    CanSleep        = 1u << 13,
+    CanSleepPerm    = 1u << 14,
+    IgnoreAlarm     = 1u << 15,
+};
+
+constexpr uint16_t kDefaultUnitStateFlags =
+    static_cast<uint16_t>(UnitStateFlag::UseFood) |
+    static_cast<uint16_t>(UnitStateFlag::PathingEnabled) |
+    static_cast<uint16_t>(UnitStateFlag::CanSleep) |
+    static_cast<uint16_t>(UnitStateFlag::CanSleepPerm);
 
 class CUnit : public CWidget {
 public:
@@ -42,6 +69,20 @@ public:
     // Any components already populated before adoption are migrated into the registry's contiguous pools.
     void BindRegistry(SimEcsRegistry* registry);
     SimEcsRegistry* GetBoundRegistry() const { return registry_; }
+
+    // Compact 16-bit State Flag Bitfield Accessors (Phase 16)
+    bool HasStateFlag(UnitStateFlag flag) const {
+        return (stateFlags_ & static_cast<uint16_t>(flag)) != 0;
+    }
+    void SetStateFlag(UnitStateFlag flag, bool enabled) {
+        if (enabled) {
+            stateFlags_ |= static_cast<uint16_t>(flag);
+        } else {
+            stateFlags_ &= static_cast<uint16_t>(~static_cast<uint16_t>(flag));
+        }
+    }
+    uint16_t GetStateFlagsBitmask() const { return stateFlags_; }
+    void SetStateFlagsBitmask(uint16_t mask) { stateFlags_ = mask; }
 
     // Type info
     CUnitType* GetUnitType() const { return unitType_; }
@@ -59,8 +100,8 @@ public:
     void SetPropWindow(float v) { propWindow_ = v; }
     float GetEffectivePropWindow() const;
     // Pathing toggle (ref setUnitPathing / CUnit.isPathingEnabled).
-    bool IsPathingEnabled() const { return pathingEnabled_; }
-    void SetPathingEnabled(bool v) { pathingEnabled_ = v; }
+    bool IsPathingEnabled() const { return HasStateFlag(UnitStateFlag::PathingEnabled); }
+    void SetPathingEnabled(bool v) { SetStateFlag(UnitStateFlag::PathingEnabled, v); }
     PathingGridMovementType GetMovementType() const { return movementType_; }
     bool IsFlying() const { return movementType_ == PathingGridMovementType::FLY; }
     float GetSpeed() const;
@@ -250,8 +291,8 @@ public:
     bool IsSummoned() const;
     // Illusion flag (ref IsUnitIllusion): set on Mirror Image / Wand of
     // Illusion copies at summon time; never cleared while alive.
-    bool IsIllusion() const { return illusion_; }
-    void SetIsIllusion(bool v) { illusion_ = v; }
+    bool IsIllusion() const { return HasStateFlag(UnitStateFlag::Illusion); }
+    void SetIsIllusion(bool v) { SetStateFlag(UnitStateFlag::Illusion, v); }
     // Spell effect reaction (ref CheckUnitForAbilityEffectReaction):
     // returns true when an enemy-targeted spell effect may land. A present
     // Spell Shield (BNss) is consumed and the effect fizzles instead.
@@ -259,10 +300,10 @@ public:
     bool CheckSpellEffectReaction(CSimulation& game, CUnit* caster);
     // Sleep capability (ref UnitAddSleep/UnitCanSleep): Sleep effects only
     // land when both flags hold. Both default true (retail default).
-    bool CanSleep() const { return canSleep_ && canSleepPerm_; }
-    void SetCanSleep(bool v) { canSleep_ = v; }
-    bool CanSleepPerm() const { return canSleepPerm_; }
-    void SetCanSleepPerm(bool v) { canSleepPerm_ = v; }
+    bool CanSleep() const { return HasStateFlag(UnitStateFlag::CanSleep) && HasStateFlag(UnitStateFlag::CanSleepPerm); }
+    void SetCanSleep(bool v) { SetStateFlag(UnitStateFlag::CanSleep, v); }
+    bool CanSleepPerm() const { return HasStateFlag(UnitStateFlag::CanSleepPerm); }
+    void SetCanSleepPerm(bool v) { SetStateFlag(UnitStateFlag::CanSleepPerm, v); }
     // Instance unit-type flags (ref UnitAddType/UnitRemoveType raw ids).
     // Stored per instance in cold UnitScriptOverridesComponent pool; consulted by future targeting/type checks.
     void AddUnitTypeFlag(int typeId) {
@@ -283,8 +324,8 @@ public:
     }
     // Town-alarm opt-out (ref UnitIgnoreAlarm): no alarm system consumes
     // this yet; retained so script intent survives.
-    bool IsAlarmIgnored() const { return ignoreAlarm_; }
-    void SetIgnoreAlarm(bool v) { ignoreAlarm_ = v; }
+    bool IsAlarmIgnored() const { return HasStateFlag(UnitStateFlag::IgnoreAlarm); }
+    void SetIgnoreAlarm(bool v) { SetStateFlag(UnitStateFlag::IgnoreAlarm, v); }
     // Command-card alt icon (ref UnitSetUsesAltIcon): consumed by UI.
     bool UsesAltIcon() const { return VisualComp().useAltIcon; }
     void SetUsesAltIcon(bool v) { VisualComp().useAltIcon = v; }
@@ -347,44 +388,44 @@ public:
                  const std::string& weaponSoundType,
                  float damage, float bonusDamage = 0) override;
 
-    // Properties
-    bool IsBuilding() const { return isBuilding_; }
-    bool IsHero() const { return isHero_; }
-    bool IsInvulnerable() const override { return invulnerable_; }
-    void SetInvulnerable(bool v) { invulnerable_ = v; }
+    // Properties (backed by compact 16-bit UnitStateFlag bitmask)
+    bool IsBuilding() const { return HasStateFlag(UnitStateFlag::Building); }
+    bool IsHero() const { return HasStateFlag(UnitStateFlag::Hero); }
+    bool IsInvulnerable() const override { return HasStateFlag(UnitStateFlag::Invulnerable); }
+    void SetInvulnerable(bool v) { SetStateFlag(UnitStateFlag::Invulnerable, v); }
 
     // State
-    void SetHidden(bool v) { hidden_ = v; }
-    bool IsHidden() const { return hidden_; }
+    void SetHidden(bool v) { SetStateFlag(UnitStateFlag::Hidden, v); }
+    bool IsHidden() const { return HasStateFlag(UnitStateFlag::Hidden); }
     // Paused units stay in the world but skip behavior and ability ticks.
-    void SetPaused(bool v) { paused_ = v; }
-    bool IsPaused() const { return paused_; }
+    void SetPaused(bool v) { SetStateFlag(UnitStateFlag::Paused, v); }
+    bool IsPaused() const { return HasStateFlag(UnitStateFlag::Paused); }
 
     // Construction state
     bool IsConstructing() const { return ConstructionComp().constructing; }
     void SetConstructing(bool v) { ConstructionComp().constructing = v; }
     // Root state (Night Elf ancients): rooted units cannot move but can
     // still attack; movement behaviors complete immediately while rooted.
-    bool IsRooted() const { return rooted_; }
-    void SetRooted(bool v) { rooted_ = v; }
+    bool IsRooted() const { return HasStateFlag(UnitStateFlag::Rooted); }
+    void SetRooted(bool v) { SetStateFlag(UnitStateFlag::Rooted, v); }
     // Invisibility is hidden from other players unless revealed (Faerie Fire)
     // or a detector is within sight range.
-    bool IsInvisible() const { return invisible_; }
-    void SetInvisible(bool v) { invisible_ = v; }
+    bool IsInvisible() const { return HasStateFlag(UnitStateFlag::Invisible); }
+    void SetInvisible(bool v) { SetStateFlag(UnitStateFlag::Invisible, v); }
     // Detectors (shades, sentry wards) pierce stealth within sight range.
-    bool IsDetector() const { return detector_; }
-    void SetDetector(bool v) { detector_ = v; }
+    bool IsDetector() const { return HasStateFlag(UnitStateFlag::Detector); }
+    void SetDetector(bool v) { SetStateFlag(UnitStateFlag::Detector, v); }
     // Players who also see through this unit's sight (UnitShareVision).
     void SetSharesVisionWith(int player, bool share);
     const std::unordered_set<int>& SharedVisionPlayers() const { return ScriptOverridesComp().sharedVisionPlayers; }
     // Ethereal (Banish): immune to physical (NORMAL damage), takes bonus
     // from MAGIC/SPELLS (ref CUnitDefaultEtherealDamageModListener).
-    bool IsEthereal() const { return ethereal_; }
-    void SetEthereal(bool v) { ethereal_ = v; }
+    bool IsEthereal() const { return HasStateFlag(UnitStateFlag::Ethereal); }
+    void SetEthereal(bool v) { SetStateFlag(UnitStateFlag::Ethereal, v); }
     // Magic immunity (Anti-Magic Shell, spell immunity): resists MAGIC and
     // non-universal SPELLS (ref CUnitDefaultMagicImmuneDamageModListener).
-    bool IsMagicImmune() const { return magicImmune_; }
-    void SetMagicImmune(bool v) { magicImmune_ = v; }
+    bool IsMagicImmune() const { return HasStateFlag(UnitStateFlag::MagicImmune); }
+    void SetMagicImmune(bool v) { SetStateFlag(UnitStateFlag::MagicImmune, v); }
     bool IsInvisibleTo(const CUnit* viewer) const;
     // Stealth pre-check for fog rendering: invisible flag or a Wind Walk
     // buff. Detector/Faerie-Fire resolution still needs IsInvisibleTo(viewer).
@@ -465,15 +506,15 @@ public:
                          const std::vector<CTargetType>& targetsAllowed) const override;
 
     // Resource / food
-    int GetFoodUsed() const { return useFood_ ? foodUsed_ : 0; }
+    int GetFoodUsed() const { return UsesFood() ? foodUsed_ : 0; }
     int GetFoodMade() const { return foodMade_; }
     void SetFoodUsed(int v) { foodUsed_ = v; }
     void SetFoodMade(int v) { foodMade_ = v; }
     // Whether this unit counts toward food usage (ref SetUnitUseFood).
     // Toggling preserves the base value; sim add/remove accounting reads
     // through GetFoodUsed, so toggle-then-die can drift by design (noted).
-    bool UsesFood() const { return useFood_; }
-    void SetUseFood(bool v) { useFood_ = v; }
+    bool UsesFood() const { return HasStateFlag(UnitStateFlag::UseFood); }
+    void SetUseFood(bool v) { SetStateFlag(UnitStateFlag::UseFood, v); }
     // Revive a dead hero at a position (ref ReviveHero).
     void Revive(CSimulation& game, float x, float y);
     // Alternate-form morph (Metamorphosis, Bear/Raven/Robo forms):
@@ -481,6 +522,7 @@ public:
     void MorphTo(CUnitType* form, War3ID formId);
     void Unmorph();
     bool IsMorphed() const { return MorphComp().morphed; }
+
     // Attack modifier slot (ref attackReplacement): one data-driven proc
     // effect per attack index, installed by orb/arrow abilities. Installing
     // replaces whatever was there (retail orbs do not stack). Behaviors
@@ -528,6 +570,8 @@ public:
         auto& sn = StructureNavComp();
         sn.rallyX = x; sn.rallyY = y; sn.rallyOrderId = orderId;
     }
+    // Waygate state (ref CAbilityWander / waygate destination). A unit with
+    // an active waygate teleports entering units to (waygateX_, waygateY_).
     bool IsWaygateActive() const { return StructureNavComp().waygateActive; }
     void SetWaygateActive(bool v) { StructureNavComp().waygateActive = v; }
     float GetWaygateX() const { return StructureNavComp().waygateX; }
@@ -536,11 +580,18 @@ public:
         auto& sn = StructureNavComp();
         sn.waygateX = x; sn.waygateY = y;
     }
+    // Building footprint stamp on the runtime pathing map (ref CUnit
+    // pathingInstance: created on spawn/move, cleared on death/removal).
     void RegeneratePathingInstance(CSimulation& game);
     void KillPathingInstance(CSimulation& game);
     int GetPathingStampId() const { return StructureNavComp().pathingStampId; }
     UnitAttributeAggregator& Attrs() { return attrs_; }
     const UnitAttributeAggregator& Attrs() const { return attrs_; }
+
+    // Autocast target acquisition (ref CUnit.autoAcquireAutocastTargets +
+    // AutocastTargetFinderEnum). Only idle units with an enabled autocast
+    // ability, mana, and cooldown ready participate.
+    bool TryAutocast(CSimulation& simulation);
 
 private:
     static SimEcsRegistry& DetachedRegistry();
@@ -549,10 +600,6 @@ private:
     }
 
     void PerformDefaultBehavior(CSimulation& simulation);
-    bool TryAutocast(CSimulation& simulation);
-    // Kill rewards (bounty dice + hero XP split) fired once at the
-    // killing blow. Source may be nullptr (degeneration/decay).
-    void AwardBountyAndXP(CSimulation& simulation, CUnit* source);
     // Return fire / flee when damaged while idle (ref damage() else
     // branch). No-op while busy; P0-2 refines the gate with
     // interruptable().
@@ -576,23 +623,8 @@ private:
     PathingGridMovementType movementType_;
     float collisionSize_;
 
-    // Core flags
-    bool isBuilding_;
-    bool isHero_;
-    bool hidden_ = false;
-    bool paused_ = false;
-    bool invulnerable_ = false;
-    bool rooted_ = false;
-    bool invisible_ = false;
-    bool detector_ = false;
-    bool ethereal_ = false;
-    bool magicImmune_ = false;
-    bool illusion_ = false;
-    bool useFood_ = true;
-    bool pathingEnabled_ = true;
-    bool canSleep_ = true;
-    bool canSleepPerm_ = true;
-    bool ignoreAlarm_ = false;
+    // Phase 16: Compact 16-bit bitmask replacing 16 scattered bool fields
+    uint16_t stateFlags_ = kDefaultUnitStateFlags;
 
     int foodUsed_ = 0;
     int foodMade_ = 0;

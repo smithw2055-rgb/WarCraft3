@@ -2,9 +2,6 @@
 #include "data/slk_merge.h"
 #include "gameplay_constants.h"
 #include "ecs/unit_type.h"
-#include "ecs/unit.h"
-#include "ecs/csimulation.h"
-#include "ecs/handle_id.h"
 #include "map/object_mods.h"
 #include "resource/mpq_storm.h"
 #include <algorithm>
@@ -638,42 +635,3 @@ bool CUnitData::HasUnitType(War3ID typeId) const {
     return types_.find(typeId) != types_.end();
 }
 
-CUnit* CUnitData::CreateUnit(CSimulation& simulation, int playerIndex,
-                             War3ID typeId, float x, float y, float facing,
-                             HandleIdAllocator& handleIdAllocator,
-                             const std::vector<uint8_t>* buildingPathing) const {
-    auto* type = GetUnitType(typeId);
-    if (!type) return nullptr;
-
-    int handleId = handleIdAllocator.CreateId();
-    auto* unit = new CUnit(handleId, type, playerIndex, typeId, x, y, facing);
-
-    if (buildingPathing) {
-        (void)buildingPathing;
-    }
-
-    (void)simulation;
-    return unit;
-}
-
-void CUnitData::AddDefaultAbilitiesToUnit(CSimulation& simulation, HandleIdAllocator& handleIdAllocator,
-                                          const CUnitType& unitType, bool addDefault,
-                                          int manaInitial, int speed, CUnit& unit) const {
-    (void)simulation;
-    (void)handleIdAllocator;
-    (void)unitType;
-    (void)addDefault;
-    (void)manaInitial;
-    (void)speed;
-    (void)unit;
-}
-
-void CUnitData::ApplyPlayerUpgradesToUnit(CSimulation& simulation, int playerIndex,
-                                          const CUnitType& unitType, CUnit& unit) const {
-    (void)unitType;
-    if (auto* mod = simulation.GetSimulationModule()) {
-        if (CPlayer* player = simulation.GetPlayer(playerIndex)) {
-            mod->OnApplyPlayerUpgradesToUnit(simulation, *player, unit);
-        }
-    }
-}

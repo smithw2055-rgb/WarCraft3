@@ -1,9 +1,7 @@
 #include "ability_factory.h"
 #include "ecs/ability.h"
 #include "ecs/abilities/ability_generic.h"
-#include "ecs/abilities/ability_queue.h"
 #include "ecs/abilities/ability_spell_base.h"
-#include "ecs/abilities/spells22.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "game/war3/war3_game_module.h"
@@ -186,14 +184,7 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
         }
     }
 
-    // 3. Check Spells22 alias table (only when War3 catalog is active)
-    if (GetStore().war3Bootstrapped) {
-        if (auto alias22 = CreateSpells22Alias(handleId, code)) {
-            return alias22;
-        }
-    }
-
-    // 4. Check raw ABEffectChain registry (only when War3 catalog is active)
+    // 3. Check raw ABEffectChain registry (only when War3 catalog is active)
     if (GetStore().war3Bootstrapped && AbilityBuilderRegistry::Instance().Find(code) != nullptr) {
         ABSpellDescriptor desc;
         desc.code = code;
@@ -202,7 +193,7 @@ std::unique_ptr<CAbility> AbilityFactory::CreateAbility(int handleId, War3ID cod
         return spell;
     }
 
-    // 5. Fallback generic do-nothing placeholder
+    // 4. Fallback generic do-nothing placeholder
     return std::make_unique<CAbilityGenericDoNothing>(handleId, code);
 }
 
@@ -216,20 +207,5 @@ void AbilityFactory::AddDefaultAbilities(CSimulation& game, CUnit* unit,
             CreateAbility(game.AllocateHandleId(), code);
         if (!ability) continue;
         unit->AddAbility(game, std::move(ability));
-    }
-}
-
-void AbilityFactory::AddQueueAbilities(CSimulation& game, CUnit* unit,
-                                       const std::vector<War3ID>& unitsTrained,
-                                       const std::vector<War3ID>& researchesAvailable) {
-    (void)game;
-    auto* queue = dynamic_cast<CAbilityQueue*>(unit->GetAbility(War3ID("Aque")));
-    if (queue) {
-        for (auto& id : unitsTrained) {
-            queue->AddTrainedUnit(id);
-        }
-        for (auto& id : researchesAvailable) {
-            queue->AddResearch(id);
-        }
     }
 }

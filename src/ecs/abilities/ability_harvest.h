@@ -1,11 +1,6 @@
 #pragma once
 #include "ecs/ability.h"
 
-// Resource types
-enum class CResourceType : uint8_t {
-    NONE, GOLD, LUMBER
-};
-
 // CAbilityHarvest - resource gathering ability
 // Supports both gold mining and lumber chopping
 class CAbilityHarvest : public CAbility {

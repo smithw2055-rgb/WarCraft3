@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-// Phase 13, 14 & 15 Modernization: war3::War3GameModule (src/game/war3/war3_game_module.h)
+// Phase 13, 14, 15 & 16 Modernization: war3::War3GameModule (src/game/war3/war3_game_module.h)
 //
 // Extracts WarCraft III's:
 //   1. Unit/building/worker/hero ability assembly & ~190 spell/ability catalog
@@ -15,8 +15,16 @@
 //      reduction curve, and Ethereal/Magic-Immunity rules
 //   7. MeleeAIController tactical AI lifecycle, race build-order discovery,
 //      and armor-counter tactical target scoring
-// out of CSimulation, CPlayer, CCombatSystem, and MeleeAIController into an
-// independent, dynamically loadable plugin module implementing both:
+//   8. [Phase 16] Unit combat reactions & passive procs (Drunken Haze/Curse/
+//      Highland miss, Mana Shield, Howl of Terror, Avatar, Defend, Berserk,
+//      Runed Bracers, Sleep wake, Thorns/Spiked Carapace reflection, Vampiric
+//      lifesteal, Bash stun, Orb/Arrow attack modifiers, Cleaving Attack,
+//      Wind Walk backstab, Pulverize AoE slam), Kill Bounty Dice & Hero XP
+//      distribution, Idle Spell Autocast target acquisition, Item Attribute
+//      Bonus routing, and Campaign Hero Carry-Over serialization
+// out of CSimulation, CUnit, CPlayer, CCombatSystem, MeleeAIController,
+// item_bonuses, and hero_carry into an independent, dynamically loadable
+// plugin module implementing both:
 //   - engine::ISimulationModule (plugs into CSimulation)
 //   - engine::IGameModule       (plugs into engine::EngineKernel)
 // ============================================================================
@@ -64,7 +72,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 15u; }
+    uint32_t GetModuleVersion() const override { return 16u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -75,6 +83,10 @@ public:
     void OnAssembleUnitAbilities(CSimulation& sim,
                                  CUnit& unit,
                                  const CUnitType& unitType) override;
+
+    void OnUnitAbilityAdded(CSimulation& sim,
+                            CUnit& unit,
+                            CAbility& ability) override;
 
     void OnConfigureCreatedItem(CSimulation& sim, CItem& item) override;
 
@@ -202,6 +214,75 @@ public:
                                       int playerIndex,
                                       AIRacePlan& outPlan);
 
+    // --- Phase 16: Unit Combat Reactions, Passive Procs, Kill Bounty & Hero XP,
+    //               Idle Spell Autocast, Item Bonuses & Campaign Hero Carry-Over ---
+    bool OnEvaluatePreMitigationDamage(CSimulation& sim,
+                                       CUnit* attacker,
+                                       CUnit& target,
+                                       bool isAttack,
+                                       bool isRanged,
+                                       int attackTypeOrd,
+                                       int damageTypeOrd,
+                                       bool invulnerableTarget,
+                                       float& inOutDamage) override;
+
+    void OnModifyPostMitigationDamage(CSimulation& sim,
+                                      CUnit* attacker,
+                                      CUnit& target,
+                                      bool isAttack,
+                                      bool isRanged,
+                                      int attackTypeOrd,
+                                      int damageTypeOrd,
+                                      float& inOutActualDamage) override;
+
+    void OnPostDamageLanded(CSimulation& sim,
+                            CUnit* attacker,
+                            CUnit& target,
+                            bool isAttack,
+                            bool isRanged,
+                            int attackTypeOrd,
+                            int damageTypeOrd,
+                            float incomingBaseDamage,
+                            float incomingBaseBonus,
+                            float actualDamage,
+                            bool wasEvaded,
+                            bool invulnerableTarget) override;
+
+    void OnAwardKillBountyAndXP(CSimulation& sim,
+                                CUnit* killer,
+                                CUnit& victim) override;
+
+    bool OnTryUnitIdleAutocast(CSimulation& sim, CUnit& unit) override;
+
+    float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
+
+    bool OnCheckSpellEffectReaction(CSimulation& sim,
+                                    CUnit& target,
+                                    CUnit* caster) override;
+
+    void OnApplyUnitItemBonus(CSimulation& sim,
+                              CUnit& unit,
+                              int bonusTypeOrd,
+                              int signedDelta) override;
+
+    bool IsCarriableHero(const CSimulation& sim, CUnit& unit) const override;
+
+    bool OnSnapshotCarriedHero(const CSimulation& sim,
+                               CUnit& unit,
+                               CarriedHero& outCarried) const override;
+
+    CUnit* OnRespawnCarriedHero(CSimulation& sim,
+                                const CarriedHero& carried,
+                                float x,
+                                float y) override;
+
+    // Configurable runtime multipliers for custom map modes (e.g., 2.0x turbo XP/bounty)
+    void SetBountyMultiplier(float mult) { bountyMultiplier_ = std::max(0.0f, mult); }
+    float GetBountyMultiplier() const { return bountyMultiplier_; }
+
+    void SetExperienceMultiplier(float mult) { experienceMultiplier_ = std::max(0.0f, mult); }
+    float GetExperienceMultiplier() const { return experienceMultiplier_; }
+
     // Optional bound CSimulation when hosted inside EngineKernel
     void BindSimulation(CSimulation* sim) { boundSim_ = sim; }
     CSimulation* GetBoundSimulation() const { return boundSim_; }
@@ -226,6 +307,8 @@ private:
     std::unordered_map<uint32_t, std::vector<War3ID>> customTechEquivalents_;
     AttackDefenseTable combatTable_;
     float defenseArmorFactor_ = 0.06f;
+    float bountyMultiplier_ = 1.0f;
+    float experienceMultiplier_ = 1.0f;
     std::unordered_map<int, std::shared_ptr<MeleeAIController>> aiControllers_;
     bool meleeVictoryRulesEnabled_ = false;
     bool requireZeroUnitsForDefeat_ = false;

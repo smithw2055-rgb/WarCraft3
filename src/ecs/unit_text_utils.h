@@ -3,7 +3,6 @@
 #include "ecs/ability.h"
 #include "ecs/unit.h"
 #include "ecs/behaviors/behavior.h"
-#include "ecs/abilities/ability_harvest.h"
 #include <string>
 #include <vector>
 

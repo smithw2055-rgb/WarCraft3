@@ -182,6 +182,7 @@ SimStateSnapshot SimStateSnapshot::Capture(const CSimulation& sim) {
         us.isInvulnerable = u->IsInvulnerable();
         us.isPaused = u->IsPaused();
         us.pathingEnabled = u->IsPathingEnabled();
+        us.stateFlagsBitmask = u->GetStateFlagsBitmask();
 
         if (const auto* vc = reg.TryGet<UnitVisualComponent>(h)) {
             us.hasVisualComp = true;
@@ -342,10 +343,13 @@ bool SimStateSnapshot::Restore(CSimulation& sim) const {
         u->SetMana(us.mana);
         
         u->CWidget::SetLife(sim, us.life);
+        u->SetStateFlagsBitmask(us.stateFlagsBitmask);
+
         u->SetHidden(us.isHidden);
         u->SetInvulnerable(us.isInvulnerable);
         u->SetPaused(us.isPaused);
         u->SetPathingEnabled(us.pathingEnabled);
+
 
         if (us.hasVisualComp) {
             sim.ecsRegistry_.Emplace<UnitVisualComponent>(us.handleId, us.visualComp);

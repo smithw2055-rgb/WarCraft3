@@ -4894,7 +4894,7 @@ bool TestPhase15StageLL2CustomCombatMatrixHotOverrideAndDynamicPluginCombat() {
         {
             auto dynSimMod = loader.CreateSimulationModule(pluginKey);
             TEST_ASSERT(dynSimMod != nullptr);
-            TEST_ASSERT(dynSimMod->GetModuleVersion() == 15u);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 15u);
             sim.SetSimulationModule(dynSimMod);
 
             DamageResult pluginRes = combat->CalculateDamage(
@@ -5032,7 +5032,7 @@ bool TestPhase15StageMM2RetailDriveMapsCombatAndTacticalAiEndToEndSuite() {
     auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
     auto gameMod = loader.CreateGameModule(war3::War3GameModule::kModuleId);
     TEST_ASSERT(simMod != nullptr && gameMod != nullptr);
-    TEST_ASSERT(simMod->GetModuleVersion() == 15u);
+    TEST_ASSERT(simMod->GetModuleVersion() >= 15u);
 
     MpqManager mpq;
     CSimulation sim;
@@ -5061,5 +5061,429 @@ bool TestPhase15StageMM2RetailDriveMapsCombatAndTacticalAiEndToEndSuite() {
 
     session.TeardownCurrentSession(mpq, sim, scene, presentation);
     kernel.Shutdown();
+    return true;
+}
+
+
+#include "ecs/hero_carry.h"
+#include "ecs/item_bonuses.h"
+#include "ecs/abilities/ability_hero.h"
+#include "ecs/abilities/ability_inventory.h"
+#include "ecs/abilities/spells4.h"
+#include "ecs/abilities/spells5.h"
+#include "ecs/abilities/spells10.h"
+#include "ecs/abilities/spells25.h"
+
+// ============================================================================
+// Phase 16 (Stage NN & Stage OO):
+//   - Stage NN1: CUnit 16-bit UnitStateFlag bitmask packing, snapshot/restore,
+//                and Resistant Skin (Brsk) / Spell Shield (BNss) module hooks
+//   - Stage NN2: War3GameModule Combat Reactions (Mana Shield, Howl, Avatar,
+//                Defend) & Passive Procs (Thorns/Spiked Carapace, Vampiric,
+//                Cleave, Wind Walk Backstab) vs PureEngineMode
+//   - Stage OO1: War3GameModule Bounty Dice, Hero XP Split, Item Stat Routing,
+//                and Campaign Hero Carry vs PureEngineMode
+//   - Stage OO2: Dynamic Plugin SO Version 16 & Cloud Retail W3X Maps Suite
+// ============================================================================
+
+bool TestPhase16StageNN1UnitStateBitfieldPackingAndZeroAbilityHeaderCoupling() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "500");
+    ubTxt.SetString("hfoo", "manaN", "200");
+    ubTxt.SetString("hfoo", "mana0", "200");
+    ubTxt.SetString("hfoo", "spd", "270");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "Player0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "Player1", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->ResetModuleStats();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* u = sim.CreateUnit(War3ID("hfoo"), 0, 100.0f, 200.0f, 0.0f);
+    CUnit* enemy = sim.CreateUnit(War3ID("hfoo"), 1, 250.0f, 200.0f, 180.0f);
+    TEST_ASSERT(u && enemy);
+    sim.Update();
+
+    // 1. Verify default UnitStateFlag bitmask has PathingEnabled | CanSleep | CanSleepPerm | UseFood
+    TEST_ASSERT(u->IsPathingEnabled());
+    TEST_ASSERT(u->CanSleep());
+    TEST_ASSERT(u->CanSleepPerm());
+    TEST_ASSERT(!u->IsHidden());
+    TEST_ASSERT(!u->IsInvulnerable());
+    TEST_ASSERT(!u->IsEthereal());
+    TEST_ASSERT(!u->IsMagicImmune());
+    TEST_ASSERT(!u->IsIllusion());
+    TEST_ASSERT(u->HasStateFlag(UnitStateFlag::PathingEnabled));
+    TEST_ASSERT(u->HasStateFlag(UnitStateFlag::CanSleep));
+    TEST_ASSERT(u->HasStateFlag(UnitStateFlag::CanSleepPerm));
+
+    // Toggle flags and verify packed 16-bit mask round-trips through SimStateSnapshot
+    u->SetEthereal(true);
+    u->SetMagicImmune(true);
+    u->SetIsIllusion(true);
+    u->SetRooted(true);
+    u->SetInvisible(true);
+    u->SetDetector(true);
+    u->SetIgnoreAlarm(true);
+    const uint16_t expectedMask = u->GetStateFlagsBitmask();
+    TEST_ASSERT(u->IsEthereal() && u->IsMagicImmune() && u->IsIllusion() &&
+                u->IsRooted() && u->IsInvisible() && u->IsDetector() && u->IsAlarmIgnored());
+
+    SimStateSnapshot snap = SimStateSnapshot::Capture(sim);
+    u->SetEthereal(false);
+    u->SetMagicImmune(false);
+    u->SetIsIllusion(false);
+    u->SetRooted(false);
+    u->SetInvisible(false);
+    TEST_ASSERT(!u->IsEthereal() && !u->IsRooted());
+
+    TEST_ASSERT(snap.Restore(sim));
+    TEST_ASSERT(u->GetStateFlagsBitmask() == expectedMask);
+    TEST_ASSERT(u->IsEthereal() && u->IsMagicImmune() && u->IsIllusion() &&
+                u->IsRooted() && u->IsInvisible() && u->IsDetector() && u->IsAlarmIgnored());
+
+    // Reset combat-blocking flags for buff & spell shield tests
+    u->SetEthereal(false);
+    u->SetMagicImmune(false);
+    u->SetIsIllusion(false);
+    u->SetRooted(false);
+    u->SetInvisible(false);
+
+    // 2. Verify Resistant Skin (Brsk) reduces negative buff duration to 25% in War3GameModule,
+    //    whereas PureEngineMode leaves duration at 100%.
+    u->AddBuff(std::make_unique<CBuffResistant>(), sim);
+    TEST_ASSERT(u->HasBuff(War3ID("Brsk")));
+    u->AddBuff(std::make_unique<CBuffSlow>(12.0f, 0.5f, enemy->GetHandleId()), sim);
+    const CBuff* slowWar3 = u->GetBuff(War3ID("Bslo"));
+    TEST_ASSERT(slowWar3 != nullptr);
+    TEST_NEAR(slowWar3->GetDuration(), 3.0f, 0.01f);
+    u->RemoveBuff(War3ID("Bslo"), sim);
+
+    sim.SetPureEngineMode(true);
+    u->AddBuff(std::make_unique<CBuffSlow>(12.0f, 0.5f, enemy->GetHandleId()), sim);
+    const CBuff* slowPure = u->GetBuff(War3ID("Bslo"));
+    TEST_ASSERT(slowPure != nullptr);
+    TEST_NEAR(slowPure->GetDuration(), 12.0f, 0.01f);
+    u->RemoveBuff(War3ID("Bslo"), sim);
+
+    // 3. Verify Spell Shield (CBuffSpellShield `BNss`) blocks hostile spell in War3GameModule
+    //    (returns false = spell blocked & consumes BNss), whereas PureEngineMode allows it.
+    sim.SetSimulationModule(war3Mod);
+    u->AddBuff(std::make_unique<CBuffSpellShield>(30.0f), sim);
+    TEST_ASSERT(u->HasBuff(War3ID("BNss")));
+    TEST_ASSERT(!u->CheckSpellEffectReaction(sim, enemy));
+    TEST_ASSERT(!u->HasBuff(War3ID("BNss")));
+
+    return true;
+}
+
+bool TestPhase16StageNN2War3ModuleCombatReactionsAndPassiveProcsVsPureEngine() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "1000");
+    ubTxt.SetString("hfoo", "manaN", "500");
+    ubTxt.SetString("hfoo", "mana0", "500");
+    ubTxt.SetString("hfoo", "defType", "heavy");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "Player0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "Player1", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->ResetModuleStats();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* attacker = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* defender = sim.CreateUnit(War3ID("hfoo"), 1, 100.0f, 0.0f, 180.0f);
+    CUnit* bystander = sim.CreateUnit(War3ID("hfoo"), 1, 120.0f, 40.0f, 180.0f);
+    TEST_ASSERT(attacker && defender && bystander);
+    sim.Update();
+
+    // 1. Pre-mitigation: Howl of Terror (BNht 0.70x damage factor) + Mana Shield (BNms absorbs incoming damage via mana)
+    attacker->AddBuff(std::make_unique<CBuffHowl>(10.0f, 0.70f), sim);
+    defender->AddBuff(std::make_unique<CBuffManaShield>(30.0f), sim);
+    defender->SetMana(40.0f);
+    defender->SetLife(sim, 1000.0f);
+
+    // 100 weapon damage -> Mana Shield absorbs 40 (drains all 40 mana, leaving 60) -> Howl scales 60 * 0.70 = 42 damage -> 958 life
+    defender->Damage(sim, attacker, true, true, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f);
+    TEST_NEAR(defender->GetMana(), 0.0f, 0.1f);
+    TEST_NEAR(defender->GetLife(), 958.0f, 0.1f);
+    TEST_ASSERT(war3Mod->GetModuleStats().preMitigationEvaluations >= 1);
+
+    attacker->RemoveBuff(War3ID("BNht"), sim);
+    defender->RemoveBuff(War3ID("BNms"), sim);
+
+    // 2. Post-mitigation: Defend (CBuffDefend 0.5x weapon attack reduction)
+    defender->SetLife(sim, 1000.0f);
+    defender->AddBuff(std::make_unique<CBuffDefend>(30.0f), sim);
+    defender->Damage(sim, attacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f);
+    TEST_NEAR(defender->GetLife(), 950.0f, 0.1f);
+    TEST_ASSERT(war3Mod->GetModuleStats().postMitigationEvaluations >= 1);
+    defender->RemoveBuff(War3ID("Bdef"), sim);
+
+    // 3. Post-hit passives: Vampiric Aura lifesteal + Thorns reflection + Cleave splash + Wind Walk backstab
+    attacker->SetLife(sim, 500.0f);
+    attacker->AddBuff(std::make_unique<CBuffLifesteal>(30.0f, 0.20f), sim); // 20% lifesteal
+    defender->AddBuff(std::make_unique<CBuffThorns>(30.0f, 0.10f), sim);    // 10% melee reflection
+    attacker->AddAbility(sim, std::make_unique<CAbilityCleavingAttack>(99001)); // 50% splash in 200 radius
+    attacker->AddBuff(std::make_unique<CBuffWindWalk>(20.0f, 50.0f), sim);  // +50 backstab damage
+
+    defender->SetLife(sim, 1000.0f);
+    bystander->SetLife(sim, 1000.0f);
+
+    defender->Damage(sim, attacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f);
+    // Attacker gained 20 HP from Vampiric (500 -> 520) and took 10 reflected damage from Thorns (520 -> 510)
+    TEST_NEAR(attacker->GetLife(), 510.0f, 0.5f);
+    // Defender took 100 weapon + 50 Wind Walk backstab = 150 damage (1000 -> 850), and BOwk buff was consumed
+    TEST_NEAR(defender->GetLife(), 850.0f, 0.5f);
+    TEST_ASSERT(!attacker->HasBuff(War3ID("BOwk")));
+    // Bystander took 50% Cleave splash = 50 damage (1000 -> 950)
+    TEST_NEAR(bystander->GetLife(), 950.0f, 0.5f);
+    TEST_ASSERT(war3Mod->GetModuleStats().postDamageReactions >= 1);
+
+    // 4. Switch to PureEngineMode -> verify War3 combat reactions & passives are completely bypassed
+    sim.SetPureEngineMode(true);
+    attacker->SetLife(sim, 500.0f);
+    defender->SetLife(sim, 1000.0f);
+    bystander->SetLife(sim, 1000.0f);
+    defender->AddBuff(std::make_unique<CBuffDefend>(30.0f), sim);
+    defender->Damage(sim, attacker, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 100.0f);
+    // In PureEngineMode: no Defend 0.5x reduction, no Vampiric heal, no Thorns reflect, no Cleave splash
+    TEST_NEAR(defender->GetLife(), 900.0f, 0.1f);
+    TEST_NEAR(attacker->GetLife(), 500.0f, 0.1f);
+    TEST_NEAR(bystander->GetLife(), 1000.0f, 0.1f);
+
+    return true;
+}
+
+bool TestPhase16StageOO1War3ModuleBountyDiceHeroXpSplitItemBonusesAndHeroCarry() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // Paladin Hero (Hpal)
+    udTxt.SetString("Hpal", "race", "human");
+    udTxt.SetString("Hpal", "isbldg", "0");
+    ubTxt.SetString("Hpal", "isHero", "1");
+    ubTxt.SetString("Hpal", "HP", "700");
+    ubTxt.SetString("Hpal", "manaN", "300");
+    ubTxt.SetString("Hpal", "mana0", "300");
+    ubTxt.SetString("Hpal", "STR", "22");
+    ubTxt.SetString("Hpal", "AGI", "13");
+    ubTxt.SetString("Hpal", "INT", "17");
+    ubTxt.SetString("Hpal", "STRplus", "2.7");
+    ubTxt.SetString("Hpal", "AGIplus", "1.5");
+    ubTxt.SetString("Hpal", "INTplus", "1.8");
+    ubTxt.SetString("Hpal", "Primary", "STR");
+    uaTxt.SetString("Hpal", "heroAbilList", "AHhb,AHds");
+
+    // Creep (nogr): Level 3, Bounty 25 + 1d1 = 26 gold
+    udTxt.SetString("nogr", "race", "creeps");
+    udTxt.SetString("nogr", "isbldg", "0");
+    ubTxt.SetString("nogr", "HP", "400");
+    ubTxt.SetString("nogr", "level", "3");
+    ubTxt.SetString("nogr", "bountyGoldDice", "1");
+    ubTxt.SetString("nogr", "bountyGoldSides", "1");
+    ubTxt.SetString("nogr", "bountyGoldBase", "25");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    constants.grantNormalXp = {25, 40, 60, 85, 115};
+    CSimulation sim;
+    sim.SetGameplayConstants(constants);
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "HumanPlayer", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "CreepPlayer", CMapControl::COMPUTER));
+    sim.GetPlayer(1)->SetGivesBounty(true);
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->ResetModuleStats();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* hero = sim.CreateUnit(War3ID("Hpal"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* creep = sim.CreateUnit(War3ID("nogr"), 1, 100.0f, 0.0f, 180.0f);
+    TEST_ASSERT(hero && creep);
+    sim.Update();
+
+    auto* heroAbil = dynamic_cast<CAbilityHero*>(hero->GetAbility(War3ID("AHer")));
+    TEST_ASSERT(heroAbil != nullptr);
+
+    // 1. Verify War3GameModule assembled hero stats & heroAbilList from Hpal CUnitType
+    TEST_ASSERT(heroAbil->GetStrength().base == 22);
+    TEST_ASSERT(heroAbil->GetLearnableSkills().count(War3ID("AHhb")) == 1);
+
+    // 2. Configure 2.0x custom bounty & XP multipliers on War3GameModule and kill the creep
+    war3Mod->SetBountyMultiplier(2.0f);
+    war3Mod->SetExperienceMultiplier(2.0f);
+    const int goldBefore = sim.GetPlayer(0)->GetGold();
+    const int xpBefore = heroAbil->GetXP();
+
+    creep->Damage(sim, hero, true, false, CAttackType::HERO, CDamageType::NORMAL, "", 500.0f);
+    TEST_ASSERT(creep->IsDead());
+    // Base bounty = 26 * 2.0 = 52 gold; Level 3 creep base XP = 60 * 2.0 = 120 XP
+    TEST_ASSERT(sim.GetPlayer(0)->GetGold() == goldBefore + 52);
+    TEST_ASSERT(heroAbil->GetXP() == xpBefore + 120);
+    TEST_ASSERT(war3Mod->GetModuleStats().bountiesAwarded >= 1);
+    TEST_ASSERT(war3Mod->GetModuleStats().heroXpDistributions >= 1);
+
+    war3Mod->SetBountyMultiplier(1.0f);
+    war3Mod->SetExperienceMultiplier(1.0f);
+
+    // 3. Verify Item Bonus routing: +10 STR adds +10 Hero Strength (+250 MaxHP via War3 hero formula)
+    const int maxLifeBefore = hero->GetMaxLife();
+    std::vector<CItemBonus> strBonus = {{CItemBonusType::STRENGTH, 10}};
+    ApplyItemBonuses(sim, hero, strBonus);
+    TEST_ASSERT(heroAbil->GetStrength().bonus == 10);
+    TEST_ASSERT(hero->GetMaxLife() == maxLifeBefore + 250);
+    TEST_ASSERT(war3Mod->GetModuleStats().itemBonusesApplied >= 1);
+    RemoveItemBonuses(sim, hero, strBonus);
+    TEST_ASSERT(heroAbil->GetStrength().bonus == 0);
+    TEST_ASSERT(hero->GetMaxLife() == maxLifeBefore);
+
+    // 4. Verify Campaign Hero Carry snapshot via War3GameModule vs PureEngineMode
+    heroAbil->SetProperName("Uther the Lightbringer");
+    TEST_ASSERT(IsCarriableHero(hero, sim));
+    CarriedHero carried = SnapshotHero(hero, sim);
+    TEST_ASSERT(carried.typeId == War3ID("Hpal"));
+    TEST_ASSERT(carried.xp == 120);
+    TEST_ASSERT(carried.properName == "Uther the Lightbringer");
+    // Respawn carried hero at (300, 400)
+    CUnit* respawned = RespawnCarriedHero(sim, carried, 300.0f, 400.0f);
+    TEST_ASSERT(war3Mod->GetModuleStats().heroesCarriedOver >= 1);
+    TEST_ASSERT(respawned != nullptr);
+    auto* respawnedHeroAbil = dynamic_cast<CAbilityHero*>(respawned->GetAbility(War3ID("AHer")));
+    TEST_ASSERT(respawnedHeroAbil != nullptr);
+    TEST_ASSERT(respawnedHeroAbil->GetXP() == 120);
+    TEST_ASSERT(respawnedHeroAbil->GetProperName() == "Uther the Lightbringer");
+
+    // In PureEngineMode, IsCarriableHero returns false (no War3 hero carry rule mounted)
+    sim.SetPureEngineMode(true);
+    TEST_ASSERT(!IsCarriableHero(hero, sim));
+
+    return true;
+}
+
+bool TestPhase16StageOO2DynamicPluginVersion16AndRetailDriveMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath = candidate;
+            break;
+        }
+    }
+
+    FILE* f = std::fopen(soPath.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase16PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 16u);
+
+            CGameplayConstants constants;
+            SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+            TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+            udTxt.SetString("hfoo", "race", "human");
+            udTxt.SetString("hfoo", "isbldg", "0");
+            ubTxt.SetString("hfoo", "HP", "420");
+            ubTxt.SetString("hfoo", "bountyGoldDice", "1");
+            ubTxt.SetString("hfoo", "bountyGoldSides", "1");
+            ubTxt.SetString("hfoo", "bountyGoldBase", "20");
+            CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+            CSimulation sim;
+            sim.SetUnitData(&unitData);
+            sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+            sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+            sim.GetPlayer(1)->SetGivesBounty(true);
+            sim.SetSimulationModule(dynSimMod);
+
+            CUnit* killer = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+            CUnit* victim = sim.CreateUnit(War3ID("hfoo"), 1, 64.0f, 0.0f, 180.0f);
+            TEST_ASSERT(killer && victim);
+            sim.Update();
+
+            const int gold0 = sim.GetPlayer(0)->GetGold();
+            victim->Damage(sim, killer, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 500.0f);
+            TEST_ASSERT(victim->IsDead());
+            TEST_ASSERT(sim.GetPlayer(0)->GetGold() == gold0 + 21);
+
+            sim.SetPureEngineMode(true);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    // End-to-end verification across cloud retail W3X maps downloaded from Google Drive
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TurtleRock.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        auto gameMod = loader.CreateGameModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && gameMod);
+        TEST_ASSERT(simMod->GetModuleVersion() == 16u);
+
+        MpqManager mpq;
+        CSimulation sim;
+        sim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, sim, scene, presentation, mapPath));
+
+        CUnitType* footType = MakePhase5UnitType(War3ID("hfoo"), 420, 270, false);
+        CUnit* u0 = sim.CreateUnit(War3ID("hfoo"), 0, 128.0f, 128.0f, 0.0f);
+        if (!u0) {
+            auto uPtr = std::make_unique<CUnit>(sim.AllocateHandleId(), footType, 0, War3ID("hfoo"), 128.0f, 128.0f, 0.0f);
+            u0 = uPtr.get();
+            simMod->OnAssembleUnitAbilities(sim, *u0, *footType);
+        }
+        sim.Update();
+
+        // Capture full state snapshot including packed uint16_t stateFlagsBitmask and verify deterministic restore
+        SimStateSnapshot snap = SimStateSnapshot::Capture(sim);
+        sim.Update();
+        sim.Update();
+        TEST_ASSERT(snap.Restore(sim));
+
+        session.TeardownCurrentSession(mpq, sim, scene, presentation);
+    }
+
     return true;
 }

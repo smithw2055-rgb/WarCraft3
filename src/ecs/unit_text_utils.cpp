@@ -1,4 +1,5 @@
 #include "unit_text_utils.h"
+#include "ecs/abilities/ability_harvest.h"
 #include <sstream>
 
 namespace unit_text_utils {

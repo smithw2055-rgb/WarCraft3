@@ -1,12 +1,12 @@
 #pragma once
 // ============================================================================
-// Phase 13, 14 & 15 Engine Foundation: engine::ISimulationModule & NullSimulationModule
+// Phase 13, 14, 15 & 16 Engine Foundation: engine::ISimulationModule & NullSimulationModule
 //
-// Decouples the deterministic ECS world kernel (CSimulation), generic player
-// state container (CPlayer), combat engine (CCombatSystem), and tactical AI
-// host from game-specific unit/ability/economy/techtree/upgrade/victory-defeat/
-// armor-counter/AI rulesets (such as War3GameModule, a custom sci-fi RTS
-// module, or a headless pure-ECS benchmark harness).
+// Decouples the deterministic ECS world kernel (CSimulation), generic entity
+// class (CUnit), generic player state container (CPlayer), combat engine
+// (CCombatSystem), tactical AI host, item bonus pipeline, and campaign hero
+// carry-over serializer from game-specific WarCraft 3 rulesets (such as
+// War3GameModule, a custom sci-fi RTS module, or a headless pure-ECS harness).
 // ============================================================================
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +21,8 @@ class CUnitType;
 class CItem;
 class CDestructable;
 class CCombatSystem;
+class CAbility;
+struct CarriedHero;
 
 namespace engine {
 
@@ -37,6 +39,15 @@ struct SimulationModuleStats {
     uint64_t unitUpgradesApplied = 0;
     uint64_t victoryEvaluations = 0;
     uint64_t combatDamageEvaluations = 0;
+    uint64_t preMitigationEvaluations = 0;
+    uint64_t postMitigationEvaluations = 0;
+    uint64_t postDamageReactions = 0;
+    uint64_t bountiesAwarded = 0;
+    uint64_t heroXpDistributions = 0;
+    uint64_t autocastEvaluations = 0;
+    uint64_t autocastOrdersIssued = 0;
+    uint64_t itemBonusesApplied = 0;
+    uint64_t heroesCarriedOver = 0;
     uint64_t aiControllersCreated = 0;
     uint64_t aiControllerTicks = 0;
     uint64_t tacticalTargetEvaluations = 0;
@@ -67,6 +78,10 @@ public:
     virtual void OnAssembleUnitAbilities(CSimulation& sim,
                                          CUnit& unit,
                                          const CUnitType& unitType) = 0;
+
+    virtual void OnUnitAbilityAdded(CSimulation& /*sim*/,
+                                    CUnit& /*unit*/,
+                                    CAbility& /*ability*/) {}
 
     virtual void OnConfigureCreatedItem(CSimulation& /*sim*/, CItem& /*item*/) {}
 
@@ -207,6 +222,106 @@ public:
         return baseScore;
     }
 
+    // ========================================================================
+    // Phase 16: Unit Combat Reactions, Passive Procs, Kill Bounty & Hero XP,
+    //           Idle Spell Autocast, Item Bonuses & Campaign Hero Carry-Over
+    // ========================================================================
+
+    // Evaluates pre-mitigation miss rolls (Drunken Haze, Curse, Highland cliff miss),
+    // Mana Shield absorption, attacker damage-dealt modifiers (Howl of Terror, AIdd),
+    // and Avatar spell immunity before CCombatSystem::CalculateDamage.
+    // Returns false if the attack is completely missed/negated; otherwise updates inOutDamage.
+    virtual bool OnEvaluatePreMitigationDamage(CSimulation& /*sim*/,
+                                               CUnit* /*attacker*/,
+                                               CUnit& /*target*/,
+                                               bool /*isAttack*/,
+                                               bool /*isRanged*/,
+                                               int /*attackTypeOrd*/,
+                                               int /*damageTypeOrd*/,
+                                               bool /*invulnerableTarget*/,
+                                               float& /*inOutDamage*/) {
+        ++stats_.preMitigationEvaluations;
+        return true;
+    }
+
+    // Modifies post-mitigation damage (Defend 0.5x, Berserk taken multiplier, Runed Bracers).
+    virtual void OnModifyPostMitigationDamage(CSimulation& /*sim*/,
+                                              CUnit* /*attacker*/,
+                                              CUnit& /*target*/,
+                                              bool /*isAttack*/,
+                                              bool /*isRanged*/,
+                                              int /*attackTypeOrd*/,
+                                              int /*damageTypeOrd*/,
+                                              float& /*inOutActualDamage*/) {
+        ++stats_.postMitigationEvaluations;
+    }
+
+    // Executes post-hit combat reactions & passive procs (Sleep wake-up, Thorns/Spiked Carapace
+    // melee reflection, Vampiric Aura lifesteal, Bash stun proc, Orb/Arrow attack modifiers,
+    // Cleaving Attack splash, Wind Walk backstab break, and Pulverize AoE slam).
+    virtual void OnPostDamageLanded(CSimulation& /*sim*/,
+                                    CUnit* /*attacker*/,
+                                    CUnit& /*target*/,
+                                    bool /*isAttack*/,
+                                    bool /*isRanged*/,
+                                    int /*attackTypeOrd*/,
+                                    int /*damageTypeOrd*/,
+                                    float /*incomingBaseDamage*/,
+                                    float /*incomingBaseBonus*/,
+                                    float /*actualDamage*/,
+                                    bool /*wasEvaded*/,
+                                    bool /*invulnerableTarget*/) {
+        ++stats_.postDamageReactions;
+    }
+
+    // Awards gold/lumber kill bounty dice to the killer's owner and splits Hero XP
+    // among nearby allied heroes (or globally when globalExperience is active).
+    virtual void OnAwardKillBountyAndXP(CSimulation& /*sim*/,
+                                        CUnit* /*killer*/,
+                                        CUnit& /*victim*/) {}
+
+    // Evaluates idle spell autocast target acquisition (heals on lowest-HP ally, debuffs on nearest enemy).
+    virtual bool OnTryUnitIdleAutocast(CSimulation& /*sim*/, CUnit& /*unit*/) {
+        ++stats_.autocastEvaluations;
+        return false;
+    }
+
+    // Negative buff duration multiplier (e.g., 0.25x when Resistant Skin 'Brsk' is active).
+    virtual float GetNegativeBuffDurationMultiplier(const CUnit& /*target*/) const {
+        return 1.0f;
+    }
+
+    // Spell Shield reaction check (returns false when a spell shield 'BNss' blocks the spell).
+    virtual bool OnCheckSpellEffectReaction(CSimulation& /*sim*/,
+                                            CUnit& /*target*/,
+                                            CUnit* /*caster*/) {
+        return true;
+    }
+
+    // Applies or removes an item stat bonus on a unit (routes STR/AGI/INT through Hero ability in War3 mode).
+    virtual void OnApplyUnitItemBonus(CSimulation& /*sim*/,
+                                      CUnit& /*unit*/,
+                                      int /*bonusTypeOrd*/,
+                                      int /*signedDelta*/) {
+        ++stats_.itemBonusesApplied;
+    }
+
+    // Campaign Hero Carry-Over hooks (SnapshotHero / RespawnCarriedHero)
+    virtual bool IsCarriableHero(const CSimulation& /*sim*/, CUnit& /*unit*/) const {
+        return false;
+    }
+    virtual bool OnSnapshotCarriedHero(const CSimulation& /*sim*/,
+                                       CUnit& /*unit*/,
+                                       CarriedHero& /*outCarried*/) const {
+        return false;
+    }
+    virtual CUnit* OnRespawnCarriedHero(CSimulation& /*sim*/,
+                                        const CarriedHero& /*carried*/,
+                                        float /*x*/,
+                                        float /*y*/) {
+        return nullptr;
+    }
+
     const SimulationModuleStats& GetModuleStats() const { return stats_; }
     void ResetModuleStats() { stats_ = {}; }
 
@@ -216,8 +331,8 @@ protected:
 
 // Pure Engine Mode module: creates bare ECS entities without any WarCraft 3
 // race/worker/building abilities, food accounting, techtree equivalences,
-// upgrade mutations, upkeep taxes, melee victory/defeat rules, or War3
-// armor/attack counter multipliers.
+// upgrade mutations, upkeep taxes, melee victory/defeat rules, War3
+// armor/attack counter multipliers, or War3 passive/buff combat procs.
 class NullSimulationModule final : public ISimulationModule {
 public:
     const char* GetModuleId() const override { return "NullPureEngineModule"; }
