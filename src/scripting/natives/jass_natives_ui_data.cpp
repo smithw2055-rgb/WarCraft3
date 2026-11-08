@@ -114,24 +114,11 @@ void JassNatives::RegisterPoolStockNatives() {
         return JassValue::Int((int)candidates[(size_t)(sim->SimRand01() * (float)candidates.size()) % candidates.size()]);
     });
 
-    auto findShop = [data = data_, sim = sim_](int unitHandle) -> CAbilitySellItems* {
-        if (!sim) return nullptr;
-        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
-        if (uSim < 0) return nullptr;
-        CUnit* u = sim->GetUnit(uSim);
-        if (!u) return nullptr;
-        return dynamic_cast<CAbilitySellItems*>(u->GetAbility(War3ID("Asei")));
+    auto findShop = [data = data_, sim = sim_](int unitHandle) -> CAbility* {
+        return FindUnitShop(data, sim, unitHandle);
     };
-    auto allShops = [data = data_, sim = sim_]() -> std::vector<CAbilitySellItems*> {
-        std::vector<CAbilitySellItems*> out;
-        if (!sim) return out;
-        for (CUnit* u : sim->GetUnits()) {
-            if (!u) continue;
-            if (auto* shop = dynamic_cast<CAbilitySellItems*>(u->GetAbility(War3ID("Asei")))) {
-                out.push_back(shop);
-            }
-        }
-        return out;
+    auto allShops = [sim = sim_]() -> std::vector<CAbility*> {
+        return FindAllWorldShops(sim);
     };
     vm_.RegisterNative("AddItemToStock", [findShop](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4) return JassValue::Null();
@@ -2212,7 +2199,7 @@ void JassNatives::RegisterMiscNatives() {
         if (args.empty()) return JassValue::Str("");
         CUnit* unit = getUnit(args[0].intVal);
         if (!unit) return JassValue::Str("");
-        auto* hero = dynamic_cast<CAbilityHero*>(unit->GetAbility(War3ID("AHer")));
+        CAbility* hero = unit->GetAbility(War3ID("AHer"));
         return JassValue::Str(hero ? hero->GetProperName() : "");
     });
     vm_.RegisterNative("IsSuspendedXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
@@ -2384,7 +2371,7 @@ void JassNatives::RegisterMiscNatives() {
         const int simId = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
         CUnit* unit = sim->GetUnit(simId);
         if (!unit) return nullptr;
-        auto* rally = dynamic_cast<CAbilityRally*>(unit->GetAbility(War3ID("ARal")));
+        CAbility* rally = unit->GetAbility(War3ID("ARal"));
         if (!rally || !rally->IsExplicitlySet()) return nullptr;
         return rally->GetRallyTarget();
     };
@@ -2607,8 +2594,8 @@ void JassNatives::RegisterMiscNatives() {
         if (!factory) return JassValue::Null();
         const War3ID resultId((uint32_t)args[1].intVal);
         for (CAbility* ability : factory->GetAbilities()) {
-            if (auto* queue = dynamic_cast<CAbilityQueue*>(ability)) {
-                queue->QueueUnit(*sim, factory, resultId);
+            if (ability && ability->GetCategory() == CAbilityCategory::QUEUE) {
+                ability->QueueUnit(*sim, factory, resultId);
                 return JassValue::Null();
             }
         }

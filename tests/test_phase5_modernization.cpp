@@ -5292,7 +5292,7 @@ bool TestPhase16StageOO1War3ModuleBountyDiceHeroXpSplitItemBonusesAndHeroCarry()
     ubTxt.SetString("Hpal", "STRplus", "2.7");
     ubTxt.SetString("Hpal", "AGIplus", "1.5");
     ubTxt.SetString("Hpal", "INTplus", "1.8");
-    ubTxt.SetString("Hpal", "Primary", "STR");
+    ubTxt.SetString("Hpal", "primary", "STR");
     uaTxt.SetString("Hpal", "heroAbilList", "AHhb,AHds");
 
     // Creep (nogr): Level 3, Bounty 25 + 1d1 = 26 gold
@@ -6056,7 +6056,7 @@ bool TestPhase18StageSS2CustomAutocastSpellRegistrationAndDynamicPluginV18Suite(
     sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
 
     auto war3Mod = std::make_shared<war3::War3GameModule>();
-    TEST_ASSERT(war3Mod->GetModuleVersion() == 18u);
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 18u);
     sim.SetSimulationModule(war3Mod);
 
     // 1. Register a custom data-driven single-target heal spell (ACh8) & register it for LOWEST_HP_ALLY autocast
@@ -6136,7 +6136,336 @@ bool TestPhase18StageSS2CustomAutocastSpellRegistrationAndDynamicPluginV18Suite(
         std::fclose(mf);
 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
-        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 18u);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 18u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+
+#include "scripting/jass_natives_internal.h"
+
+// ============================================================================
+// Phase 19 (Stage TT & Stage UU):
+//   - Stage TT1: Generic CAbility virtual contracts for Production Queue,
+//                Build Menu, Building Upgrade, Repair, and Rally Point
+//   - Stage TT2: Generic CAbility virtual contracts for Hero Progression/Stats
+//                and Shop Stock Management
+//   - Stage UU1: Decoupled JASS Natives (Hero, Inventory, Shop, Cooldowns)
+//                via ResolveJassUnit / FindHeroAbility / FindUnitInventory / FindUnitShop
+//   - Stage UU2: War3GameModule Version 19 OnSnapBuildPosition &
+//                IsBuildLocationObstructed + Dynamic Plugin SO v19 + Cloud Maps
+// ============================================================================
+
+bool TestPhase19StageTT1GenericCAbilityQueueBuildUpgradeAndRallyContracts() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // Peasant (hpea), Town Hall (htow -> upgrades to hkee, trains hpea)
+    udTxt.SetString("hpea", "race", "human");
+    udTxt.SetString("hpea", "isbldg", "0");
+    ubTxt.SetString("hpea", "HP", "220");
+    ubTxt.SetString("hpea", "goldcost", "75");
+    ubTxt.SetString("hpea", "fused", "1");
+    ubTxt.SetString("hpea", "bldtm", "10");
+    ubTxt.SetString("hpea", "builds", "htow,hbar");
+    uaTxt.SetString("hpea", "abilList", "Ahar,Arep");
+
+    udTxt.SetString("htow", "race", "human");
+    udTxt.SetString("htow", "isbldg", "1");
+    ubTxt.SetString("htow", "HP", "1500");
+    ubTxt.SetString("htow", "fmade", "12");
+    ubTxt.SetString("htow", "trains", "hpea");
+    ubTxt.SetString("htow", "Upgrade", "hkee");
+
+    udTxt.SetString("hkee", "race", "human");
+    udTxt.SetString("hkee", "isbldg", "1");
+    ubTxt.SetString("hkee", "HP", "2000");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    auto p0 = std::make_unique<CPlayer>(0, "HumanP0", CMapControl::USER);
+    p0->SetGold(1000);
+    p0->SetLumber(1000);
+    sim.AddPlayer(std::move(p0));
+    sim.SetSimulationModule(std::make_shared<war3::War3GameModule>());
+
+    CUnit* peasant = sim.CreateUnit(War3ID("hpea"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* hall    = sim.CreateUnit(War3ID("htow"), 0, 200.0f, 0.0f, 0.0f);
+    TEST_ASSERT(peasant && hall);
+    sim.Update();
+
+    // 1. Inspect Build & Repair abilities purely via CAbility* virtual contract
+    CAbility* buildAbil = nullptr;
+    CAbility* repAbil   = nullptr;
+    for (CAbility* ab : peasant->GetAbilities()) {
+        if (!ab) continue;
+        if (ab->GetCategory() == CAbilityCategory::BUILD && !ab->IsRepairAbility()) buildAbil = ab;
+        if (ab->IsRepairAbility()) repAbil = ab;
+    }
+    TEST_ASSERT(buildAbil != nullptr && repAbil != nullptr);
+    TEST_ASSERT(buildAbil->GetBuildableStructures().count(War3ID("htow")) > 0);
+    TEST_ASSERT(buildAbil->GetBuildableStructures().count(War3ID("hbar")) > 0);
+
+    // 2. Inspect Queue, Upgrade, and Rally abilities on Town Hall purely via CAbility*
+    CAbility* queueAbil = hall->GetAbility(War3ID("Aque"));
+    CAbility* upgAbil   = hall->GetAbility(War3ID("Aupg"));
+    CAbility* rallyAbil = hall->GetAbility(War3ID("ARal"));
+    TEST_ASSERT(queueAbil && upgAbil && rallyAbil);
+    TEST_ASSERT(queueAbil->GetTrainedUnits().count(War3ID("hpea")) > 0);
+    TEST_ASSERT(upgAbil->GetUpgradesTo().count(War3ID("hkee")) > 0);
+    TEST_ASSERT(!rallyAbil->IsExplicitlySet());
+
+    // Queue a peasant via CAbility* virtual QueueUnit and cancel it via CAbility* virtual CancelQueueItem
+    queueAbil->QueueUnit(sim, hall, War3ID("hpea"));
+    TEST_ASSERT(queueAbil->GetQueueCount() == 1);
+    TEST_ASSERT(queueAbil->GetQueuedItemType(0) == CQueueItemType::UNIT);
+    TEST_ASSERT(queueAbil->GetQueuedItem(0) == War3ID("hpea"));
+    TEST_ASSERT(queueAbil->GetBuildTime() > 0.0f);
+    queueAbil->CancelQueueItem(sim, hall, 0);
+    TEST_ASSERT(queueAbil->GetQueueCount() == 0);
+
+    return true;
+}
+
+bool TestPhase19StageTT2GenericCAbilityHeroProgressionAndShopStockContracts() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // Paladin Hero (Hpal) & Goblin Merchant Shop (ngme)
+    udTxt.SetString("Hpal", "race", "human");
+    udTxt.SetString("Hpal", "isbldg", "0");
+    ubTxt.SetString("Hpal", "HP", "650");
+    ubTxt.SetString("Hpal", "STR", "22");
+    ubTxt.SetString("Hpal", "AGI", "13");
+    ubTxt.SetString("Hpal", "INT", "17");
+    ubTxt.SetString("Hpal", "isHero", "1");
+    ubTxt.SetString("Hpal", "primary", "STR");
+    uaTxt.SetString("Hpal", "heroAbilList", "AHhb,AHds,AHad,AHre");
+
+    udTxt.SetString("ngme", "race", "other");
+    udTxt.SetString("ngme", "isbldg", "1");
+    ubTxt.SetString("ngme", "HP", "1500");
+    uaTxt.SetString("ngme", "abilList", "Asei");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.SetSimulationModule(std::make_shared<war3::War3GameModule>());
+
+    CUnit* paladin = sim.CreateUnit(War3ID("Hpal"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* shop    = sim.CreateUnit(War3ID("ngme"), 0, 200.0f, 0.0f, 0.0f);
+    TEST_ASSERT(paladin && shop);
+    sim.Update();
+
+    // 1. Operate Hero ability exclusively through generic CAbility* pointer
+    CAbility* heroAbil = paladin->GetAbility(War3ID("AHer"));
+    TEST_ASSERT(heroAbil != nullptr);
+    TEST_ASSERT(heroAbil->GetHeroLevel() == 1);
+    TEST_ASSERT(heroAbil->GetSkillPoints() == 1);
+    TEST_ASSERT(heroAbil->GetStrength().GetCurrent(1) == 22);
+    TEST_ASSERT(heroAbil->GetAgility().GetCurrent(1) == 13);
+    TEST_ASSERT(heroAbil->GetIntelligence().GetCurrent(1) == 17);
+
+    heroAbil->SetProperName("Uther the Lightbringer");
+    TEST_ASSERT(heroAbil->GetProperName() == "Uther the Lightbringer");
+
+    heroAbil->SetHeroLevel(sim, paladin, 3);
+    TEST_ASSERT(heroAbil->GetHeroLevel() == 3);
+    TEST_ASSERT(heroAbil->GetSkillPoints() == 3);
+    TEST_ASSERT(heroAbil->SelectHeroSkill(sim, paladin, War3ID("AHhb")));
+    TEST_ASSERT(heroAbil->GetSkillPoints() == 2);
+
+    heroAbil->AddStrengthBonus(sim, paladin, 8);
+    TEST_ASSERT(heroAbil->GetStrength().bonus == 8);
+    TEST_ASSERT(heroAbil->StripLevels(sim, paladin, 1));
+    TEST_ASSERT(heroAbil->GetHeroLevel() == 2);
+
+    // 2. Operate Shop stock ability exclusively through generic CAbility* pointer
+    CAbility* shopAbil = shop->GetAbility(War3ID("Asei"));
+    TEST_ASSERT(shopAbil != nullptr);
+    shopAbil->SetStockMax(3);
+    shopAbil->SetStockReplenishInterval(15.0f);
+    shopAbil->AddStockItem(War3ID("phea"), 2, 3);
+    shopAbil->AddStockUnit(War3ID("hfoo"), 1, 2);
+    TEST_ASSERT(shopAbil->RemoveStock(War3ID("phea")));
+    TEST_ASSERT(shopAbil->RemoveStock(War3ID("hfoo")));
+
+    return true;
+}
+
+bool TestPhase19StageUU1DecoupledJassNativesHeroInventoryShopAndCooldowns() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("Hpal", "race", "human");
+    udTxt.SetString("Hpal", "isbldg", "0");
+    ubTxt.SetString("Hpal", "HP", "650");
+    ubTxt.SetString("Hpal", "STR", "20");
+    ubTxt.SetString("Hpal", "AGI", "15");
+    ubTxt.SetString("Hpal", "INT", "18");
+    ubTxt.SetString("Hpal", "isHero", "1");
+    ubTxt.SetString("Hpal", "primary", "STR");
+    uaTxt.SetString("Hpal", "abilList", "AInv,AHhb");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.SetSimulationModule(std::make_shared<war3::War3GameModule>());
+
+    JassVM vm;
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    auto callNative = [&](const std::string& name, const std::vector<JassValue>& args) -> JassValue {
+        const auto& table = vm.GetRegisteredNatives();
+        auto it = table.find(name);
+        return it != table.end() ? it->second(args) : JassValue::Null();
+    };
+
+    CUnit* hero = sim.CreateUnit(War3ID("Hpal"), 0, 0.0f, 0.0f, 0.0f);
+    TEST_ASSERT(hero != nullptr);
+    sim.Update();
+
+    const int heroJassHandle = natives.GetData()->AllocHandle(JassHandleInfo::UNIT, hero->GetHandleId());
+    TEST_ASSERT(ResolveJassUnit(natives.GetData(), &sim, heroJassHandle) == hero);
+    TEST_ASSERT(FindHeroAbility(&sim, hero->GetHandleId()) == hero->GetAbility(War3ID("AHer")));
+    TEST_ASSERT(FindUnitInventory(natives.GetData(), &sim, heroJassHandle) == hero->GetAbility(War3ID("AInv")));
+
+    // Exercise JASS Hero & Inventory & Cooldown natives through VM
+    TEST_ASSERT(callNative("GetHeroLevel", {JassValue::Int(heroJassHandle)}).intVal == 1);
+    callNative("SetHeroLevel", {JassValue::Int(heroJassHandle), JassValue::Int(4), JassValue::Bool(false)});
+    TEST_ASSERT(callNative("GetHeroLevel", {JassValue::Int(heroJassHandle)}).intVal == 4);
+
+    // ModifyHeroStat: stat 0 (STR), method 1 (ADD), value 10
+    callNative("ModifyHeroStat", {
+        JassValue::Int(heroJassHandle),
+        JassValue::Int(0),
+        JassValue::Int(1),
+        JassValue::Int(10)
+    });
+    TEST_ASSERT(callNative("GetHeroStr", {JassValue::Int(heroJassHandle), JassValue::Bool(true)}).intVal == 30);
+
+    // Inventory size & UnitAddItemById
+    TEST_ASSERT(callNative("UnitInventorySize", {JassValue::Int(heroJassHandle)}).intVal == 6);
+    const int itemJassHandle = callNative("UnitAddItemById", {
+        JassValue::Int(heroJassHandle),
+        JassValue::Int(static_cast<int>(War3ID("rat9").value))
+    }).intVal;
+    TEST_ASSERT(itemJassHandle != 0);
+    TEST_ASSERT(callNative("UnitHasItem", {
+        JassValue::Int(heroJassHandle),
+        JassValue::Int(itemJassHandle)
+    }).boolVal);
+
+    // Cooldown start & end via CAbility virtual cooldown interface
+    callNative("StartUnitAbilityDefaultCooldown", {
+        JassValue::Int(heroJassHandle),
+        JassValue::Int(static_cast<int>(War3ID("AHhb").value))
+    });
+    CAbility* holyLight = hero->GetAbility(War3ID("AHhb"));
+    TEST_ASSERT(holyLight != nullptr);
+    holyLight->SetCooldown(5.0f);
+    holyLight->StartCooldown();
+    TEST_NEAR(holyLight->GetCooldownRemaining(), 5.0f, 0.01f);
+    callNative("EndUnitAbilityCooldown", {
+        JassValue::Int(heroJassHandle),
+        JassValue::Int(static_cast<int>(War3ID("AHhb").value))
+    });
+    TEST_NEAR(holyLight->GetCooldownRemaining(), 0.0f, 0.01f);
+
+    return true;
+}
+
+bool TestPhase19StageUU2War3GameModuleV19BuildSnapObstructionAndDynamicPluginSuite() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("htow", "race", "human");
+    udTxt.SetString("htow", "isbldg", "1");
+    ubTxt.SetString("htow", "HP", "1500");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() == 19u);
+    sim.SetSimulationModule(war3Mod);
+
+    // 1. Test OnSnapBuildPosition & IsBuildLocationObstructed on War3GameModule v19
+    const CUnitType* hallType = unitData.GetUnitType(War3ID("htow"));
+    float snapX = 115.0f, snapY = -70.0f;
+    sim.GetSimulationModule()->OnSnapBuildPosition(hallType, snapX, snapY);
+    TEST_ASSERT(std::fmod(std::fabs(snapX), 32.0f) < 0.01f);
+    TEST_ASSERT(std::fmod(std::fabs(snapY), 32.0f) < 0.01f);
+
+    TEST_ASSERT(!sim.GetSimulationModule()->IsBuildLocationObstructed(
+        sim, 512.0f, 512.0f, 0, War3ID("htow").value));
+
+    // 2. Test Dynamic Plugin SO Version 19 & Cloud Retail W3X Maps
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath19 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths19[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths19) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath19 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath19.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase19PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath19));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 19u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TwistedMeadows.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 19u);
 
         MpqManager mpq;
         CSimulation mapSim;

@@ -5,18 +5,9 @@
 #include "../ecs/unit_type.h"
 #include "../ecs/orders/order.h"
 #include "../ecs/unit.h"
+#include "../ecs/ability.h"
 #include "../ecs/csimulation.h"
 #include "../ecs/player.h"
-#include "../ecs/abilities/ability_attack.h"
-#include "../ecs/abilities/ability_build.h"
-#include "../ecs/abilities/ability_harvest.h"
-#include "../ecs/abilities/ability_inventory.h"
-#include "../ecs/abilities/ability_move.h"
-#include "../ecs/abilities/ability_queue.h"
-#include "../ecs/abilities/ability_rally.h"
-#include "../ecs/abilities/ability_repair.h"
-#include "../ecs/abilities/ability_spell_base.h"
-#include "../ecs/abilities/ability_upgrade.h"
 #include "../ecs/item.h"
 #include "../asset/BLP.h"
 #include "../asset/stb_image.h"
@@ -612,10 +603,10 @@ void MainUI::UpdateQueueState() {
 
     CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
     if (!unit) return;
-    auto* queueAbility = dynamic_cast<CAbilityQueue*>(unit->GetAbility(War3ID("Aque")));
+    CAbility* queueAbility = unit->GetAbility(War3ID("Aque"));
     if (!queueAbility) return;
 
-    for (int i = 0; i < CAbilityQueue::MAX_QUEUE; ++i) {
+    for (int i = 0; i < CAbility::MAX_QUEUE_SLOTS; ++i) {
         const CQueueItemType type = queueAbility->GetQueuedItemType(i);
         if (type == CQueueItemType::NONE) continue;
 
@@ -654,7 +645,7 @@ bool MainUI::HandleQueueSlotClick(int slot) {
     if (!simulation_ || selectedUnitHandle_ < 0 || slot < 0) return false;
     CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
     if (!unit) return false;
-    auto* queueAbility = dynamic_cast<CAbilityQueue*>(unit->GetAbility(War3ID("Aque")));
+    CAbility* queueAbility = unit->GetAbility(War3ID("Aque"));
     if (!queueAbility || queueAbility->GetQueuedItemType(slot) == CQueueItemType::NONE) return false;
 
     queueAbility->CancelQueueItem(*simulation_, unit, slot);
@@ -672,12 +663,12 @@ void MainUI::UpdateInventoryState() {
 
     CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
     if (!unit) return;
-    auto* inventory = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")));
+    CAbility* inventory = unit->GetAbility(War3ID("AInv"));
     if (!inventory) return;
 
     inventoryAvailable_ = true;
-    inventoryCapacity_ = std::clamp(inventory->GetItemCapacity(), 0, CAbilityInventory::MAX_SLOTS);
-    for (int i = 0; i < CAbilityInventory::MAX_SLOTS; ++i) {
+    inventoryCapacity_ = std::clamp(inventory->GetItemCapacity(), 0, CAbility::MAX_INVENTORY_SLOTS);
+    for (int i = 0; i < CAbility::MAX_INVENTORY_SLOTS; ++i) {
         CItem* item = inventory->GetItem(i);
 
         HudInventoryItem hudItem;
@@ -710,7 +701,7 @@ bool MainUI::HandleInventorySlotClick(int slot) {
     if (!simulation_ || selectedUnitHandle_ < 0 || slot < 0) return false;
     CUnit* unit = simulation_->GetUnit(selectedUnitHandle_);
     if (!unit) return false;
-    auto* inventory = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")));
+    CAbility* inventory = unit->GetAbility(War3ID("AInv"));
     if (!inventory || !inventory->GetItem(slot)) return false;
 
     const bool used = inventory->UseItem(*simulation_, unit, slot);
@@ -1071,7 +1062,7 @@ bool MainUI::ToggleAutocast(int index) {
     if (!unit) return false;
 
     for (auto* ability : unit->GetAbilities()) {
-        auto* spell = dynamic_cast<CAbilitySpellBase*>(ability);
+        CAbility* spell = (ability && ability->IsSpellAbility()) ? ability : nullptr;
         if (!spell || spell->GetBaseOrderId() != slot.orderId) continue;
         CAutocastKind kind = GetAutocastKind(spell->GetAlias());
         if (kind == CAutocastKind::NONE) kind = GetAutocastKind(spell->GetCode());
@@ -1481,7 +1472,8 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
         costs.mana = def->manaCost;
         float cooldownRemaining = 0.0f;
         float cooldownMax = 0.0f;
-        if (const auto* spell = dynamic_cast<const CAbilitySpellBase*>(ability)) {
+        if (ability && ability->IsSpellAbility()) {
+            const CAbility* spell = ability;
             cooldownRemaining = spell->GetCooldownRemaining();
             cooldownMax = spell->GetCooldown();
         }
@@ -1517,7 +1509,7 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                           "ReplaceableTextures\\CommandButtons\\BTNCancel.blp");
 
         for (auto* ability : unit->GetAbilities()) {
-            auto* buildAbility = dynamic_cast<CAbilityBuild*>(ability);
+            CAbility* buildAbility = (ability && ability->GetCategory() == CAbilityCategory::BUILD && !ability->IsRepairAbility()) ? ability : nullptr;
             if (!buildAbility || buildAbility->GetBaseOrderId() != activeSubmenuOrderId_) {
                 continue;
             }
@@ -1580,22 +1572,26 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
             continue;
         }
 
-        if (auto* buildAbility = dynamic_cast<CAbilityBuild*>(ability)) {
+        if (ability->GetCategory() == CAbilityCategory::BUILD && !ability->IsRepairAbility()) {
+            CAbility* buildAbility = ability;
             addAbilityButton(buildAbility, buildAbility->GetBaseOrderId(), CommandClickMode::OPEN_MENU);
             continue;
         }
-        if (auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(ability)) {
+        if (ability->GetCategory() == CAbilityCategory::HARVEST && ability->GetCode() == War3ID("Ahar")) {
+            CAbility* harvestAbility = ability;
             const int orderId = harvestAbility->IsCarryingResources()
                 ? OrderIds::RETURN_RESOURCES
                 : OrderIds::HARVEST;
             addAbilityButton(harvestAbility, orderId, CommandClickMode::TARGET);
             continue;
         }
-        if (auto* repairAbility = dynamic_cast<CAbilityRepair*>(ability)) {
+        if (ability->IsRepairAbility()) {
+            CAbility* repairAbility = ability;
             addAbilityButton(repairAbility, static_cast<int>(repairAbility->GetAlias().value), CommandClickMode::TARGET);
             continue;
         }
-        if (auto* rallyAbility = dynamic_cast<CAbilityRally*>(ability)) {
+        if (ability->GetCategory() == CAbilityCategory::RALLY) {
+            CAbility* rallyAbility = ability;
             const auto* def = abilityData_.GetAbility(rallyAbility->GetAlias());
             int rCol = (def && def->buttonPosX >= 0 && def->buttonPosX < kCommandCols) ? def->buttonPosX : 3;
             int rRow = (def && def->buttonPosY >= 0 && def->buttonPosY < kCommandRows) ? def->buttonPosY : 0;
@@ -1605,7 +1601,8 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                              icon ? std::string() : "Rally", icon, GetIconUri(rArt), -1, "Set Rally Point");
             continue;
         }
-        if (auto* spellAbility = dynamic_cast<CAbilitySpellBase*>(ability)) {
+        if (ability->IsSpellAbility()) {
+            CAbility* spellAbility = ability;
             // Spell buttons carry the retail base order (ref getBaseOrderId)
             // so clicks dispatch through the same order routing as JASS.
             // Passives and item powers have no engine order: no button.
@@ -1629,7 +1626,8 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
             addAbilityButton(spellAbility, baseOrder, mode);
             continue;
         }
-        if (auto* queueAbility = dynamic_cast<CAbilityQueue*>(ability)) {
+        if (ability->GetCategory() == CAbilityCategory::QUEUE) {
+            CAbility* queueAbility = ability;
             std::vector<War3ID> trained(queueAbility->GetTrainedUnits().begin(), queueAbility->GetTrainedUnits().end());
             std::sort(trained.begin(), trained.end(),
                       [](const War3ID& lhs, const War3ID& rhs) { return lhs.value < rhs.value; });
@@ -1649,7 +1647,7 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 }
                 const CPlayer* player = simulation_ ? simulation_->GetPlayer(unit->GetPlayerIndex()) : nullptr;
                 const HudResourceCosts costs = UnitTypeCosts(trainedType);
-                const bool canQueue = queueAbility->GetQueueCount() < CAbilityQueue::MAX_QUEUE;
+                const bool canQueue = queueAbility->GetQueueCount() < CAbility::MAX_QUEUE_SLOTS;
                 std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(trainedId.value), CommandClickMode::IMMEDIATE,
                                  !ability->IsDisabled() && canQueue && PlayerCanAfford(player, costs), icon ? std::string() : label,
@@ -1680,7 +1678,7 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
                 const CPlayer* player = simulation_ ? simulation_->GetPlayer(unit->GetPlayerIndex()) : nullptr;
                 const int currentLevel = player ? player->GetTechLevel(researchId) : 0;
                 const HudResourceCosts costs = UpgradeCostsAtLevel(upgrade, currentLevel);
-                const bool canQueue = queueAbility->GetQueueCount() < CAbilityQueue::MAX_QUEUE;
+                const bool canQueue = queueAbility->GetQueueCount() < CAbility::MAX_QUEUE_SLOTS;
                 const bool notMaxed = !upgrade || currentLevel < upgrade->maxLevel;
                 std::shared_ptr<Texture> icon = iconPath.empty() ? nullptr : LoadTextureFromMpq(iconPath);
                 SetCommandSlotAt(row, col, static_cast<int>(researchId.value), CommandClickMode::IMMEDIATE,
@@ -1697,7 +1695,8 @@ void MainUI::PopulateCommandCardForUnit(CUnit* unit) {
             }
             continue;
         }
-        if (auto* upgradeAbility = dynamic_cast<CAbilityUpgrade*>(ability)) {
+        if (ability->GetCategory() == CAbilityCategory::UPGRADE) {
+            CAbility* upgradeAbility = ability;
             std::vector<War3ID> upgrades(upgradeAbility->GetUpgradesTo().begin(), upgradeAbility->GetUpgradesTo().end());
             std::sort(upgrades.begin(), upgrades.end(),
                       [](const War3ID& lhs, const War3ID& rhs) { return lhs.value < rhs.value; });

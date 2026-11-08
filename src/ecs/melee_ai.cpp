@@ -6,9 +6,9 @@
 #include "data/unitdata.h"
 #include "destructable.h"
 #include "data/destructabledata.h"
-#include "abilities/ability_gold_mine.h"
-#include "abilities/ability_build.h"
-#include "abilities/ability_queue.h"
+
+
+#include "ability.h"
 #include "data/upgradedata.h"
 #include "orders/order.h"
 #include "behaviors/behavior.h"
@@ -28,6 +28,15 @@ bool HasAbility(const CUnitType* type, War3ID ability) {
 float Dist2(float x1, float y1, float x2, float y2) {
     const float dx = x1 - x2, dy = y1 - y2;
     return dx * dx + dy * dy;
+}
+
+CAbility* FindMineAbility(CUnit* unit) {
+    if (!unit) return nullptr;
+    if (CAbility* ov = unit->GetAbility(War3ID("Agl2"))) return ov;
+    for (CAbility* ab : unit->GetAbilities()) {
+        if (ab && ab->IsResourceMine()) return ab;
+    }
+    return nullptr;
 }
 
 } // namespace
@@ -252,14 +261,17 @@ bool MeleeAIController::FindBuildSpot(float nearX, float nearY, const War3ID& bu
             float y = nearY + std::sin(angle) * radius;
             const CUnitType* buildType =
                 (sim_ && sim_->GetUnitData()) ? sim_->GetUnitData()->GetUnitType(buildingType) : nullptr;
-            CAbilityBuild::RoundBuildPositionForType(buildType, x, y);
+            if (auto* mod = sim_->GetSimulationModule()) {
+                mod->OnSnapBuildPosition(buildType, x, y);
+            }
             if (sim_->GetPathfinding() && sim_->GetPathfinding()->HasPathingMap()) {
                 if (!sim_->GetPathfinding()->IsWorldPointPathableForUnit(
                         x, y, 0.0f, PathingGridMovementType::FOOT, nullptr)) {
                     continue;
                 }
             }
-            if (!CAbilityBuild::IsBuildLocationObstructed(*sim_, x, y, playerIndex_, buildingType)) {
+            if (!sim_->GetSimulationModule() ||
+                !sim_->GetSimulationModule()->IsBuildLocationObstructed(*sim_, x, y, playerIndex_, buildingType.value)) {
                 outX = x;
                 outY = y;
                 return true;
@@ -322,8 +334,8 @@ CUnit* MeleeAIController::FindNearestGoldMine(float x, float y) const {
     float bestDist = 0.0f;
     for (CUnit* unit : sim_->GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsHidden()) continue;
-        CMineAccess mine = MineAccessOf(unit);
-        if (!mine.ok() || mine.Gold() <= 0) continue;
+        CAbility* mine = FindMineAbility(unit);
+        if (!mine || mine->GetGold() <= 0) continue;
         const float d = Dist2(x, y, unit->GetX(), unit->GetY());
         if (!best || d < bestDist) {
             best = unit;
@@ -356,11 +368,11 @@ CUnit* MeleeAIController::FindIdleProduction(const War3ID& buildingType) const {
     for (CUnit* unit : sim_->GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsConstructing() || unit->GetPlayerIndex() != playerIndex_) continue;
         if (unit->GetTypeId() == buildingType) {
-            auto* queue = dynamic_cast<CAbilityQueue*>(unit->GetAbility(War3ID("Aque")));
+            CAbility* queue = unit->GetAbility(War3ID("Aque"));
             if (!queue || queue->GetQueueCount() == 0) {
                 return unit; // completely idle!
             }
-            if (queue->GetQueueCount() < CAbilityQueue::MAX_QUEUE && !bestAvailable) {
+            if (queue->GetQueueCount() < CAbility::MAX_QUEUE_SLOTS && !bestAvailable) {
                 bestAvailable = unit; // has room in queue
             }
         }
@@ -418,8 +430,8 @@ CUnit* MeleeAIController::FindRichMine(float x, float y, const CUnit* exclude) c
     float bestDist = 0.0f;
     for (CUnit* unit : sim_->GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsHidden() || unit == exclude) continue;
-        CMineAccess mine = MineAccessOf(unit);
-        if (!mine.ok() || mine.Gold() <= 0) continue;
+        CAbility* mine = FindMineAbility(unit);
+        if (!mine || mine->GetGold() <= 0) continue;
         const float d = Dist2(x, y, unit->GetX(), unit->GetY());
         if (!best || d < bestDist) {
             best = unit;
@@ -511,8 +523,8 @@ bool MeleeAIController::TryTrainWorkers() {
         if (!hall) continue;
         bool room = true;
         for (CAbility* ab : hall->GetAbilities()) {
-            if (auto* queue = dynamic_cast<CAbilityQueue*>(ab)) {
-                if (queue->GetQueueCount() >= CAbilityQueue::MAX_QUEUE) room = false;
+            if (ab && ab->GetCategory() == CAbilityCategory::QUEUE) {
+                if (ab->GetQueueCount() >= CAbility::MAX_QUEUE_SLOTS) room = false;
                 break;
             }
         }
@@ -675,10 +687,11 @@ bool MeleeAIController::TryExpand() {
     // The main mine still has reserves: no reason to walk across the map.
     CUnit* mainMine = FindRichMine(mainHall->GetX(), mainHall->GetY(), nullptr);
     if (!mainMine) return false;
-    if (MineAccessOf(mainMine).Gold() > 3000) return false;
+    if (CAbility* m = FindMineAbility(mainMine); !m || m->GetGold() > 3000) return false;
     // Richest unowned mine: nearest with real gold that is not the main one.
     CUnit* expoMine = FindRichMine(mainHall->GetX(), mainHall->GetY(), mainMine);
-    if (!expoMine || MineAccessOf(expoMine).Gold() < 1500) return false;
+    if (!expoMine) return false;
+    if (CAbility* m = FindMineAbility(expoMine); !m || m->GetGold() < 1500) return false;
     CPlayer* player = sim_->GetPlayer(playerIndex_);
     if (!player) return false;
     const CUnitType* hallType = sim_->GetUnitData()->GetUnitType(plan_.townHall);
@@ -776,7 +789,7 @@ bool MeleeAIController::TryResearchUpgrades() {
     for (CUnit* unit : sim_->GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsConstructing() || unit->GetPlayerIndex() != playerIndex_) continue;
         for (CAbility* ability : unit->GetAbilities()) {
-            auto* queue = dynamic_cast<CAbilityQueue*>(ability);
+            CAbility* queue = (ability && ability->GetCategory() == CAbilityCategory::QUEUE) ? ability : nullptr;
             // Idle production only: research shares the train FIFO, so a
             // busy building waits for a later think instead of queueing
             // behind units.

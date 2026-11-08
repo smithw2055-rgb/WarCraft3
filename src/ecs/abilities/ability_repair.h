@@ -13,6 +13,7 @@ public:
     CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) override;
 
     // Configuration (implements CAbility virtual repair capability contract)
+    bool IsRepairAbility() const override { return true; }
     float GetRepairRate() const override { return repairRate_; }
     void SetRepairRate(float v) { repairRate_ = v; }
     float GetRepairRange() const override { return repairRange_; }

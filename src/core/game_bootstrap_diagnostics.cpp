@@ -751,8 +751,7 @@ void GameController::MaybeLogAIStatus() {
                 const bool hasHar = u->GetAbility(War3ID("Ahar")) != nullptr;
                 const CBehavior* b = u->GetCurrentBehavior();
                 int carried = 0;
-                if (const auto* har = dynamic_cast<const CAbilityHarvest*>(
-                        u->GetAbility(War3ID("Ahar")))) {
+                if (const CAbility* har = u->GetAbility(War3ID("Ahar"))) {
                     carried = har->GetCarriedAmount();
                 }
                 float hallDist = -1.0f;
@@ -913,7 +912,7 @@ void GameController::RunGameplaySmoke() {
     CUnit* dropoff = FindPlayerDropoff(simulation_, playerIndex);
     CUnit* mine = FindNearestGoldMine(simulation_, worker);
     CPlayer* player = simulation_.GetPlayer(playerIndex);
-    auto* harvest = worker ? dynamic_cast<CAbilityHarvest*>(worker->GetAbility(War3ID("Ahar"))) : nullptr;
+    CAbility* harvest = worker ? worker->GetAbility(War3ID("Ahar")) : nullptr;
 
     if (!worker || !dropoff || !mine || !player || !harvest) {
         std::cout << "GameplaySmoke: result=fail"
@@ -989,8 +988,8 @@ void GameController::RunGameplaySmoke() {
     worker->SetInvulnerable(false);
     harvest->ClearCarried();
     worker->SetPosition(mine->GetX() + 96.0f, mine->GetY());
-    const int mineGoldBefore = dynamic_cast<CAbilityGoldMine*>(mine->GetAbility(War3ID("Agld")))
-        ? dynamic_cast<CAbilityGoldMine*>(mine->GetAbility(War3ID("Agld")))->GetGold()
+    const int mineGoldBefore = mine->GetAbility(War3ID("Agld"))
+        ? mine->GetAbility(War3ID("Agld"))->GetGold()
         : 0;
     const bool uiHarvestClicked = ui_.InvokeCommandOrderForDiagnostics(OrderIds::HARVEST);
     const bool uiHarvestIssued = issuePendingFromUi(mine, mine->GetX(), mine->GetY());
@@ -1030,7 +1029,7 @@ void GameController::RunGameplaySmoke() {
               << " carried=" << harvest->GetCarriedAmount()
               << std::endl;
 
-    auto* queueAbility = dynamic_cast<CAbilityQueue*>(dropoff->GetAbility(War3ID("Aque")));
+    CAbility* queueAbility = dropoff->GetAbility(War3ID("Aque"));
     SetSelectedUnits({dropoff}, dropoff->GetHandleId(), true);
     const bool uiTrainBeforeQueue = ui_.IsCommandOrderEnabled((int)War3ID("hpea").value);
     const int peasantsBeforeTrain = CountPlayerUnitsOfType(simulation_, playerIndex, War3ID("hpea"));

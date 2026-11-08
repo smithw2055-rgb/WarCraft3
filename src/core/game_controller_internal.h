@@ -12,15 +12,6 @@
 #include "../ecs/widget.h"
 #include "../ecs/destructable.h"
 #include "../ecs/item.h"
-#include "../ecs/abilities/ability_attack.h"
-#include "../ecs/abilities/ability_build.h"
-#include "../ecs/abilities/ability_gold_mine.h"
-#include "../ecs/abilities/ability_harvest.h"
-#include "../ecs/abilities/ability_hero.h"
-#include "../ecs/abilities/ability_inventory.h"
-#include "../ecs/abilities/ability_move.h"
-#include "../ecs/abilities/ability_queue.h"
-#include "../ecs/abilities/ability_repair.h"
 #include "../core/map_path_resolver.h"
 #include "../core/path_utils.h"
 #include "../platform/platform.h"
@@ -1284,8 +1275,11 @@ inline bool FindGameplaySmokeBuildSite(CSimulation& sim, const CUnit* anchor, Wa
         float y = anchor->GetY() + offset[1];
         const CUnitType* buildType =
             sim.GetUnitData() ? sim.GetUnitData()->GetUnitType(buildingTypeId) : nullptr;
-        CAbilityBuild::RoundBuildPositionForType(buildType, x, y);
-        if (!CAbilityBuild::IsBuildLocationObstructed(sim, x, y, anchor->GetPlayerIndex(), buildingTypeId)) {
+        if (auto* mod = sim.GetSimulationModule()) {
+            mod->OnSnapBuildPosition(buildType, x, y);
+        }
+        if (!sim.GetSimulationModule() ||
+            !sim.GetSimulationModule()->IsBuildLocationObstructed(sim, x, y, anchor->GetPlayerIndex(), buildingTypeId.value)) {
             outX = x;
             outY = y;
             return true;

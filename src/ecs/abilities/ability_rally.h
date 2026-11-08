@@ -16,12 +16,12 @@ public:
     CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) override;
     CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, float x, float y) override;
 
-    // Rally point access
-    CWidget* GetRallyTarget() const { return rallyTarget_; }
-    float GetRallyX() const { return rallyX_; }
-    float GetRallyY() const { return rallyY_; }
-    bool HasRallyPoint() const { return rallyTarget_ != nullptr || hasRallyPoint_; }
-    bool IsExplicitlySet() const { return explicitlySet_; }
+    // Rally point access (implements CAbility virtual rally capability contract)
+    CWidget* GetRallyTarget() const override { return rallyTarget_; }
+    float GetRallyX() const override { return rallyX_; }
+    float GetRallyY() const override { return rallyY_; }
+    bool HasRallyPoint() const override { return rallyTarget_ != nullptr || hasRallyPoint_; }
+    bool IsExplicitlySet() const override { return explicitlySet_; }
 
     void ApplyToTrainedUnit(CSimulation& game, CUnit* building, CUnit* trainedUnit) const;
     void ClearRallyPoint();

@@ -19,9 +19,7 @@ public:
     void AddSoldItem(War3ID id) { itemsSold_.push_back(id); }
     const std::vector<War3ID>& GetSoldItems() const { return itemsSold_; }
 
-    // Stock management (ref shop stock with replenish interval).
-    // Entries added via AddItemToStock natives gate purchases; shops with
-    // no entry for an id keep the legacy unlimited behavior.
+    // Stock management (implements CAbility virtual shop stock contract)
     struct StockEntry {
         War3ID id;
         int current = 0;
@@ -29,20 +27,18 @@ public:
         float timer = 0.0f;
         bool isUnit = false;
     };
-    void AddStockItem(War3ID id, int current, int max);
-    void AddStockUnit(War3ID id, int current, int max);
-    bool RemoveStock(War3ID id);
+    void AddStockItem(War3ID id, int current, int max) override;
+    void AddStockUnit(War3ID id, int current, int max) override;
+    bool RemoveStock(War3ID id) override;
     const StockEntry* FindStock(War3ID id) const;
     bool ConsumeStock(War3ID id);
 
     // Stock management
-    void SetStockMax(int v) { stockMax_ = v; }
-    void SetStockReplenishInterval(float v) { stockReplenishInterval_ = v; }
+    void SetStockMax(int v) override { stockMax_ = v; }
+    void SetStockReplenishInterval(float v) override { stockReplenishInterval_ = v; }
 
 private:
-    // Mercenary hire from unit-stock slots (order carries 0x10000).
     bool HireUnit(CSimulation& game, CUnit* caster, int orderId);
-    // Pawn an inventory item back to this shop for gold (ref pawn shops).
     bool PawnItem(CSimulation& game, CUnit* shop, CUnit* seller, int slot);
 
     std::vector<War3ID> itemsSold_;

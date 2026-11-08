@@ -77,7 +77,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 18u; }
+    uint32_t GetModuleVersion() const override { return 19u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -263,6 +263,16 @@ public:
     int GetAbilityAutocastKind(uint32_t abilityRawcode) const override;
     void RegisterAutocastAbility(War3ID abilityCode, int autocastKindOrd);
     void ClearCustomAutocastAbilities() { customAutocastKinds_.clear(); }
+
+    // Phase 19: Building placement grid snap & obstruction validation
+    void OnSnapBuildPosition(const CUnitType* buildType,
+                             float& inOutX,
+                             float& inOutY) const override;
+    bool IsBuildLocationObstructed(CSimulation& sim,
+                                   float x,
+                                   float y,
+                                   int playerIndex,
+                                   uint32_t buildingTypeRawcode) const override;
 
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 

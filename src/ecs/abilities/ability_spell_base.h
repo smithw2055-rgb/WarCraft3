@@ -6,45 +6,32 @@
 
 struct CAbilityDefFull;
 
-// Spell targeting type
-enum class CSpellTargetType : uint8_t {
-    NO_TARGET,      // Instant cast, no target needed
-    TARGET_UNIT,    // Must target a unit
-    TARGET_POINT,   // Must target a point
-    TARGET_BOTH     // Can target unit or point
-};
-
 // ============================================================
 // CAbilitySpellBase - base class for all spell abilities
 //
-// Phase 17–18 Modernization:
-// - Implements CAbility virtual casting/cooldown contract so CBehaviorSpell
-//   never depends on CAbilitySpellBase directly.
+// Phase 17–19 Modernization:
+// - Implements CAbility virtual casting/cooldown/target-type contract so
+//   CBehaviorSpell, MainUI, and JASS natives never depend on CAbilitySpellBase.
 // - Eliminates duplicate `level_` field shadowing `CAbility::level_` and packs
 //   `maxLevel_` (`int16_t`) beside `targetType_`, reducing `sizeof(CAbilitySpellBase)`
 //   from 72 bytes down to 56 bytes (22.2% reduction).
-// - Provides high-reuse declarative effect primitives (`CastBuffOnTarget`,
-//   `CastBuffOnSelf`, `CastPointDamageWaves`, `CastCasterAreaDamageWaves`,
-//   `CastPointAreaBuff`, `CastCasterAreaBuff`, `CastLineDamageAndStun`,
-//   `CastTimedSpawnerUnit`, `CastPointAreaHeal`, `ForEachPassiveAllyInRange`,
-//   `IsFriendlyToPlayer`) to eliminate repetitive ABEffectChain boilerplate
-//   across spells1..29.
 // ============================================================
 class CAbilitySpellBase : public CAbility {
 public:
     CAbilitySpellBase(int handleId, War3ID code, CAbilityCategory category);
 
-    // Configuration
-    CSpellTargetType GetTargetType() const { return targetType_; }
-    void SetTargetType(CSpellTargetType v) { targetType_ = v; }
+    // Configuration (implements CAbility virtual spell capability contract)
+    bool IsSpellAbility() const override { return true; }
+    CSpellTargetType GetTargetType() const override { return targetType_; }
+    void SetTargetType(CSpellTargetType v) override { targetType_ = v; }
     float GetCastRange() const override { return castRange_; }
-    void SetCastRange(float v) { castRange_ = v; }
+    void SetCastRange(float v) override { castRange_ = v; }
     float GetCastPoint() const override { return castPoint_; }
-    void SetCastPoint(float v) { castPoint_ = v; }
-    float GetCooldown() const { return cooldown_; }
-    void SetCooldown(float v) { cooldown_ = v; }
+    void SetCastPoint(float v) override { castPoint_ = v; }
+    float GetCooldown() const override { return cooldown_; }
+    void SetCooldown(float v) override { cooldown_ = v; }
     int GetManaCost() const override { return manaCost_; }
-    void SetManaCost(int v) { manaCost_ = v; }
+    void SetManaCost(int v) override { manaCost_ = v; }
     int GetLevel() const override { return level_; }
     void SetLevel(int v) override;
     int GetMaxLevel() const { return maxLevel_; }
@@ -72,9 +59,9 @@ public:
     // Cooldown state
     bool IsOnCooldown() const { return cooldownRemaining_ > 0; }
     void StartCooldown() override { cooldownRemaining_ = cooldown_; }
-    void ResetCooldown() { cooldownRemaining_ = 0.0f; }
-    void UpdateCooldown(float dt) { if (cooldownRemaining_ > 0) cooldownRemaining_ -= dt; }
-    float GetCooldownRemaining() const { return cooldownRemaining_; }
+    void ResetCooldown() override { cooldownRemaining_ = 0.0f; }
+    void UpdateCooldown(float dt) override { if (cooldownRemaining_ > 0) cooldownRemaining_ -= dt; }
+    float GetCooldownRemaining() const override { return cooldownRemaining_; }
 
     // ===== Phase 17–18 Declarative Spell Effect Primitives =====
     static void CastBuffOnTarget(CSimulation& game, CUnit* caster, CWidget* target,
@@ -147,7 +134,6 @@ private:
 // ============================================================
 // CAbilityDataDrivenSpell - Unity ScriptableObject / Godot Resource
 // style data-driven spell implementation.
-// Replaces hundreds of repetitive 30-line CAbilitySpellBase subclasses!
 // ============================================================
 class CAbilityDataDrivenSpell : public CAbilitySpellBase {
 public:

@@ -1261,9 +1261,7 @@ int JassNatives::UpdateTimers(float dt) {
         for (CUnit* unit : sim_->GetUnits()) {
             if (!unit) continue;
             for (CAbility* ability : unit->GetAbilities()) {
-                if (auto* spell = dynamic_cast<CAbilitySpellBase*>(ability)) {
-                    spell->UpdateCooldown(dt);
-                }
+                if (ability) ability->UpdateCooldown(dt);
             }
         }
     }

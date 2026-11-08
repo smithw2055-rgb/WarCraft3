@@ -2030,6 +2030,20 @@ void War3GameModule::RegisterAutocastAbility(War3ID abilityCode, int autocastKin
     ++stats_.customAutocastRegistered;
 }
 
+void War3GameModule::OnSnapBuildPosition(const CUnitType* buildType,
+                                         float& inOutX,
+                                         float& inOutY) const {
+    CAbilityBuild::RoundBuildPositionForType(buildType, inOutX, inOutY);
+}
+
+bool War3GameModule::IsBuildLocationObstructed(CSimulation& sim,
+                                               float x,
+                                               float y,
+                                               int playerIndex,
+                                               uint32_t buildingTypeRawcode) const {
+    return CAbilityBuild::IsBuildLocationObstructed(sim, x, y, playerIndex, War3ID(buildingTypeRawcode));
+}
+
 bool War3GameModule::OnTryUnitIdleAutocast(CSimulation& sim, CUnit& unit) {
     ++stats_.autocastEvaluations;
     if (unit.IsDead() || unit.IsBuilding() || unit.IsPaused()) return false;

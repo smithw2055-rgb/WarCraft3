@@ -111,8 +111,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                         if (!su) continue;
                         if (nearUnit && nearUnit != su) {
                             bool targeted = false;
-                            if (auto* attackAbility = dynamic_cast<CAbilityAttack*>(
-                                    su->GetAbility(War3ID("Aatk")))) {
+                            if (CAbility* attackAbility = su->GetAbility(War3ID("Aatk"))) {
                                 if (attackAbility->CheckCanTarget(simulation_, su, OrderIds::SMART, nearUnit)) {
                                     su->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::SMART, nearUnit));
                                     targeted = true;
@@ -164,7 +163,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                         bool canTargetWidget = false;
 
                         if (targetWidget) {
-                            if (auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(su->GetAbility(War3ID("Ahar")))) {
+                            if (CAbility* harvestAbility = su->GetAbility(War3ID("Ahar"))) {
                                 if (harvestAbility->CheckCanTarget(simulation_, su, OrderIds::HARVEST, targetWidget)) {
                                     orderId = OrderIds::HARVEST;
                                     canTargetWidget = true;
@@ -174,7 +173,16 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                                 }
                             }
                             if (!canTargetWidget) {
-                                if (auto* repairAbility = dynamic_cast<CAbilityRepair*>(su->GetAbility(War3ID("Arep")))) {
+                                CAbility* repairAbility = su->GetAbility(War3ID("Arep"));
+                                if (!repairAbility) {
+                                    for (CAbility* ab : su->GetAbilities()) {
+                                        if (ab && ab->IsRepairAbility()) {
+                                            repairAbility = ab;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (repairAbility) {
                                     if (repairAbility->CheckCanTarget(simulation_, su, OrderIds::REPAIR, targetWidget)) {
                                         orderId = OrderIds::REPAIR;
                                         canTargetWidget = true;
@@ -182,7 +190,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                                 }
                             }
                             if (!canTargetWidget) {
-                                if (auto* attackAbility = dynamic_cast<CAbilityAttack*>(su->GetAbility(War3ID("Aatk")))) {
+                                if (CAbility* attackAbility = su->GetAbility(War3ID("Aatk"))) {
                                     if (attackAbility->CheckCanTarget(simulation_, su, OrderIds::SMART, targetWidget)) {
                                         orderId = OrderIds::SMART;
                                         canTargetWidget = true;
@@ -191,7 +199,7 @@ void GameController::OnMouseDown(const sapp_event* ev) {    if (ev->mouse_button
                                 }
                             }
                             if (!canTargetWidget && targetUnit) {
-                                if (auto* moveAbility = dynamic_cast<CAbilityMove*>(su->GetAbility(War3ID("Amov")))) {
+                                if (CAbility* moveAbility = su->GetAbility(War3ID("Amov"))) {
                                     if (moveAbility->CheckCanTarget(simulation_, su, OrderIds::SMART, targetWidget)) {
                                         orderId = OrderIds::SMART;
                                         canTargetWidget = true;

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 #include "ecs/fwd.h"
 #include "resource/slk.h"
 
@@ -23,6 +24,36 @@ enum class CBuildRace : uint8_t {
     HUMAN, ORC, UNDEAD, NIGHT_ELF, NAGA, NEUTRAL
 };
 
+// Spell targeting type (moved from ability_spell_base.h in Phase 19 so UI,
+// scripting, and core layers never include ability_spell_base.h directly)
+enum class CSpellTargetType : uint8_t {
+    NO_TARGET,      // Instant cast, no target needed
+    TARGET_UNIT,    // Must target a unit
+    TARGET_POINT,   // Must target a point
+    TARGET_BOTH     // Can target unit or point
+};
+
+// Production queue item type (moved from ability_queue.h in Phase 19 so UI
+// and scripting layers never include ability_queue.h directly)
+enum class CQueueItemType : uint8_t {
+    NONE, UNIT, RESEARCH, HERO_REVIVE
+};
+
+// Hero attribute stat value (moved from ability_hero.h in Phase 19 so
+// scripting and UI layers query hero attributes through CAbility virtual contract)
+struct HeroStatValue {
+    int base = 0;
+    float perLevelFactor = 0.0f;
+    int bonus = 0;
+
+    int GetCurrentBase(int level) const {
+        return base + static_cast<int>(perLevelFactor * static_cast<float>(level - 1));
+    }
+    int GetCurrent(int level) const {
+        return GetCurrentBase(level) + bonus;
+    }
+};
+
 // Aura effect type & bonus definition (moved from ability_aura.h in Phase 17
 // so CUnit, CBuff, and UnitAttributeAggregator have zero concrete ability headers)
 enum class CAuraEffectType : uint8_t {
@@ -43,8 +74,6 @@ enum class CAbilityCategory : uint8_t {
 };
 
 // Autocast acquisition kind (ref AutocastType + autoAcquireAutocastTargets).
-// Central table so the sim (idle acquisition) and the UI (right-click
-// toggle) agree on which rawcodes participate.
 enum class CAutocastKind : uint8_t {
     NONE = 0,
     LOWEST_HP_ALLY = 1, // heals: lowest-hp wounded ally in range
@@ -103,17 +132,18 @@ enum class AbilityStateFlag : uint8_t {
 // CAbility - base class for all abilities
 //
 // Abilities validate orders and create/return behaviors.
-// Phase 17: Provides virtual capability query/action interfaces for
-// casting, resource gathering/dropoff, mining, repair, work state,
-// and inventory management so generic ECS behaviors (`src/ecs/behaviors/*`)
-// and presentation helpers never include concrete WarCraft 3 ability headers.
-// Phase 18: Packs `level_` (11-bit) and boolean flags (`physical_`,
-// `permanent_`, `iconShowing_`, `autocastActive_`, `passiveSpell_`) into a
-// shared `uint16_t` bitfield alongside `category_` and `disabled_`, shrinking
-// `sizeof(CAbility)` to 24 bytes (down from 40 bytes).
+// Phase 17–19: Provides the complete virtual capability contract for
+// spell casting/cooldowns, worker resource gathering/dropoff, mining,
+// repair, production queues, build menus, building upgrades, rally points,
+// inventory slots, hero progression/stats, and shop stock so `src/ecs/`,
+// `src/ecs/behaviors/*`, `src/scripting/*`, `src/ui/*`, `src/core/*`, and
+// `src/map/*` have ZERO concrete WarCraft 3 ability header `#include`s.
 // ============================================================
 class CAbility {
 public:
+    static constexpr int MAX_QUEUE_SLOTS     = 5;
+    static constexpr int MAX_INVENTORY_SLOTS = 6;
+
     CAbility(int handleId, War3ID code, CAbilityCategory category);
     virtual ~CAbility() = default;
 
@@ -169,10 +199,6 @@ public:
     virtual void OnRemove(CSimulation& game, CUnit* unit);
     virtual void OnTick(CSimulation& game, CUnit* unit);
     virtual void OnDeath(CSimulation& game, CUnit* unit);
-    // Hero skill level-up refresh: unapply then re-apply so passives
-    // that pushed member values at OnAdd time (evasion, crit, carapace)
-    // pick up the new level's numbers. Implementations must keep the
-    // OnRemove/OnAdd pair idempotent.
     virtual void OnLevelChanged(CSimulation& game, CUnit* unit);
 
     // Order validation
@@ -190,18 +216,28 @@ public:
     virtual bool CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, int orderId);
 
     // Begin execution - returns a behavior the unit should start performing
-    // Ownership of returned behavior is transferred to caller
     virtual CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target);
     virtual CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, float x, float y);
     virtual CBehavior* BeginNoTarget(CSimulation& game, CUnit* caster, int orderId);
 
-    // ===== Phase 17 Generic Capability Interfaces (Decouples Behaviors from Concrete Abilities) =====
+    // ===== Phase 17–19 Generic Capability Interfaces =====
 
     // 1. Spell Casting & Cooldown Interface (overridden by CAbilitySpellBase)
+    virtual bool IsSpellAbility() const { return false; }
+    virtual CSpellTargetType GetTargetType() const { return CSpellTargetType::NO_TARGET; }
+    virtual void SetTargetType(CSpellTargetType /*v*/) {}
     virtual float GetCastRange() const { return 0.0f; }
+    virtual void SetCastRange(float /*v*/) {}
     virtual float GetCastPoint() const { return 0.0f; }
+    virtual void SetCastPoint(float /*v*/) {}
+    virtual float GetCooldown() const { return 0.0f; }
+    virtual void SetCooldown(float /*v*/) {}
+    virtual float GetCooldownRemaining() const { return 0.0f; }
     virtual int GetManaCost() const { return 0; }
+    virtual void SetManaCost(int /*v*/) {}
     virtual void StartCooldown() {}
+    virtual void ResetCooldown() {}
+    virtual void UpdateCooldown(float /*dt*/) {}
     virtual void DoEffect(CSimulation& /*game*/, CUnit* /*caster*/, CWidget* /*target*/) {}
     virtual void DoEffect(CSimulation& /*game*/, CUnit* /*caster*/, float /*x*/, float /*y*/) {}
     virtual void DoEffect(CSimulation& /*game*/, CUnit* /*caster*/) {}
@@ -216,7 +252,7 @@ public:
     virtual bool IsCarryingResources() const { return GetCarriedAmount() > 0; }
     virtual bool AcceptsResourceDropoff(CResourceType /*type*/) const { return false; }
 
-    // 3. Resource Mine Interface (overridden by CAbilityGoldMine & CAbilityOverlayedGoldMine)
+    // 3. Resource Mine Interface (overridden by CAbilityGoldMine, CAbilityOverlayedGoldMine, CAbilityBlightedGoldMine)
     virtual bool IsResourceMine() const { return false; }
     virtual int GetGold() const { return 0; }
     virtual void SetGold(int /*v*/) {}
@@ -226,16 +262,81 @@ public:
     virtual float GetMiningDuration() const { return 5.0f; }
 
     // 4. Repair & Working Animation State Interface (overridden by CAbilityRepair, CAbilityQueue, CAbilityGoldMine)
+    virtual bool IsRepairAbility() const { return false; }
     virtual float GetRepairRate() const { return 10.0f; }
     virtual float GetRepairRange() const { return 128.0f; }
     virtual bool IsActivelyWorking() const { return false; }
 
     // 5. Inventory Slot Interface (overridden by CAbilityInventory)
     virtual bool PickUpItem(CSimulation& /*game*/, CUnit* /*unit*/, CItem* /*item*/) { return false; }
+    virtual bool PickUpItem(CSimulation& game, CUnit* unit, CItem* item, int /*slotPreference*/) {
+        return PickUpItem(game, unit, item);
+    }
     virtual bool DropItem(CSimulation& /*game*/, CUnit* /*unit*/, int /*slot*/) { return false; }
     virtual bool DropItemAt(CSimulation& /*game*/, CUnit* /*unit*/, int /*slot*/, float /*x*/, float /*y*/) { return false; }
+    virtual bool DropItem(CSimulation& /*game*/, CUnit* /*unit*/, CItem* /*item*/) { return false; }
+    virtual bool DropItemAt(CSimulation& /*game*/, CUnit* /*unit*/, CItem* /*item*/, float /*x*/, float /*y*/) { return false; }
+    virtual bool UseItem(CSimulation& /*game*/, CUnit* /*unit*/, int /*slot*/) { return false; }
+    virtual bool UseItem(CSimulation& /*game*/, CUnit* /*unit*/, CItem* /*item*/) { return false; }
+    virtual bool MoveItemToSlot(CItem* /*item*/, int /*slot*/) { return false; }
     virtual CItem* GetItem(int /*slot*/) const { return nullptr; }
     virtual int FindItemSlot(CItem* /*item*/) const { return -1; }
+    virtual bool HasItem(CItem* item) const { return FindItemSlot(item) >= 0; }
+    virtual int GetItemCount() const { return 0; }
+    virtual int GetItemCapacity() const { return 0; }
+    virtual void SetItemCapacity(int /*cap*/) {}
+    virtual void SetCanDrop(bool /*v*/) {}
+
+    // 6. Production Queue, Build Menu, Upgrade & Rally Interface (overridden by CAbilityQueue, CAbilityBuild, CAbilityUpgrade, CAbilityRally)
+    static const std::unordered_set<War3ID>& EmptyWar3IdSet();
+    virtual bool QueueUnit(CSimulation& /*game*/, CUnit* /*building*/, War3ID /*unitTypeId*/) { return false; }
+    virtual bool QueueResearch(CSimulation& /*game*/, CUnit* /*building*/, War3ID /*upgradeId*/) { return false; }
+    virtual bool QueueReviveHero(CSimulation& /*game*/, CUnit* /*building*/, CUnit* /*hero*/) { return false; }
+    virtual void CancelQueueItem(CSimulation& /*game*/, CUnit* /*building*/, int /*slot*/) {}
+    virtual War3ID GetQueuedItem(int /*slot*/) const { return War3ID(); }
+    virtual CQueueItemType GetQueuedItemType(int /*slot*/) const { return CQueueItemType::NONE; }
+    virtual int GetQueueCount() const { return 0; }
+    virtual float GetProgress() const { return 0.0f; }
+    virtual float GetBuildTime() const { return 0.0f; }
+    virtual const std::unordered_set<War3ID>& GetBuildableStructures() const { return EmptyWar3IdSet(); }
+    virtual const std::unordered_set<War3ID>& GetTrainedUnits() const { return EmptyWar3IdSet(); }
+    virtual const std::unordered_set<War3ID>& GetResearches() const { return EmptyWar3IdSet(); }
+    virtual const std::unordered_set<War3ID>& GetUpgradesTo() const { return EmptyWar3IdSet(); }
+    virtual CWidget* GetRallyTarget() const { return nullptr; }
+    virtual float GetRallyX() const { return 0.0f; }
+    virtual float GetRallyY() const { return 0.0f; }
+    virtual bool HasRallyPoint() const { return false; }
+    virtual bool IsExplicitlySet() const { return false; }
+
+    // 7. Hero Progression & Shop Stock Interface (overridden by CAbilityHero and CAbilitySellItems)
+    static const HeroStatValue& EmptyHeroStat();
+    static const std::string& EmptyProperName();
+    virtual int GetXP() const { return 0; }
+    virtual void AddXP(CSimulation& /*game*/, CUnit* /*unit*/, int /*amount*/) {}
+    virtual void SetXP(CSimulation& /*game*/, CUnit* /*unit*/, int /*value*/) {}
+    virtual int GetHeroLevel() const { return 1; }
+    virtual void SetHeroLevel(CSimulation& /*game*/, CUnit* /*unit*/, int /*level*/) {}
+    virtual bool StripLevels(CSimulation& /*game*/, CUnit* /*unit*/, int /*levels*/) { return false; }
+    virtual bool SelectHeroSkill(CSimulation& /*game*/, CUnit* /*unit*/, War3ID /*skillCode*/) { return false; }
+    virtual int GetSkillPoints() const { return 0; }
+    virtual void SetSkillPoints(int /*v*/) {}
+    virtual const HeroStatValue& GetStrength() const { return EmptyHeroStat(); }
+    virtual const HeroStatValue& GetAgility() const { return EmptyHeroStat(); }
+    virtual const HeroStatValue& GetIntelligence() const { return EmptyHeroStat(); }
+    virtual void SetStrengthBase(int /*v*/) {}
+    virtual void SetAgilityBase(int /*v*/) {}
+    virtual void SetIntelligenceBase(int /*v*/) {}
+    virtual void AddStrengthBonus(CSimulation& /*game*/, CUnit* /*unit*/, int /*v*/) {}
+    virtual void AddAgilityBonus(CSimulation& /*game*/, CUnit* /*unit*/, int /*v*/) {}
+    virtual void AddIntelligenceBonus(CSimulation& /*game*/, CUnit* /*unit*/, int /*v*/) {}
+    virtual const std::string& GetProperName() const { return EmptyProperName(); }
+    virtual void SetProperName(const std::string& /*name*/) {}
+    virtual const std::unordered_set<War3ID>& GetLearnableSkills() const { return EmptyWar3IdSet(); }
+    virtual void AddStockItem(War3ID /*id*/, int /*current*/, int /*max*/) {}
+    virtual void AddStockUnit(War3ID /*id*/, int /*current*/, int /*max*/) {}
+    virtual bool RemoveStock(War3ID /*id*/) { return false; }
+    virtual void SetStockMax(int /*v*/) {}
+    virtual void SetStockReplenishInterval(float /*v*/) {}
 
 protected:
     int handleId_;

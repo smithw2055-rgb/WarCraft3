@@ -294,6 +294,19 @@ public:
         return 0;
     }
 
+    // Phase 19: Grid snap and obstruction validation for building placement
+    virtual void OnSnapBuildPosition(const CUnitType* /*buildType*/,
+                                     float& /*inOutX*/,
+                                     float& /*inOutY*/) const {}
+
+    virtual bool IsBuildLocationObstructed(CSimulation& /*sim*/,
+                                           float /*x*/,
+                                           float /*y*/,
+                                           int /*playerIndex*/,
+                                           uint32_t /*buildingTypeRawcode*/) const {
+        return false;
+    }
+
     // Negative buff duration multiplier (e.g., 0.25x when Resistant Skin 'Brsk' is active).
     virtual float GetNegativeBuffDurationMultiplier(const CUnit& /*target*/) const {
         return 1.0f;

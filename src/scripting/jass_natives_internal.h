@@ -7,16 +7,9 @@
 #include "audio/AudioSystem.h"
 #include "ecs/player.h"
 #include "ecs/item.h"
-#include "ecs/abilities/ability_inventory.h"
-#include "ecs/abilities/ability_hero.h"
-#include "ecs/abilities/ability_harvest.h"
-#include "ecs/abilities/ability_spell_base.h"
-#include "ecs/abilities/ability_queue.h"
 #include "ecs/ability.h"
 #include "ecs/buff.h"
 #include "ecs/buffs.h"
-#include "ecs/abilities/ability_sell_items.h"
-#include "ecs/abilities/ability_rally.h"
 #include "ecs/ability_factory.h"
 #include "ecs/destructable.h"
 #include "ecs/orders/order.h"
@@ -371,12 +364,44 @@ inline std::string UnitLegacyNameFromId(CSimulation* sim, int typeId) {
     return unitType ? unitType->GetLegacyName() : "";
 }
 
-inline CAbilityHero* FindHeroAbility(CSimulation* sim, int unitSimId) {
+inline CUnit* ResolveJassUnit(const std::shared_ptr<JassNativesData>& data,
+                              CSimulation* sim, int unitJassHandle) {
+    if (!data || !sim) return nullptr;
+    const int simId = data->GetSimHandle(unitJassHandle, JassHandleInfo::UNIT);
+    return simId >= 0 ? sim->GetUnit(simId) : nullptr;
+}
+
+inline CAbility* FindHeroAbility(CSimulation* sim, int unitSimId) {
     if (!sim) return nullptr;
     CUnit* unit = sim->GetUnit(unitSimId);
     if (!unit || !unit->IsHero()) return nullptr;
-    CAbility* ability = unit->GetAbility(War3ID("AHer"));
-    return dynamic_cast<CAbilityHero*>(ability);
+    return unit->GetAbility(War3ID("AHer"));
+}
+
+inline CAbility* FindUnitInventory(const std::shared_ptr<JassNativesData>& data,
+                                   CSimulation* sim, int unitJassHandle,
+                                   CUnit** outUnit = nullptr) {
+    CUnit* unit = ResolveJassUnit(data, sim, unitJassHandle);
+    if (outUnit) *outUnit = unit;
+    return unit ? unit->GetAbility(War3ID("AInv")) : nullptr;
+}
+
+inline CAbility* FindUnitShop(const std::shared_ptr<JassNativesData>& data,
+                              CSimulation* sim, int unitJassHandle) {
+    CUnit* unit = ResolveJassUnit(data, sim, unitJassHandle);
+    return unit ? unit->GetAbility(War3ID("Asei")) : nullptr;
+}
+
+inline std::vector<CAbility*> FindAllWorldShops(CSimulation* sim) {
+    std::vector<CAbility*> out;
+    if (!sim) return out;
+    for (CUnit* u : sim->GetUnits()) {
+        if (!u) continue;
+        if (CAbility* shop = u->GetAbility(War3ID("Asei"))) {
+            out.push_back(shop);
+        }
+    }
+    return out;
 }
 
 inline int UnitRaceToJassOrdinal(const std::string& raceName) {

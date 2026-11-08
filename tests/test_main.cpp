@@ -853,6 +853,10 @@ bool TestPhase18StageRR1CompactCBuffCAbilityLayoutAndCRTPCloneFidelity();
 bool TestPhase18StageRR2UnifiedBuffStateRestorationAndPeriodicAoEHelpers();
 bool TestPhase18StageSS1PassiveSpellFlagAreaHealAndBlightedMineVirtualContract();
 bool TestPhase18StageSS2CustomAutocastSpellRegistrationAndDynamicPluginV18Suite();
+bool TestPhase19StageTT1GenericCAbilityQueueBuildUpgradeAndRallyContracts();
+bool TestPhase19StageTT2GenericCAbilityHeroProgressionAndShopStockContracts();
+bool TestPhase19StageUU1DecoupledJassNativesHeroInventoryShopAndCooldowns();
+bool TestPhase19StageUU2War3GameModuleV19BuildSnapObstructionAndDynamicPluginSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1701,6 +1705,10 @@ int main(int argc, char** argv) {
         {"Phase18 Stage RR2 Unified CBuff state restoration and periodic AoE helpers", TestPhase18StageRR2UnifiedBuffStateRestorationAndPeriodicAoEHelpers},
         {"Phase18 Stage SS1 Passive spell flag area heal and BlightedMine virtual contract", TestPhase18StageSS1PassiveSpellFlagAreaHealAndBlightedMineVirtualContract},
         {"Phase18 Stage SS2 Custom autocast spell registration and dynamic plugin SO v18", TestPhase18StageSS2CustomAutocastSpellRegistrationAndDynamicPluginV18Suite},
+        {"Phase19 Stage TT1 Generic CAbility queue build upgrade and rally contracts", TestPhase19StageTT1GenericCAbilityQueueBuildUpgradeAndRallyContracts},
+        {"Phase19 Stage TT2 Generic CAbility hero progression and shop stock contracts", TestPhase19StageTT2GenericCAbilityHeroProgressionAndShopStockContracts},
+        {"Phase19 Stage UU1 Decoupled JASS natives hero inventory shop and cooldowns", TestPhase19StageUU1DecoupledJassNativesHeroInventoryShopAndCooldowns},
+        {"Phase19 Stage UU2 War3GameModule v19 build snap obstruction and dynamic plugin SO", TestPhase19StageUU2War3GameModuleV19BuildSnapObstructionAndDynamicPluginSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

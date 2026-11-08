@@ -2,6 +2,21 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 
+const std::unordered_set<War3ID>& CAbility::EmptyWar3IdSet() {
+    static const std::unordered_set<War3ID> kEmpty;
+    return kEmpty;
+}
+
+const HeroStatValue& CAbility::EmptyHeroStat() {
+    static const HeroStatValue kEmpty{};
+    return kEmpty;
+}
+
+const std::string& CAbility::EmptyProperName() {
+    static const std::string kEmpty;
+    return kEmpty;
+}
+
 CAbility::CAbility(int handleId, War3ID code, CAbilityCategory category)
     : handleId_(handleId), code_(code), alias_(code), category_(category),
       level_(1), physical_(0), permanent_(0), iconShowing_(1),

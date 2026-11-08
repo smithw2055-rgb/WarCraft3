@@ -3,16 +3,11 @@
 #include <vector>
 #include <unordered_set>
 
-// Queue item type
-enum class CQueueItemType : uint8_t {
-    NONE, UNIT, RESEARCH, HERO_REVIVE
-};
-
 // CAbilityQueue - training/research queue ability
-// Allows buildings to queue units, research, and hero revives
+// Allows buildings to queue units, research, and hero revives (CQueueItemType is defined in ecs/ability.h)
 class CAbilityQueue : public CAbility {
 public:
-    static constexpr int MAX_QUEUE = 5;
+    static constexpr int MAX_QUEUE = MAX_QUEUE_SLOTS;
 
     CAbilityQueue(int handleId);
 
@@ -26,26 +21,26 @@ public:
     bool CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caster, int orderId) override;
     CBehavior* BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) override;
 
-    // Queue management
-    bool QueueUnit(CSimulation& game, CUnit* building, War3ID unitTypeId);
-    bool QueueResearch(CSimulation& game, CUnit* building, War3ID upgradeId);
-    bool QueueReviveHero(CSimulation& game, CUnit* building, CUnit* hero);
-    void CancelQueueItem(CSimulation& game, CUnit* building, int slot);
+    // Queue management (implements CAbility virtual production queue contract)
+    bool QueueUnit(CSimulation& game, CUnit* building, War3ID unitTypeId) override;
+    bool QueueResearch(CSimulation& game, CUnit* building, War3ID upgradeId) override;
+    bool QueueReviveHero(CSimulation& game, CUnit* building, CUnit* hero) override;
+    void CancelQueueItem(CSimulation& game, CUnit* building, int slot) override;
     void CancelAll(CSimulation& game, CUnit* building);
 
     // Queue state
-    War3ID GetQueuedItem(int slot) const;
-    CQueueItemType GetQueuedItemType(int slot) const;
-    int GetQueueCount() const;
+    War3ID GetQueuedItem(int slot) const override;
+    CQueueItemType GetQueuedItemType(int slot) const override;
+    int GetQueueCount() const override;
     bool IsActivelyWorking() const override { return GetQueueCount() > 0; }
-    float GetProgress() const { return progress_; }
-    float GetBuildTime() const { return buildTime_; }
+    float GetProgress() const override { return progress_; }
+    float GetBuildTime() const override { return buildTime_; }
 
     // Configuration
     void AddTrainedUnit(War3ID id) { unitsTrained_.insert(id); }
     void AddResearch(War3ID id) { researchesAvailable_.insert(id); }
-    const std::unordered_set<War3ID>& GetTrainedUnits() const { return unitsTrained_; }
-    const std::unordered_set<War3ID>& GetResearches() const { return researchesAvailable_; }
+    const std::unordered_set<War3ID>& GetTrainedUnits() const override { return unitsTrained_; }
+    const std::unordered_set<War3ID>& GetResearches() const override { return researchesAvailable_; }
 
 private:
     void ProcessCompletion(CSimulation& game, CUnit* building);

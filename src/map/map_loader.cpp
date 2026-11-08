@@ -4,7 +4,7 @@
 #include "../map/w3x_storm.h"
 #include "../map/wts.h"
 #include "../ecs/destructable.h"
-#include "../ecs/abilities/ability_inventory.h"
+#include "../ecs/ability.h"
 #include <cmath>
 #include <iostream>
 
@@ -409,8 +409,7 @@ void MapLoader::LoadUnits(const std::string& mapPath) {
                 }
                 // Preplaced inventory (heroes, shops): create + pick up.
                 if (!u.inventory.empty()) {
-                    if (auto* inv = dynamic_cast<CAbilityInventory*>(
-                            simUnit->GetAbility(War3ID("AInv")))) {
+                    if (CAbility* inv = simUnit->GetAbility(War3ID("AInv"))) {
                         for (const auto& entry : u.inventory) {
                             War3ID itemId(entry.id);
                             if (!itemData_.HasItem(itemId)) continue;

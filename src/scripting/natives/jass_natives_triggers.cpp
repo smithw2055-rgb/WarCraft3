@@ -2232,7 +2232,7 @@ void JassNatives::RegisterGameNatives() {
         data->abilityCooldowns.erase(cooldownKey(uSim, code));
         if (sim) {
             CUnit* unit = sim->GetUnit(uSim);
-            auto* spell = unit ? dynamic_cast<CAbilitySpellBase*>(unit->GetAbility(War3ID(code))) : nullptr;
+            CAbility* spell = unit ? unit->GetAbility(War3ID(code)) : nullptr;
             if (spell) spell->ResetCooldown();
         }
         return JassValue::Null();
@@ -2257,7 +2257,7 @@ void JassNatives::RegisterGameNatives() {
         if (!handle) return JassValue::Null();
         int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         CUnit* unit = uSim >= 0 ? sim->GetUnit(uSim) : nullptr;
-        auto* spell = unit ? dynamic_cast<CAbilitySpellBase*>(unit->GetAbility(handle->code)) : nullptr;
+        CAbility* spell = unit ? unit->GetAbility(handle->code) : nullptr;
         if (spell) spell->StartCooldown();
         return JassValue::Null();
     });
@@ -2266,7 +2266,7 @@ void JassNatives::RegisterGameNatives() {
         int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         CUnit* unit = uSim >= 0 ? sim->GetUnit(uSim) : nullptr;
         const War3ID code = AbilityCodeFromJassArg(data, args[1].intVal);
-        auto* spell = unit ? dynamic_cast<CAbilitySpellBase*>(unit->GetAbility(code)) : nullptr;
+        CAbility* spell = unit ? unit->GetAbility(code) : nullptr;
         if (spell) spell->StartCooldown();
         return JassValue::Null();
     });
@@ -2277,7 +2277,7 @@ void JassNatives::RegisterGameNatives() {
         int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         if (uSim >= 0 && sim) {
             CUnit* unit = sim->GetUnit(uSim);
-            auto* spell = unit ? dynamic_cast<CAbilitySpellBase*>(unit->GetAbility(handle->code)) : nullptr;
+            CAbility* spell = unit ? unit->GetAbility(handle->code) : nullptr;
             if (spell) spell->ResetCooldown();
             data->abilityCooldowns.erase(cooldownKey(uSim, (uint32_t)handle->code.value));
         }
@@ -2290,7 +2290,7 @@ void JassNatives::RegisterGameNatives() {
         const War3ID code = AbilityCodeFromJassArg(data, args[1].intVal);
         if (sim) {
             CUnit* unit = sim->GetUnit(uSim);
-            auto* spell = unit ? dynamic_cast<CAbilitySpellBase*>(unit->GetAbility(code)) : nullptr;
+            CAbility* spell = unit ? unit->GetAbility(code) : nullptr;
             if (spell && spell->GetCooldownRemaining() > 0.0f) {
                 return JassValue::Real(spell->GetCooldownRemaining());
             }
@@ -2511,7 +2511,7 @@ void JassNatives::RegisterGameNatives() {
     vm_.RegisterNative("SetAbilityCastRange", [simAbilityFromHandle](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         const float range = args[1].type == JassValue::REAL ? args[1].realVal : (float)args[1].intVal;
-        if (auto* base = dynamic_cast<CAbilitySpellBase*>(simAbilityFromHandle(args[0].intVal))) {
+        if (CAbility* base = simAbilityFromHandle(args[0].intVal)) {
             base->SetCastRange(range);
         }
         return JassValue::Null();
@@ -2759,8 +2759,7 @@ void JassNatives::RegisterGameNatives() {
         int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         CUnit* unit = uSim >= 0 ? sim->GetUnit(uSim) : nullptr;
         if (!unit) return JassValue::Null();
-        CAbility* base = unit->GetAbility(War3ID("Ahar"));
-        auto* harvest = dynamic_cast<CAbilityHarvest*>(base);
+        CAbility* harvest = unit->GetAbility(War3ID("Ahar"));
         if (!harvest || harvest->GetCarriedAmount() <= 0) return JassValue::Null();
         CPlayer* player = sim->GetPlayer(unit->GetPlayerIndex());
         if (!player) {
