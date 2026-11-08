@@ -560,7 +560,7 @@ void War3GameModule::OnAssembleUnitAbilities(CSimulation& sim,
         unit.AddAbility(sim, std::make_unique<CAbilityRally>(sim.AllocateHandleId()));
         unit.AddAbility(sim, std::make_unique<CAbilityUpgrade>(sim.AllocateHandleId()));
 
-        if (auto* queueAbility = dynamic_cast<CAbilityQueue*>(unit.GetAbility(War3ID("Aque")))) {
+        if (CAbility* queueAbility = unit.GetAbility(War3ID("Aque"))) {
             for (const auto& trainId : unitType.GetUnitsTrained()) {
                 queueAbility->AddTrainedUnit(trainId);
             }
@@ -568,7 +568,7 @@ void War3GameModule::OnAssembleUnitAbilities(CSimulation& sim,
                 queueAbility->AddResearch(researchId);
             }
         }
-        if (auto* upgradeAbility = dynamic_cast<CAbilityUpgrade*>(unit.GetAbility(War3ID("Aupg")))) {
+        if (CAbility* upgradeAbility = unit.GetAbility(War3ID("Aupg"))) {
             for (const auto& upgradeId : unitType.GetUpgradesTo()) {
                 upgradeAbility->AddUpgradeTo(upgradeId);
             }
@@ -1616,23 +1616,23 @@ void War3GameModule::OnUnitAbilityAdded(CSimulation& sim,
     CAbilityData* data = sim.GetAbilityData();
     if (!data) return;
 
-    if (auto* spell = dynamic_cast<CAbilitySpellBase*>(&ability)) {
-        if (const CAbilityDefFull* def = data->GetAbility(spell->GetAlias())) {
-            spell->ApplyData(*def);
+    if (ability.IsSpellAbility()) {
+        if (const CAbilityDefFull* def = data->GetAbility(ability.GetAlias())) {
+            ability.ApplyData(*def);
         }
     }
 
     if (const CAbilityDefFull* def = data->GetAbility(ability.GetAlias())) {
-        if (auto* cargo = dynamic_cast<CAbilityCargoHold*>(&ability)) {
-            const int cap = def->DataIntAt(1, 0, cargo->GetCapacity());
-            cargo->SetCapacity(cap);
+        if (ability.GetCategory() == CAbilityCategory::CARGO_HOLD && ability.GetCargoCapacity() > 0) {
+            const int cap = def->DataIntAt(1, 0, ability.GetCargoCapacity());
+            ability.SetCargoCapacity(cap);
         }
-        if (auto* load = dynamic_cast<CAbilityLoad*>(&ability)) {
+        if (ability.GetCode() == War3ID("Aloa")) {
             const float range = def->RangeAt(1);
-            if (range > 0.0f) load->SetLoadRange(range);
-            if (auto* hold = unit.GetAbility(War3ID("Acar"))) {
-                if (auto* h = dynamic_cast<CAbilityCargoHold*>(hold)) {
-                    load->SetCargoCapacity(h->GetCapacity());
+            if (range > 0.0f) ability.SetLoadRange(range);
+            if (CAbility* hold = unit.GetAbility(War3ID("Acar"))) {
+                if (hold->GetCargoCapacity() > 0) {
+                    ability.SetCargoCapacity(hold->GetCargoCapacity());
                 }
             }
         }
@@ -1670,12 +1670,12 @@ bool War3GameModule::OnEvaluatePreMitigationDamage(CSimulation& sim,
     ++stats_.preMitigationEvaluations;
     const auto attackType = static_cast<CAttackType>(attackTypeOrd);
 
-    // 1. Drunken Haze (BNdh) & Curse (Bcrs): attacker swing may miss outright
+    // 1. Drunken Haze (BNdh) & Curse (Bcrs): attacker swing may miss outright via CBuff::GetMissChance()
     if (isAttack && attacker && attacker != &target) {
-        if (auto* haze = dynamic_cast<CBuffHaze*>(attacker->GetBuff(War3ID("BNdh")))) {
+        if (const CBuff* haze = attacker->GetBuff(War3ID("BNdh"))) {
             if (sim.SimRand01() < haze->GetMissChance()) return false;
         }
-        if (auto* curse = dynamic_cast<CBuffCurse*>(attacker->GetBuff(War3ID("Bcrs")))) {
+        if (const CBuff* curse = attacker->GetBuff(War3ID("Bcrs"))) {
             if (sim.SimRand01() < curse->GetMissChance()) return false;
         }
     }
@@ -1699,16 +1699,14 @@ bool War3GameModule::OnEvaluatePreMitigationDamage(CSimulation& sim,
         if (inOutDamage <= 0.0f) return false;
     }
 
-    // 4. Howl of Terror (BNht) & Item reaction AIdd attacker damage-dealt multiplier
+    // 4. Howl of Terror (BNht) & Item reaction AIdd attacker damage-dealt multiplier via CBuff virtual contract
     if (isAttack && attacker && attacker != &target) {
-        if (auto* howl = dynamic_cast<CBuffHowl*>(attacker->GetBuff(War3ID("BNht")))) {
-            inOutDamage *= howl->GetDamageFactor();
+        if (const CBuff* howl = attacker->GetBuff(War3ID("BNht"))) {
+            inOutDamage *= howl->GetDamageDealtFactor();
         }
         float dealt = 1.0f;
         for (const auto& buff : attacker->GetBuffs()) {
-            if (auto* mod = dynamic_cast<CBuffDamageMod*>(buff.get())) {
-                dealt += mod->GetAttackDealtAdd();
-            }
+            if (buff) dealt += buff->GetAttackDealtAdd(), inOutDamage *= (buff->GetId() != War3ID("BNht") ? buff->GetDamageDealtFactor() : 1.0f);
         }
         if (dealt < 0.0f) dealt = 0.0f;
         inOutDamage *= dealt;
@@ -1734,33 +1732,26 @@ void War3GameModule::OnModifyPostMitigationDamage(CSimulation& /*sim*/,
     ++stats_.postMitigationEvaluations;
     if (inOutActualDamage <= 0.0f) return;
 
-    const auto attackType = static_cast<CAttackType>(attackTypeOrd);
-
-    // 1. Defend (0.5x weapon attack reduction) & Berserk (damage-taken amplification)
+    // 1. Defend (0.5x weapon attack reduction) & Berserk (damage-taken amplification) via CBuff virtual contract
     if (isAttack) {
         for (const auto& buff : target.GetBuffs()) {
-            if (dynamic_cast<CBuffDefend*>(buff.get())) {
-                inOutActualDamage *= 0.5f;
+            if (buff && buff->GetId() == War3ID("Bdef")) {
+                inOutActualDamage *= buff->GetWeaponDamageTakenMultiplier();
                 break;
             }
         }
         for (const auto& buff : target.GetBuffs()) {
-            if (auto* berserk = dynamic_cast<CBuffBerserk*>(buff.get())) {
-                inOutActualDamage *= berserk->GetDamageTakenMultiplier();
+            if (buff && buff->GetId() != War3ID("Bdef") && buff->GetWeaponDamageTakenMultiplier() != 1.0f) {
+                inOutActualDamage *= buff->GetWeaponDamageTakenMultiplier();
                 break;
             }
         }
     }
 
-    // 2. Runed Bracers / item per-attack-type damage-taken modifiers
+    // 2. Runed Bracers / item per-attack-type damage-taken modifiers via CBuff virtual contract
     for (const auto& buff : target.GetBuffs()) {
-        auto* mod = dynamic_cast<CBuffDamageMod*>(buff.get());
-        if (!mod) continue;
-        float mul = 1.0f;
-        if (attackType == CAttackType::SPELLS) mul = mod->GetSpellsTaken();
-        else if (attackType == CAttackType::MAGIC) mul = mod->GetMagicTaken();
-        else if (attackType == CAttackType::PIERCE) mul = mod->GetPierceTaken();
-        inOutActualDamage *= mul;
+        if (!buff) continue;
+        inOutActualDamage *= buff->GetAttackTypeDamageTakenMultiplier(attackTypeOrd);
     }
 }
 
@@ -1784,7 +1775,7 @@ void War3GameModule::OnPostDamageLanded(CSimulation& sim,
         target.RemoveBuff(War3ID("BUsl"), sim);
     }
 
-    // 2. Thorns Aura (CBuffThorns) & Spiked Carapace (AUts) melee reflection
+    // 2. Thorns Aura (CBuffThorns) & Spiked Carapace (AUts) melee reflection via virtual contracts
     if (isAttack && !isRanged && attacker && attacker != &target &&
         damageType == CDamageType::NORMAL &&
         (invulnerableTarget ? !wasEvaded : actualDamage != 0.0f)) {
@@ -1799,9 +1790,7 @@ void War3GameModule::OnPostDamageLanded(CSimulation& sim,
         if (enemy && !resisted) {
             float bestPercent = 0.0f;
             for (const auto& buff : target.GetBuffs()) {
-                if (auto* thorns = dynamic_cast<CBuffThorns*>(buff.get())) {
-                    bestPercent = std::max(bestPercent, thorns->GetReflectPercent());
-                }
+                if (buff) bestPercent = std::max(bestPercent, buff->GetReflectPercent());
             }
             if (bestPercent > 0.0f) {
                 const float reflected = (incomingBaseDamage + incomingBaseBonus) * bestPercent;
@@ -1811,7 +1800,7 @@ void War3GameModule::OnPostDamageLanded(CSimulation& sim,
                                      "", reflected, 0.0f);
                 }
             }
-            if (auto* carapace = dynamic_cast<CAbilitySpikedCarapace*>(target.GetAbility(War3ID("AUts")))) {
+            if (const CAbility* carapace = target.GetAbility(War3ID("AUts"))) {
                 const float reflected = (incomingBaseDamage + incomingBaseBonus) *
                                         carapace->GetReflectPercent();
                 if (reflected > 0.0f) {
@@ -1823,7 +1812,7 @@ void War3GameModule::OnPostDamageLanded(CSimulation& sim,
         }
     }
 
-    // 3. Vampiric Aura / Item Lifesteal (CBuffLifesteal)
+    // 3. Vampiric Aura / Item Lifesteal (CBuffLifesteal) via CBuff::GetStealPercent()
     if (isAttack && attacker && attacker != &target && actualDamage > 0.0f && !target.IsBuilding()) {
         bool mechanical = false;
         if (const CUnitType* ut = target.GetUnitType()) {
@@ -1841,9 +1830,7 @@ void War3GameModule::OnPostDamageLanded(CSimulation& sim,
         if (!mechanical && !passiveAlly && !resisted) {
             float bestPercent = 0.0f;
             for (const auto& buff : attacker->GetBuffs()) {
-                if (auto* leech = dynamic_cast<CBuffLifesteal*>(buff.get())) {
-                    bestPercent = std::max(bestPercent, leech->GetStealPercent());
-                }
+                if (buff) bestPercent = std::max(bestPercent, buff->GetStealPercent());
             }
             if (bestPercent > 0.0f) {
                 float healed = attacker->GetLife() + actualDamage * bestPercent;
@@ -1853,11 +1840,11 @@ void War3GameModule::OnPostDamageLanded(CSimulation& sim,
         }
     }
 
-    // 4. Bash (AHbh) stun proc
+    // 4. Bash (AHbh) stun proc via CAbility::GetProcChance() / GetProcDuration()
     if (isAttack && attacker && attacker != &target && actualDamage > 0.0f && !target.IsDead()) {
-        if (auto* bash = dynamic_cast<CAbilityBash*>(attacker->GetAbility(War3ID("AHbh")))) {
-            if (sim.SimRand01() < bash->GetChance()) {
-                target.AddBuff(std::make_unique<CBuffStun>(bash->GetDuration()), sim);
+        if (const CAbility* bash = attacker->GetAbility(War3ID("AHbh"))) {
+            if (sim.SimRand01() < bash->GetProcChance()) {
+                target.AddBuff(std::make_unique<CBuffStun>(bash->GetProcDuration()), sim);
                 sim.FireCombatText(attacker->GetHandleId(), target.GetHandleId(),
                                    CSimulation::CombatTextKind::BASH, 0.0f);
             }
@@ -1869,9 +1856,9 @@ void War3GameModule::OnPostDamageLanded(CSimulation& sim,
         attacker->FireAttackModifiers(sim, &target, actualDamage);
     }
 
-    // 6. Cleaving Attack (ANca) splash
+    // 6. Cleaving Attack (ANca) splash via CAbility::GetSplashFraction() / GetSplashRadius()
     if (isAttack && attacker && attacker != &target && actualDamage > 0.0f && !target.IsDead()) {
-        if (auto* cleave = dynamic_cast<CAbilityCleavingAttack*>(attacker->GetAbility(War3ID("ANca")))) {
+        if (const CAbility* cleave = attacker->GetAbility(War3ID("ANca"))) {
             const float splash = actualDamage * cleave->GetSplashFraction();
             const float radius = cleave->GetSplashRadius();
             if (splash > 0.0f) {
@@ -1895,9 +1882,9 @@ void War3GameModule::OnPostDamageLanded(CSimulation& sim,
         }
     }
 
-    // 7. Wind Walk (BOwk) break & backstab bonus damage
+    // 7. Wind Walk (BOwk) break & backstab bonus damage via CBuff::GetBackstabDamage()
     if (isAttack && attacker && attacker != &target && actualDamage > 0.0f) {
-        if (auto* walk = dynamic_cast<CBuffWindWalk*>(attacker->GetBuff(War3ID("BOwk")))) {
+        if (const CBuff* walk = attacker->GetBuff(War3ID("BOwk"))) {
             const float backstab = walk->GetBackstabDamage();
             attacker->RemoveBuff(War3ID("BOwk"), sim);
             if (backstab > 0.0f && !target.IsDead()) {
@@ -1908,11 +1895,11 @@ void War3GameModule::OnPostDamageLanded(CSimulation& sim,
         }
     }
 
-    // 8. Pulverize (Awar) AoE slam proc
+    // 8. Pulverize (Awar) AoE slam proc via CAbility::GetProcChance() / GetSplashRadius()
     if (isAttack && attacker && attacker != &target && actualDamage > 0.0f && !target.IsDead()) {
-        if (auto* pulv = dynamic_cast<CAbilityPulverize*>(attacker->GetAbility(War3ID("Awar")))) {
-            if (sim.SimRand01() < pulv->GetChance()) {
-                const float radius = pulv->GetRadius();
+        if (const CAbility* pulv = attacker->GetAbility(War3ID("Awar"))) {
+            if (sim.SimRand01() < pulv->GetProcChance()) {
+                const float radius = pulv->GetSplashRadius();
                 CPlayer* srcPlayer = sim.GetPlayer(attacker->GetPlayerIndex());
                 for (auto* unit : sim.GetUnits()) {
                     if (!unit || unit->IsDead() || unit == &target || unit == attacker) continue;
@@ -2004,7 +1991,7 @@ void War3GameModule::OnAwardKillBountyAndXP(CSimulation& sim,
 
     bool anyXpAwarded = false;
     for (CUnit* hero : receivers) {
-        auto* heroAbility = dynamic_cast<CAbilityHero*>(hero->GetAbility(War3ID("AHer")));
+        CAbility* heroAbility = hero->GetAbility(War3ID("AHer"));
         if (!heroAbility) continue;
         const int share = static_cast<int>(availableXp * (1.0f / static_cast<float>(receivers.size())) *
                                            gc.GetHeroFactorXp(hero->GetHeroLevel()));
@@ -2057,7 +2044,7 @@ bool War3GameModule::OnTryUnitIdleAutocast(CSimulation& sim, CUnit& unit) {
     const War3ID defaultAuto = uType ? uType->GetDefaultAutocastAbility() : War3ID(0u);
 
     for (CAbility* ab : unit.GetAbilities()) {
-        auto* spell = dynamic_cast<CAbilitySpellBase*>(ab);
+        CAbility* spell = (ab && ab->IsSpellAbility()) ? ab : nullptr;
         if (!spell || spell->IsDisabled() || spell->IsOnCooldown()) continue;
         auto kind = static_cast<CAutocastKind>(GetAbilityAutocastKind(spell->GetAlias().value));
         if (kind == CAutocastKind::NONE) {
@@ -2130,9 +2117,9 @@ void War3GameModule::OnApplyUnitItemBonus(CSimulation& sim,
                                           int signedDelta) {
     ++stats_.itemBonusesApplied;
     const auto bonusType = static_cast<CItemBonusType>(bonusTypeOrd);
-    auto findHeroAbility = [](CUnit& u) -> CAbilityHero* {
+    auto findHeroAbility = [](CUnit& u) -> CAbility* {
         if (!u.IsHero()) return nullptr;
-        return dynamic_cast<CAbilityHero*>(u.GetAbility(War3ID("AHer")));
+        return u.GetAbility(War3ID("AHer"));
     };
 
     switch (bonusType) {
@@ -2196,7 +2183,7 @@ bool War3GameModule::IsCarriableHero(const CSimulation& sim, CUnit& unit) const 
     CPlayer* owner = sim.GetPlayer(unit.GetPlayerIndex());
     if (!owner || owner->GetController() != CMapControl::USER) return false;
     for (CAbility* ab : unit.GetAbilities()) {
-        if (dynamic_cast<CAbilityHero*>(ab) != nullptr) return true;
+        if (ab && ab->GetCategory() == CAbilityCategory::HERO) return true;
     }
     return false;
 }
@@ -2207,10 +2194,10 @@ bool War3GameModule::OnSnapshotCarriedHero(const CSimulation& sim,
     outCarried = CarriedHero{};
     if (!IsCarriableHero(sim, unit)) return false;
 
-    CAbilityHero* hero = nullptr;
+    CAbility* hero = nullptr;
     for (CAbility* ab : unit.GetAbilities()) {
-        if (auto* h = dynamic_cast<CAbilityHero*>(ab)) {
-            hero = h;
+        if (ab && ab->GetCategory() == CAbilityCategory::HERO) {
+            hero = ab;
             break;
         }
     }
@@ -2227,7 +2214,7 @@ bool War3GameModule::OnSnapshotCarriedHero(const CSimulation& sim,
         if (!ab || learnable.count(ab->GetCode()) == 0) continue;
         outCarried.learnedSkills.emplace_back(ab->GetCode(), ab->GetLevel());
     }
-    if (auto* inv = dynamic_cast<CAbilityInventory*>(unit.GetAbility(War3ID("AInv")))) {
+    if (CAbility* inv = unit.GetAbility(War3ID("AInv"))) {
         for (int slot = 0; slot < inv->GetItemCapacity(); ++slot) {
             CItem* item = inv->GetItem(slot);
             if (!item) continue;
@@ -2253,10 +2240,10 @@ CUnit* War3GameModule::OnRespawnCarriedHero(CSimulation& sim,
     CUnit* hero = sim.CreateUnit(carried.typeId, carried.ownerPlayer, x, y, 0.0f);
     if (!hero) return nullptr;
 
-    CAbilityHero* heroAb = nullptr;
+    CAbility* heroAb = nullptr;
     for (CAbility* ab : hero->GetAbilities()) {
-        if (auto* h = dynamic_cast<CAbilityHero*>(ab)) {
-            heroAb = h;
+        if (ab && ab->GetCategory() == CAbilityCategory::HERO) {
+            heroAb = ab;
             break;
         }
     }
@@ -2280,7 +2267,7 @@ CUnit* War3GameModule::OnRespawnCarriedHero(CSimulation& sim,
     }
 
     if (!carried.items.empty()) {
-        if (auto* inv = dynamic_cast<CAbilityInventory*>(hero->GetAbility(War3ID("AInv")))) {
+        if (CAbility* inv = hero->GetAbility(War3ID("AInv"))) {
             for (const auto& ci : carried.items) {
                 CItem* item = sim.CreateItem(ci.typeId, x, y);
                 if (!item) continue;
@@ -2440,6 +2427,83 @@ bool War3GameModule::RegisterCustomAbilityDef(CSimulation& sim,
     abilityData->RegisterAbility(abilityId, std::move(def));
     ++stats_.customDataArchetypesRegistered;
     return true;
+}
+
+void War3GameModule::RegisterCustomBuffCreator(War3ID buffCode, BuffCreatorFn creator) {
+    if (buffCode.value == 0 || !creator) return;
+    customBuffCreators_[buffCode.value] = std::move(creator);
+    ++stats_.customBuffsRegistered;
+}
+
+void War3GameModule::RegisterCustomBuffSpec(const DataDrivenBuffSpec& spec) {
+    if (spec.id.value == 0) return;
+    customBuffSpecs_[spec.id.value] = spec;
+    ++stats_.customBuffsRegistered;
+}
+
+bool War3GameModule::UnregisterCustomBuff(War3ID buffCode) {
+    if (buffCode.value == 0) return false;
+    const size_t c1 = customBuffCreators_.erase(buffCode.value);
+    const size_t c2 = customBuffSpecs_.erase(buffCode.value);
+    return (c1 + c2) > 0;
+}
+
+bool War3GameModule::HasCustomBuff(War3ID buffCode) const {
+    return customBuffCreators_.count(buffCode.value) > 0 ||
+           customBuffSpecs_.count(buffCode.value) > 0;
+}
+
+CBuff* War3GameModule::CreateTimedLifeBuff(uint32_t buffRawcode,
+                                           float duration) const {
+    return new CBuffTimedLife(War3ID(buffRawcode), duration);
+}
+
+CBuff* War3GameModule::CreateBuffByCode(uint32_t buffRawcode,
+                                        float duration,
+                                        int casterHandleId) const {
+    auto it = customBuffCreators_.find(buffRawcode);
+    if (it != customBuffCreators_.end() && it->second) {
+        return it->second(duration, casterHandleId).release();
+    }
+    const War3ID code(buffRawcode);
+    const float dur = duration > 0.0f ? duration : 10.0f;
+    if (code == War3ID("Bstn")) return new CBuffStun(dur);
+    if (code == War3ID("BUsl")) return new CBuffSleep(dur);
+    if (code == War3ID("BNsi")) return new CBuffSilence(dur);
+    if (code == War3ID("BOhx")) return new CBuffHex(dur);
+    if (code == War3ID("Bply")) return new CBuffPolymorph(dur);
+    if (code == War3ID("Bdsh")) return new CBuffDivineShield(dur);
+    if (code == War3ID("Bdef")) return new CBuffDefend(dur);
+    if (code == War3ID("Bena")) return new CBuffEnsnare(dur);
+    if (code == War3ID("BNms")) return new CBuffManaShield(dur);
+    if (code == War3ID("BNss")) return new CBuffSpellShield(dur);
+    if (code == War3ID("Brsk")) return new CBuffResistant();
+    if (code == War3ID("BTLF")) return new CBuffTimedLife(code, dur);
+    return nullptr;
+}
+
+bool War3GameModule::TryApplyCustomBuffByCode(CSimulation& sim,
+                                              CUnit& target,
+                                              uint32_t buffRawcode,
+                                              float durationOverride,
+                                              int casterHandleId) {
+    auto specIt = customBuffSpecs_.find(buffRawcode);
+    if (specIt != customBuffSpecs_.end()) {
+        DataDrivenBuffSpec spec = specIt->second;
+        if (durationOverride > 0.0f) spec.duration = durationOverride;
+        if (casterHandleId >= 0) spec.casterHandleId = casterHandleId;
+        if (target.ApplyDataDrivenBuff(spec, sim)) {
+            ++stats_.customBuffsApplied;
+            return true;
+        }
+        return false;
+    }
+    if (CBuff* rawBuff = CreateBuffByCode(buffRawcode, durationOverride, casterHandleId)) {
+        target.AddBuff(std::unique_ptr<CBuff>(rawBuff), sim);
+        ++stats_.customBuffsApplied;
+        return true;
+    }
+    return false;
 }
 
 } // namespace war3

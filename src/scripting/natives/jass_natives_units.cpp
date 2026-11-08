@@ -2873,7 +2873,11 @@ void JassNatives::RegisterUnitStateNatives() {
         if (args.size() < 3 || !sim) return JassValue::Null();
         CUnit* u = getUnit(args[0].intVal);
         if (!u) return JassValue::Null();
-        u->AddBuff(std::make_unique<CBuffTimedLife>(War3ID((uint32_t)args[1].intVal), args[2].realVal), *sim);
+        if (const auto* mod = sim->GetSimulationModule()) {
+            if (CBuff* timed = mod->CreateTimedLifeBuff((uint32_t)args[1].intVal, args[2].realVal)) {
+                u->AddBuff(std::unique_ptr<CBuff>(timed), *sim);
+            }
+        }
         return JassValue::Null();
     });
     vm_.RegisterNative("UnitPauseTimedLife", [getUnit](const std::vector<JassValue>& args) -> JassValue {
@@ -2881,8 +2885,8 @@ void JassNatives::RegisterUnitStateNatives() {
         CUnit* u = getUnit(args[0].intVal);
         if (!u) return JassValue::Null();
         for (const auto& buff : u->GetBuffs()) {
-            if (auto* timed = dynamic_cast<CBuffTimedLife*>(buff.get())) {
-                timed->SetSuspended(args[1].boolVal);
+            if (buff && buff->IsTimedLife()) {
+                buff->SetSuspended(args[1].boolVal);
             }
         }
         return JassValue::Null();

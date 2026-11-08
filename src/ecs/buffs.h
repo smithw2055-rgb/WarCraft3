@@ -47,7 +47,7 @@ public:
     CBuffThorns(float duration, float reflectPercent, War3ID id = War3ID("Bthr"))
         : CBuffCloneable(id, duration, true), reflectPercent_(reflectPercent) {}
 
-    float GetReflectPercent() const { return reflectPercent_; }
+    float GetReflectPercent() const override { return reflectPercent_; }
 
 private:
     float reflectPercent_;
@@ -59,7 +59,7 @@ public:
     CBuffLifesteal(float duration, float stealPercent)
         : CBuffCloneable(War3ID("BUav"), duration, true), stealPercent_(stealPercent) {}
 
-    float GetStealPercent() const { return stealPercent_; }
+    float GetStealPercent() const override { return stealPercent_; }
 
 private:
     float stealPercent_;
@@ -79,6 +79,7 @@ class CBuffEthereal : public CBuffCloneable<CBuffEthereal> {
 public:
     explicit CBuffEthereal(float duration, War3ID id = War3ID("Bban"));
 
+    bool GrantsEthereal() const override { return true; }
     void OnApply(CSimulation& game, CUnit* target) override;
     void OnRemove(CSimulation& game, CUnit* target) override;
 };
@@ -87,6 +88,7 @@ public:
 class CBuffMagicImmune : public CBuffCloneable<CBuffMagicImmune> {
 public:
     explicit CBuffMagicImmune(float duration, War3ID id = War3ID("Bam2"));
+    bool GrantsMagicImmune() const override { return true; }
 
     void OnApply(CSimulation& game, CUnit* target) override;
     void OnRemove(CSimulation& game, CUnit* target) override;
@@ -114,14 +116,14 @@ public:
 class CBuffSilence : public CBuffCloneable<CBuffSilence> {
 public:
     explicit CBuffSilence(float duration)
-        : CBuffCloneable(War3ID("BNsi"), duration, false) {}
+        : CBuffCloneable(War3ID("BNsi"), duration, false) { silence_ = true; }
 };
 
 // Hex debuff - cannot attack or cast, but can still move.
 class CBuffHex : public CBuffCloneable<CBuffHex> {
 public:
     explicit CBuffHex(float duration)
-        : CBuffCloneable(War3ID("BOhx"), duration, false) {}
+        : CBuffCloneable(War3ID("BOhx"), duration, false) { hex_ = true; }
 };
 
 // Rejuvenation buff - periodic heal
@@ -217,6 +219,7 @@ class CBuffDefend : public CBuffCloneable<CBuffDefend> {
 public:
     explicit CBuffDefend(float duration)
         : CBuffCloneable(War3ID("Bdef"), duration, true) {}
+    float GetWeaponDamageTakenMultiplier() const override { return 0.5f; }
 };
 
 // Clarity - timed bonus mana regen (Clarity Potion).
@@ -256,9 +259,9 @@ public:
 class CBuffWindWalk : public CBuffCloneable<CBuffWindWalk> {
 public:
     CBuffWindWalk(float duration, float backstabDamage)
-        : CBuffCloneable(War3ID("BOwk"), duration, true), backstabDamage_(backstabDamage) {}
+        : CBuffCloneable(War3ID("BOwk"), duration, true), backstabDamage_(backstabDamage) { stealth_ = true; }
 
-    float GetBackstabDamage() const { return backstabDamage_; }
+    float GetBackstabDamage() const override { return backstabDamage_; }
 
 private:
     float backstabDamage_;
@@ -270,6 +273,7 @@ public:
     CBuffBerserk(float duration, float attackSpeedMul, float damageTakenMul);
 
     float GetDamageTakenMultiplier() const { return damageTakenMul_; }
+    float GetWeaponDamageTakenMultiplier() const override { return damageTakenMul_; }
     void OnApply(CSimulation& game, CUnit* target) override;
     void OnRemove(CSimulation& game, CUnit* target) override;
 
@@ -424,6 +428,7 @@ public:
         : CBuffCloneable(War3ID("BNht"), duration, false), damageFactor_(damageFactor) {}
 
     float GetDamageFactor() const { return damageFactor_; }
+    float GetDamageDealtFactor() const override { return damageFactor_; }
 
 private:
     float damageFactor_;
@@ -435,7 +440,7 @@ public:
     CBuffCurse(float duration, float missChance)
         : CBuffCloneable(War3ID("Bcrs"), duration, false), missChance_(missChance) {}
 
-    float GetMissChance() const { return missChance_; }
+    float GetMissChance() const override { return missChance_; }
 
 private:
     float missChance_;
@@ -447,7 +452,7 @@ public:
     CBuffHaze(float duration, float missChance)
         : CBuffCloneable(War3ID("BNdh"), duration, false), missChance_(missChance) {}
 
-    float GetMissChance() const { return missChance_; }
+    float GetMissChance() const override { return missChance_; }
 
 private:
     float missChance_;
@@ -473,6 +478,7 @@ public:
 class CBuffWhirlwind : public CBuffCloneable<CBuffWhirlwind> {
 public:
     CBuffWhirlwind(float duration, float damagePerSecond, float radius);
+    bool GrantsMagicImmune() const override { return true; }
 
     void OnApply(CSimulation& game, CUnit* target) override;
     void OnRemove(CSimulation& game, CUnit* target) override;
@@ -560,7 +566,14 @@ public:
     float GetSpellsTaken() const { return spellsTaken_; }
     float GetMagicTaken() const { return magicTaken_; }
     float GetPierceTaken() const { return pierceTaken_; }
-    float GetAttackDealtAdd() const { return attackDealtAdd_; }
+    float GetAttackDealtAdd() const override { return attackDealtAdd_; }
+    float GetAttackTypeDamageTakenMultiplier(int attackTypeOrd) const override {
+        // CAttackType: PIERCE = 2, MAGIC = 4, SPELLS = 7
+        if (attackTypeOrd == 7) return spellsTaken_;
+        if (attackTypeOrd == 4) return magicTaken_;
+        if (attackTypeOrd == 2) return pierceTaken_;
+        return 1.0f;
+    }
 
 private:
     float spellsTaken_;

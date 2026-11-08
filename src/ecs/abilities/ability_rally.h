@@ -23,7 +23,7 @@ public:
     bool HasRallyPoint() const override { return rallyTarget_ != nullptr || hasRallyPoint_; }
     bool IsExplicitlySet() const override { return explicitlySet_; }
 
-    void ApplyToTrainedUnit(CSimulation& game, CUnit* building, CUnit* trainedUnit) const;
+    void ApplyToTrainedUnit(CSimulation& game, CUnit* building, CUnit* trainedUnit) const override;
     void ClearRallyPoint();
 
 private:

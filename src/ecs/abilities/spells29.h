@@ -1,18 +1,20 @@
 #pragma once
 #include "ecs/abilities/ability_spell_base.h"
-#include "ecs/abilities/spells4.h"
-
-class CAbilityGoldMine;
 
 // Drunken Brawler (ANdb): critical strike plus a dodge chance.
-// Still a CAbilityCriticalStrike, so the existing crit alias check holds.
-class CAbilityDrunkenBrawler : public CAbilityCriticalStrike {
+// Phase 22 Stage ZZ2: Directly inherits CAbilitySpellBase (zero dependency on spells4.h).
+class CAbilityDrunkenBrawler : public CAbilitySpellBase {
 public:
     explicit CAbilityDrunkenBrawler(int handleId);
     void OnAdd(CSimulation& game, CUnit* unit) override;
     void OnRemove(CSimulation& game, CUnit* unit) override;
 
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
+
 private:
+    float critChance_ = 0.15f;
+    float critMultiplier_ = 2.0f;
     float dodge_ = 0.10f;
 };
 

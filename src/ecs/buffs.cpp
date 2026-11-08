@@ -69,17 +69,19 @@ void RefreshUnitInvisibleFromBuffs(CUnit* target, const CBuff* excluding) {
     }
 }
 
-void RefreshUnitMagicImmuneFromBuffs(CUnit* target) {
+void RefreshUnitMagicImmuneFromBuffs(CUnit* target, const CBuff* excluding) {
     if (!target) return;
-    int immuneCount = 0;
-    for (const auto& b : target->GetBuffs()) {
-        if (!b) continue;
-        if (dynamic_cast<const CBuffMagicImmune*>(b.get()) ||
-            dynamic_cast<const CBuffWhirlwind*>(b.get())) {
-            ++immuneCount;
+    bool hasOtherImmune = (target->GetAbility(War3ID("Amim")) != nullptr);
+    if (!hasOtherImmune) {
+        for (const auto& b : target->GetBuffs()) {
+            if (!b || b.get() == excluding) continue;
+            if (b->GrantsMagicImmune()) {
+                hasOtherImmune = true;
+                break;
+            }
         }
     }
-    if (immuneCount <= 1) {
+    if (!hasOtherImmune) {
         target->SetMagicImmune(false);
     }
 }
@@ -191,11 +193,17 @@ void CBuffEthereal::OnApply(CSimulation& game, CUnit* target) {
 void CBuffEthereal::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
-    int count = 0;
-    for (const auto& b : target->GetBuffs()) {
-        if (b && dynamic_cast<const CBuffEthereal*>(b.get())) ++count;
+    bool hasOtherEth = (target->GetAbility(War3ID("Aetl")) != nullptr);
+    if (!hasOtherEth) {
+        for (const auto& b : target->GetBuffs()) {
+            if (!b || b.get() == this) continue;
+            if (b->GrantsEthereal()) {
+                hasOtherEth = true;
+                break;
+            }
+        }
     }
-    if (count <= 1) target->SetEthereal(false);
+    if (!hasOtherEth) target->SetEthereal(false);
 }
 
 // ===== CBuffMagicImmune =====
@@ -209,7 +217,7 @@ void CBuffMagicImmune::OnApply(CSimulation& game, CUnit* target) {
 
 void CBuffMagicImmune::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    RefreshUnitMagicImmuneFromBuffs(target);
+    RefreshUnitMagicImmuneFromBuffs(target, this);
 }
 
 // ===== CBuffStun =====
@@ -248,7 +256,7 @@ void CBuffStun::OnRefresh(CSimulation& game, CUnit* target, const CBuff& newBuff
 
 // ===== CBuffSleep =====
 CBuffSleep::CBuffSleep(float duration)
-    : CBuffCloneable(War3ID("BUsl"), duration, false) {}
+    : CBuffCloneable(War3ID("BUsl"), duration, false) { sleep_ = true; }
 
 void CBuffSleep::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
@@ -271,7 +279,7 @@ void CBuffRejuvenation::OnPeriodic(CSimulation& game, CUnit* target) {
 
 // ===== CBuffTimedLife =====
 CBuffTimedLife::CBuffTimedLife(War3ID alias, float duration)
-    : CBuffCloneable(alias, duration, false) {}
+    : CBuffCloneable(alias, duration, false) { timedLife_ = true; }
 
 void CBuffTimedLife::OnRemove(CSimulation& game, CUnit* target) {
     if (!target || target->IsDead()) return;
@@ -680,7 +688,7 @@ void CBuffWhirlwind::OnApply(CSimulation&, CUnit* target) {
 void CBuffWhirlwind::OnRemove(CSimulation&, CUnit* target) {
     if (!target) return;
     target->SetAttacksDisabled(false);
-    RefreshUnitMagicImmuneFromBuffs(target);
+    RefreshUnitMagicImmuneFromBuffs(target, this);
 }
 
 void CBuffWhirlwind::OnPeriodic(CSimulation& game, CUnit* target) {

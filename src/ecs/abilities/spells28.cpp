@@ -18,12 +18,12 @@ void MorphIfKnownImpl(CSimulation& game, CUnit* unit, War3ID formId) {
     if (form) unit->MorphTo(form, formId);
 }
 
-CAbilityCargoHold* FindCargo(CUnit* unit) {
+CAbility* FindCargo(CUnit* unit) {
     if (!unit) return nullptr;
-    if (auto* burrow = dynamic_cast<CAbilityCargoHold*>(unit->GetAbility(War3ID("Abun")))) {
+    if (CAbility* burrow = unit->GetAbility(War3ID("Abun"))) {
         return burrow;
     }
-    return dynamic_cast<CAbilityCargoHold*>(unit->GetAbility(War3ID("Acar")));
+    return unit->GetAbility(War3ID("Acar"));
 }
 
 void SetHarvestDisabled(CUnit* unit, bool disabled) {
@@ -69,7 +69,7 @@ public:
         if (!target) return;
         target->Unmorph();
         SetHarvestDisabled(target, false);
-        if (auto* militia = dynamic_cast<CAbilityPairing*>(target->GetAbility(War3ID("Amil")))) {
+        if (CAbility* militia = target->GetAbility(War3ID("Amil"))) {
             militia->SetConverted(false);
         }
         SendBackToWork(game, target);
@@ -180,7 +180,7 @@ void CAbilityPairing::DoEffect(CSimulation& game, CUnit* caster) {
             const float dx = other->GetX() - caster->GetX();
             const float dy = other->GetY() - caster->GetY();
             if (dx * dx + dy * dy > radius_ * radius_) continue;
-            if (auto* militia = dynamic_cast<CAbilityPairing*>(other->GetAbility(War3ID("Amil")))) {
+            if (CAbility* militia = other->GetAbility(War3ID("Amil"))) {
                 militia->Convert(game, other);
             }
         }
@@ -289,8 +289,7 @@ bool CAbilityAcolyteHarvest::CheckCanTarget(CSimulation& game, CUnit* unit, int 
 void CAbilityAcolyteHarvest::Unbind(CSimulation& game) {
     if (mineUnitHandle_ < 0) return;
     if (CUnit* mineUnit = game.GetUnit(mineUnitHandle_)) {
-        if (auto* mine = dynamic_cast<CAbilityBlightedGoldMine*>(
-                mineUnit->GetAbility(War3ID("Abgm")))) {
+        if (CAbility* mine = mineUnit->GetAbility(War3ID("Abgm"))) {
             mine->RemoveMiner();
         }
     }
@@ -300,7 +299,7 @@ void CAbilityAcolyteHarvest::Unbind(CSimulation& game) {
 void CAbilityAcolyteHarvest::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     auto* mineUnit = dynamic_cast<CUnit*>(target);
     if (!caster || !mineUnit) return;
-    auto* mine = dynamic_cast<CAbilityBlightedGoldMine*>(mineUnit->GetAbility(War3ID("Abgm")));
+    CAbility* mine = mineUnit->GetAbility(War3ID("Abgm"));
     if (!mine) return;
     if (mineUnitHandle_ == mineUnit->GetHandleId()) return;
     Unbind(game);
@@ -424,7 +423,7 @@ CAbilityDropInstant::CAbilityDropInstant(int handleId, War3ID code)
 
 void CAbilityDropInstant::DoEffect(CSimulation&, CUnit* caster) {
     if (!caster) return;
-    if (CAbilityCargoHold* cargo = FindCargo(caster)) {
+    if (CAbility* cargo = FindCargo(caster)) {
         cargo->UnloadAll(caster);
         return;
     }

@@ -86,6 +86,8 @@ public:
     CAbilityPulverize(int handleId);
     float GetChance() const { return chance_; }
     float GetRadius() const { return radius_; }
+    float GetProcChance() const override { return chance_; }
+    float GetSplashRadius() const override { return radius_; }
     void SetChance(float v) { chance_ = v; }
 private:
     float chance_ = 0.25f;

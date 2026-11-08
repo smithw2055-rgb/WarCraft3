@@ -1,5 +1,4 @@
 #include "ability_queue.h"
-#include "ability_rally.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
@@ -435,7 +434,7 @@ void CAbilityQueue::ProcessCompletion(CSimulation& game, CUnit* building) {
                     auto* newUnit = game.CreateUnit(completedId, building->GetPlayerIndex(),
                                                      spawnX, spawnY, 0);
                     if (newUnit) {
-                        auto* rallyAbility = dynamic_cast<CAbilityRally*>(building->GetAbility(War3ID("ARal")));
+                        CAbility* rallyAbility = building->GetAbility(War3ID("ARal"));
                         if (rallyAbility) {
                             rallyAbility->ApplyToTrainedUnit(game, building, newUnit);
                         }

@@ -216,7 +216,7 @@ bool TestSpells29FactoryCoverage() {
             return false;
         }
     }
-    TEST_ASSERT(dynamic_cast<CAbilityCriticalStrike*>(
+    TEST_ASSERT(dynamic_cast<CAbilitySpellBase*>(
         AbilityFactory::CreateAbility(29921, War3ID("ANdb")).get()) != nullptr);
     TEST_ASSERT(dynamic_cast<CAbilityDrunkenBrawler*>(
         AbilityFactory::CreateAbility(29922, War3ID("ANdb")).get()) != nullptr);

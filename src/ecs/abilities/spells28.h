@@ -22,9 +22,9 @@ public:
     void DoEffect(CSimulation& game, CUnit* caster) override;
     void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
     // Town hall call-to-arms invokes this on each peasant.
-    bool Convert(CSimulation& game, CUnit* self);
+    bool Convert(CSimulation& game, CUnit* self) override;
     bool IsConverted() const { return converted_; }
-    void SetConverted(bool v) { converted_ = v; }
+    void SetConverted(bool v) override { converted_ = v; }
     void SetMilitiaDuration(float seconds) { militiaDuration_ = seconds; }
     float GetMilitiaDuration() const { return militiaDuration_; }
     CPairMode GetMode() const { return mode_; }
@@ -67,8 +67,8 @@ public:
     void OnTick(CSimulation& game, CUnit* unit) override;
     bool IsResourceMine() const override { return true; }
     bool CanAddMiner() const override { return miners_ < maxMiners_; }
-    bool AddMiner();
-    void RemoveMiner();
+    bool AddMiner() override;
+    void RemoveMiner() override;
     int GetGold() const override { return gold_; }
     void SetGold(int v) override { gold_ = v; }
     int GetMinerCount() const { return miners_; }
@@ -134,10 +134,12 @@ public:
     CAbilityCargoHold(int handleId, War3ID code, bool burrow, int capacity = 4);
     void OnAdd(CSimulation& game, CUnit* unit) override;
     void OnRemove(CSimulation& game, CUnit* unit) override;
-    bool TryLoad(CUnit* holder, CUnit* passenger);
-    void UnloadAll(CUnit* holder);
+    bool TryLoad(CUnit* holder, CUnit* passenger) override;
+    void UnloadAll(CUnit* holder) override;
     int GetCapacity() const { return capacity_; }
     void SetCapacity(int v) { if (v > 0) capacity_ = v; }
+    int GetCargoCapacity() const override { return capacity_; }
+    void SetCargoCapacity(int v) override { SetCapacity(v); }
     bool IsBurrow() const { return burrow_; }
 
 private:

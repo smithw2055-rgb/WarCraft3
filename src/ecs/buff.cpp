@@ -4,7 +4,9 @@
 
 CBuff::CBuff(War3ID id, float duration, bool isPositive)
     : id_(id), duration_(duration), remaining_(duration),
-      isPositive_(isPositive), periodic_(false), suspended_(false) {}
+      isPositive_(isPositive), periodic_(false), suspended_(false),
+      timedLife_(false), hex_(false), silence_(false),
+      sleep_(false), stealth_(false) {}
 
 bool CBuff::AddStack() {
     if (stackCount_ < maxStacks_) {

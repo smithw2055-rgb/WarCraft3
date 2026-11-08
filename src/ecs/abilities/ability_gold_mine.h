@@ -53,7 +53,8 @@ public:
     void OnTick(CSimulation& game, CUnit* unit) override;
     void OnDeath(CSimulation& game, CUnit* unit) override;
 
-    void SetParentMine(CUnit* parentUnit, CAbilityGoldMine* parent);
+    void SetParentMine(CUnit* parentUnit, CAbilityGoldMine* parent = nullptr);
+    void BindParentMineUnit(CUnit* parentUnit) override { SetParentMine(parentUnit, nullptr); }
     CUnit* GetParentUnit() const { return parentUnit_; }
     CAbilityGoldMine* GetParentMine() const { return parent_; }
 
@@ -80,9 +81,8 @@ private:
 
 // Harvest face of a mine: the overlay when present, otherwise the base mine.
 struct CMineAccess {
-    CAbilityGoldMine* base = nullptr;
-    CAbilityOverlayedGoldMine* overlay = nullptr;
-    bool ok() const { return base || overlay; }
+    CAbility* mine = nullptr;
+    bool ok() const { return mine != nullptr; }
     int Gold() const;
     bool CanAdd() const;
     void Add(CBehaviorHarvest* miner);

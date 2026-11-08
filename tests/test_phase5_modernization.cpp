@@ -6898,7 +6898,7 @@ bool TestPhase21StageYY1War3GameModuleV21CustomItemUpgradeAndAbilityDataArchetyp
     sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
 
     auto war3Mod = std::make_shared<war3::War3GameModule>();
-    TEST_ASSERT(war3Mod->GetModuleVersion() == 21u);
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 21u);
     sim.SetSimulationModule(war3Mod);
 
     // 1. Register custom ability definition & descriptor ("ACs1")
@@ -6981,7 +6981,303 @@ bool TestPhase21StageYY2DynamicPluginSOV21AndCloudRetailMapsEndToEndSuite() {
         std::fclose(mf);
 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
-        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 21u);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 21u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+
+// ============================================================================
+// Phase 22 Modernization Tests:
+//   - Stage ZZ1: 8-bit CBuff State Bitfields (TIMED_LIFE, HEX, SILENCE, SLEEP,
+//                STEALTH) & Virtual Combat Modifier Contract (GetMissChance,
+//                GetDamageDealtFactor, GetWeaponDamageTakenMultiplier,
+//                GetAttackTypeDamageTakenMultiplier, GetReflectPercent,
+//                GetStealPercent, GetBackstabDamage) with sizeof(CBuff) == 40
+//   - Stage ZZ2: Complete CAbility Base Virtual Contract (Zero Cross-Ability
+//                Headers & Zero dynamic_cast<CAbility*> Across src/)
+//   - Stage AAA1: War3GameModule Version 22 Dynamic Custom Buff Factory &
+//                 Declarative DataDrivenBuffSpec Registry + JASS CreateJassBuff
+//                 Live Unit Attachment
+//   - Stage AAA2: Dynamic Plugin SO Version 22 & Cloud Retail Maps Suite
+// ============================================================================
+
+bool TestPhase22StageZZ1CompactCBuff8BitStateFlagsAndVirtualCombatModifierContract() {
+    // 1. Verify sizeof(CBuff) remains 40 bytes after packing all 8 status flags into 1 byte
+    TEST_ASSERT(sizeof(CBuff) == 40);
+
+    // 2. Verify O(1) bitfield flags on CBuff subclasses without dynamic_cast
+    CBuffTimedLife timed(War3ID("BTLF"), 30.0f);
+    TEST_ASSERT(timed.IsTimedLife());
+    TEST_ASSERT((timed.GetBuffStateFlagsBitmask() & static_cast<uint8_t>(BuffStateFlag::TIMED_LIFE)) != 0);
+
+    CBuffHex hex(10.0f);
+    TEST_ASSERT(hex.IsHexBuff());
+    CBuffPolymorph poly(10.0f);
+    TEST_ASSERT(poly.IsHexBuff());
+
+    CBuffSilence sil(8.0f);
+    TEST_ASSERT(sil.IsSilenceBuff());
+
+    CBuffSleep sleep(12.0f);
+    TEST_ASSERT(sleep.IsSleepBuff());
+
+    CBuffWindWalk walk(20.0f, 85.0f);
+    TEST_ASSERT(walk.IsStealthBuff());
+    TEST_NEAR(walk.GetBackstabDamage(), 85.0f, 1e-4f);
+
+    // 3. Verify virtual combat modifier getters on CBuff* base pointer
+    const CBuff* hazePtr = &timed;
+    TEST_NEAR(hazePtr->GetMissChance(), 0.0f, 1e-4f);
+
+    CBuffHaze haze(10.0f, 0.45f);
+    CBuffCurse curse(10.0f, 0.33f);
+    CBuffHowl howl(10.0f, 0.70f);
+    CBuffDefend defend(10.0f);
+    CBuffBerserk berserk(10.0f, 1.50f, 1.20f);
+    CBuffDamageMod dmgMod(War3ID("Bdm1"), 0.67f, 0.80f, 0.50f, 0.25f);
+    CBuffThorns thorns(10.0f, 0.30f);
+    CBuffLifesteal leech(10.0f, 0.15f);
+
+    const CBuff* bHaze = &haze;
+    const CBuff* bCurse = &curse;
+    const CBuff* bHowl = &howl;
+    const CBuff* bDef = &defend;
+    const CBuff* bBrk = &berserk;
+    const CBuff* bMod = &dmgMod;
+    const CBuff* bThr = &thorns;
+    const CBuff* bLch = &leech;
+
+    TEST_NEAR(bHaze->GetMissChance(), 0.45f, 1e-4f);
+    TEST_NEAR(bCurse->GetMissChance(), 0.33f, 1e-4f);
+    TEST_NEAR(bHowl->GetDamageDealtFactor(), 0.70f, 1e-4f);
+    TEST_NEAR(bDef->GetWeaponDamageTakenMultiplier(), 0.50f, 1e-4f);
+    TEST_NEAR(bBrk->GetWeaponDamageTakenMultiplier(), 1.20f, 1e-4f);
+    TEST_NEAR(bMod->GetAttackDealtAdd(), 0.25f, 1e-4f);
+    TEST_NEAR(bMod->GetAttackTypeDamageTakenMultiplier(static_cast<int>(CAttackType::SPELLS)), 0.67f, 1e-4f);
+    TEST_NEAR(bMod->GetAttackTypeDamageTakenMultiplier(static_cast<int>(CAttackType::MAGIC)), 0.80f, 1e-4f);
+    TEST_NEAR(bMod->GetAttackTypeDamageTakenMultiplier(static_cast<int>(CAttackType::PIERCE)), 0.50f, 1e-4f);
+    TEST_NEAR(bThr->GetReflectPercent(), 0.30f, 1e-4f);
+    TEST_NEAR(bLch->GetStealPercent(), 0.15f, 1e-4f);
+
+    return true;
+}
+
+bool TestPhase22StageZZ2CompleteCAbilityVirtualContractZeroCrossAbilityCasts() {
+    TEST_ASSERT(sizeof(CAbility) == 24);
+
+    CSimulation sim;
+    CUnitData unitData;
+    unitData.RegisterUnitType(War3ID("egol"), std::make_unique<CUnitType>(*MakePhase5UnitType(War3ID("egol"), 1000, 0, true)));
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.SetSimulationModule(std::make_shared<war3::War3GameModule>());
+
+    // 1. Verify GENERIC_PLACEHOLDER bitfield on unknown ability without dynamic_cast
+    auto unknownAb = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("Z999"));
+    TEST_ASSERT(unknownAb != nullptr);
+    TEST_ASSERT(unknownAb->IsGenericPlaceholder());
+
+    // 2. Verify passive combat proc virtual getters through CAbility* base pointer
+    auto bashAb = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("AHbh"));
+    auto cleaveAb = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("ANca"));
+    auto pulvAb = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("Awar"));
+    auto caraAb = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("AUts"));
+    TEST_ASSERT(bashAb && cleaveAb && pulvAb && caraAb);
+    TEST_ASSERT(!bashAb->IsGenericPlaceholder());
+    TEST_ASSERT(bashAb->GetProcChance() > 0.0f && bashAb->GetProcDuration() > 0.0f);
+    TEST_ASSERT(cleaveAb->GetSplashFraction() > 0.0f && cleaveAb->GetSplashRadius() > 0.0f);
+    TEST_ASSERT(pulvAb->GetProcChance() > 0.0f && pulvAb->GetSplashRadius() > 0.0f);
+    TEST_ASSERT(caraAb->GetReflectPercent() > 0.0f);
+
+    // 3. Verify Entangle Gold Mine (Aent), Overlayed Mine (Agl2), and CargoHold (Aenc) via CAbility* virtual contract
+    CUnitType* treeType = MakePhase5UnitType(War3ID("etol"), 1500, 0, true);
+    CUnitType* mineType = MakePhase5UnitType(War3ID("ngol"), 1500, 0, true);
+    CUnitType* wispType = MakePhase5UnitType(War3ID("ewsp"), 120, 270, false);
+
+    CUnit* mineUnit = sim.AdoptUnit(std::make_unique<CUnit>(sim.AllocateHandleId(), mineType, 0, War3ID("ngol"), 0.0f, 0.0f, 0.0f));
+    CUnit* treeUnit = sim.AdoptUnit(std::make_unique<CUnit>(sim.AllocateHandleId(), treeType, 0, War3ID("etol"), 64.0f, 0.0f, 0.0f));
+    CUnit* wispUnit = sim.AdoptUnit(std::make_unique<CUnit>(sim.AllocateHandleId(), wispType, 0, War3ID("ewsp"), 32.0f, 0.0f, 0.0f));
+    mineUnit->AddAbility(sim, AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("Agld")));
+    CAbility* baseGold = mineUnit->GetAbility(War3ID("Agld"));
+    TEST_ASSERT(baseGold != nullptr);
+    baseGold->SetGold(250);
+
+    auto entangleAb = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("Aent"));
+    TEST_ASSERT(entangleAb != nullptr);
+    entangleAb->DoEffect(sim, treeUnit, mineUnit);
+    sim.Update();
+
+    // Find spawned egol replacement unit and operate its cargo & overlay purely via CAbility*
+    CUnit* egol = nullptr;
+    for (CUnit* u : sim.GetUnits()) {
+        if (u && u->GetTypeId() == War3ID("egol")) {
+            egol = u;
+            break;
+        }
+    }
+    TEST_ASSERT(egol != nullptr);
+    CAbility* overlay = egol->GetAbility(War3ID("Agl2"));
+    CAbility* cargo = egol->GetAbility(War3ID("Aenc"));
+    TEST_ASSERT(overlay != nullptr && cargo != nullptr);
+    TEST_ASSERT(overlay->GetGold() == 250);
+    TEST_ASSERT(cargo->GetCargoCapacity() == 5);
+    TEST_ASSERT(cargo->TryLoad(egol, wispUnit));
+
+    return true;
+}
+
+bool TestPhase22StageAAA1War3GameModuleV22DynamicBuffFactoryAndJassBuffAttachment() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "500");
+    ubTxt.SetString("hfoo", "def", "2");
+    ubTxt.SetString("hfoo", "spd", "270");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() == 22u);
+    sim.SetSimulationModule(war3Mod);
+
+    // 1. Register a declarative DataDrivenBuffSpec ("BCs1": +6 armor, +20 flat damage for 15s)
+    DataDrivenBuffSpec customSpec;
+    customSpec.id = War3ID("BCs1");
+    customSpec.duration = 15.0f;
+    customSpec.isPositive = true;
+    customSpec.armorDelta = 6.0f;
+    customSpec.flatDamageBonus = 20;
+    war3Mod->RegisterCustomBuffSpec(customSpec);
+    TEST_ASSERT(war3Mod->HasCustomBuff(War3ID("BCs1")));
+
+    // 2. Register a custom CBuffCreatorFn ("BCs2": custom Silence buff)
+    war3Mod->RegisterCustomBuffCreator(War3ID("BCs2"),
+        [](float duration, int /*casterHandleId*/) -> std::unique_ptr<CBuff> {
+            return std::make_unique<CBuffSilence>(duration > 0.0f ? duration : 8.0f);
+        });
+    TEST_ASSERT(war3Mod->HasCustomBuff(War3ID("BCs2")));
+    TEST_ASSERT(war3Mod->GetModuleStats().customBuffsRegistered == 2u);
+
+    CUnit* footman = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    TEST_ASSERT(footman != nullptr);
+    sim.Update();
+
+    // 3. Apply custom buffs via JASS CreateJassBuff + UnitAddAbility and UnitApplyTimedLife
+    JassVM vm;
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    auto callNative = [&](const std::string& name, const std::vector<JassValue>& args) -> JassValue {
+        const auto& table = vm.GetRegisteredNatives();
+        auto it = table.find(name);
+        return it != table.end() ? it->second(args) : JassValue::Null();
+    };
+
+    const int uHandle = natives.GetData()->AllocHandle(JassHandleInfo::UNIT, footman->GetHandleId());
+    const int baseDef = footman->GetTotalDefense();
+
+    const int buffHandle1 = callNative("CreateJassBuff", {
+        JassValue::Int(static_cast<int>(War3ID("BCs1").value)),
+        JassValue::Int(static_cast<int>(War3ID("BCs1").value))
+    }).intVal;
+    TEST_ASSERT(buffHandle1 != 0);
+    TEST_ASSERT(callNative("UnitAddAbility", {
+        JassValue::Int(uHandle),
+        JassValue::Int(buffHandle1)
+    }).boolVal);
+    TEST_ASSERT(footman->HasBuff(War3ID("BCs1")));
+    TEST_ASSERT(footman->GetTotalDefense() == baseDef + 6);
+    TEST_ASSERT(footman->GetNonStackingDamageTotal() == 20);
+
+    // Apply custom creator buff "BCs2" directly by rawcode via UnitAddAbility
+    TEST_ASSERT(!footman->IsSilenced());
+    TEST_ASSERT(callNative("UnitAddAbility", {
+        JassValue::Int(uHandle),
+        JassValue::Int(static_cast<int>(War3ID("BCs2").value))
+    }).boolVal);
+    TEST_ASSERT(footman->IsSilenced());
+    TEST_ASSERT(war3Mod->GetModuleStats().customBuffsApplied == 2u);
+
+    // Verify UnitApplyTimedLife & UnitPauseTimedLife route through ISimulationModule::CreateTimedLifeBuff
+    TEST_ASSERT(!footman->IsSummoned());
+    callNative("UnitApplyTimedLife", {
+        JassValue::Int(uHandle),
+        JassValue::Int(static_cast<int>(War3ID("BTLF").value)),
+        JassValue::Real(25.0f)
+    });
+    TEST_ASSERT(footman->IsSummoned());
+    callNative("UnitPauseTimedLife", {
+        JassValue::Int(uHandle),
+        JassValue::Bool(true)
+    });
+    TEST_ASSERT(footman->GetBuff(War3ID("BTLF"))->IsSuspended());
+
+    TEST_ASSERT(war3Mod->UnregisterCustomBuff(War3ID("BCs1")));
+    TEST_ASSERT(war3Mod->UnregisterCustomBuff(War3ID("BCs2")));
+    return true;
+}
+
+bool TestPhase22StageAAA2DynamicPluginSOV22AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath22 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths22[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths22) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath22 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath22.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase22PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath22));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() == 22u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TwistedMeadows.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(6)BlizzardTD.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 22u);
 
         MpqManager mpq;
         CSimulation mapSim;

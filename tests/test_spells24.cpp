@@ -156,7 +156,7 @@ bool TestSpells24FactoryCoverage() {
         AbilityFactory::CreateAbility(24929, War3ID("Aakb")).get()) != nullptr);
     TEST_ASSERT(dynamic_cast<CAbilityReincarnation*>(
         AbilityFactory::CreateAbility(24930, War3ID("ACrn")).get()) != nullptr);
-    TEST_ASSERT(dynamic_cast<CAbilityCriticalStrike*>(
+    TEST_ASSERT(dynamic_cast<CAbilitySpellBase*>(
         AbilityFactory::CreateAbility(24931, War3ID("ANdb")).get()) != nullptr);
     TEST_ASSERT(dynamic_cast<CAbilityRejuvenation*>(
         AbilityFactory::CreateAbility(24932, War3ID("AIrg")).get()) != nullptr);

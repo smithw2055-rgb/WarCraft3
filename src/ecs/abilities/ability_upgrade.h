@@ -15,7 +15,7 @@ public:
     bool IsUpgrading() const { return upgrading_; }
 
     // Configuration
-    void AddUpgradeTo(War3ID id) { upgradesTo_.insert(id); }
+    void AddUpgradeTo(War3ID id) override { upgradesTo_.insert(id); }
     const std::unordered_set<War3ID>& GetUpgradesTo() const override { return upgradesTo_; }
 
 private:

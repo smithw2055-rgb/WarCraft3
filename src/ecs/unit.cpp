@@ -1,7 +1,7 @@
 #include "ecs/unit_text_utils.h"
 #include "ecs/pathing/pathfinding.h"
 #include "csimulation.h"
-#include "ecs/buffs.h"
+#include "ecs/buff.h"
 #include "data/unitdata.h"
 #include "data/itemdata.h"
 #include "behaviors/behavior_move.h"
@@ -693,7 +693,7 @@ void CUnit::RemoveBuffsIf(CSimulation& game, bool removePositive, bool removeNeg
     for (auto it = buffs_.begin(); it != buffs_.end();) {
         CBuff* buff = it->get();
         bool match = buff != nullptr;
-        const bool isTimedLife = dynamic_cast<CBuffTimedLife*>(buff) != nullptr;
+        const bool isTimedLife = buff && buff->IsTimedLife();
         if (match && timedLifeOnly) {
             match = isTimedLife;
         }
@@ -731,7 +731,7 @@ bool CUnit::CheckSpellEffectReaction(CSimulation& game, CUnit* caster) {
 
 bool CUnit::IsHexed() const {
     for (const auto& buff : buffs_) {
-        if (buff && dynamic_cast<const CBuffHex*>(buff.get())) return true;
+        if (buff && buff->IsHexBuff()) return true;
     }
     return false;
 }
@@ -748,7 +748,7 @@ void CUnit::SetSharesVisionWith(int player, bool share) {
 bool CUnit::IsStealthed() const {
     if (IsInvisible()) return true;
     for (const auto& buff : buffs_) {
-        if (buff && dynamic_cast<const CBuffWindWalk*>(buff.get())) return true;
+        if (buff && buff->IsStealthBuff()) return true;
     }
     return false;
 }
@@ -759,7 +759,7 @@ bool CUnit::IsInvisibleTo(const CUnit* viewer) const {
     bool hidden = IsInvisible();
     if (!hidden) {
         for (const auto& buff : buffs_) {
-            if (buff && dynamic_cast<const CBuffWindWalk*>(buff.get())) {
+            if (buff && buff->IsStealthBuff()) {
                 hidden = true;
                 break;
             }
@@ -777,21 +777,21 @@ bool CUnit::IsInvisibleTo(const CUnit* viewer) const {
 
 bool CUnit::IsSilenced() const {
     for (const auto& buff : buffs_) {
-        if (buff && dynamic_cast<const CBuffSilence*>(buff.get())) return true;
+        if (buff && buff->IsSilenceBuff()) return true;
     }
     return false;
 }
 
 bool CUnit::IsAsleep() const {
     for (const auto& buff : buffs_) {
-        if (buff && dynamic_cast<const CBuffSleep*>(buff.get())) return true;
+        if (buff && buff->IsSleepBuff()) return true;
     }
     return false;
 }
 
 bool CUnit::IsSummoned() const {
     for (const auto& buff : buffs_) {
-        if (buff && dynamic_cast<const CBuffTimedLife*>(buff.get())) return true;
+        if (buff && buff->IsTimedLife()) return true;
     }
     return false;
 }

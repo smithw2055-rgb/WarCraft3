@@ -72,7 +72,7 @@ public:
     CAbilitySpikedCarapace(int handleId);
     void OnAdd(CSimulation& game, CUnit* unit) override;
     void OnRemove(CSimulation& game, CUnit* unit) override;
-    float GetReflectPercent() const { return reflectPercent_; }
+    float GetReflectPercent() const override { return reflectPercent_; }
 private:
     int armorBonus_ = 4;
     float reflectPercent_ = 0.25f;

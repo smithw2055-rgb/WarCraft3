@@ -37,8 +37,8 @@ public:
     float GetBuildTime() const override { return buildTime_; }
 
     // Configuration
-    void AddTrainedUnit(War3ID id) { unitsTrained_.insert(id); }
-    void AddResearch(War3ID id) { researchesAvailable_.insert(id); }
+    void AddTrainedUnit(War3ID id) override { unitsTrained_.insert(id); }
+    void AddResearch(War3ID id) override { researchesAvailable_.insert(id); }
     const std::unordered_set<War3ID>& GetTrainedUnits() const override { return unitsTrained_; }
     const std::unordered_set<War3ID>& GetResearches() const override { return researchesAvailable_; }
 

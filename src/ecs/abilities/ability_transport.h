@@ -11,10 +11,10 @@ public:
     CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) override;
 
     // Configuration
-    int GetCargoCapacity() const { return cargoCapacity_; }
-    void SetCargoCapacity(int v) { cargoCapacity_ = v; }
+    int GetCargoCapacity() const override { return cargoCapacity_; }
+    void SetCargoCapacity(int v) override { cargoCapacity_ = v; }
     float GetLoadRange() const { return loadRange_; }
-    void SetLoadRange(float v) { loadRange_ = v; }
+    void SetLoadRange(float v) override { loadRange_ = v; }
 
 private:
     int cargoCapacity_ = 8;

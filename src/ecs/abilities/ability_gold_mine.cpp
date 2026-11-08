@@ -77,11 +77,21 @@ void CAbilityOverlayedGoldMine::SetParentMine(CUnit* parentUnit, CAbilityGoldMin
 }
 
 int CAbilityOverlayedGoldMine::GetGold() const {
-    return parent_ ? parent_->GetGold() : 0;
+    if (parent_) return parent_->GetGold();
+    if (parentUnit_) {
+        if (CAbility* gold = parentUnit_->GetAbility(War3ID("Agld"))) return gold->GetGold();
+    }
+    return 0;
 }
 
 void CAbilityOverlayedGoldMine::SetGold(int v) {
-    if (parent_) parent_->SetGold(v);
+    if (parent_) {
+        parent_->SetGold(v);
+        return;
+    }
+    if (parentUnit_) {
+        if (CAbility* gold = parentUnit_->GetAbility(War3ID("Agld"))) gold->SetGold(v);
+    }
 }
 
 void CAbilityOverlayedGoldMine::AddMiner(CBehaviorHarvest* miner) {
@@ -114,37 +124,29 @@ void CAbilityOverlayedGoldMine::OnDeath(CSimulation& game, CUnit* unit) {
 CMineAccess MineAccessOf(CUnit* unit) {
     CMineAccess access;
     if (!unit) return access;
-    access.overlay = dynamic_cast<CAbilityOverlayedGoldMine*>(unit->GetAbility(War3ID("Agl2")));
-    if (!access.overlay) {
-        access.base = dynamic_cast<CAbilityGoldMine*>(unit->GetAbility(War3ID("Agld")));
+    access.mine = unit->GetAbility(War3ID("Agl2"));
+    if (!access.mine) {
+        access.mine = unit->GetAbility(War3ID("Agld"));
     }
     return access;
 }
 
 int CMineAccess::Gold() const {
-    if (overlay) return overlay->GetGold();
-    if (base) return base->GetGold();
-    return 0;
+    return mine ? mine->GetGold() : 0;
 }
 
 bool CMineAccess::CanAdd() const {
-    if (overlay) return overlay->CanAddMiner();
-    if (base) return base->CanAddMiner();
-    return false;
+    return mine ? mine->CanAddMiner() : false;
 }
 
 void CMineAccess::Add(CBehaviorHarvest* miner) {
-    if (overlay) overlay->AddMiner(miner);
-    else if (base) base->AddMiner(miner);
+    if (mine) mine->AddMiner(miner);
 }
 
 void CMineAccess::Remove(CBehaviorHarvest* miner) {
-    if (overlay) overlay->RemoveMiner(miner);
-    else if (base) base->RemoveMiner(miner);
+    if (mine) mine->RemoveMiner(miner);
 }
 
 float CMineAccess::Duration() const {
-    if (overlay) return overlay->GetMiningDuration();
-    if (base) return base->GetMiningDuration();
-    return 0.0f;
+    return mine ? mine->GetMiningDuration() : 0.0f;
 }

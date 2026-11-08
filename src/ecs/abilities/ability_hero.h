@@ -50,7 +50,7 @@ public:
     void SetProperName(const std::string& name) override { properName_ = name; }
 
     // Learnable skills
-    void AddLearnableSkill(War3ID skillCode) { skillsAvailable_.insert(skillCode); }
+    void AddLearnableSkill(War3ID skillCode) override { skillsAvailable_.insert(skillCode); }
     const std::unordered_set<War3ID>& GetLearnableSkills() const override { return skillsAvailable_; }
 
 private:

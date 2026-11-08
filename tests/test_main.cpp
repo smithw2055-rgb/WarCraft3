@@ -865,6 +865,10 @@ bool TestPhase21StageXX1UnifiedMpqSingleArchiveReaderAndJassScriptResolver();
 bool TestPhase21StageXX2LayeredMapObjectModsAndCaseInsensitiveSlkMergeHelpers();
 bool TestPhase21StageYY1War3GameModuleV21CustomItemUpgradeAndAbilityDataArchetypes();
 bool TestPhase21StageYY2DynamicPluginSOV21AndCloudRetailMapsEndToEndSuite();
+bool TestPhase22StageZZ1CompactCBuff8BitStateFlagsAndVirtualCombatModifierContract();
+bool TestPhase22StageZZ2CompleteCAbilityVirtualContractZeroCrossAbilityCasts();
+bool TestPhase22StageAAA1War3GameModuleV22DynamicBuffFactoryAndJassBuffAttachment();
+bool TestPhase22StageAAA2DynamicPluginSOV22AndCloudRetailMapsEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1725,6 +1729,10 @@ int main(int argc, char** argv) {
         {"Phase21 Stage XX2 Layered map ObjectMods loader and SlkMerge helpers", TestPhase21StageXX2LayeredMapObjectModsAndCaseInsensitiveSlkMergeHelpers},
         {"Phase21 Stage YY1 War3GameModule v21 custom item upgrade and ability archetypes", TestPhase21StageYY1War3GameModuleV21CustomItemUpgradeAndAbilityDataArchetypes},
         {"Phase21 Stage YY2 Dynamic plugin SO v21 and cloud retail maps end-to-end suite", TestPhase21StageYY2DynamicPluginSOV21AndCloudRetailMapsEndToEndSuite},
+        {"Phase22 Stage ZZ1 Compact CBuff 8-bit state flags and virtual combat contract", TestPhase22StageZZ1CompactCBuff8BitStateFlagsAndVirtualCombatModifierContract},
+        {"Phase22 Stage ZZ2 Complete CAbility virtual contract zero cross-ability casts", TestPhase22StageZZ2CompleteCAbilityVirtualContractZeroCrossAbilityCasts},
+        {"Phase22 Stage AAA1 War3GameModule v22 dynamic buff factory and JASS buff attach", TestPhase22StageAAA1War3GameModuleV22DynamicBuffFactoryAndJassBuffAttachment},
+        {"Phase22 Stage AAA2 Dynamic plugin SO v22 and cloud retail maps end-to-end suite", TestPhase22StageAAA2DynamicPluginSOV22AndCloudRetailMapsEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

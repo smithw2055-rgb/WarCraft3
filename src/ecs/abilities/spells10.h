@@ -12,8 +12,8 @@
 class CAbilityCleavingAttack : public CAbilitySpellBase {
 public:
     CAbilityCleavingAttack(int handleId);
-    float GetSplashFraction() const { return splashFraction_; }
-    float GetSplashRadius() const { return splashRadius_; }
+    float GetSplashFraction() const override { return splashFraction_; }
+    float GetSplashRadius() const override { return splashRadius_; }
 private:
     float splashFraction_ = 0.5f;
     float splashRadius_ = 200.0f;

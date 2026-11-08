@@ -20,12 +20,17 @@ enum class CBuffTargetType : uint8_t {
     AOE         // Applied to area of effect
 };
 
-// Compact bitmask flags for CBuff instance state (Phase 18 Stage RR)
+// Compact bitmask flags for CBuff instance state (Phase 18 Stage RR & Phase 22 Stage ZZ1)
 enum class BuffStateFlag : uint8_t {
     NONE        = 0,
     IS_POSITIVE = 1u << 0,
     PERIODIC    = 1u << 1,
     SUSPENDED   = 1u << 2,
+    TIMED_LIFE  = 1u << 3,
+    HEX         = 1u << 4,
+    SILENCE     = 1u << 5,
+    SLEEP       = 1u << 6,
+    STEALTH     = 1u << 7,
 };
 
 // ============================================================
@@ -65,12 +70,18 @@ struct DataDrivenBuffRecord {
 // ============================================================
 // CBuff - base class for all buffs/debuffs
 //
-// Phase 18 Modernization:
-// - Packs boolean state flags (`isPositive_`, `periodic_`, `suspended_`) into
-//   1-bit bitfields and stack counters into `int16_t`, reducing `sizeof(CBuff)`
-//   from 56 bytes down to 40 bytes (28.6% reduction).
+// Phase 18 & Phase 22 Modernization:
+// - Packs all 8 boolean state flags (`isPositive_`, `periodic_`, `suspended_`,
+//   `timedLife_`, `hex_`, `silence_`, `sleep_`, `stealth_`) into a single byte
+//   of 1-bit bitfields and stack counters into `int16_t`, keeping `sizeof(CBuff)`
+//   at 40 bytes (28.6% reduction vs original 56 bytes).
 // - Provides `CBuffCloneable<Derived, Base>` CRTP mixin to eliminate manual
 //   `Clone()` boilerplate across all 48 concrete buff subclasses.
+// - Exposes virtual combat/state query contracts (`GetMissChance`,
+//   `GetDamageDealtFactor`, `GetAttackDealtAdd`, `GetWeaponDamageTakenMultiplier`,
+//   `GetAttackTypeDamageTakenMultiplier`, `GetReflectPercent`, `GetStealPercent`,
+//   `GetBackstabDamage`) so `CUnit`, `jass_natives_*`, and `War3GameModule`
+//   never perform `dynamic_cast<CBuff*>` or depend on `ecs/buffs.h`.
 // ============================================================
 class CBuff {
 public:
@@ -124,19 +135,58 @@ public:
     bool IsSuspended() const { return suspended_; }
     void SetSuspended(bool v) { suspended_ = v; }
 
+    // Phase 22 Stage ZZ1: O(1) bitfield status flags (eliminates dynamic_cast in CUnit & JASS)
+    bool IsTimedLife() const { return timedLife_; }
+    void SetTimedLife(bool v) { timedLife_ = v; }
+    bool IsTimedLifeBar() const { return timedLife_; }
+
+    bool IsHexBuff() const { return hex_; }
+    void SetHexBuff(bool v) { hex_ = v; }
+
+    bool IsSilenceBuff() const { return silence_; }
+    void SetSilenceBuff(bool v) { silence_ = v; }
+
+    bool IsSleepBuff() const { return sleep_; }
+    void SetSleepBuff(bool v) { sleep_ = v; }
+
+    bool IsStealthBuff() const { return stealth_; }
+    void SetStealthBuff(bool v) { stealth_ = v; }
+
     // O(1) bitmask inspection/restoration for state flags
     uint8_t GetBuffStateFlagsBitmask() const {
         uint8_t mask = 0;
         if (isPositive_) mask |= static_cast<uint8_t>(BuffStateFlag::IS_POSITIVE);
         if (periodic_)   mask |= static_cast<uint8_t>(BuffStateFlag::PERIODIC);
         if (suspended_)  mask |= static_cast<uint8_t>(BuffStateFlag::SUSPENDED);
+        if (timedLife_)  mask |= static_cast<uint8_t>(BuffStateFlag::TIMED_LIFE);
+        if (hex_)        mask |= static_cast<uint8_t>(BuffStateFlag::HEX);
+        if (silence_)    mask |= static_cast<uint8_t>(BuffStateFlag::SILENCE);
+        if (sleep_)      mask |= static_cast<uint8_t>(BuffStateFlag::SLEEP);
+        if (stealth_)    mask |= static_cast<uint8_t>(BuffStateFlag::STEALTH);
         return mask;
     }
     void SetBuffStateFlagsBitmask(uint8_t mask) {
         isPositive_ = (mask & static_cast<uint8_t>(BuffStateFlag::IS_POSITIVE)) != 0;
         periodic_   = (mask & static_cast<uint8_t>(BuffStateFlag::PERIODIC)) != 0;
         suspended_  = (mask & static_cast<uint8_t>(BuffStateFlag::SUSPENDED)) != 0;
+        timedLife_  = (mask & static_cast<uint8_t>(BuffStateFlag::TIMED_LIFE)) != 0;
+        hex_        = (mask & static_cast<uint8_t>(BuffStateFlag::HEX)) != 0;
+        silence_    = (mask & static_cast<uint8_t>(BuffStateFlag::SILENCE)) != 0;
+        sleep_      = (mask & static_cast<uint8_t>(BuffStateFlag::SLEEP)) != 0;
+        stealth_    = (mask & static_cast<uint8_t>(BuffStateFlag::STEALTH)) != 0;
     }
+
+    // Phase 22 Stage ZZ1: Virtual Combat Modifier & Reaction Query Contract
+    virtual float GetMissChance() const { return 0.0f; }
+    virtual float GetDamageDealtFactor() const { return 1.0f; }
+    virtual float GetAttackDealtAdd() const { return 0.0f; }
+    virtual float GetWeaponDamageTakenMultiplier() const { return 1.0f; }
+    virtual float GetAttackTypeDamageTakenMultiplier(int /*attackTypeOrd*/) const { return 1.0f; }
+    virtual float GetReflectPercent() const { return 0.0f; }
+    virtual float GetStealPercent() const { return 0.0f; }
+    virtual float GetBackstabDamage() const { return 0.0f; }
+    virtual bool GrantsEthereal() const { return false; }
+    virtual bool GrantsMagicImmune() const { return false; }
 
     // Lifecycle
     virtual void OnApply(CSimulation& game, CUnit* target);
@@ -161,6 +211,11 @@ protected:
     bool isPositive_ : 1;
     bool periodic_   : 1;
     bool suspended_  : 1;
+    bool timedLife_  : 1;
+    bool hex_        : 1;
+    bool silence_    : 1;
+    bool sleep_      : 1;
+    bool stealth_    : 1;
 };
 
 // CRTP helper that implements `Clone()` via the derived class's copy constructor,

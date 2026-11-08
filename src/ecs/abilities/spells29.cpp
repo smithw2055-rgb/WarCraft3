@@ -1,9 +1,11 @@
 #include "spells29.h"
-#include "ecs/abilities/ability_gold_mine.h"
-#include "ecs/abilities/spells28.h"
+#include "data/abilitydata.h"
+#include "ecs/ability_factory.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
 #include "ecs/unit.h"
+#include "ecs/unit_type.h"
+#include <algorithm>
 
 namespace {
 
@@ -22,18 +24,30 @@ void SetMineWorkDisabled(CUnit* unit, bool disabled) {
 } // namespace
 
 CAbilityDrunkenBrawler::CAbilityDrunkenBrawler(int handleId)
-    : CAbilityCriticalStrike(handleId) {
+    : CAbilitySpellBase(handleId, War3ID("ANdb"), CAbilityCategory::SPELL) {
+    SetTargetType(CSpellTargetType::NO_TARGET);
+    SetPassiveSpell(true);
     SetAlias(War3ID("ANdb"));
 }
 
 void CAbilityDrunkenBrawler::OnAdd(CSimulation& game, CUnit* unit) {
-    CAbilityCriticalStrike::OnAdd(game, unit);
-    if (unit) unit->AddEvasionSource(GetAlias(), dodge_);
+    (void)game;
+    if (!unit) return;
+    unit->AddCritSource(GetAlias(), critChance_, critMultiplier_);
+    unit->AddEvasionSource(GetAlias(), dodge_);
 }
 
 void CAbilityDrunkenBrawler::OnRemove(CSimulation& game, CUnit* unit) {
-    CAbilityCriticalStrike::OnRemove(game, unit);
-    if (unit) unit->RemoveEvasionSource(GetAlias());
+    (void)game;
+    if (!unit) return;
+    unit->RemoveCritSource(GetAlias());
+    unit->RemoveEvasionSource(GetAlias());
+}
+
+void CAbilityDrunkenBrawler::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    critChance_ = def.DataFloatAt(level, 0, critChance_ * 100.0f) / 100.0f;
+    critMultiplier_ = def.DataFloatAt(level, 1, critMultiplier_);
+    dodge_ = def.DataFloatAt(level, 3, dodge_);
 }
 
 CAbilityEntangleGoldMine::CAbilityEntangleGoldMine(int handleId)
@@ -74,8 +88,8 @@ CBehavior* CAbilityEntangleGoldMine::Begin(CSimulation& game, CUnit* caster, int
 void CAbilityEntangleGoldMine::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     auto* mineUnit = dynamic_cast<CUnit*>(target);
     if (!caster || !mineUnit || mineUnit->IsDead()) return;
-    auto* gold = dynamic_cast<CAbilityGoldMine*>(mineUnit->GetAbility(War3ID("Agld")));
-    if (!gold) return;
+    CAbility* gold = mineUnit->GetAbility(War3ID("Agld"));
+    if (!gold || !gold->IsResourceMine()) return;
     if (replacement_ && !replacement_->IsDead()) return;
 
     CUnit* created = game.CreateUnit(resultId_, caster->GetPlayerIndex(),
@@ -87,20 +101,23 @@ void CAbilityEntangleGoldMine::DoEffect(CSimulation& game, CUnit* caster, CWidge
     original_ = mineUnit;
     replacement_ = created;
 
-    auto* overlay = dynamic_cast<CAbilityOverlayedGoldMine*>(created->GetAbility(War3ID("Agl2")));
+    CAbility* overlay = created->GetAbility(War3ID("Agl2"));
     if (!overlay) {
-        auto made = std::make_unique<CAbilityOverlayedGoldMine>(game.AllocateHandleId());
+        auto made = AbilityFactory::CreateAbility(game.AllocateHandleId(), War3ID("Agl2"));
         overlay = made.get();
-        created->AddAbility(game, std::move(made));
+        if (made) created->AddAbility(game, std::move(made));
     }
-    overlay->SetParentMine(mineUnit, gold);
+    if (overlay) {
+        overlay->BindParentMineUnit(mineUnit);
+    }
 
     auto mine = std::make_unique<CAbilityEntangledMine>(game.AllocateHandleId());
     mine->SetParent(mineUnit);
     created->AddAbility(game, std::move(mine));
     if (!created->GetAbility(War3ID("Aenc"))) {
-        created->AddAbility(game, std::make_unique<CAbilityCargoHold>(
-            game.AllocateHandleId(), War3ID("Aenc"), false, 5));
+        if (auto cargo = AbilityFactory::CreateAbility(game.AllocateHandleId(), War3ID("Aenc"))) {
+            created->AddAbility(game, std::move(cargo));
+        }
     }
 
     if (!instant_) {
@@ -156,8 +173,8 @@ void CAbilityEntangledMine::OnTick(CSimulation& game, CUnit* unit) {
     if (accum_ < interval_) return;
     accum_ -= interval_;
 
-    if (auto* cargo = dynamic_cast<CAbilityCargoHold*>(unit->GetAbility(War3ID("Aenc")))) {
-        const int cap = cargo->GetCapacity();
+    if (CAbility* cargo = unit->GetAbility(War3ID("Aenc"))) {
+        const int cap = cargo->GetCargoCapacity();
         if (cap <= 0) return;
         index_ = (index_ + 1) % cap;
         if (index_ >= (int)unit->GetCargoUnits().size()) return;

@@ -12,6 +12,7 @@ public:
         SetPhysical(true);
         SetPermanent(false);
         SetIconShowing(true);
+        SetGenericPlaceholder(true);
     }
 
     bool CheckCanUse(CSimulation&, CUnit*, int) const override { return false; }

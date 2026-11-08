@@ -36,7 +36,7 @@ public:
     void SetLevel(int v) override;
     int GetMaxLevel() const { return maxLevel_; }
     void SetMaxLevel(int v) { maxLevel_ = static_cast<int16_t>(v); }
-    void ApplyData(const CAbilityDefFull& def);
+    void ApplyData(const CAbilityDefFull& def) override;
 
     // Order validation
     int GetBaseOrderId() const override;
@@ -57,7 +57,7 @@ public:
     void DoEffect(CSimulation& game, CUnit* caster) override;
 
     // Cooldown state
-    bool IsOnCooldown() const { return cooldownRemaining_ > 0; }
+    bool IsOnCooldown() const override { return cooldownRemaining_ > 0; }
     void StartCooldown() override { cooldownRemaining_ = cooldown_; }
     void ResetCooldown() override { cooldownRemaining_ = 0.0f; }
     void UpdateCooldown(float dt) override { if (cooldownRemaining_ > 0) cooldownRemaining_ -= dt; }

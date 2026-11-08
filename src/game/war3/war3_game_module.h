@@ -29,12 +29,14 @@
 //   - engine::IGameModule       (plugs into engine::EngineKernel)
 // ============================================================================
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "data/combat_types.h"
+#include "ecs/buff.h"
 #include "ecs/melee_ai.h"
 #include "engine/dynamic_module_loader.h"
 #include "engine/engine_kernel.h"
@@ -77,7 +79,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 21u; }
+    uint32_t GetModuleVersion() const override { return 22u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -317,6 +319,24 @@ public:
                                   float area,
                                   float duration);
 
+    // Phase 22: Dynamic Buff Factory & Declarative DataDrivenBuffSpec Registry
+    using BuffCreatorFn = std::function<std::unique_ptr<CBuff>(float duration, int casterHandleId)>;
+    void RegisterCustomBuffCreator(War3ID buffCode, BuffCreatorFn creator);
+    void RegisterCustomBuffSpec(const DataDrivenBuffSpec& spec);
+    bool UnregisterCustomBuff(War3ID buffCode);
+    bool HasCustomBuff(War3ID buffCode) const;
+
+    CBuff* CreateTimedLifeBuff(uint32_t buffRawcode,
+                               float duration) const override;
+    CBuff* CreateBuffByCode(uint32_t buffRawcode,
+                            float duration = 0.0f,
+                            int casterHandleId = -1) const override;
+    bool TryApplyCustomBuffByCode(CSimulation& sim,
+                                  CUnit& target,
+                                  uint32_t buffRawcode,
+                                  float durationOverride = 0.0f,
+                                  int casterHandleId = -1) override;
+
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 
     bool OnCheckSpellEffectReaction(CSimulation& sim,
@@ -369,6 +389,8 @@ private:
     CSimulation* boundSim_ = nullptr;
     std::unordered_map<uint32_t, std::vector<War3ID>> customTechEquivalents_;
     std::unordered_map<uint32_t, int> customAutocastKinds_;
+    std::unordered_map<uint32_t, BuffCreatorFn> customBuffCreators_;
+    std::unordered_map<uint32_t, DataDrivenBuffSpec> customBuffSpecs_;
     AttackDefenseTable combatTable_;
     float defenseArmorFactor_ = 0.06f;
     float bountyMultiplier_ = 1.0f;

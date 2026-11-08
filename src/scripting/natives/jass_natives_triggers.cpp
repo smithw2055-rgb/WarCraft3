@@ -2298,20 +2298,47 @@ void JassNatives::RegisterGameNatives() {
         auto it = data->abilityCooldowns.find(cooldownKey(uSim, (uint32_t)code.value));
         return JassValue::Real(it != data->abilityCooldowns.end() ? it->second : 0.0f);
     });
-    vm_.RegisterNative("UnitAddAbility", [data = data_, addAbilityToUnit](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("UnitAddAbility", [data = data_, sim = sim_, addAbilityToUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);
-        // Buff handles wait on the buff factory (no CBuff construction from
-        // JASS yet); fail closed instead of attaching a do-nothing ability.
         auto handle = HandleToAbility(data, args[1].intVal);
-        if (handle && handle->isBuff) return JassValue::Bool(false);
-        return JassValue::Bool(addAbilityToUnit(args[0].intVal, AbilityCodeFromJassArg(data, args[1].intVal), 1));
+        if (handle && handle->isBuff) {
+            if (!sim || !sim->GetSimulationModule()) return JassValue::Bool(false);
+            CUnit* u = ResolveJassUnit(data, sim, args[0].intVal);
+            if (!u) return JassValue::Bool(false);
+            const War3ID buffCode = handle->alias.value != 0 ? handle->alias : handle->code;
+            return JassValue::Bool(sim->GetSimulationModule()->TryApplyCustomBuffByCode(*sim, *u, buffCode.value));
+        }
+        const War3ID code = AbilityCodeFromJassArg(data, args[1].intVal);
+        if (sim && sim->GetSimulationModule()) {
+            if (CUnit* u = ResolveJassUnit(data, sim, args[0].intVal)) {
+                if (sim->GetSimulationModule()->TryApplyCustomBuffByCode(*sim, *u, code.value)) {
+                    return JassValue::Bool(true);
+                }
+            }
+        }
+        return JassValue::Bool(addAbilityToUnit(args[0].intVal, code, 1));
     });
-    vm_.RegisterNative("AddUnitAbility", [data = data_, addAbilityToUnit](const std::vector<JassValue>& args) -> JassValue {
+    vm_.RegisterNative("AddUnitAbility", [data = data_, sim = sim_, addAbilityToUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         auto ability = HandleToAbility(data, args[1].intVal);
-        if (ability && ability->isBuff) return JassValue::Null();
+        if (ability && ability->isBuff) {
+            if (sim && sim->GetSimulationModule()) {
+                if (CUnit* u = ResolveJassUnit(data, sim, args[0].intVal)) {
+                    const War3ID buffCode = ability->alias.value != 0 ? ability->alias : ability->code;
+                    sim->GetSimulationModule()->TryApplyCustomBuffByCode(*sim, *u, buffCode.value);
+                }
+            }
+            return JassValue::Null();
+        }
         const War3ID abilityCode = ability ? ability->code : AbilityCodeFromJassArg(data, args[1].intVal);
         const int level = ability ? ability->level : 1;
+        if (!ability && sim && sim->GetSimulationModule()) {
+            if (CUnit* u = ResolveJassUnit(data, sim, args[0].intVal)) {
+                if (sim->GetSimulationModule()->TryApplyCustomBuffByCode(*sim, *u, abilityCode.value)) {
+                    return JassValue::Null();
+                }
+            }
+        }
         addAbilityToUnit(args[0].intVal, abilityCode, level);
         return JassValue::Null();
     });

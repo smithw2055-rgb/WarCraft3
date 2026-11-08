@@ -22,6 +22,8 @@ class CItem;
 class CDestructable;
 class CCombatSystem;
 class CAbility;
+class CBuff;
+struct DataDrivenBuffSpec;
 struct CarriedHero;
 struct AIRacePlan;
 
@@ -35,6 +37,8 @@ struct SimulationModuleStats {
     uint64_t customOrdersRegistered = 0;
     uint64_t customAurasRegistered = 0;
     uint64_t customDataArchetypesRegistered = 0;
+    uint64_t customBuffsRegistered = 0;
+    uint64_t customBuffsApplied = 0;
     uint64_t itemsConfigured = 0;
     uint64_t destructablesConfigured = 0;
     uint64_t unitsCommitted = 0;
@@ -321,6 +325,26 @@ public:
                                      int /*orderId*/,
                                      uint32_t /*abilityRawcode*/ = 0,
                                      int /*secondaryOrderId*/ = 0) {}
+
+    // Phase 22: Dynamic Buff Factory & Timed Life Buff Creation Contract
+    virtual CBuff* CreateTimedLifeBuff(uint32_t /*buffRawcode*/,
+                                       float /*duration*/) const {
+        return nullptr;
+    }
+
+    virtual CBuff* CreateBuffByCode(uint32_t /*buffRawcode*/,
+                                    float /*duration*/ = 0.0f,
+                                    int /*casterHandleId*/ = -1) const {
+        return nullptr;
+    }
+
+    virtual bool TryApplyCustomBuffByCode(CSimulation& /*sim*/,
+                                          CUnit& /*target*/,
+                                          uint32_t /*buffRawcode*/,
+                                          float /*durationOverride*/ = 0.0f,
+                                          int /*casterHandleId*/ = -1) {
+        return false;
+    }
 
     // Negative buff duration multiplier (e.g., 0.25x when Resistant Skin 'Brsk' is active).
     virtual float GetNegativeBuffDurationMultiplier(const CUnit& /*target*/) const {

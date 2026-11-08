@@ -37,6 +37,8 @@ public:
     CAbilityBash(int handleId);
     float GetChance() const { return chance_; }
     float GetDuration() const { return duration_; }
+    float GetProcChance() const override { return chance_; }
+    float GetProcDuration() const override { return duration_; }
     void SetChance(float v) { chance_ = v; }
     void SetDuration(float v) { duration_ = v; }
 protected:

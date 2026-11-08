@@ -120,12 +120,13 @@ inline bool HasDisableFlag(uint8_t flags, CAbilityDisableType flag) {
 
 // Compact bitmask flags for CAbility instance state (Phase 18 Stage RR)
 enum class AbilityStateFlag : uint8_t {
-    NONE            = 0,
-    PHYSICAL        = 1u << 0,
-    PERMANENT       = 1u << 1,
-    ICON_SHOWING    = 1u << 2,
-    AUTOCAST_ACTIVE = 1u << 3,
-    PASSIVE_SPELL   = 1u << 4,
+    NONE                = 0,
+    PHYSICAL            = 1u << 0,
+    PERMANENT           = 1u << 1,
+    ICON_SHOWING        = 1u << 2,
+    AUTOCAST_ACTIVE     = 1u << 3,
+    PASSIVE_SPELL       = 1u << 4,
+    GENERIC_PLACEHOLDER = 1u << 5,
 };
 
 // ============================================================
@@ -162,6 +163,7 @@ public:
     bool IsPermanent() const { return permanent_ != 0; }
     bool IsIconShowing() const { return iconShowing_ != 0; }
     bool IsPassiveSpell() const { return passiveSpell_ != 0; }
+    bool IsGenericPlaceholder() const { return genericPlaceholder_ != 0; }
     uint8_t GetDisabledFlags() const { return disabled_; }
 
     void SetDisabled(bool disabled, CAbilityDisableType type);
@@ -169,25 +171,28 @@ public:
     void SetPermanent(bool v) { permanent_ = v ? 1u : 0u; }
     void SetIconShowing(bool v) { iconShowing_ = v ? 1u : 0u; }
     void SetPassiveSpell(bool v) { passiveSpell_ = v ? 1u : 0u; }
+    void SetGenericPlaceholder(bool v) { genericPlaceholder_ = v ? 1u : 0u; }
     bool IsAutocastActive() const { return autocastActive_ != 0; }
     void SetAutocastActive(bool v) { autocastActive_ = v ? 1u : 0u; }
 
     // O(1) bitmask inspection/restoration for ability state flags
     uint8_t GetAbilityStateFlagsBitmask() const {
         uint8_t mask = 0;
-        if (physical_)       mask |= static_cast<uint8_t>(AbilityStateFlag::PHYSICAL);
-        if (permanent_)      mask |= static_cast<uint8_t>(AbilityStateFlag::PERMANENT);
-        if (iconShowing_)    mask |= static_cast<uint8_t>(AbilityStateFlag::ICON_SHOWING);
-        if (autocastActive_) mask |= static_cast<uint8_t>(AbilityStateFlag::AUTOCAST_ACTIVE);
-        if (passiveSpell_)   mask |= static_cast<uint8_t>(AbilityStateFlag::PASSIVE_SPELL);
+        if (physical_)           mask |= static_cast<uint8_t>(AbilityStateFlag::PHYSICAL);
+        if (permanent_)          mask |= static_cast<uint8_t>(AbilityStateFlag::PERMANENT);
+        if (iconShowing_)        mask |= static_cast<uint8_t>(AbilityStateFlag::ICON_SHOWING);
+        if (autocastActive_)     mask |= static_cast<uint8_t>(AbilityStateFlag::AUTOCAST_ACTIVE);
+        if (passiveSpell_)       mask |= static_cast<uint8_t>(AbilityStateFlag::PASSIVE_SPELL);
+        if (genericPlaceholder_) mask |= static_cast<uint8_t>(AbilityStateFlag::GENERIC_PLACEHOLDER);
         return mask;
     }
     void SetAbilityStateFlagsBitmask(uint8_t mask) {
-        physical_       = (mask & static_cast<uint8_t>(AbilityStateFlag::PHYSICAL)) ? 1u : 0u;
-        permanent_      = (mask & static_cast<uint8_t>(AbilityStateFlag::PERMANENT)) ? 1u : 0u;
-        iconShowing_    = (mask & static_cast<uint8_t>(AbilityStateFlag::ICON_SHOWING)) ? 1u : 0u;
-        autocastActive_ = (mask & static_cast<uint8_t>(AbilityStateFlag::AUTOCAST_ACTIVE)) ? 1u : 0u;
-        passiveSpell_   = (mask & static_cast<uint8_t>(AbilityStateFlag::PASSIVE_SPELL)) ? 1u : 0u;
+        physical_           = (mask & static_cast<uint8_t>(AbilityStateFlag::PHYSICAL)) ? 1u : 0u;
+        permanent_          = (mask & static_cast<uint8_t>(AbilityStateFlag::PERMANENT)) ? 1u : 0u;
+        iconShowing_        = (mask & static_cast<uint8_t>(AbilityStateFlag::ICON_SHOWING)) ? 1u : 0u;
+        autocastActive_     = (mask & static_cast<uint8_t>(AbilityStateFlag::AUTOCAST_ACTIVE)) ? 1u : 0u;
+        passiveSpell_       = (mask & static_cast<uint8_t>(AbilityStateFlag::PASSIVE_SPELL)) ? 1u : 0u;
+        genericPlaceholder_ = (mask & static_cast<uint8_t>(AbilityStateFlag::GENERIC_PLACEHOLDER)) ? 1u : 0u;
     }
 
     // Base engine order id for this ability (ref getBaseOrderId); 0 when
@@ -339,6 +344,38 @@ public:
     virtual bool RemoveStock(War3ID /*id*/) { return false; }
     virtual void SetStockMax(int /*v*/) {}
     virtual void SetStockReplenishInterval(float /*v*/) {}
+    virtual void AddLearnableSkill(War3ID /*skillCode*/) {}
+
+    // 8. Phase 22 Stage ZZ2: Extended Queue/Upgrade/Rally/Cargo/Mine/Pairing/Combat Passive Contracts
+    virtual void AddTrainedUnit(War3ID /*unitTypeId*/) {}
+    virtual void AddResearch(War3ID /*upgradeId*/) {}
+    virtual void AddUpgradeTo(War3ID /*targetTypeId*/) {}
+    virtual void ApplyToTrainedUnit(CSimulation& /*game*/, CUnit* /*building*/, CUnit* /*trainedUnit*/) const {}
+    virtual void ApplyData(const struct CAbilityDefFull& /*def*/) {}
+    virtual bool IsOnCooldown() const { return GetCooldownRemaining() > 0.0f; }
+
+    // Cargo Hold & Transport Load virtual contract
+    virtual int GetCargoCapacity() const { return 0; }
+    virtual void SetCargoCapacity(int /*v*/) {}
+    virtual void SetLoadRange(float /*v*/) {}
+    virtual bool TryLoad(CUnit* /*holder*/, CUnit* /*passenger*/) { return false; }
+    virtual void UnloadAll(CUnit* /*holder*/) {}
+
+    // Blighted & Overlayed Mine virtual contract
+    virtual bool AddMiner() { return false; }
+    virtual void RemoveMiner() {}
+    virtual void BindParentMineUnit(CUnit* /*parentUnit*/) {}
+
+    // Militia / Pairing conversion virtual contract
+    virtual bool Convert(CSimulation& /*game*/, CUnit* /*self*/) { return false; }
+    virtual void SetConverted(bool /*v*/) {}
+
+    // Passive Combat Procs virtual contract (Spiked Carapace, Bash, Cleaving Attack, Pulverize)
+    virtual float GetReflectPercent() const { return 0.0f; }
+    virtual float GetProcChance() const { return 0.0f; }
+    virtual float GetProcDuration() const { return 0.0f; }
+    virtual float GetSplashFraction() const { return 0.0f; }
+    virtual float GetSplashRadius() const { return 0.0f; }
 
 protected:
     int handleId_;
@@ -346,10 +383,11 @@ protected:
     War3ID alias_;
     CAbilityCategory category_;
     uint8_t disabled_ = 0;
-    uint16_t level_          : 11;
-    uint16_t physical_       : 1;
-    uint16_t permanent_      : 1;
-    uint16_t iconShowing_    : 1;
-    uint16_t autocastActive_ : 1;
-    uint16_t passiveSpell_   : 1;
+    uint16_t level_              : 10;
+    uint16_t physical_           : 1;
+    uint16_t permanent_          : 1;
+    uint16_t iconShowing_        : 1;
+    uint16_t autocastActive_     : 1;
+    uint16_t passiveSpell_       : 1;
+    uint16_t genericPlaceholder_ : 1;
 };

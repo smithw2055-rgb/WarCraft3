@@ -9,7 +9,6 @@
 #include "ecs/item.h"
 #include "ecs/ability.h"
 #include "ecs/buff.h"
-#include "ecs/buffs.h"
 #include "ecs/ability_factory.h"
 #include "ecs/destructable.h"
 #include "ecs/orders/order.h"
@@ -210,7 +209,7 @@ inline CDamageType ToScriptDamageType(int ordinal) {
 // (documented approximation; full purge/count-all queries are exact).
 inline bool BuffExMatches(const CBuff* buff, bool wantPositive, bool wantNegative, bool timedLifeOnly) {
     if (!buff) return false;
-    if (timedLifeOnly && dynamic_cast<const CBuffTimedLife*>(buff) == nullptr) return false;
+    if (timedLifeOnly && !buff->IsTimedLife()) return false;
     if (buff->IsPositive() && !wantPositive) return false;
     if (buff->IsNegative() && !wantNegative) return false;
     return true;

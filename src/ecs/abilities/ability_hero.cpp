@@ -2,7 +2,6 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/ability_factory.h"
-#include "ecs/abilities/ability_generic.h"
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -146,7 +145,7 @@ void CAbilityHero::LearnSkill(CSimulation& game, CUnit* unit, War3ID skillCode) 
         // Placeholder fallback (ref GenericDoNothing) is not learnable:
         // like ref learnSkill with no ability type, keep the point and
         // report failure instead of spending it on a dead icon.
-        if (dynamic_cast<CAbilityGenericDoNothing*>(created.get())) {
+        if (created->IsGenericPlaceholder()) {
             std::cout << "Hero cannot learn unimplemented skill: " << skillCode.ToString() << std::endl;
         } else {
             created->SetLevel(1);
