@@ -1,6 +1,6 @@
 #pragma once
 #include "ecs/behaviors/behavior.h"
-#include "ecs/abilities/ability_harvest.h"
+#include "ecs/ability.h"
 #include <deque>
 
 // CBehaviorHarvest - worker moves to resource and gathers it
@@ -36,7 +36,7 @@ private:
     bool returning_ = false;
     bool inMine_ = false;
     float gatherTimer_ = 0;
-    float gatherDuration_ = 2.0f; // seconds per gather cycle
+    float gatherDuration_ = 2.0f; // seconds per chop/mine tick
     int gatheredAmount_ = 0;
     int popoutFromMineTurnTick_ = 0;
 

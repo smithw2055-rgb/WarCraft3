@@ -2,7 +2,7 @@
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"
 #include "ecs/item.h"
-#include "ecs/abilities/ability_inventory.h"
+#include "ecs/ability.h"
 #include "ecs/pathing/world_collision.h"
 #include <cmath>
 
@@ -33,9 +33,9 @@ bool StepToward(CSimulation& simulation, CUnit* unit, float tx, float ty, float 
     return false;
 }
 
-CAbilityInventory* GetInventory(CUnit* unit) {
+CAbility* GetInventory(CUnit* unit) {
     if (!unit) return nullptr;
-    return dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")));
+    return unit->GetAbility(War3ID("AInv"));
 }
 
 } // namespace
@@ -102,19 +102,12 @@ bool CBehaviorGiveItem::TryGiveNow(CSimulation& simulation) {
     if (!giver || !receiver) return true;
     CItem* item = giver->GetItem(slot_);
     if (!item) return true;
-    // Detach from giver without scattering to the ground: drop to feet
-    // first is wrong (fires drop events); instead remove from the slot
-    // via DropItemAt to a scratch position is avoided -- do a direct
-    // transfer: clear giver slot, then receiver pickup.
     const int giverSlot = giver->FindItemSlot(item);
     if (giverSlot < 0) return true;
-    // Use the public drop-then-pickup path so ability grant/revoke and
-    // item events stay consistent (ref GiveItemToHero drops + picks up).
     const float gx = unit_->GetX();
     const float gy = unit_->GetY();
     if (!giver->DropItemAt(simulation, unit_, giverSlot, gx, gy)) return true;
     if (!receiver->PickUpItem(simulation, target_, item)) {
-        // Receiver full: leave it on the ground where the giver stood.
         return true;
     }
     return true;

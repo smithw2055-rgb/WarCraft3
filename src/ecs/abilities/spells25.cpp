@@ -20,6 +20,17 @@ void KillUnit(CSimulation& game, CUnit* unit) {
     unit->SetLife(game, 0);
 }
 
+void ApplyUnitStatSlotDelta(CUnit* unit, CAbilityItemStatBonus::StatSlot slot, int delta) {
+    if (!unit || delta == 0) return;
+    switch (slot) {
+        case CAbilityItemStatBonus::StatSlot::DAMAGE:   unit->AddBonusDamage(delta); break;
+        case CAbilityItemStatBonus::StatSlot::ARMOR:    unit->AddBonusArmor(delta); break;
+        case CAbilityItemStatBonus::StatSlot::MAX_LIFE: unit->AddBonusMaxLife(static_cast<float>(delta)); break;
+        case CAbilityItemStatBonus::StatSlot::MAX_MANA: unit->AddBonusMaxMana(delta); break;
+        default: break;
+    }
+}
+
 } // namespace
 
 // ===== Curse =====
@@ -34,8 +45,7 @@ CAbilityCurse::CAbilityCurse(int handleId)
 void CAbilityCurse::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     auto* unit = dynamic_cast<CUnit*>(target);
     if (!unit || unit->IsDead()) return;
-    const int casterHandle = caster ? caster->GetHandleId() : -1;
-    (void)casterHandle;
+    (void)caster;
     unit->AddBuff(std::make_unique<CBuffCurse>(duration_, missChance_), game);
 }
 
@@ -113,7 +123,6 @@ void CAbilitySacrifice::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
     const float y = victim->GetY();
     const int player = caster ? caster->GetPlayerIndex() : victim->GetPlayerIndex();
     KillUnit(game, victim);
-    // Shade (ushd). CreateUnit is a no-op until that unit type is registered.
     game.CreateUnit(War3ID("ushd"), player, x, y, 0);
 }
 
@@ -178,96 +187,37 @@ void CAbilityChestOfGold::ApplyEffectData(const CAbilityDefFull& def, int level)
     gold_ = def.DataIntAt(level, 0, gold_);
 }
 
-// ===== Item stat passives =====
-CAbilityItemStatBonus::CAbilityItemStatBonus(int handleId, War3ID code)
-    : CAbilitySpellBase(handleId, code, CAbilityCategory::ITEM) {
+// ===== Unified Item Stat Passives =====
+CAbilityItemStatBonus::CAbilityItemStatBonus(int handleId, War3ID code, StatSlot slot, int defaultBonus)
+    : CAbilitySpellBase(handleId, code, CAbilityCategory::ITEM)
+    , slot_(slot)
+    , bonus_(defaultBonus) {
     iconShowing_ = false;
     permanent_ = true;
+    SetPassiveSpell(true);
     SetTargetType(CSpellTargetType::NO_TARGET);
 }
 
-bool CAbilityItemStatBonus::CheckCanTarget(CSimulation&, CUnit*, int, CWidget*) const { return false; }
-bool CAbilityItemStatBonus::CheckCanTargetPoint(CSimulation&, CUnit*, int, float, float) const { return false; }
-bool CAbilityItemStatBonus::CheckCanTargetNoTarget(CSimulation&, CUnit*, int) const { return false; }
-
-CAbilityItemDamageBonus::CAbilityItemDamageBonus(int handleId)
-    : CAbilityItemStatBonus(handleId, War3ID("AIat")) {}
-
-void CAbilityItemDamageBonus::OnAdd(CSimulation&, CUnit* unit) {
-    if (!unit) return;
+void CAbilityItemStatBonus::OnAdd(CSimulation&, CUnit* unit) {
+    if (!unit || slot_ == StatSlot::NONE) return;
     applied_ = bonus_;
-    unit->AddBonusDamage(applied_);
+    ApplyUnitStatSlotDelta(unit, slot_, applied_);
 }
 
-void CAbilityItemDamageBonus::OnRemove(CSimulation&, CUnit* unit) {
-    if (!unit) return;
-    unit->AddBonusDamage(-applied_);
+void CAbilityItemStatBonus::OnRemove(CSimulation&, CUnit* unit) {
+    if (!unit || slot_ == StatSlot::NONE) return;
+    ApplyUnitStatSlotDelta(unit, slot_, -applied_);
     applied_ = 0;
 }
 
-void CAbilityItemDamageBonus::ApplyEffectData(const CAbilityDefFull& def, int level) {
-    bonus_ = def.DataIntAt(level, 0, bonus_);
-}
-
-CAbilityItemArmorBonus::CAbilityItemArmorBonus(int handleId)
-    : CAbilityItemStatBonus(handleId, War3ID("AIde")) {}
-
-void CAbilityItemArmorBonus::OnAdd(CSimulation&, CUnit* unit) {
-    if (!unit) return;
-    applied_ = bonus_;
-    unit->AddBonusArmor(applied_);
-}
-
-void CAbilityItemArmorBonus::OnRemove(CSimulation&, CUnit* unit) {
-    if (!unit) return;
-    unit->AddBonusArmor(-applied_);
-    applied_ = 0;
-}
-
-void CAbilityItemArmorBonus::ApplyEffectData(const CAbilityDefFull& def, int level) {
-    bonus_ = def.DataIntAt(level, 0, bonus_);
-}
-
-CAbilityItemLifeBonus::CAbilityItemLifeBonus(int handleId)
-    : CAbilityItemStatBonus(handleId, War3ID("AIml")) {}
-
-void CAbilityItemLifeBonus::OnAdd(CSimulation&, CUnit* unit) {
-    if (!unit) return;
-    applied_ = bonus_;
-    unit->AddBonusMaxLife((float)applied_);
-}
-
-void CAbilityItemLifeBonus::OnRemove(CSimulation&, CUnit* unit) {
-    if (!unit) return;
-    unit->AddBonusMaxLife((float)-applied_);
-    applied_ = 0;
-}
-
-void CAbilityItemLifeBonus::ApplyEffectData(const CAbilityDefFull& def, int level) {
-    bonus_ = def.DataIntAt(level, 0, bonus_);
-}
-
-CAbilityItemManaPoolBonus::CAbilityItemManaPoolBonus(int handleId)
-    : CAbilityItemStatBonus(handleId, War3ID("AImm")) {}
-
-void CAbilityItemManaPoolBonus::OnAdd(CSimulation&, CUnit* unit) {
-    if (!unit) return;
-    applied_ = bonus_;
-    unit->AddBonusMaxMana(applied_);
-}
-
-void CAbilityItemManaPoolBonus::OnRemove(CSimulation&, CUnit* unit) {
-    if (!unit) return;
-    unit->AddBonusMaxMana(-applied_);
-    applied_ = 0;
-}
-
-void CAbilityItemManaPoolBonus::ApplyEffectData(const CAbilityDefFull& def, int level) {
-    bonus_ = def.DataIntAt(level, 0, bonus_);
+void CAbilityItemStatBonus::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    if (slot_ != StatSlot::NONE) {
+        bonus_ = def.DataIntAt(level, 0, bonus_);
+    }
 }
 
 CAbilityItemAttributeBonus::CAbilityItemAttributeBonus(int handleId)
-    : CAbilityItemStatBonus(handleId, War3ID("AIab")) {}
+    : CAbilityItemStatBonus(handleId, War3ID("AIab"), StatSlot::NONE, 0) {}
 
 void CAbilityItemAttributeBonus::OnAdd(CSimulation& game, CUnit* unit) {
     if (!unit) return;

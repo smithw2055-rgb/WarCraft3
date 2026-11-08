@@ -16,8 +16,6 @@ CAbilityDevour::CAbilityDevour(int handleId)
 }
 
 void CAbilityDevour::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto a single AbilityBuilder devour (cargo swallow plus
-    // digest over time).
     ABActionDevourTarget devour(digestDuration_, digestPerTick_);
     devour.Run(game, caster, target, false, 0, 0);
 }
@@ -36,8 +34,6 @@ CAbilityDevourMagic::CAbilityDevourMagic(int handleId)
 }
 
 void CAbilityDevourMagic::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto a single AbilityBuilder devour (dispel + per-buff
-    // mana refund).
     ABActionDevourMagic devour(manaPerBuff_);
     devour.Run(game, caster, target, false, 0, 0);
 }
@@ -75,8 +71,6 @@ private:
 
 void CAbilityColdArrows::OnAdd(CSimulation& game, CUnit* unit) {
     (void)game;
-    // ANfa instances alias ANfa (same class, ref X2 column): the alias
-    // keeps the two arrow lines distinct in the shared slot.
     if (unit) unit->SetAttackModifier(0, GetAlias(),
         std::make_unique<ColdArrowsEffect>(slowDuration_, slowPercent_,
                                            poisonDuration_, poisonPerTick_));
@@ -104,18 +98,9 @@ CAbilityMonsoon::CAbilityMonsoon(int handleId)
 }
 
 void CAbilityMonsoon::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    if (!caster) return;
-    // Migrated onto AbilityBuilder waves (ref Blizzard wave pattern): each
-    // wave runs a per-unit COLD damage chain over other-player units in
-    // radius. Waves resolve instantly; the total matches the old loop.
-    for (int w = 0; w < waves_; w++) {
-        ABEffectChain perUnit;
-        perUnit.Add(std::make_unique<ABActionDamageTarget>(
-            damagePerWave_, CAttackType::SPELLS, CDamageType::COLD));
-        ABActionForEachInRange wave(radius_, std::move(perUnit));
-        wave.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
-        wave.Run(game, caster, nullptr, true, x, y);
-    }
+    CastPointDamageWaves(game, caster, x, y, waves_, radius_, damagePerWave_,
+                         CAttackType::SPELLS, CDamageType::COLD,
+                         ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
 }
 
 void CAbilityMonsoon::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -134,33 +119,12 @@ CAbilityAbsorbMana::CAbilityAbsorbMana(int handleId)
 void CAbilityAbsorbMana::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || target->IsDead()) return;
     auto* targetUnit = dynamic_cast<CUnit*>(target);
-    if (!targetUnit) return;
-    // Migrated onto AbilityBuilder conditionals: summoned victims burn via
-    // KillTarget, and the caster is refunded manaGain_ (clamped to max, ref
-    // the original arithmetic). The refund runs against the caster, so it
-    // is a second conditional keyed on the captured victim.
-    float mana = caster->GetMana() + manaGain_;
-    if (mana > (float)caster->GetMaxMana()) mana = (float)caster->GetMaxMana();
-    ABEffectChain burn;
-    burn.Add(std::make_unique<ABActionKillTarget>());
-    ABActionIf killIf(
-        std::make_shared<ABCondFunc>(
-            [](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(unitTarget);
-                return unit != nullptr && unit->IsSummoned();
-            }),
-        std::move(burn));
-    killIf.Run(game, caster, target, false, 0, 0);
-    ABEffectChain refund;
-    refund.Add(std::make_unique<ABActionSetManaTarget>(mana));
-    ABActionIf refundIf(
-        std::make_shared<ABCondFunc>(
-            [target](CSimulation&, CUnit*, CWidget*, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(target);
-                return unit != nullptr && unit->IsSummoned();
-            }),
-        std::move(refund));
-    refundIf.Run(game, caster, caster, false, 0, 0);
+    if (!targetUnit || !targetUnit->IsSummoned()) return;
+    const float mana = std::min(caster->GetMana() + manaGain_, static_cast<float>(caster->GetMaxMana()));
+    ABActionKillTarget kill;
+    kill.Run(game, caster, target, false, 0, 0);
+    ABActionSetManaTarget refund(mana);
+    refund.Run(game, caster, caster, false, 0, 0);
 }
 
 // ===== Unholy Frenzy =====
@@ -173,12 +137,7 @@ CAbilityUnholyFrenzy::CAbilityUnholyFrenzy(int handleId)
 }
 
 void CAbilityUnholyFrenzy::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    (void)caster;
-    // Migrated onto a single AbilityBuilder buff attach (Berserk without
-    // the weak-skin half: damage-taken multiplier 1.0).
-    ABActionAddBuffTarget frenzy(
-        [duration = duration_, attack = attackSpeedMul_]() {
-            return std::make_unique<CBuffBerserk>(duration, attack, 1.0f);
-        });
-    frenzy.Run(game, caster, target, false, 0, 0);
+    CastBuffOnTarget(game, caster, target, [duration = duration_, attack = attackSpeedMul_]() {
+        return std::make_unique<CBuffBerserk>(duration, attack, 1.0f);
+    });
 }

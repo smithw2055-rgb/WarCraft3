@@ -15,8 +15,6 @@ CAbilityOrbOfFrost::CAbilityOrbOfFrost(int handleId)
 
 namespace {
 
-// Chilling proc (values snapshotted at install so later level-ups
-// reinstall via OnRemove/OnAdd instead of aliasing live ability state).
 class OrbFrostEffect : public CAttackModifierEffect {
 public:
     OrbFrostEffect(float duration, float slowPercent)
@@ -49,21 +47,6 @@ public:
 private:
     float duration_;
     int armorPenalty_;
-};
-
-class OrbFireEffect : public CAttackModifierEffect {
-public:
-    explicit OrbFireEffect(float bonusDamage) : bonusDamage_(bonusDamage) {}
-    void OnAttackLanded(CSimulation& game, CUnit* attacker, CUnit* victim,
-                        float damageDealt) override {
-        (void)damageDealt;
-        if (!victim) return;
-        victim->Damage(game, attacker, false, false,
-                       CAttackType::SPELLS, CDamageType::FIRE,
-                       "", bonusDamage_, 0);
-    }
-private:
-    float bonusDamage_;
 };
 
 } // namespace
@@ -105,7 +88,7 @@ CAbilityOrbOfFire::CAbilityOrbOfFire(int handleId)
 void CAbilityOrbOfFire::OnAdd(CSimulation& game, CUnit* unit) {
     (void)game;
     if (unit) unit->SetAttackModifier(0, War3ID("AIfb"),
-        std::make_unique<OrbFireEffect>(bonusDamage_));
+        std::make_unique<CAttackBonusDamageEffect>(bonusDamage_));
 }
 
 void CAbilityOrbOfFire::OnRemove(CSimulation& game, CUnit* unit) {
@@ -121,7 +104,6 @@ CAbilityIllusion::CAbilityIllusion(int handleId)
 }
 
 void CAbilityIllusion::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto a single AbilityBuilder copy summon.
     ABActionSummonCopyOfTarget illusion(War3ID("AIil"), duration_);
     illusion.Run(game, caster, target, false, 0, 0);
 }
@@ -134,12 +116,10 @@ CAbilityLightningShieldWand::CAbilityLightningShieldWand(int handleId)
 }
 
 void CAbilityLightningShieldWand::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto a single AbilityBuilder buff attach.
-    ABActionAddBuffTarget shield(
-        [duration = duration_, tick = damagePerTick_, radius = radius_]() {
-            return std::make_unique<CBuffLightningShield>(duration, tick, radius);
-        });
-    shield.Run(game, caster, target, false, 0, 0);
+    CastBuffOnTarget(game, caster, target,
+                     [duration = duration_, tick = damagePerTick_, radius = radius_]() {
+                         return std::make_unique<CBuffLightningShield>(duration, tick, radius);
+                     });
 }
 
 // ===== Scroll of the Beast =====
@@ -149,17 +129,10 @@ CAbilityBeastScroll::CAbilityBeastScroll(int handleId)
 }
 
 void CAbilityBeastScroll::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto an AbilityBuilder iteration: same-player units around
-    // the caster gain bonus damage (Roar pattern, armor-less Inner Fire).
-    if (!caster) return;
-    ABEffectChain perUnit;
-    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(
-        [duration = duration_, damage = bonusDamage_]() {
-            return std::make_unique<CBuffInnerFire>(duration, damage, 0);
-        }));
-    ABActionForEachInRange rally(radius_, std::move(perUnit));
-    rally.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
-    rally.Run(game, caster, nullptr, false, 0, 0);
+    CastCasterAreaBuff(game, caster, radius_,
+                       [duration = duration_, damage = bonusDamage_]() {
+                           return std::make_unique<CBuffInnerFire>(duration, damage, 0);
+                       });
 }
 
 // ===== Healing Wards =====
@@ -170,8 +143,6 @@ CAbilityHealingWard::CAbilityHealingWard(int handleId)
 }
 
 void CAbilityHealingWard::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto a single AbilityBuilder create-and-buff (the ward is
-    // born already radiating; graceful without unit data).
     if (!caster) return;
     ABActionCreateUnitWithBuff ward(
         wardType_, x, y,

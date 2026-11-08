@@ -3,13 +3,8 @@
 #include <vector>
 #include <unordered_set>
 
-// Build race type
-enum class CBuildRace : uint8_t {
-    HUMAN, ORC, UNDEAD, NIGHT_ELF, NAGA, NEUTRAL
-};
-
 // CAbilityBuild - build structure ability
-// Supports all races with race-specific behavior
+// Supports all races with race-specific behavior (CBuildRace is defined in ecs/ability.h)
 class CAbilityBuild : public CAbility {
 public:
     CAbilityBuild(int handleId, War3ID code, CBuildRace race);
@@ -32,7 +27,7 @@ public:
     CBuildRace GetRace() const { return race_; }
 
     // Get the base order ID for this race's build menu
-    int GetBaseOrderId() const;
+    int GetBaseOrderId() const override;
 
     // Static: validate build location
     static bool IsBuildLocationObstructed(CSimulation& game, float x, float y,

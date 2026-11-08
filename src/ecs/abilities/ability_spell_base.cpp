@@ -1,6 +1,8 @@
 #include "ability_spell_base.h"
 #include "ecs/unit.h"
+#include "ecs/player.h"
 #include "ecs/csimulation.h"
+#include "ecs/buffs.h"
 #include "ecs/behaviors/behavior_spell.h"
 #include "ecs/orders/order.h"
 #include "data/abilitydata.h"
@@ -12,13 +14,13 @@ CAbilitySpellBase::CAbilitySpellBase(int handleId, War3ID code, CAbilityCategory
 }
 
 void CAbilitySpellBase::SetLevel(int v) {
-    level_ = v;
+    level_ = static_cast<uint16_t>(v < 0 ? 0 : v);
     if (dataDef_) ApplyData(*dataDef_);
 }
 
 void CAbilitySpellBase::ApplyData(const CAbilityDefFull& def) {
     dataDef_ = &def;
-    maxLevel_ = def.levels;
+    maxLevel_ = static_cast<int16_t>(def.levels);
     cooldown_ = def.CooldownAt(level_);
     manaCost_ = def.ManaCostAt(level_);
     castRange_ = def.RangeAt(level_);
@@ -36,10 +38,14 @@ int CAbilitySpellBase::GetBaseOrderId() const {
 
 bool CAbilitySpellBase::CheckCanUse(CSimulation& game, CUnit* unit, int orderId) const {
     (void)game;
-    if (IsDisabled()) return false;
+    if (IsDisabled() || IsPassiveSpell()) return false;
     if (IsOnCooldown()) return false;
     if (!unit) return false;
-    if (!SpellMatchesOrder(code_, orderId) && !SpellMatchesOrder(alias_, orderId)) return false;
+    const int baseOrder = GetBaseOrderId();
+    const bool matchesOrder = SpellMatchesOrder(code_, orderId) ||
+                              SpellMatchesOrder(alias_, orderId) ||
+                              (orderId != 0 && orderId == baseOrder);
+    if (!matchesOrder) return false;
     if (unit->IsSilenced() || unit->IsHexed()) return false;
     if (unit->GetMana() < manaCost_) return false;
     return true;
@@ -127,6 +133,156 @@ void CAbilitySpellBase::DoEffect(CSimulation& game, CUnit* caster) {
 }
 
 // ============================================================
+// Phase 17–18 Declarative Spell Effect Primitives
+// ============================================================
+
+void CAbilitySpellBase::CastBuffOnTarget(CSimulation& game, CUnit* caster, CWidget* target,
+                                         ABActionAddBuffTarget::BuffFactory factory) {
+    ABActionAddBuffTarget action(std::move(factory));
+    action.Run(game, caster, target, false, 0.0f, 0.0f);
+}
+
+void CAbilitySpellBase::CastBuffOnSelf(CSimulation& game, CUnit* caster,
+                                       ABActionAddBuffTarget::BuffFactory factory) {
+    if (!caster) return;
+    ABActionAddBuffTarget action(std::move(factory));
+    action.Run(game, caster, caster, false, 0.0f, 0.0f);
+}
+
+void CAbilitySpellBase::CastPointDamageWaves(CSimulation& game, CUnit* caster, float x, float y,
+                                             int waves, float radius, float dmgPerWave,
+                                             CAttackType atkType, CDamageType dmgType,
+                                             ABFactionFilter filter) {
+    if (!caster) return;
+    for (int w = 0; w < waves; ++w) {
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTarget>(dmgPerWave, atkType, dmgType));
+        ABActionForEachInRange wave(radius, std::move(perUnit));
+        wave.SetFactionFilter(filter);
+        wave.Run(game, caster, nullptr, true, x, y);
+    }
+}
+
+void CAbilitySpellBase::CastCasterAreaDamageWaves(CSimulation& game, CUnit* caster,
+                                                  int waves, float radius, float dmgPerWave,
+                                                  CAttackType atkType, CDamageType dmgType,
+                                                  ABFactionFilter filter) {
+    if (!caster) return;
+    for (int w = 0; w < waves; ++w) {
+        ABEffectChain perUnit;
+        perUnit.Add(std::make_unique<ABActionDamageTarget>(dmgPerWave, atkType, dmgType));
+        ABActionForEachInRange wave(radius, std::move(perUnit));
+        wave.SetFactionFilter(filter);
+        wave.Run(game, caster, nullptr, false, 0.0f, 0.0f);
+    }
+}
+
+void CAbilitySpellBase::CastPointAreaBuff(CSimulation& game, CUnit* caster, float x, float y,
+                                          float radius, ABActionAddBuffTarget::BuffFactory factory,
+                                          ABFactionFilter filter, bool includeCaster) {
+    if (!caster) return;
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(std::move(factory)));
+    ABActionForEachInRange area(radius, std::move(perUnit), includeCaster);
+    area.SetFactionFilter(filter);
+    area.Run(game, caster, nullptr, true, x, y);
+}
+
+void CAbilitySpellBase::CastCasterAreaBuff(CSimulation& game, CUnit* caster,
+                                           float radius, ABActionAddBuffTarget::BuffFactory factory,
+                                           ABFactionFilter filter, bool includeCaster) {
+    if (!caster) return;
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionAddBuffTarget>(std::move(factory)));
+    ABActionForEachInRange area(radius, std::move(perUnit), includeCaster);
+    area.SetFactionFilter(filter);
+    area.Run(game, caster, nullptr, false, 0.0f, 0.0f);
+}
+
+void CAbilitySpellBase::CastLineDamageAndStun(CSimulation& game, CUnit* caster,
+                                              CWidget* unitTarget, bool hasPoint, float x, float y,
+                                              float range, float width, float damage, float stunDuration,
+                                              CAttackType atkType, CDamageType dmgType,
+                                              ABFactionFilter filter) {
+    if (!caster) return;
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionDamageTarget>(damage, atkType, dmgType));
+    if (stunDuration > 0.0f) {
+        perUnit.Add(std::make_unique<ABActionStunTarget>(stunDuration));
+    }
+    ABActionForEachInLine line(range, width, std::move(perUnit));
+    line.SetFactionFilter(filter);
+    line.Run(game, caster, unitTarget, hasPoint, x, y);
+}
+
+void CAbilitySpellBase::CastTimedSpawnerUnit(CSimulation& game, CUnit* caster, float x, float y,
+                                             War3ID unitType, War3ID buffCode, float lifeDuration,
+                                             War3ID spawnType, float spawnInterval,
+                                             float boomDamage, float boomRadius) {
+    if (!caster) return;
+    using BF = ABActionCreateUnitWithBuff::BuffFactory;
+    ABActionCreateUnitWithBuff factory(
+        unitType, x, y,
+        {BF([buffCode, lifeDuration]() {
+             return std::make_unique<CBuffTimedLife>(buffCode, lifeDuration);
+         }),
+         BF([lifeDuration, spawnType, spawnInterval, boomDamage, boomRadius]() {
+             return std::make_unique<CBuffSpawner>(
+                 lifeDuration, spawnType, spawnInterval, boomDamage, boomRadius);
+         })});
+    factory.Run(game, caster, nullptr, true, x, y);
+}
+
+void CAbilitySpellBase::CastPointAreaHeal(CSimulation& game, CUnit* caster, float x, float y,
+                                          float radius, float amount,
+                                          ABFactionFilter filter, bool includeCaster) {
+    if (!caster) return;
+    ABEffectChain perUnit;
+    perUnit.Add(std::make_unique<ABActionHealTarget>(amount));
+    ABActionForEachInRange heal(radius, std::move(perUnit), includeCaster);
+    heal.SetFactionFilter(filter);
+    heal.Run(game, caster, nullptr, true, x, y);
+}
+
+void CAbilitySpellBase::ForEachPassiveAllyInRange(CSimulation& game, CUnit* caster,
+                                                  float cx, float cy, float radius,
+                                                  bool includeCaster,
+                                                  const std::function<void(CUnit*)>& fn) {
+    if (!caster || !fn) return;
+    CPlayer* owner = game.GetPlayer(caster->GetPlayerIndex());
+    const float radiusSq = radius * radius;
+    for (CUnit* other : game.GetUnits()) {
+        if (!other || other->IsDead()) continue;
+        if (!includeCaster && other == caster) continue;
+        const float dx = other->GetX() - cx;
+        const float dy = other->GetY() - cy;
+        if (dx * dx + dy * dy > radiusSq) continue;
+        const bool self = (other == caster);
+        CPlayer* otherPlayer = game.GetPlayer(other->GetPlayerIndex());
+        const bool ally = owner && otherPlayer &&
+                          owner->HasAlliance(*otherPlayer, CAllianceType::PASSIVE);
+        if (!self && !ally) continue;
+        fn(other);
+    }
+}
+
+bool CAbilitySpellBase::IsFriendlyToPlayer(CSimulation& game, int playerIndex, const CUnit* other) {
+    if (!other) return true;
+    if (other->GetPlayerIndex() == playerIndex) return true;
+    CPlayer* owner = game.GetPlayer(playerIndex);
+    CPlayer* theirs = game.GetPlayer(other->GetPlayerIndex());
+    return owner && theirs && owner->HasAlliance(*theirs, CAllianceType::ALLIED);
+}
+
+void CAttackBonusDamageEffect::OnAttackLanded(CSimulation& game, CUnit* attacker,
+                                              CUnit* victim, float damageDealt) {
+    (void)damageDealt;
+    if (!victim) return;
+    victim->Damage(game, attacker, false, false,
+                   CAttackType::SPELLS, damageType_, "", bonusDamage_, 0.0f);
+}
+
+// ============================================================
 // CAbilityDataDrivenSpell implementation
 // ============================================================
 CAbilityDataDrivenSpell::CAbilityDataDrivenSpell(int handleId, War3ID code, const ABSpellDescriptor& desc)
@@ -144,6 +300,11 @@ CAbilityDataDrivenSpell::CAbilityDataDrivenSpell(int handleId, War3ID code, cons
     for (int i = 0; i < 9; ++i) {
         ctx_.data[i] = desc.defaultData[i];
     }
+}
+
+int CAbilityDataDrivenSpell::GetBaseOrderId() const {
+    const int base = SpellBaseOrderId(code_);
+    return base != 0 ? base : static_cast<int>(code_.value);
 }
 
 void CAbilityDataDrivenSpell::ApplyEffectData(const CAbilityDefFull& def, int level) {

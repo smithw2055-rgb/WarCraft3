@@ -14,14 +14,7 @@ CAbilityItemHealGroup::CAbilityItemHealGroup(int handleId)
 }
 
 void CAbilityItemHealGroup::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto an AbilityBuilder iteration: same-player units in radius
-    // of the effect point are healed (caster included when in range).
-    if (!caster) return;
-    ABEffectChain perUnit;
-    perUnit.Add(std::make_unique<ABActionHealTarget>(healAmount_));
-    ABActionForEachInRange heal(radius_, std::move(perUnit), true);
-    heal.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
-    heal.Run(game, caster, nullptr, true, x, y);
+    CastPointAreaHeal(game, caster, x, y, radius_, healAmount_);
 }
 
 // ===== Scroll of Town Portal =====
@@ -32,9 +25,6 @@ CAbilityItemTownPortal::CAbilityItemTownPortal(int handleId)
 }
 
 void CAbilityItemTownPortal::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto an AbilityBuilder iteration: same-player units around
-    // the caster relocate to the spell destination (carried by the teleport
-    // action itself, since iteration repoints the effect point).
     if (!caster) return;
     ABEffectChain group;
     group.Add(std::make_unique<ABActionTeleportTarget>(x, y));
@@ -51,11 +41,9 @@ CAbilityItemInvulnerable::CAbilityItemInvulnerable(int handleId)
 }
 
 void CAbilityItemInvulnerable::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder buff attach.
-    if (!caster) return;
-    ABActionAddBuffTarget shield(
-        [duration = duration_]() { return std::make_unique<CBuffDivineShield>(duration); });
-    shield.Run(game, caster, caster, false, 0, 0);
+    CastBuffOnSelf(game, caster, [duration = duration_]() {
+        return std::make_unique<CBuffDivineShield>(duration);
+    });
 }
 
 // ===== Potion of Healing =====
@@ -65,7 +53,6 @@ CAbilityItemHealSelf::CAbilityItemHealSelf(int handleId)
 }
 
 void CAbilityItemHealSelf::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder heal.
     if (!caster) return;
     ABActionHealTarget heal(healAmount_);
     heal.Run(game, caster, caster, false, 0, 0);
@@ -78,12 +65,8 @@ CAbilityItemManaSelf::CAbilityItemManaSelf(int handleId)
 }
 
 void CAbilityItemManaSelf::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder mana set (clamped like the hand loop).
     if (!caster) return;
-    float mana = caster->GetMana() + manaAmount_;
-    if (mana > static_cast<float>(caster->GetMaxMana())) {
-        mana = static_cast<float>(caster->GetMaxMana());
-    }
+    float mana = std::min(caster->GetMana() + manaAmount_, static_cast<float>(caster->GetMaxMana()));
     ABActionSetManaTarget setMana(mana);
     setMana.Run(game, caster, caster, false, 0, 0);
 }
@@ -95,13 +78,9 @@ CAbilityItemClarity::CAbilityItemClarity(int handleId)
 }
 
 void CAbilityItemClarity::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder buff attach.
-    if (!caster) return;
-    ABActionAddBuffTarget clarity(
-        [duration = duration_, regen = regenBonus_]() {
-            return std::make_unique<CBuffClarity>(duration, regen);
-        });
-    clarity.Run(game, caster, caster, false, 0, 0);
+    CastBuffOnSelf(game, caster, [duration = duration_, regen = regenBonus_]() {
+        return std::make_unique<CBuffClarity>(duration, regen);
+    });
 }
 
 // ===== Wand of Mana Stealing =====
@@ -112,8 +91,6 @@ CAbilityItemManaSteal::CAbilityItemManaSteal(int handleId)
 }
 
 void CAbilityItemManaSteal::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto a single AbilityBuilder mana steal (no damage, unlike
-    // Mana Burn).
     ABActionManaSteal steal(stealAmount_);
     steal.Run(game, caster, target, false, 0, 0);
 }
@@ -125,11 +102,7 @@ CAbilityItemProtection::CAbilityItemProtection(int handleId)
 }
 
 void CAbilityItemProtection::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder buff attach.
-    if (!caster) return;
-    ABActionAddBuffTarget armor(
-        [duration = duration_, bonus = armorBonus_]() {
-            return std::make_unique<CBuffArmor>(War3ID("AIda"), duration, bonus, true);
-        });
-    armor.Run(game, caster, caster, false, 0, 0);
+    CastBuffOnSelf(game, caster, [duration = duration_, bonus = armorBonus_]() {
+        return std::make_unique<CBuffArmor>(War3ID("AIda"), duration, bonus, true);
+    });
 }

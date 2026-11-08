@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 #include "resource/slk.h"
-#include "ecs/abilities/ability_aura.h"
+#include "ecs/ability.h"
 
 class CUnitType;
 

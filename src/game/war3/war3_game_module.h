@@ -43,6 +43,7 @@
 #include "resource/slk.h"
 
 struct CUpgradeType;
+struct ABSpellDescriptor;
 
 namespace war3 {
 
@@ -63,6 +64,10 @@ public:
     static void RegisterWar3AbilityCatalog();
     static size_t UnregisterWar3AbilityCatalog();
 
+    // Phase 17: Register a custom data-driven ABSpellDescriptor scoped to War3GameModule
+    void RegisterCustomSpellDescriptor(const ::ABSpellDescriptor& desc);
+    size_t GetRegisteredAbilityCount() const;
+
     // --- engine::IGameModule interface ---
     const char* GetModuleName() const override { return kModuleId; }
     bool OnInit(engine::EngineKernel& kernel) override;
@@ -72,7 +77,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 16u; }
+    uint32_t GetModuleVersion() const override { return 18u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -254,6 +259,11 @@ public:
 
     bool OnTryUnitIdleAutocast(CSimulation& sim, CUnit& unit) override;
 
+    // Phase 18: Module-scoped autocast acquisition registry & query
+    int GetAbilityAutocastKind(uint32_t abilityRawcode) const override;
+    void RegisterAutocastAbility(War3ID abilityCode, int autocastKindOrd);
+    void ClearCustomAutocastAbilities() { customAutocastKinds_.clear(); }
+
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 
     bool OnCheckSpellEffectReaction(CSimulation& sim,
@@ -305,6 +315,7 @@ private:
 
     CSimulation* boundSim_ = nullptr;
     std::unordered_map<uint32_t, std::vector<War3ID>> customTechEquivalents_;
+    std::unordered_map<uint32_t, int> customAutocastKinds_;
     AttackDefenseTable combatTable_;
     float defenseArmorFactor_ = 0.06f;
     float bountyMultiplier_ = 1.0f;

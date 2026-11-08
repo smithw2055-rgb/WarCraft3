@@ -62,10 +62,34 @@ std::string JoinStrings(const std::vector<std::string>& values, const char* deli
 
 std::string FormatSelectedUnitsBrief(const std::vector<CUnit*>& units);
 
-CResourceType GetUnitCarriedResourceType(const CUnit* unit);
+inline CResourceType GetUnitCarriedResourceType(const CUnit* unit) {
+    if (!unit) return CResourceType::NONE;
+    for (const CAbility* ab : unit->GetAbilities()) {
+        if (ab && ab->IsCarryingResources()) {
+            return ab->GetCarriedResourceType();
+        }
+    }
+    return CResourceType::NONE;
+}
 
-CBehaviorCategory GetUnitCurrentBehaviorCategory(const CUnit* unit);
+inline CBehaviorCategory GetUnitCurrentBehaviorCategory(const CUnit* unit) {
+    if (!unit) {
+        return CBehaviorCategory::NONE;
+    }
+    auto* behavior = unit->GetCurrentBehavior();
+    return behavior ? behavior->GetCategory() : CBehaviorCategory::NONE;
+}
 
-bool IsMovementBehaviorCategory(CBehaviorCategory category);
+inline bool IsMovementBehaviorCategory(CBehaviorCategory category) {
+    switch (category) {
+        case CBehaviorCategory::MOVE:
+        case CBehaviorCategory::FOLLOW:
+        case CBehaviorCategory::PATROL:
+        case CBehaviorCategory::ATTACK_MOVE:
+            return true;
+        default:
+            return false;
+    }
+}
 
 } // namespace unit_text_utils

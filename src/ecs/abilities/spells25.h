@@ -16,12 +16,10 @@ protected:
     void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
     float duration_ = 15.0f;
-    float missChance_ = 0.33f; // ref DataA, documented guess
+    float missChance_ = 0.33f;
 };
 
 // ===== Moon Well (Ambt) - spend mana to restore life, then mana =====
-// Ref CAbilityMoonWell: DataA is mana spent per mana restored, DataB is
-// mana spent per hit point restored.
 class CAbilityMoonWell : public CAbilitySpellBase {
 public:
     CAbilityMoonWell(int handleId);
@@ -41,7 +39,7 @@ public:
 protected:
     void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    float hitPointsGained_ = 100.0f; // ref DataC, documented guess
+    float hitPointsGained_ = 100.0f;
 };
 
 // ===== Sacrifice (Asac) - the pit consumes the target =====
@@ -84,64 +82,60 @@ public:
 protected:
     void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:
-    int gold_ = 250; // ref DataA, documented guess
+    int gold_ = 250;
 };
 
-// Passive item stat. CheckCanTarget* stays closed so it never casts.
+// ============================================================================
+// Phase 17 Unified Passive Item Stat Bonus Base (`CAbilityItemStatBonus`)
+// Consolidates duplicated OnAdd/OnRemove/ApplyEffectData logic across
+// CAbilityItemDamageBonus, CAbilityItemArmorBonus, CAbilityItemLifeBonus,
+// and CAbilityItemManaPoolBonus into a single parameterized base.
+// ============================================================================
 class CAbilityItemStatBonus : public CAbilitySpellBase {
 public:
-    CAbilityItemStatBonus(int handleId, War3ID code);
-    bool CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const override;
-    bool CheckCanTargetPoint(CSimulation& game, CUnit* unit, int orderId, float x, float y) const override;
-    bool CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const override;
+    enum class StatSlot : uint8_t {
+        NONE = 0,
+        DAMAGE,
+        ARMOR,
+        MAX_LIFE,
+        MAX_MANA
+    };
+
+    CAbilityItemStatBonus(int handleId, War3ID code, StatSlot slot = StatSlot::NONE, int defaultBonus = 0);
+
+    void OnAdd(CSimulation& game, CUnit* unit) override;
+    void OnRemove(CSimulation& game, CUnit* unit) override;
+
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
+
+    StatSlot slot_ = StatSlot::NONE;
+    int bonus_ = 0;
+    int applied_ = 0;
 };
 
 class CAbilityItemDamageBonus : public CAbilityItemStatBonus {
 public:
-    explicit CAbilityItemDamageBonus(int handleId);
-    void OnAdd(CSimulation& game, CUnit* unit) override;
-    void OnRemove(CSimulation& game, CUnit* unit) override;
-protected:
-    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
-private:
-    int bonus_ = 3;
-    int applied_ = 0;
+    explicit CAbilityItemDamageBonus(int handleId)
+        : CAbilityItemStatBonus(handleId, War3ID("AIat"), StatSlot::DAMAGE, 3) {}
 };
 
 class CAbilityItemArmorBonus : public CAbilityItemStatBonus {
 public:
-    explicit CAbilityItemArmorBonus(int handleId);
-    void OnAdd(CSimulation& game, CUnit* unit) override;
-    void OnRemove(CSimulation& game, CUnit* unit) override;
-protected:
-    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
-private:
-    int bonus_ = 2;
-    int applied_ = 0;
+    explicit CAbilityItemArmorBonus(int handleId)
+        : CAbilityItemStatBonus(handleId, War3ID("AIde"), StatSlot::ARMOR, 2) {}
 };
 
 class CAbilityItemLifeBonus : public CAbilityItemStatBonus {
 public:
-    explicit CAbilityItemLifeBonus(int handleId);
-    void OnAdd(CSimulation& game, CUnit* unit) override;
-    void OnRemove(CSimulation& game, CUnit* unit) override;
-protected:
-    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
-private:
-    int bonus_ = 150;
-    int applied_ = 0;
+    explicit CAbilityItemLifeBonus(int handleId)
+        : CAbilityItemStatBonus(handleId, War3ID("AIml"), StatSlot::MAX_LIFE, 150) {}
 };
 
 class CAbilityItemManaPoolBonus : public CAbilityItemStatBonus {
 public:
-    explicit CAbilityItemManaPoolBonus(int handleId);
-    void OnAdd(CSimulation& game, CUnit* unit) override;
-    void OnRemove(CSimulation& game, CUnit* unit) override;
-protected:
-    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
-private:
-    int bonus_ = 100;
-    int applied_ = 0;
+    explicit CAbilityItemManaPoolBonus(int handleId)
+        : CAbilityItemStatBonus(handleId, War3ID("AImm"), StatSlot::MAX_MANA, 100) {}
 };
 
 // AIab: DataA agility, DataB intelligence, DataC strength (ref definition).

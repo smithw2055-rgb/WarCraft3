@@ -5,6 +5,8 @@
 #include "resource/slk.h"
 
 class CBehavior;
+class CBehaviorHarvest;
+class CItem;
 class COrder;
 class COrderTargetPoint;
 class COrderTargetWidget;
@@ -13,6 +15,24 @@ class COrderNoTarget;
 // Resource types carried by workers or harvested from resource nodes
 enum class CResourceType : uint8_t {
     NONE, GOLD, LUMBER
+};
+
+// Build race type (moved from ability_build.h in Phase 17 so generic build
+// behaviors and simulation modules do not depend on concrete ability headers)
+enum class CBuildRace : uint8_t {
+    HUMAN, ORC, UNDEAD, NIGHT_ELF, NAGA, NEUTRAL
+};
+
+// Aura effect type & bonus definition (moved from ability_aura.h in Phase 17
+// so CUnit, CBuff, and UnitAttributeAggregator have zero concrete ability headers)
+enum class CAuraEffectType : uint8_t {
+    MOVE_SPEED, ATTACK_SPEED, ARMOR, DAMAGE, LIFE_REGEN, MANA_REGEN
+};
+
+struct CAuraBonus {
+    CAuraEffectType type = CAuraEffectType::MOVE_SPEED;
+    float value = 0;
+    bool isPercent = false;
 };
 
 // Ability category (matches Java CAbilityCategory)
@@ -69,12 +89,28 @@ inline bool HasDisableFlag(uint8_t flags, CAbilityDisableType flag) {
     return (flags & static_cast<uint8_t>(flag)) != 0;
 }
 
+// Compact bitmask flags for CAbility instance state (Phase 18 Stage RR)
+enum class AbilityStateFlag : uint8_t {
+    NONE            = 0,
+    PHYSICAL        = 1u << 0,
+    PERMANENT       = 1u << 1,
+    ICON_SHOWING    = 1u << 2,
+    AUTOCAST_ACTIVE = 1u << 3,
+    PASSIVE_SPELL   = 1u << 4,
+};
+
 // ============================================================
 // CAbility - base class for all abilities
 //
 // Abilities validate orders and create/return behaviors.
-// They do NOT execute per-tick logic themselves (most have
-// empty OnTick). Behaviors are the per-tick execution units.
+// Phase 17: Provides virtual capability query/action interfaces for
+// casting, resource gathering/dropoff, mining, repair, work state,
+// and inventory management so generic ECS behaviors (`src/ecs/behaviors/*`)
+// and presentation helpers never include concrete WarCraft 3 ability headers.
+// Phase 18: Packs `level_` (11-bit) and boolean flags (`physical_`,
+// `permanent_`, `iconShowing_`, `autocastActive_`, `passiveSpell_`) into a
+// shared `uint16_t` bitfield alongside `category_` and `disabled_`, shrinking
+// `sizeof(CAbility)` to 24 bytes (down from 40 bytes).
 // ============================================================
 class CAbility {
 public:
@@ -87,22 +123,42 @@ public:
     War3ID GetAlias() const { return alias_; }
     void SetAlias(War3ID alias) { alias_ = alias; }
     CAbilityCategory GetCategory() const { return category_; }
-    virtual int GetLevel() const { return level_; }
-    virtual void SetLevel(int level) { level_ = level; }
+    virtual int GetLevel() const { return static_cast<int>(level_); }
+    virtual void SetLevel(int level) { level_ = static_cast<uint16_t>(level < 0 ? 0 : level); }
 
     // State
     bool IsDisabled() const { return disabled_ != 0; }
-    bool IsPhysical() const { return physical_; }
-    bool IsPermanent() const { return permanent_; }
-    bool IsIconShowing() const { return iconShowing_; }
+    bool IsPhysical() const { return physical_ != 0; }
+    bool IsPermanent() const { return permanent_ != 0; }
+    bool IsIconShowing() const { return iconShowing_ != 0; }
+    bool IsPassiveSpell() const { return passiveSpell_ != 0; }
     uint8_t GetDisabledFlags() const { return disabled_; }
 
     void SetDisabled(bool disabled, CAbilityDisableType type);
-    void SetPhysical(bool v) { physical_ = v; }
-    void SetPermanent(bool v) { permanent_ = v; }
-    void SetIconShowing(bool v) { iconShowing_ = v; }
-    bool IsAutocastActive() const { return autocastActive_; }
-    void SetAutocastActive(bool v) { autocastActive_ = v; }
+    void SetPhysical(bool v) { physical_ = v ? 1u : 0u; }
+    void SetPermanent(bool v) { permanent_ = v ? 1u : 0u; }
+    void SetIconShowing(bool v) { iconShowing_ = v ? 1u : 0u; }
+    void SetPassiveSpell(bool v) { passiveSpell_ = v ? 1u : 0u; }
+    bool IsAutocastActive() const { return autocastActive_ != 0; }
+    void SetAutocastActive(bool v) { autocastActive_ = v ? 1u : 0u; }
+
+    // O(1) bitmask inspection/restoration for ability state flags
+    uint8_t GetAbilityStateFlagsBitmask() const {
+        uint8_t mask = 0;
+        if (physical_)       mask |= static_cast<uint8_t>(AbilityStateFlag::PHYSICAL);
+        if (permanent_)      mask |= static_cast<uint8_t>(AbilityStateFlag::PERMANENT);
+        if (iconShowing_)    mask |= static_cast<uint8_t>(AbilityStateFlag::ICON_SHOWING);
+        if (autocastActive_) mask |= static_cast<uint8_t>(AbilityStateFlag::AUTOCAST_ACTIVE);
+        if (passiveSpell_)   mask |= static_cast<uint8_t>(AbilityStateFlag::PASSIVE_SPELL);
+        return mask;
+    }
+    void SetAbilityStateFlagsBitmask(uint8_t mask) {
+        physical_       = (mask & static_cast<uint8_t>(AbilityStateFlag::PHYSICAL)) ? 1u : 0u;
+        permanent_      = (mask & static_cast<uint8_t>(AbilityStateFlag::PERMANENT)) ? 1u : 0u;
+        iconShowing_    = (mask & static_cast<uint8_t>(AbilityStateFlag::ICON_SHOWING)) ? 1u : 0u;
+        autocastActive_ = (mask & static_cast<uint8_t>(AbilityStateFlag::AUTOCAST_ACTIVE)) ? 1u : 0u;
+        passiveSpell_   = (mask & static_cast<uint8_t>(AbilityStateFlag::PASSIVE_SPELL)) ? 1u : 0u;
+    }
 
     // Base engine order id for this ability (ref getBaseOrderId); 0 when
     // the ability is not triggered by orders (passives, item powers).
@@ -139,15 +195,58 @@ public:
     virtual CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, float x, float y);
     virtual CBehavior* BeginNoTarget(CSimulation& game, CUnit* caster, int orderId);
 
+    // ===== Phase 17 Generic Capability Interfaces (Decouples Behaviors from Concrete Abilities) =====
+
+    // 1. Spell Casting & Cooldown Interface (overridden by CAbilitySpellBase)
+    virtual float GetCastRange() const { return 0.0f; }
+    virtual float GetCastPoint() const { return 0.0f; }
+    virtual int GetManaCost() const { return 0; }
+    virtual void StartCooldown() {}
+    virtual void DoEffect(CSimulation& /*game*/, CUnit* /*caster*/, CWidget* /*target*/) {}
+    virtual void DoEffect(CSimulation& /*game*/, CUnit* /*caster*/, float /*x*/, float /*y*/) {}
+    virtual void DoEffect(CSimulation& /*game*/, CUnit* /*caster*/) {}
+
+    // 2. Worker Resource Harvest & Dropoff Interface (overridden by CAbilityHarvest / CAbilityReturnResources)
+    virtual CResourceType GetCarriedResourceType() const { return CResourceType::NONE; }
+    virtual int GetCarriedAmount() const { return 0; }
+    virtual void SetCarried(CResourceType /*type*/, int /*amount*/) {}
+    virtual void ClearCarried() {}
+    virtual int GetLastTargetHandle() const { return -1; }
+    virtual void SetLastTargetHandle(int /*handleId*/) {}
+    virtual bool IsCarryingResources() const { return GetCarriedAmount() > 0; }
+    virtual bool AcceptsResourceDropoff(CResourceType /*type*/) const { return false; }
+
+    // 3. Resource Mine Interface (overridden by CAbilityGoldMine & CAbilityOverlayedGoldMine)
+    virtual bool IsResourceMine() const { return false; }
+    virtual int GetGold() const { return 0; }
+    virtual void SetGold(int /*v*/) {}
+    virtual bool CanAddMiner() const { return false; }
+    virtual void AddMiner(CBehaviorHarvest* /*miner*/) {}
+    virtual void RemoveMiner(CBehaviorHarvest* /*miner*/) {}
+    virtual float GetMiningDuration() const { return 5.0f; }
+
+    // 4. Repair & Working Animation State Interface (overridden by CAbilityRepair, CAbilityQueue, CAbilityGoldMine)
+    virtual float GetRepairRate() const { return 10.0f; }
+    virtual float GetRepairRange() const { return 128.0f; }
+    virtual bool IsActivelyWorking() const { return false; }
+
+    // 5. Inventory Slot Interface (overridden by CAbilityInventory)
+    virtual bool PickUpItem(CSimulation& /*game*/, CUnit* /*unit*/, CItem* /*item*/) { return false; }
+    virtual bool DropItem(CSimulation& /*game*/, CUnit* /*unit*/, int /*slot*/) { return false; }
+    virtual bool DropItemAt(CSimulation& /*game*/, CUnit* /*unit*/, int /*slot*/, float /*x*/, float /*y*/) { return false; }
+    virtual CItem* GetItem(int /*slot*/) const { return nullptr; }
+    virtual int FindItemSlot(CItem* /*item*/) const { return -1; }
+
 protected:
     int handleId_;
     War3ID code_;
     War3ID alias_;
     CAbilityCategory category_;
-    int level_ = 1;
     uint8_t disabled_ = 0;
-    bool physical_ = false;
-    bool permanent_ = false;
-    bool iconShowing_ = true;
-    bool autocastActive_ = false;
+    uint16_t level_          : 11;
+    uint16_t physical_       : 1;
+    uint16_t permanent_      : 1;
+    uint16_t iconShowing_    : 1;
+    uint16_t autocastActive_ : 1;
+    uint16_t passiveSpell_   : 1;
 };

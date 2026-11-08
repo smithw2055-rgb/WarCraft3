@@ -20,6 +20,14 @@ enum class CBuffTargetType : uint8_t {
     AOE         // Applied to area of effect
 };
 
+// Compact bitmask flags for CBuff instance state (Phase 18 Stage RR)
+enum class BuffStateFlag : uint8_t {
+    NONE        = 0,
+    IS_POSITIVE = 1u << 0,
+    PERIODIC    = 1u << 1,
+    SUSPENDED   = 1u << 2,
+};
+
 // ============================================================
 // Stage Z1: Zero-allocation POD descriptor for data-driven
 // numerical/periodic buffs (Unity DOTS GameplayEffect style).
@@ -56,6 +64,13 @@ struct DataDrivenBuffRecord {
 
 // ============================================================
 // CBuff - base class for all buffs/debuffs
+//
+// Phase 18 Modernization:
+// - Packs boolean state flags (`isPositive_`, `periodic_`, `suspended_`) into
+//   1-bit bitfields and stack counters into `int16_t`, reducing `sizeof(CBuff)`
+//   from 56 bytes down to 40 bytes (28.6% reduction).
+// - Provides `CBuffCloneable<Derived, Base>` CRTP mixin to eliminate manual
+//   `Clone()` boilerplate across all 48 concrete buff subclasses.
 // ============================================================
 class CBuff {
 public:
@@ -91,7 +106,7 @@ public:
     virtual bool MergeByCaster() const { return false; }
     int GetStackCount() const { return stackCount_; }
     int GetMaxStacks() const { return maxStacks_; }
-    void SetMaxStacks(int v) { maxStacks_ = v; }
+    void SetMaxStacks(int v) { maxStacks_ = static_cast<int16_t>(v); }
     bool AddStack();
     void RemoveStack();
 
@@ -109,6 +124,20 @@ public:
     bool IsSuspended() const { return suspended_; }
     void SetSuspended(bool v) { suspended_ = v; }
 
+    // O(1) bitmask inspection/restoration for state flags
+    uint8_t GetBuffStateFlagsBitmask() const {
+        uint8_t mask = 0;
+        if (isPositive_) mask |= static_cast<uint8_t>(BuffStateFlag::IS_POSITIVE);
+        if (periodic_)   mask |= static_cast<uint8_t>(BuffStateFlag::PERIODIC);
+        if (suspended_)  mask |= static_cast<uint8_t>(BuffStateFlag::SUSPENDED);
+        return mask;
+    }
+    void SetBuffStateFlagsBitmask(uint8_t mask) {
+        isPositive_ = (mask & static_cast<uint8_t>(BuffStateFlag::IS_POSITIVE)) != 0;
+        periodic_   = (mask & static_cast<uint8_t>(BuffStateFlag::PERIODIC)) != 0;
+        suspended_  = (mask & static_cast<uint8_t>(BuffStateFlag::SUSPENDED)) != 0;
+    }
+
     // Lifecycle
     virtual void OnApply(CSimulation& game, CUnit* target);
     virtual void OnRemove(CSimulation& game, CUnit* target);
@@ -116,20 +145,31 @@ public:
     virtual void OnPeriodic(CSimulation& game, CUnit* target);
     virtual void OnDeath(CSimulation& game, CUnit* target);
 
-    // Clone for stacking
+    // Clone for stacking & state snapshots
     virtual CBuff* Clone() const = 0;
 
 protected:
     War3ID id_;
     float duration_;
     float remaining_;
-    bool isPositive_;
-    CBuffStackType stackType_ = CBuffStackType::NONE;
-    int stackCount_ = 1;
-    int maxStacks_ = 1;
-    bool periodic_ = false;
     float periodicInterval_ = 1.0f;
-    float periodicTimer_ = 0;
+    float periodicTimer_ = 0.0f;
     int casterHandleId_ = -1;
-    bool suspended_ = false;
+    int16_t stackCount_ = 1;
+    int16_t maxStacks_ = 1;
+    CBuffStackType stackType_ = CBuffStackType::NONE;
+    bool isPositive_ : 1;
+    bool periodic_   : 1;
+    bool suspended_  : 1;
+};
+
+// CRTP helper that implements `Clone()` via the derived class's copy constructor,
+// preserving `remaining_`, `periodicTimer_`, `casterHandleId_`, and all derived members.
+template <typename Derived, typename Base = CBuff>
+class CBuffCloneable : public Base {
+public:
+    using Base::Base;
+    CBuff* Clone() const override {
+        return new Derived(static_cast<const Derived&>(*this));
+    }
 };

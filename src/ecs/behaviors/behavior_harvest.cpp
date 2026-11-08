@@ -3,7 +3,6 @@
 #include "ecs/destructable.h"
 #include "ecs/unit.h"
 #include "ecs/player.h"
-#include "ecs/abilities/ability_gold_mine.h"
 #include "ecs/orders/order.h"
 #include "ecs/pathing/pathfinding.h"
 #include "ecs/pathing/world_collision.h"
@@ -13,13 +12,34 @@
 #include <iostream>
 #include <limits>
 
+namespace {
+
+// Resolves the active mine ability on a unit (overlayed mine Agl2 takes precedence over Agld)
+CAbility* ResolveMineAbility(CUnit* unit) {
+    if (!unit) return nullptr;
+    if (CAbility* overlay = unit->GetAbility(War3ID("Agl2"))) {
+        if (overlay->IsResourceMine()) return overlay;
+    }
+    if (CAbility* base = unit->GetAbility(War3ID("Agld"))) {
+        if (base->IsResourceMine()) return base;
+    }
+    for (CAbility* ab : unit->GetAbilities()) {
+        if (ab && ab->IsResourceMine()) {
+            return ab;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
 CBehaviorHarvest::CBehaviorHarvest() {}
 
 void CBehaviorHarvest::SetTarget(CWidget* target) {
     target_ = target;
     waypoints_.clear();
     if (target_ && unit_) {
-        if (auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(unit_->GetAbility(War3ID("Ahar")))) {
+        if (CAbility* harvestAbility = unit_->GetAbility(War3ID("Ahar"))) {
             harvestAbility->SetLastTargetHandle(target_->GetHandleId());
         }
     }
@@ -42,7 +62,9 @@ void CBehaviorHarvest::Begin(CSimulation& simulation) {
 void CBehaviorHarvest::End(CSimulation& simulation) {
     if (resourceType_ == CResourceType::GOLD && inMine_) {
         if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
-            MineAccessOf(targetUnit).Remove(this);
+            if (CAbility* mine = ResolveMineAbility(targetUnit)) {
+                mine->RemoveMiner(this);
+            }
         }
         if (unit_) {
             unit_->SetHidden(false);
@@ -63,8 +85,7 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
         && (resourceType_ == CResourceType::GOLD || gatheredAmount_ >= capacity_);
     if (shouldReturnWithPayload) {
         propelling_ = false;
-        auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(unit_->GetAbility(War3ID("Ahar")));
-        if (harvestAbility) {
+        if (CAbility* harvestAbility = unit_->GetAbility(War3ID("Ahar"))) {
             harvestAbility->SetCarried(resourceType_, gatheredAmount_);
         }
         unit_->IssueOrder(std::make_unique<COrderNoTarget>(OrderIds::RETURN_RESOURCES));
@@ -107,21 +128,19 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
 
             // For gold mines, enter immediately if capacity allows (ref CBehaviorHarvest.java accept(CUnit))
             if (resourceType_ == CResourceType::GOLD) {
-                auto* targetUnit = dynamic_cast<CUnit*>(target_);
-                if (targetUnit) {
-                    CMineAccess goldMine = MineAccessOf(targetUnit);
-                    if (goldMine.ok()) {
-                        if (goldMine.Gold() <= 0) {
+                if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+                    if (CAbility* goldMine = ResolveMineAbility(targetUnit)) {
+                        if (goldMine->GetGold() <= 0) {
                             return true;
                         }
-                        if (goldMine.CanAdd()) {
-                            goldMine.Add(this);
+                        if (goldMine->CanAddMiner()) {
+                            goldMine->AddMiner(this);
                             unit_->SetHidden(true);
                             unit_->SetInvulnerable(true);
                             inMine_ = true;
                             gathering_ = false;
                             popoutFromMineTurnTick_ = simulation.GetGameTurnTick() + std::max(1, static_cast<int>(
-                                std::ceil(goldMine.Duration() / simulation.GetSimStepTime())));
+                                std::ceil(goldMine->GetMiningDuration() / simulation.GetSimStepTime())));
                             return false;
                         }
                     }
@@ -143,9 +162,6 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                                                 target_->GetX(), target_->GetY(),
                                                 std::max(0.0f, unit_->GetCollisionSize()),
                                                 unit_->GetMovementType(), unit_, worldPath)) {
-                    // Drop waypoints already reached: degenerate same-cell
-                    // paths would otherwise refill every tick and treadmill
-                    // in the pop branch forever (no turning, no movement).
                     const float stepReach = std::max(1.0f,
                         unit_->GetSpeed() * simulation.GetSimStepTime()) * 2.0f;
                     for (size_t i = 1; i < worldPath.size(); i++) {
@@ -199,11 +215,6 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                 propelling_ = true;
             }
         } else {
-            // Direct approach when waypoints are exhausted: A* often
-            // resolves start/end into the same cell (empty waypoint list)
-            // while still hundreds of units out. The step below is still
-            // validated against the pathing map + dynamic collision, so a
-            // genuinely blocked unit stalls one tick and recalcs later.
             if (!unit_->TurnTowardPoint(target_->GetX(), target_->GetY())) {
                 propelling_ = false;
                 return false;
@@ -226,6 +237,9 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
 
     if (gathering_) {
         propelling_ = false;
+        if (target_) {
+            unit_->TurnTowardPoint(target_->GetX(), target_->GetY());
+        }
         float dt = simulation.GetSimStepTime();
         gatherTimer_ += dt;
 
@@ -233,23 +247,21 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             gatherTimer_ = 0;
 
             if (resourceType_ == CResourceType::GOLD) {
-                auto* targetUnit = dynamic_cast<CUnit*>(target_);
-                if (targetUnit) {
-                    CMineAccess goldMine = MineAccessOf(targetUnit);
-                    if (goldMine.ok()) {
-                        if (goldMine.Gold() <= 0) {
+                if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+                    if (CAbility* goldMine = ResolveMineAbility(targetUnit)) {
+                        if (goldMine->GetGold() <= 0) {
                             std::cout << "Gold mine depleted!" << std::endl;
                             return true;
                         }
 
-                        if (goldMine.CanAdd()) {
-                            goldMine.Add(this);
+                        if (goldMine->CanAddMiner()) {
+                            goldMine->AddMiner(this);
                             unit_->SetHidden(true);
                             unit_->SetInvulnerable(true);
                             inMine_ = true;
                             gathering_ = false;
                             popoutFromMineTurnTick_ = simulation.GetGameTurnTick() + std::max(1, static_cast<int>(
-                                std::ceil(goldMine.Duration() / simulation.GetSimStepTime())));
+                                std::ceil(goldMine->GetMiningDuration() / simulation.GetSimStepTime())));
                             std::cout << "Worker entered mine, waiting until tick " << popoutFromMineTurnTick_ << std::endl;
                         } else {
                             std::cout << "Mine full, waiting..." << std::endl;
@@ -270,12 +282,12 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                             waypoints_.clear();
                             return false;
                         }
-                        auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(
-                            unit_->GetAbility(War3ID("Ahar")));
-                        if (harvestAbility && gatheredAmount_ > 0) {
-                            harvestAbility->SetCarried(resourceType_, gatheredAmount_);
-                            unit_->IssueOrder(std::make_unique<COrderNoTarget>(
-                                OrderIds::RETURN_RESOURCES));
+                        if (CAbility* harvestAbility = unit_->GetAbility(War3ID("Ahar"))) {
+                            if (gatheredAmount_ > 0) {
+                                harvestAbility->SetCarried(resourceType_, gatheredAmount_);
+                                unit_->IssueOrder(std::make_unique<COrderNoTarget>(
+                                    OrderIds::RETURN_RESOURCES));
+                            }
                         }
                         propelling_ = false;
                         return true;
@@ -284,9 +296,9 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                 std::cout << "Chopped lumber: " << gatheredAmount_ << "/" << capacity_ << std::endl;
             }
 
-            // Face resource
-            if (target_) {
-                unit_->TurnTowardPoint(target_->GetX(), target_->GetY());
+            if (gatheredAmount_ >= capacity_) {
+                gathering_ = false;
+                return false;
             }
         }
         return false;
@@ -296,52 +308,54 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
     return true;
 }
 
+void CBehaviorHarvest::PopoutFromMine(int goldMined) {
+    inMine_ = false;
+    gathering_ = false;
+    movingToResource_ = false;
+    propelling_ = false;
+    popoutFromMineTurnTick_ = 0;
+
+    if (unit_) {
+        unit_->SetHidden(false);
+        unit_->SetInvulnerable(false);
+    }
+
+    gatheredAmount_ = std::max(0, goldMined);
+}
+
 void CBehaviorHarvest::FindNearestTree(CSimulation& simulation) {
-    if (!unit_) {
+    float searchX = unit_ ? unit_->GetX() : 0.0f;
+    float searchY = unit_ ? unit_->GetY() : 0.0f;
+    if (target_) {
+        searchX = target_->GetX();
+        searchY = target_->GetY();
+    }
+
+    CDestructable* nearest = nullptr;
+    float bestDistSq = std::numeric_limits<float>::max();
+    const auto* destData = simulation.GetDestructableData();
+    if (!destData) {
         target_ = nullptr;
         return;
     }
-
-    auto* destructableData = simulation.GetDestructableData();
-    if (!destructableData) {
-        target_ = nullptr;
-        return;
-    }
-
-    double bestDistSq = std::numeric_limits<double>::max();
-    CWidget* bestTarget = nullptr;
-    for (auto* destructable : simulation.GetDestructables()) {
-        if (!destructable || destructable->IsDead()) {
-            continue;
-        }
-        const auto* destructableType = destructableData->GetDestructable(destructable->GetTypeId());
-        if (!destructableType || !destructableType->isTree) {
-            continue;
-        }
-
-        const double distSq = destructable->DistanceSquared(unit_->GetX(), unit_->GetY());
+    for (auto* d : simulation.GetDestructables()) {
+        if (!d || d->IsDead()) continue;
+        const auto* dt = destData->GetDestructable(d->GetTypeId());
+        if (!dt || !dt->isTree) continue;
+        const float dx = d->GetX() - searchX;
+        const float dy = d->GetY() - searchY;
+        const float distSq = dx * dx + dy * dy;
         if (distSq < bestDistSq) {
             bestDistSq = distSq;
-            bestTarget = destructable;
+            nearest = d;
         }
     }
 
-    target_ = bestTarget;
+    target_ = nearest;
     waypoints_.clear();
-    if (target_) {
-        if (auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(unit_->GetAbility(War3ID("Ahar")))) {
+    if (target_ && unit_) {
+        if (CAbility* harvestAbility = unit_->GetAbility(War3ID("Ahar"))) {
             harvestAbility->SetLastTargetHandle(target_->GetHandleId());
         }
     }
-}
-
-void CBehaviorHarvest::PopoutFromMine(int goldMined) {
-    if (!unit_) {
-        return;
-    }
-    inMine_ = false;
-    popoutFromMineTurnTick_ = 0;
-    unit_->SetHidden(false);
-    unit_->SetInvulnerable(false);
-    gatheredAmount_ = goldMined;
 }

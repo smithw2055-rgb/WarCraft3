@@ -14,6 +14,14 @@ public:
     bool AcceptsGold() const { return acceptsGold_; }
     bool AcceptsLumber() const { return acceptsLumber_; }
 
+    bool AcceptsResourceDropoff(CResourceType type) const override {
+        switch (type) {
+            case CResourceType::GOLD:   return acceptsGold_;
+            case CResourceType::LUMBER: return acceptsLumber_;
+            default:                    return false;
+        }
+    }
+
 private:
     bool acceptsGold_ = true;
     bool acceptsLumber_ = true;

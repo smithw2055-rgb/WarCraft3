@@ -34,9 +34,6 @@ public:
     explicit CAbilityItemSpellResist(int handleId);
     void OnAdd(CSimulation& game, CUnit* unit) override;
     void OnRemove(CSimulation& game, CUnit* unit) override;
-    bool CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const override;
-    bool CheckCanTargetPoint(CSimulation& game, CUnit* unit, int orderId, float x, float y) const override;
-    bool CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const override;
 protected:
     void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 
@@ -54,9 +51,6 @@ public:
     explicit CAbilityItemMixedDefense(int handleId);
     void OnAdd(CSimulation& game, CUnit* unit) override;
     void OnRemove(CSimulation& game, CUnit* unit) override;
-    bool CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const override;
-    bool CheckCanTargetPoint(CSimulation& game, CUnit* unit, int orderId, float x, float y) const override;
-    bool CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const override;
 protected:
     void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 

@@ -17,9 +17,6 @@ CAbilityMassTeleport::CAbilityMassTeleport(int handleId)
 }
 
 void CAbilityMassTeleport::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Group relocation (caster included: the same-player filter covers it)
-    // as a finish chain: instant with no casting delay (legacy path),
-    // otherwise channeled per the .j doEffect.
     if (!caster) return;
     auto makeFinish = [&]() {
         ABEffectChain group;
@@ -55,9 +52,6 @@ CAbilitySummonWaterElemental::CAbilitySummonWaterElemental(int handleId)
 }
 
 void CAbilitySummonWaterElemental::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto an AbilityBuilder summon (spread-64 fan one row above
-    // the caster; run point y+32 compensates the action's half-spread
-    // lift, matching the legacy layout exactly).
     if (!caster) return;
     ABActionSummon elemental(elementalType_, War3ID("AHwe"), count_,
                              summonDuration_, 64.0f);
@@ -74,8 +68,6 @@ CAbilityResurrect::CAbilityResurrect(int handleId)
 }
 
 void CAbilityResurrect::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto an AbilityBuilder iteration: up to maxTargets dead
-    // same-player units in radius are revived in place.
     if (!caster) return;
     ABEffectChain perUnit;
     perUnit.Add(std::make_unique<ABActionReviveTarget>());
@@ -95,8 +87,6 @@ CAbilityBlink::CAbilityBlink(int handleId)
 }
 
 void CAbilityBlink::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Relocates onto the point. A blocked cell slides to the nearest
-    // walkable sample when a pathing map is loaded.
     if (!caster) return;
     const float dx = x - caster->GetX(), dy = y - caster->GetY();
     const float dist = std::sqrt(dx * dx + dy * dy);
@@ -121,8 +111,6 @@ CAbilityMirrorImage::CAbilityMirrorImage(int handleId)
 }
 
 void CAbilityMirrorImage::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto AbilityBuilder copy summons: one action per image,
-    // fanned one row above the caster exactly like the legacy layout.
     if (!caster) return;
     ABEffectChain images;
     for (int i = 0; i < count_; i++) {
@@ -147,14 +135,9 @@ CAbilityShockwave::CAbilityShockwave(int handleId)
 }
 
 void CAbilityShockwave::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder line iteration (damage corridor from
-    // the caster toward the target). Same geometry as the loop replaced.
     if (!target || !caster) return;
-    ABEffectChain perUnit;
-    perUnit.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
-                                                       CDamageType::NORMAL));
-    ABActionForEachInLine shock(range_, width_, std::move(perUnit));
-    shock.Run(game, caster, target, false, 0, 0);
+    CastLineDamageAndStun(game, caster, target, false, 0.0f, 0.0f,
+                          range_, width_, damage_, 0.0f);
 }
 
 void CAbilityShockwave::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -163,9 +146,6 @@ void CAbilityShockwave::ApplyEffectData(const CAbilityDefFull& def, int level) {
 
 // ===== Starfall =====
 CAbilityStarfall::CAbilityStarfall(int handleId)
-    // Retail AEsf (AEst is the Owl Scout); corrected against the
-    // ref mapping and the retail order list (starfall=852183/AEsf).
-    // Defaults are the SLK level-1 row (Cost 200, Cool 180).
     : CAbilitySpellBase(handleId, War3ID("AEsf"), CAbilityCategory::SPELL) {
     SetTargetType(CSpellTargetType::NO_TARGET);
     SetCooldown(180.0f);
@@ -173,18 +153,13 @@ CAbilityStarfall::CAbilityStarfall(int handleId)
 }
 
 void CAbilityStarfall::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto AbilityBuilder waves: each wave scatters (deterministic
-    // synced RNG, std::rand stays banned) and damages its neighborhood.
     if (!caster) return;
     const float cx = caster->GetX(), cy = caster->GetY();
     for (int w = 0; w < waves_; w++) {
         const float wx = cx + game.SimRandRange(-radius_, radius_);
         const float wy = cy + game.SimRandRange(-radius_, radius_);
-        ABEffectChain perUnit;
-        perUnit.Add(std::make_unique<ABActionDamageTarget>(
-            damage_, CAttackType::SPELLS, CDamageType::MAGIC));
-        ABActionForEachInRange star(radius_ / 2, std::move(perUnit));
-        star.Run(game, caster, nullptr, true, wx, wy);
+        CastPointDamageWaves(game, caster, wx, wy, 1, radius_ / 2.0f, damage_,
+                             CAttackType::SPELLS, CDamageType::MAGIC);
     }
 }
 
@@ -197,8 +172,6 @@ CAbilityTranquility::CAbilityTranquility(int handleId)
 }
 
 void CAbilityTranquility::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto an AbilityBuilder iteration: same-player units around
-    // the caster (caster included) are healed and gain Rejuvenation.
     if (!caster) return;
     ABEffectChain perUnit;
     perUnit.Add(std::make_unique<ABActionHealTarget>(healPerTick_ * duration_));
@@ -229,7 +202,6 @@ void CAbilityReincarnation::OnDeath(CSimulation& game, CUnit* unit) {
     if (unit->GetMana() < manaCost_) return;
     unit->SetMana(unit->GetMana() - manaCost_);
     reincarnateRemaining_ = reincarnateCooldown_;
-    // Revive in place at full life; corpse state cleared by Revive().
     unit->Revive(game, unit->GetX(), unit->GetY());
 }
 
@@ -251,8 +223,6 @@ CAbilityCharm::CAbilityCharm(int handleId)
 }
 
 void CAbilityCharm::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder branch: low-level non-heroes change
-    // ownership to the caster's player.
     if (!target || !caster || target->IsDead()) return;
     auto* victim = dynamic_cast<CUnit*>(target);
     if (!victim) return;

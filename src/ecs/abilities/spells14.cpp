@@ -17,20 +17,9 @@ CAbilityPocketFactory::CAbilityPocketFactory(int handleId)
 }
 
 void CAbilityPocketFactory::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto a single AbilityBuilder create-and-buff (TimedLife
-    // plus Spawner; graceful without unit data like the code replaced).
-    if (!caster) return;
-    using BF = ABActionCreateUnitWithBuff::BuffFactory;
-    ABActionCreateUnitWithBuff factory(
-        factoryType_, x, y,
-        {BF([life = factoryLife_]() {
-             return std::make_unique<CBuffTimedLife>(War3ID("ANsy"), life);
-         }),
-         BF([life = factoryLife_, goblin = goblinType_, interval = spawnInterval_,
-             boom = explodeDamage_, radius = explodeRadius_]() {
-             return std::make_unique<CBuffSpawner>(life, goblin, interval, boom, radius);
-         })});
-    factory.Run(game, caster, nullptr, true, x, y);
+    CastTimedSpawnerUnit(game, caster, x, y,
+                         factoryType_, War3ID("ANsy"), factoryLife_,
+                         goblinType_, spawnInterval_, explodeDamage_, explodeRadius_);
 }
 
 void CAbilityPocketFactory::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -48,8 +37,6 @@ CAbilityLavaSpawn::CAbilityLavaSpawn(int handleId)
 }
 
 void CAbilityLavaSpawn::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder create-and-buff (TimedLife
-    // plus Split down the tier chain).
     if (!caster) return;
     using BF = ABActionCreateUnitWithBuff::BuffFactory;
     ABActionCreateUnitWithBuff spawn(
@@ -64,21 +51,11 @@ void CAbilityLavaSpawn::DoEffect(CSimulation& game, CUnit* caster) {
 }
 
 void CAbilityLavaSpawn::ApplyEffectData(const CAbilityDefFull& def, int level) {
-    // The summoned tier walks the UnitID progression; each tier splits
-    // into the next while one exists (ref nlv1 -> nlv2 -> nlv3).
     spawnType_ = def.UnitIdAt(level, spawnType_);
     splitType_ = def.UnitIdAt(level + 1, War3ID());
-    if (splitType_ == War3ID() || splitType_ == spawnType_) {
-        splitCount_ = 0;
-    } else {
-        splitCount_ = 2;
-    }
+    splitCount_ = (splitType_ == War3ID() || splitType_ == spawnType_) ? 0 : 2;
     childType_ = def.UnitIdAt(level + 2, War3ID());
-    if (childType_ == War3ID() || childType_ == splitType_) {
-        childCount_ = 0;
-    } else {
-        childCount_ = 2;
-    }
+    childCount_ = (childType_ == War3ID() || childType_ == splitType_) ? 0 : 2;
 }
 
 // ===== Soul Burn =====
@@ -91,7 +68,6 @@ CAbilitySoulBurn::CAbilitySoulBurn(int handleId)
 }
 
 void CAbilitySoulBurn::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder chain: direct FIRE hit plus poison.
     if (!target || target->IsDead()) return;
     const int casterHandle = caster ? caster->GetHandleId() : -1;
     ABEffectChain chain;
@@ -113,9 +89,6 @@ CAbilityQuilbeast::CAbilityQuilbeast(int handleId)
 }
 
 void CAbilityQuilbeast::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto an AbilityBuilder summon (ref UnitID progression): one
-    // timed beast beside the caster. Spread 0 + explicit point preserves
-    // the exact legacy spawn offset (caster + 64, 0).
     if (!caster) return;
     ABActionSummon quil(beastType_, War3ID("ANsq"), 1, summonDuration_, 0.0f);
     quil.Run(game, caster, nullptr, true, caster->GetX() + 64.0f, caster->GetY());
@@ -135,10 +108,6 @@ CAbilityFrostBreath::CAbilityFrostBreath(int handleId)
 }
 
 void CAbilityFrostBreath::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder iteration: enemy units (caster
-    // excluded) around the target take COLD damage + slow. The primary
-    // needs no SetExclude -- distance 0 keeps it in the splash, matching
-    // the hand-rolled loop's isPrimary exemption.
     if (!target || !caster || target->IsDead()) return;
     const int casterHandle = caster->GetHandleId();
     ABEffectChain perUnit;
@@ -169,10 +138,6 @@ CAbilityForkedLightning::CAbilityForkedLightning(int handleId)
 }
 
 void CAbilityForkedLightning::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder bounce (ref ChainLightning pattern in
-    // spells2.cpp): each hop rebuilds its LIGHTNING hit with the
-    // (1 - reduction) falloff baked in. Arcs between enemies per the repo
-    // AoE convention in the loop replaced.
     if (!target || target->IsDead()) return;
     ABActionBounce forked(
         bounces_, bounceRange_,

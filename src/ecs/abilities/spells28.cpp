@@ -1,6 +1,5 @@
 #include "spells28.h"
 #include "data/unitdata.h"
-#include "ecs/abilities/ability_harvest.h"
 #include "ecs/buff.h"
 #include "ecs/csimulation.h"
 #include "ecs/destructable.h"
@@ -35,7 +34,7 @@ void SetHarvestDisabled(CUnit* unit, bool disabled) {
 }
 
 void SendBackToWork(CSimulation& game, CUnit* unit) {
-    auto* harvest = dynamic_cast<CAbilityHarvest*>(unit ? unit->GetAbility(War3ID("Ahar")) : nullptr);
+    CAbility* harvest = unit ? unit->GetAbility(War3ID("Ahar")) : nullptr;
     if (!harvest || harvest->GetLastTargetHandle() < 0) return;
     CWidget* target = game.GetWidget(harvest->GetLastTargetHandle());
     if (!target || target->IsDead()) return;
@@ -43,7 +42,7 @@ void SendBackToWork(CSimulation& game, CUnit* unit) {
 }
 
 void ReturnCarriedResources(CSimulation& game, CUnit* unit) {
-    auto* harvest = dynamic_cast<CAbilityHarvest*>(unit ? unit->GetAbility(War3ID("Ahar")) : nullptr);
+    CAbility* harvest = unit ? unit->GetAbility(War3ID("Ahar")) : nullptr;
     if (!harvest || harvest->GetCarriedAmount() <= 0) return;
     if (CPlayer* player = game.GetPlayer(unit->GetPlayerIndex())) {
         if (harvest->GetCarriedResourceType() == CResourceType::GOLD) {
@@ -55,19 +54,15 @@ void ReturnCarriedResources(CSimulation& game, CUnit* unit) {
     harvest->ClearCarried();
 }
 
-class CBuffMilitia : public CBuff {
+class CBuffMilitia : public CBuffCloneable<CBuffMilitia> {
 public:
     CBuffMilitia(float duration, War3ID formId)
-        : CBuff(War3ID("Bmil"), duration, true), formId_(formId) {}
+        : CBuffCloneable(War3ID("Bmil"), duration, true), formId_(formId) {}
 
     void OnApply(CSimulation& game, CUnit* target) override {
         if (!target) return;
         SetHarvestDisabled(target, true);
-        CUnitData* data = game.GetUnitData();
-        if (!data) return;
-        if (CUnitType* form = data->GetUnitType(formId_)) {
-            target->MorphTo(form, formId_);
-        }
+        MorphIfKnownImpl(game, target, formId_);
     }
 
     void OnRemove(CSimulation& game, CUnit* target) override {
@@ -78,12 +73,6 @@ public:
             militia->SetConverted(false);
         }
         SendBackToWork(game, target);
-    }
-
-    CBuff* Clone() const override {
-        auto* copy = new CBuffMilitia(GetDuration(), formId_);
-        copy->SetRemaining(GetRemaining());
-        return copy;
     }
 
 private:
@@ -313,9 +302,9 @@ void CAbilityAcolyteHarvest::DoEffect(CSimulation& game, CUnit* caster, CWidget*
     if (!caster || !mineUnit) return;
     auto* mine = dynamic_cast<CAbilityBlightedGoldMine*>(mineUnit->GetAbility(War3ID("Abgm")));
     if (!mine) return;
-    if (mineUnitHandle_ == mineUnit->GetHandleId()) return; // already here
+    if (mineUnitHandle_ == mineUnit->GetHandleId()) return;
     Unbind(game);
-    if (!mine->AddMiner()) return; // full: DENIED, stays unbound (ref error text)
+    if (!mine->AddMiner()) return;
     mineUnitHandle_ = mineUnit->GetHandleId();
 }
 
@@ -342,8 +331,6 @@ void CAbilityWispHarvest::DoEffect(CSimulation& game, CUnit* caster, CWidget* ta
     if (!caster || !tree || tree->IsDead()) return;
     treeHandle_ = tree->GetHandleId();
     accum_ = interval_;
-    // ref CBehaviorWispHarvest: instant jump onto the tree (no walkaround,
-    // no carry/return trips); lumber then trickles in OnTick.
     caster->SetPosition(tree->GetX(), tree->GetY());
 }
 
@@ -378,7 +365,7 @@ void CAbilityHarvestLumber::DoEffect(CSimulation& game, CUnit* caster, CWidget* 
     if (!caster || !tree || tree->IsDead()) return;
     tree->Damage(game, caster, false, false, CAttackType::NORMAL, CDamageType::NORMAL,
                  "", damageToTree_, 0);
-    if (auto* harvest = dynamic_cast<CAbilityHarvest*>(caster->GetAbility(War3ID("Ahar")))) {
+    if (CAbility* harvest = caster->GetAbility(War3ID("Ahar"))) {
         harvest->SetCarried(CResourceType::LUMBER, capacity_);
         return;
     }
@@ -519,8 +506,6 @@ bool CAbilityNeutralBuilding::CanSelect(const CSimulation& game, const CUnit* sh
                                          const CUnit* other) const {
     if (!shop || !other || other == shop || other->IsDead() || other->IsBuilding()) return false;
     if (other->IsLoadedAboard()) return false;
-    // Ref canSelectUnit: only-allies shops serve allies (not same-player
-    // only, which would lock every neutral tavern out of its customers).
     if (onlyAllies_) {
         const CPlayer* shopPlayer = game.GetPlayer(shop->GetPlayerIndex());
         const CPlayer* otherPlayer = game.GetPlayer(other->GetPlayerIndex());
@@ -568,8 +553,6 @@ CUnit* CAbilityNeutralBuilding::GetSelectedUnit(int playerIndex) const {
 bool CAbilityNeutralBuilding::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
                                              CWidget* target) const {
     if (orderId != OrderIds::NEUTRALINTERACT) {
-        // Tavern awaken (retail Aawa, targeted at the hero): accepted when
-        // aimed at a live hero; buyer/cost gates run in Begin/HireFromTavern.
         if (orderId < 852462 || orderId > 852465) return false;
         auto* hero = dynamic_cast<CUnit*>(target);
         return hero && !hero->IsDead() && hero->IsHero();
@@ -596,10 +579,6 @@ CBehavior* CAbilityNeutralBuilding::Begin(CSimulation& game, CUnit* caster, int 
 
 bool CAbilityNeutralBuilding::HireFromTavern(CSimulation& game, CUnit* tavern, CUnit* hero) {
     if (!tavern || !hero || hero->IsDead() || !hero->IsHero()) return false;
-    // Buyer = the player explicitly shopping at this tavern (their unit
-    // selected via NEUTRALINTERACT). The order itself carries no buyer;
-    // ambiguous crowds fail soft. Rescan fills selected_[] with anything
-    // nearby, so it cannot serve as buyer intent (see shopper_[]).
     int buyer = -1;
     for (int i = 0; i < kPlayerSlots; i++) {
         CUnit* shopper = shopper_[i];
@@ -610,12 +589,8 @@ bool CAbilityNeutralBuilding::HireFromTavern(CSimulation& game, CUnit* tavern, C
     }
     CPlayer* player = buyer >= 0 ? game.GetPlayer(buyer) : nullptr;
     if (!player) return false;
-    // The hero must be on offer here (neutral, in radius) and not already
-    // the buyer's (re-hiring your own hero would just burn gold).
     if (hero->GetPlayerIndex() == buyer) return false;
     if (!CanSelect(game, tavern, hero)) return false;
-    // Retail gates: max 3 live heroes, techtree tier at the current hero
-    // count (ref hero training tiers), food room, awaken cost by level.
     int aliveHeroes = 0;
     for (CUnit* unit : game.GetUnits()) {
         if (unit && !unit->IsDead() && unit->GetPlayerIndex() == buyer &&
@@ -643,11 +618,9 @@ bool CAbilityNeutralBuilding::HireFromTavern(CSimulation& game, CUnit* tavern, C
     if (player->GetGold() < goldCost || player->GetLumber() < lumberCost) return false;
     player->AddGold(-goldCost);
     player->AddLumber(-lumberCost);
-    // Ownership transfer (mirrors SetPlayerUnitsOwner bookkeeping).
     if (CPlayer* from = game.GetPlayer(hero->GetPlayerIndex())) from->RemoveUnit(hero);
     hero->SetPlayerIndex(buyer);
     player->AddUnit(hero);
-    // Muster beside the tavern at partial strength (ref awaken factors).
     hero->SetPosition(tavern->GetX() + 128.0f, tavern->GetY());
     hero->SetLife(game, hero->GetMaxLife() * gameplay.heroAwakenLifeFactor);
     hero->SetMana(hero->GetMaxMana() * gameplay.heroAwakenManaFactor);

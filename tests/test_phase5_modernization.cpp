@@ -5456,7 +5456,7 @@ bool TestPhase16StageOO2DynamicPluginVersion16AndRetailDriveMapsEndToEndSuite() 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
         auto gameMod = loader.CreateGameModule(war3::War3GameModule::kModuleId);
         TEST_ASSERT(simMod && gameMod);
-        TEST_ASSERT(simMod->GetModuleVersion() == 16u);
+        TEST_ASSERT(simMod->GetModuleVersion() >= 16u);
 
         MpqManager mpq;
         CSimulation sim;
@@ -5483,6 +5483,671 @@ bool TestPhase16StageOO2DynamicPluginVersion16AndRetailDriveMapsEndToEndSuite() 
         TEST_ASSERT(snap.Restore(sim));
 
         session.TeardownCurrentSession(mpq, sim, scene, presentation);
+    }
+
+    return true;
+}
+
+#include "ecs/abilities/spells.h"
+#include "ecs/abilities/spells3.h"
+#include "ecs/abilities/spells7.h"
+#include "ecs/abilities/spells9.h"
+#include "ecs/abilities/spells13.h"
+#include "ecs/abilities/spells20.h"
+#include "ecs/behaviors/behavior_harvest.h"
+#include "ecs/behaviors/behavior_return_resources.h"
+#include "ecs/behaviors/behavior_repair.h"
+#include "ecs/behaviors/behavior_item.h"
+#include "ecs/behaviors/behavior_spell.h"
+#include "ecs/unit_text_utils.h"
+#include "ecs/animation_utils.h"
+
+// ============================================================================
+// Phase 17 (Stage PP & Stage QQ):
+//   - Stage PP1: Generic CAbility virtual capability contracts (harvest, dropoff,
+//                mine, repair, working state, inventory, spell casting) and
+//                zero concrete ability header coupling across src/ecs/behaviors/
+//   - Stage PP2: Declarative CAbilitySpellBase effect primitives (wave damage,
+//                line damage+stun, self/target/area buffs, timed spawner) and
+//                shared CAttackBonusDamageEffect
+//   - Stage QQ1: Unified CAbilityItemStatBonus StatSlot (DAMAGE, ARMOR, MAX_LIFE,
+//                MAX_MANA) and War3GameModule::RegisterCustomSpellDescriptor
+//   - Stage QQ2: Dynamic Plugin SO Version 17 & Cloud Retail W3X Maps Suite
+// ============================================================================
+
+bool TestPhase17StagePP1GenericCAbilityCapabilityContractAndZeroBehaviorHeaderCoupling() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // Peasant (hpea), Town Hall (htow), Gold Mine (ngol)
+    udTxt.SetString("hpea", "race", "human");
+    udTxt.SetString("hpea", "isbldg", "0");
+    ubTxt.SetString("hpea", "HP", "220");
+    ubTxt.SetString("hpea", "spd", "190");
+    uaTxt.SetString("hpea", "abilList", "Ahar,Arep,AInv");
+
+    udTxt.SetString("htow", "race", "human");
+    udTxt.SetString("htow", "isbldg", "1");
+    ubTxt.SetString("htow", "HP", "1500");
+    ubTxt.SetString("htow", "fmade", "12");
+    ubTxt.SetString("htow", "trains", "hpea");
+    uaTxt.SetString("htow", "abilList", "Aret");
+
+    udTxt.SetString("ngol", "race", "other");
+    udTxt.SetString("ngol", "isbldg", "1");
+    ubTxt.SetString("ngol", "HP", "1500");
+    uaTxt.SetString("ngol", "abilList", "Agld");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    auto p0 = std::make_unique<CPlayer>(0, "HumanP0", CMapControl::USER);
+    p0->SetGold(500);
+    p0->SetLumber(500);
+    sim.AddPlayer(std::move(p0));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* peasant = sim.CreateUnit(War3ID("hpea"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* hall    = sim.CreateUnit(War3ID("htow"), 0, 100.0f, 0.0f, 0.0f);
+    CUnit* mine    = sim.CreateUnit(War3ID("ngol"), 0, -100.0f, 0.0f, 0.0f);
+    TEST_ASSERT(peasant && hall && mine);
+    sim.Update();
+
+    // 1. Verify generic CAbility harvest & dropoff capability queries (without casting to CAbilityHarvest / CAbilityReturnResources)
+    CAbility* harvAbil = peasant->GetAbility(War3ID("Ahar"));
+    CAbility* retAbil  = hall->GetAbility(War3ID("Aret"));
+    CAbility* mineAbil = mine->GetAbility(War3ID("Agld"));
+    CAbility* repAbil  = peasant->GetAbility(War3ID("Arep"));
+    CAbility* queAbil  = hall->GetAbility(War3ID("Aque"));
+    TEST_ASSERT(harvAbil && retAbil && mineAbil && repAbil && queAbil);
+
+    TEST_ASSERT(!harvAbil->IsCarryingResources());
+    TEST_ASSERT(unit_text_utils::GetUnitCarriedResourceType(peasant) == CResourceType::NONE);
+    harvAbil->SetCarried(CResourceType::GOLD, 10);
+    TEST_ASSERT(harvAbil->IsCarryingResources());
+    TEST_ASSERT(harvAbil->GetCarriedResourceType() == CResourceType::GOLD);
+    TEST_ASSERT(harvAbil->GetCarriedAmount() == 10);
+    TEST_ASSERT(unit_text_utils::GetUnitCarriedResourceType(peasant) == CResourceType::GOLD);
+
+    TEST_ASSERT(retAbil->AcceptsResourceDropoff(CResourceType::GOLD));
+    TEST_ASSERT(retAbil->AcceptsResourceDropoff(CResourceType::LUMBER));
+    TEST_ASSERT(!retAbil->AcceptsResourceDropoff(CResourceType::NONE));
+
+    // 2. Verify generic CAbility mine & working state queries
+    TEST_ASSERT(mineAbil->IsResourceMine());
+    TEST_ASSERT(mineAbil->GetGold() == 12500);
+    TEST_ASSERT(mineAbil->CanAddMiner());
+    TEST_ASSERT(!mineAbil->IsActivelyWorking());
+    TEST_ASSERT(!animation_utils::IsUnitWorkingFromPassiveState(mine));
+
+    // Queue a peasant at the Town Hall -> IsActivelyWorking() becomes true on CAbilityQueue!
+    TEST_ASSERT(!queAbil->IsActivelyWorking());
+    TEST_ASSERT(!animation_utils::IsUnitWorkingFromPassiveState(hall));
+    queAbil->CheckBeforeQueueNoTarget(sim, hall, static_cast<int>(War3ID("hpea").value));
+    TEST_ASSERT(queAbil->IsActivelyWorking());
+    TEST_ASSERT(animation_utils::IsUnitWorkingFromPassiveState(hall));
+
+    // 3. Verify CBehaviorReturnResources deposits carried gold via CAbility virtual interface
+    const int goldBefore = sim.GetPlayer(0)->GetGold();
+    auto retBeh = std::make_unique<CBehaviorReturnResources>();
+    retBeh->SetUnit(peasant);
+    retBeh->SetHarvestAbility(harvAbil);
+    retBeh->SetTarget(hall);
+    peasant->SetCurrentBehavior(std::move(retBeh));
+    sim.Update();
+    TEST_ASSERT(sim.GetPlayer(0)->GetGold() == goldBefore + 10);
+    TEST_ASSERT(!harvAbil->IsCarryingResources());
+
+    return true;
+}
+
+bool TestPhase17StagePP2DeclarativeSpellBasePrimitivesWaveLineAndAreaBuffs() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "1000");
+    ubTxt.SetString("hfoo", "manaN", "500");
+    ubTxt.SetString("hfoo", "mana0", "500");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* caster = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* ally   = sim.CreateUnit(War3ID("hfoo"), 0, 40.0f, 0.0f, 0.0f);
+    CUnit* enemy  = sim.CreateUnit(War3ID("hfoo"), 1, 150.0f, 0.0f, 180.0f);
+    TEST_ASSERT(caster && ally && enemy);
+    sim.Update();
+
+    // 1. Test CastPointDamageWaves via Flame Strike (AHfs: 3 waves x 80 = 240 damage)
+    CAbilityFlameStrike flame(sim.AllocateHandleId());
+    flame.DoEffect(sim, caster, 150.0f, 0.0f);
+    TEST_NEAR(enemy->GetLife(), 760.0f, 0.5f);
+
+    // 2. Test CastLineDamageAndStun via Impale (AUim: 80 damage + 2s stun) & Stampede (ANst: 120 damage + 2s stun, enemy-only)
+    enemy->SetLife(sim, 1000.0f);
+    ally->SetLife(sim, 1000.0f);
+    CAbilityImpale impale(sim.AllocateHandleId());
+    impale.DoEffect(sim, caster, enemy);
+    TEST_NEAR(enemy->GetLife(), 920.0f, 0.5f);
+    TEST_ASSERT(enemy->HasBuff(War3ID("Bstn")));
+    enemy->RemoveBuff(War3ID("Bstn"), sim);
+    ally->RemoveBuff(War3ID("Bstn"), sim);
+    ally->SetLife(sim, 1000.0f);
+
+    CAbilityStampede stampede(sim.AllocateHandleId());
+    stampede.DoEffect(sim, caster, 200.0f, 0.0f);
+    TEST_NEAR(enemy->GetLife(), 800.0f, 0.5f);
+    TEST_ASSERT(enemy->HasBuff(War3ID("Bstn")));
+    TEST_NEAR(ally->GetLife(), 1000.0f, 0.5f);
+    enemy->RemoveBuff(War3ID("Bstn"), sim);
+
+    // 3. Test CastCasterAreaBuff via Roar (Aroa: applies Broa to same-player units) & Big Bad Voodoo (AOvd: applies Bdsb)
+    CAbilityRoar roar(sim.AllocateHandleId());
+    roar.DoEffect(sim, caster);
+    TEST_ASSERT(ally->HasBuff(War3ID("Broa")));
+    TEST_ASSERT(!enemy->HasBuff(War3ID("Broa")));
+
+    CAbilityBigBadVoodoo voodoo(sim.AllocateHandleId());
+    voodoo.DoEffect(sim, caster);
+    TEST_ASSERT(caster->IsInvulnerable());
+    TEST_ASSERT(ally->IsInvulnerable());
+    caster->RemoveBuff(War3ID("Bdsb"), sim);
+    ally->RemoveBuff(War3ID("Bdsb"), sim);
+
+    // 4. Test shared CAttackBonusDamageEffect via Orb of Fire (AIfb: +15 bonus fire damage on weapon hit)
+    enemy->SetLife(sim, 1000.0f);
+    auto orb = std::make_unique<CAbilityOrbOfFire>(sim.AllocateHandleId());
+    caster->AddAbility(sim, std::move(orb));
+    enemy->Damage(sim, caster, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", 50.0f);
+    // 50 normal + 15 Orb of Fire proc = 65 damage -> 935 HP
+    TEST_NEAR(enemy->GetLife(), 935.0f, 0.5f);
+
+    return true;
+}
+
+bool TestPhase17StageQQ1UnifiedItemStatBonusSlotsAndWar3CustomSpellDescriptor() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "500");
+    ubTxt.SetString("hfoo", "manaN", "200");
+    ubTxt.SetString("hfoo", "mana0", "200");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->ResetModuleStats();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* u = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* target = sim.CreateUnit(War3ID("hfoo"), 1, 100.0f, 0.0f, 180.0f);
+    TEST_ASSERT(u && target);
+    sim.Update();
+
+    // 1. Verify unified CAbilityItemStatBonus (DAMAGE, ARMOR, MAX_LIFE, MAX_MANA) add & remove
+    auto dmgAbil  = std::make_unique<CAbilityItemDamageBonus>(sim.AllocateHandleId());
+    auto armAbil  = std::make_unique<CAbilityItemArmorBonus>(sim.AllocateHandleId());
+    auto lifeAbil = std::make_unique<CAbilityItemLifeBonus>(sim.AllocateHandleId());
+    auto manaAbil = std::make_unique<CAbilityItemManaPoolBonus>(sim.AllocateHandleId());
+
+    const int dmgH  = dmgAbil->GetHandleId();
+    const int armH  = armAbil->GetHandleId();
+    const int lifeH = lifeAbil->GetHandleId();
+    const int manaH = manaAbil->GetHandleId();
+
+    u->AddAbility(sim, std::move(dmgAbil));
+    u->AddAbility(sim, std::move(armAbil));
+    u->AddAbility(sim, std::move(lifeAbil));
+    u->AddAbility(sim, std::move(manaAbil));
+
+    TEST_NEAR(u->GetBonusDamage(), 3.0f, 0.01f);
+    TEST_ASSERT(u->GetBonusArmor() == 2);
+    TEST_NEAR(u->GetMaxLife(), 650.0f, 0.01f);
+    TEST_ASSERT(u->GetMaxMana() == 300);
+
+    u->RemoveAbility(sim, dmgH);
+    u->RemoveAbility(sim, armH);
+    u->RemoveAbility(sim, lifeH);
+    u->RemoveAbility(sim, manaH);
+
+    TEST_NEAR(u->GetBonusDamage(), 0.0f, 0.01f);
+    TEST_ASSERT(u->GetBonusArmor() == 0);
+    TEST_NEAR(u->GetMaxLife(), 500.0f, 0.01f);
+    TEST_ASSERT(u->GetMaxMana() == 200);
+
+    // 2. Register a custom data-driven spell descriptor via War3GameModule::RegisterCustomSpellDescriptor
+    ABSpellDescriptor customNuke;
+    customNuke.code = War3ID("ACp7");
+    customNuke.targetType = static_cast<uint8_t>(CSpellTargetType::TARGET_UNIT);
+    customNuke.defaultRange = 600.0f;
+    customNuke.defaultManaCost = 40;
+    customNuke.defaultData[0] = 175.0f;
+    customNuke.onEffect = [](const ABSpellEffectContext& ctx, CSimulation& game,
+                             CUnit* caster, CWidget* tgt, bool, float, float) {
+        ABActionDamageTarget hit(ctx.data[0], CAttackType::SPELLS, CDamageType::LIGHTNING);
+        hit.Run(game, caster, tgt, false, 0.0f, 0.0f);
+    };
+    war3Mod->RegisterCustomSpellDescriptor(customNuke);
+    TEST_ASSERT(war3Mod->GetModuleStats().customSpellsRegistered == 1);
+
+    auto spawnedSpell = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("ACp7"));
+    TEST_ASSERT(spawnedSpell != nullptr);
+    u->AddAbility(sim, std::move(spawnedSpell));
+
+    target->SetLife(sim, 500.0f);
+    u->GetAbility(War3ID("ACp7"))->DoEffect(sim, u, target);
+    TEST_NEAR(target->GetLife(), 325.0f, 0.5f);
+
+    return true;
+}
+
+bool TestPhase17StageQQ2DynamicPluginVersion17AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath = candidate;
+            break;
+        }
+    }
+
+    FILE* f = std::fopen(soPath.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase17PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 17u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    // Verify cloud retail W3X maps load and step cleanly with War3GameModule v17
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TwistedMeadows.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        auto gameMod = loader.CreateGameModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && gameMod);
+        TEST_ASSERT(simMod->GetModuleVersion() >= 17u);
+
+        MpqManager mpq;
+        CSimulation sim;
+        sim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, sim, scene, presentation, mapPath));
+        sim.Update();
+        session.TeardownCurrentSession(mpq, sim, scene, presentation);
+    }
+
+    return true;
+}
+
+#include "ecs/abilities/spells6.h"
+#include "ecs/abilities/spells8.h"
+#include "ecs/abilities/spells21.h"
+#include "ecs/abilities/spells26.h"
+#include "ecs/abilities/spells27.h"
+#include "ecs/abilities/spells28.h"
+#include "ecs/abilities/spells29.h"
+
+// ============================================================================
+// Phase 18 (Stage RR & Stage SS):
+//   - Stage RR1: Compact CBuff/CAbility/CAbilitySpellBase bitfield memory layout
+//                and CBuffCloneable<Derived, Base> CRTP deep clone fidelity
+//   - Stage RR2: Unified CBuff state-restoration counters (Invulnerable, Rooted,
+//                Invisible, MagicImmune) and DamageEnemyUnitsInRadius AoE helpers
+//   - Stage SS1: SetPassiveSpell(true), CastPointAreaHeal, ForEachPassiveAllyInRange,
+//                and CAbilityBlightedGoldMine virtual resource mine contract
+//   - Stage SS2: War3GameModule Version 18 custom autocast ability registration
+//                (RegisterAutocastAbility) and Dynamic Plugin SO v18 + cloud maps
+// ============================================================================
+
+bool TestPhase18StageRR1CompactCBuffCAbilityLayoutAndCRTPCloneFidelity() {
+    // 1. Verify compact memory footprint after Phase 18 bitfield & int16_t packing
+    static_assert(sizeof(CAbility) <= 32, "CAbility must fit within 32 bytes (down from 40)");
+    static_assert(sizeof(CBuff) <= 40, "CBuff must fit within 40 bytes (down from 56)");
+    static_assert(sizeof(CAbilitySpellBase) <= 56, "CAbilitySpellBase must fit within 56 bytes (down from 72)");
+    TEST_ASSERT(sizeof(CAbility) <= 32);
+    TEST_ASSERT(sizeof(CBuff) <= 40);
+    TEST_ASSERT(sizeof(CAbilitySpellBase) <= 56);
+
+    // 2. Verify CAbility state flag bitmask round-trip
+    CAbilitySpellBase spell(9001, War3ID("AHbz"), CAbilityCategory::SPELL);
+    spell.SetPhysical(true);
+    spell.SetPermanent(true);
+    spell.SetIconShowing(false);
+    spell.SetAutocastActive(true);
+    spell.SetPassiveSpell(true);
+    const uint8_t abilMask = spell.GetAbilityStateFlagsBitmask();
+    TEST_ASSERT((abilMask & static_cast<uint8_t>(AbilityStateFlag::PHYSICAL)) != 0);
+    TEST_ASSERT((abilMask & static_cast<uint8_t>(AbilityStateFlag::PERMANENT)) != 0);
+    TEST_ASSERT((abilMask & static_cast<uint8_t>(AbilityStateFlag::ICON_SHOWING)) == 0);
+    TEST_ASSERT((abilMask & static_cast<uint8_t>(AbilityStateFlag::AUTOCAST_ACTIVE)) != 0);
+    TEST_ASSERT((abilMask & static_cast<uint8_t>(AbilityStateFlag::PASSIVE_SPELL)) != 0);
+
+    CAbilitySpellBase restoredSpell(9002, War3ID("AHbz"), CAbilityCategory::SPELL);
+    restoredSpell.SetAbilityStateFlagsBitmask(abilMask);
+    TEST_ASSERT(restoredSpell.IsPhysical() && restoredSpell.IsPermanent() &&
+                !restoredSpell.IsIconShowing() && restoredSpell.IsAutocastActive() &&
+                restoredSpell.IsPassiveSpell());
+
+    // 3. Verify CBuff state flag bitmask & CBuffCloneable CRTP deep cloning across single & multi-level hierarchies
+    CBuffSlow slow(12.0f, 0.45f, 777);
+    slow.SetRemaining(7.5f);
+    slow.SetSuspended(true);
+    std::unique_ptr<CBuff> clonedSlow(slow.Clone());
+    TEST_ASSERT(clonedSlow != nullptr);
+    TEST_ASSERT(clonedSlow->GetId() == War3ID("Bslo"));
+    TEST_NEAR(clonedSlow->GetDuration(), 12.0f, 0.001f);
+    TEST_NEAR(clonedSlow->GetRemaining(), 7.5f, 0.001f);
+    TEST_ASSERT(clonedSlow->GetCasterHandleId() == 777);
+    TEST_ASSERT(clonedSlow->IsSuspended());
+
+    // Multi-level CRTP inheritance: CBuffPolymorph -> CBuffCloneable<CBuffPolymorph, CBuffHex>
+    CBuffPolymorph poly(25.0f);
+    poly.SetRemaining(14.0f);
+    std::unique_ptr<CBuff> clonedPoly(poly.Clone());
+    TEST_ASSERT(clonedPoly != nullptr);
+    TEST_ASSERT(clonedPoly->GetId() == War3ID("Bply"));
+    TEST_NEAR(clonedPoly->GetRemaining(), 14.0f, 0.001f);
+    TEST_ASSERT(dynamic_cast<CBuffHex*>(clonedPoly.get()) != nullptr);
+
+    // Multi-level CRTP inheritance: CBuffCyclone -> CBuffCloneable<CBuffCyclone, CBuffStun>
+    CBuffCyclone cyc(6.0f);
+    cyc.SetRemaining(3.25f);
+    std::unique_ptr<CBuff> clonedCyc(cyc.Clone());
+    TEST_ASSERT(clonedCyc != nullptr);
+    TEST_ASSERT(clonedCyc->GetId() == War3ID("Bcyc"));
+    TEST_NEAR(clonedCyc->GetRemaining(), 3.25f, 0.001f);
+    TEST_ASSERT(dynamic_cast<CBuffStun*>(clonedCyc.get()) != nullptr);
+
+    return true;
+}
+
+bool TestPhase18StageRR2UnifiedBuffStateRestorationAndPeriodicAoEHelpers() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "1000");
+    ubTxt.SetString("hfoo", "manaN", "500");
+    ubTxt.SetString("hfoo", "mana0", "500");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::USER));
+    sim.SetSimulationModule(std::make_shared<war3::War3GameModule>());
+
+    CUnit* hero  = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* ally  = sim.CreateUnit(War3ID("hfoo"), 0, 60.0f, 0.0f, 0.0f);
+    CUnit* enemy = sim.CreateUnit(War3ID("hfoo"), 1, 60.0f, 0.0f, 180.0f);
+    TEST_ASSERT(hero && ally && enemy);
+    sim.Update();
+
+    // 1. Overlapping Invulnerable & Rooted buffs (DivineShield + StoneForm)
+    hero->AddBuff(std::make_unique<CBuffDivineShield>(10.0f), sim);
+    hero->AddBuff(std::make_unique<CBuffStoneForm>(10.0f), sim);
+    TEST_ASSERT(hero->IsInvulnerable() && hero->IsRooted());
+
+    // Removing DivineShield must keep hero invulnerable while StoneForm remains active
+    hero->RemoveBuff(War3ID("Bdsh"), sim);
+    TEST_ASSERT(hero->IsInvulnerable() && hero->IsRooted());
+
+    // Adding Ensnare then removing StoneForm clears Invulnerable but keeps Rooted
+    hero->AddBuff(std::make_unique<CBuffEnsnare>(10.0f), sim);
+    hero->RemoveBuff(War3ID("Bstm"), sim);
+    TEST_ASSERT(!hero->IsInvulnerable() && hero->IsRooted());
+    hero->RemoveBuff(War3ID("Bena"), sim);
+    TEST_ASSERT(!hero->IsRooted());
+
+    // 2. Overlapping MagicImmune buffs (CBuffMagicImmune + CBuffWhirlwind)
+    hero->AddBuff(std::make_unique<CBuffMagicImmune>(10.0f), sim);
+    hero->AddBuff(std::make_unique<CBuffWhirlwind>(10.0f, 50.0f, 200.0f), sim);
+    TEST_ASSERT(hero->IsMagicImmune());
+    hero->RemoveBuff(War3ID("Bam2"), sim);
+    TEST_ASSERT(hero->IsMagicImmune());
+    hero->RemoveBuff(War3ID("BOww"), sim);
+    TEST_ASSERT(!hero->IsMagicImmune());
+
+    // 3. Shared DamageEnemyUnitsInRadius helper via CBuffPhoenixFire & CBuffExplode
+    enemy->SetLife(sim, 1000.0f);
+    ally->SetLife(sim, 1000.0f);
+    hero->AddBuff(std::make_unique<CBuffPhoenixFire>(5.0f, 30.0f, 200.0f, 45.0f), sim);
+    // Initial damage (45) hits enemy immediately on apply, sparing ally
+    TEST_NEAR(enemy->GetLife(), 955.0f, 0.5f);
+    TEST_NEAR(ally->GetLife(), 1000.0f, 0.5f);
+
+    return true;
+}
+
+bool TestPhase18StageSS1PassiveSpellFlagAreaHealAndBlightedMineVirtualContract() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "1000");
+    ubTxt.SetString("hfoo", "manaN", "500");
+    ubTxt.SetString("hfoo", "mana0", "500");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    auto p0 = std::make_unique<CPlayer>(0, "P0", CMapControl::USER);
+    p0->SetGold(100);
+    sim.AddPlayer(std::move(p0));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::USER));
+    sim.SetSimulationModule(std::make_shared<war3::War3GameModule>());
+
+    CUnit* caster = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* ally   = sim.CreateUnit(War3ID("hfoo"), 0, 100.0f, 0.0f, 0.0f);
+    CUnit* enemy  = sim.CreateUnit(War3ID("hfoo"), 1, 100.0f, 0.0f, 180.0f);
+    TEST_ASSERT(caster && ally && enemy);
+    sim.Update();
+
+    // 1. Verify SetPassiveSpell(true) on CAbilityItemSpellResist / CAbilityItemMixedDefense / CAbilityChaos
+    CAbilityItemSpellResist spellResist(sim.AllocateHandleId());
+    CAbilityItemMixedDefense mixedDef(sim.AllocateHandleId());
+    CAbilityChaos chaos(sim.AllocateHandleId());
+    TEST_ASSERT(spellResist.IsPassiveSpell() && mixedDef.IsPassiveSpell() && chaos.IsPassiveSpell());
+    TEST_ASSERT(!spellResist.CheckCanTarget(sim, caster, 0, enemy));
+    TEST_ASSERT(!spellResist.CheckCanTargetPoint(sim, caster, 0, 0.0f, 0.0f));
+    TEST_ASSERT(!spellResist.CheckCanTargetNoTarget(sim, caster, 0));
+    TEST_ASSERT(!mixedDef.CheckCanTargetNoTarget(sim, caster, 0));
+    TEST_ASSERT(!chaos.CheckCanTargetNoTarget(sim, caster, 0));
+
+    // 2. Verify CastPointAreaHeal via Healing Spray (ANhs) & ItemHealGroup (AIha)
+    caster->SetLife(sim, 600.0f);
+    ally->SetLife(sim, 600.0f);
+    enemy->SetLife(sim, 600.0f);
+    CAbilityHealingSpray spray(sim.AllocateHandleId());
+    spray.DoEffect(sim, caster, 50.0f, 0.0f);
+    TEST_ASSERT(caster->GetLife() > 600.0f);
+    TEST_ASSERT(ally->GetLife() > 600.0f);
+    TEST_NEAR(enemy->GetLife(), 600.0f, 0.5f);
+
+    // 3. Verify ForEachPassiveAllyInRange via CAbilitySpellShieldArea & CAbilityReplenish
+    CAbilitySpellShieldArea shieldArea(sim.AllocateHandleId());
+    shieldArea.DoEffect(sim, caster, 50.0f, 0.0f);
+    TEST_ASSERT(caster->HasBuff(War3ID("BNss")));
+    TEST_ASSERT(ally->HasBuff(War3ID("BNss")));
+    TEST_ASSERT(!enemy->HasBuff(War3ID("BNss")));
+
+    // 4. Verify CAbilityBlightedGoldMine implements CAbility virtual resource mine contract
+    auto blightedMine = std::make_unique<CAbilityBlightedGoldMine>(sim.AllocateHandleId());
+    CAbility* genericMine = blightedMine.get();
+    TEST_ASSERT(genericMine->IsResourceMine());
+    TEST_ASSERT(genericMine->GetGold() == 12500);
+    genericMine->SetGold(5000);
+    TEST_ASSERT(genericMine->GetGold() == 5000);
+    TEST_ASSERT(genericMine->CanAddMiner());
+    TEST_ASSERT(!genericMine->IsActivelyWorking());
+    TEST_ASSERT(blightedMine->AddMiner());
+    TEST_ASSERT(genericMine->IsActivelyWorking());
+
+    return true;
+}
+
+bool TestPhase18StageSS2CustomAutocastSpellRegistrationAndDynamicPluginV18Suite() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "1000");
+    ubTxt.SetString("hfoo", "manaN", "500");
+    ubTxt.SetString("hfoo", "mana0", "500");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() == 18u);
+    sim.SetSimulationModule(war3Mod);
+
+    // 1. Register a custom data-driven single-target heal spell (ACh8) & register it for LOWEST_HP_ALLY autocast
+    ABSpellDescriptor customHeal;
+    customHeal.code = War3ID("ACh8");
+    customHeal.targetType = static_cast<uint8_t>(CSpellTargetType::TARGET_UNIT);
+    customHeal.defaultRange = 600.0f;
+    customHeal.defaultCastPoint = 0.0f;
+    customHeal.defaultCooldown = 2.0f;
+    customHeal.defaultManaCost = 25;
+    customHeal.defaultData[0] = 200.0f;
+    customHeal.onEffect = [](const ABSpellEffectContext& ctx, CSimulation& game,
+                              CUnit* caster, CWidget* tgt, bool, float, float) {
+        ABActionHealTarget heal(ctx.data[0]);
+        heal.Run(game, caster, tgt, false, 0.0f, 0.0f);
+    };
+    war3Mod->RegisterCustomSpellDescriptor(customHeal);
+    war3Mod->RegisterAutocastAbility(War3ID("ACh8"), static_cast<int>(CAutocastKind::LOWEST_HP_ALLY));
+    TEST_ASSERT(war3Mod->GetModuleStats().customAutocastRegistered == 1);
+    TEST_ASSERT(war3Mod->GetAbilityAutocastKind(War3ID("ACh8").value) ==
+                static_cast<int>(CAutocastKind::LOWEST_HP_ALLY));
+
+    CUnit* healer  = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* wounded = sim.CreateUnit(War3ID("hfoo"), 0, 120.0f, 0.0f, 0.0f);
+    TEST_ASSERT(healer && wounded);
+    sim.Update();
+
+    auto healAbil = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("ACh8"));
+    TEST_ASSERT(healAbil != nullptr);
+    healAbil->SetAutocastActive(true);
+    healer->AddAbility(sim, std::move(healAbil));
+
+    wounded->SetLife(sim, 400.0f);
+    for (int i = 0; i < 5; ++i) {
+        sim.Update();
+    }
+    TEST_ASSERT(war3Mod->GetModuleStats().autocastOrdersIssued >= 1);
+    TEST_NEAR(wounded->GetLife(), 600.0f, 1.0f);
+
+    // 2. Verify Dynamic Plugin SO Version 18 & Cloud Retail W3X Maps
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath18 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths18[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths18) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath18 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath18.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase18PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath18));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 18u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TurtleRock.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 18u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
     }
 
     return true;

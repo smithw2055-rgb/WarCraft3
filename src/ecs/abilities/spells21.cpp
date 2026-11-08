@@ -6,20 +6,6 @@
 #include "data/abilitydata.h"
 #include <cmath>
 
-namespace {
-
-// Retail splash-style ally test: same-player or ALLIED alliance counts as
-// friendly (cf. CCombatSystem::ApplySplashDamage).
-bool IsFriendly(CSimulation& game, int casterPlayer, CUnit* other) {
-    if (!other) return true;
-    if (other->GetPlayerIndex() == casterPlayer) return true;
-    CPlayer* owner = game.GetPlayer(casterPlayer);
-    CPlayer* theirs = game.GetPlayer(other->GetPlayerIndex());
-    return owner && theirs && owner->HasAlliance(*theirs, CAllianceType::ALLIED);
-}
-
-} // namespace
-
 // ===== Stasis Trap =====
 CAbilityStasisTrap::CAbilityStasisTrap(int handleId)
     : CAbilitySpellBase(handleId, War3ID("Asta"), CAbilityCategory::SPELL) {
@@ -42,7 +28,7 @@ void CAbilityStasisTrap::DoEffect(CSimulation& game, CUnit* caster, float x, flo
                     CSimulation& sim, CSimulation::SimHazard& h) {
         bool tripped = false;
         for (CUnit* unit : sim.GetUnits()) {
-            if (!unit || unit->IsDead() || IsFriendly(sim, casterPlayer, unit)) continue;
+            if (!unit || unit->IsDead() || IsFriendlyToPlayer(sim, casterPlayer, unit)) continue;
             const float dx = unit->GetX() - h.x;
             const float dy = unit->GetY() - h.y;
             if (dx * dx + dy * dy > radius * radius) continue;
@@ -84,7 +70,6 @@ void CAbilityTornado::DoEffect(CSimulation& game, CUnit* caster, float x, float 
         twister.ty = y + game.SimRandRange(-400.0f, 400.0f);
         twister.tick = [casterHandle, casterPlayer, radius = radius_, damage = damage_](
                            CSimulation& sim, CSimulation::SimHazard& h) {
-            // Repick the wander target on arrival (deterministic sim RNG).
             const float dx = h.tx - h.x;
             const float dy = h.ty - h.y;
             if (dx * dx + dy * dy < 32.0f * 32.0f) {
@@ -93,18 +78,16 @@ void CAbilityTornado::DoEffect(CSimulation& game, CUnit* caster, float x, float 
             }
             CUnit* caster = sim.GetUnit(casterHandle);
             for (CUnit* unit : sim.GetUnits()) {
-                if (!unit || unit->IsDead() || IsFriendly(sim, casterPlayer, unit)) continue;
+                if (!unit || unit->IsDead() || IsFriendlyToPlayer(sim, casterPlayer, unit)) continue;
                 const float ux = unit->GetX() - h.x;
                 const float uy = unit->GetY() - h.y;
                 if (ux * ux + uy * uy > radius * radius) continue;
-                // Damage before the lift: Cyclone grants invulnerability,
-                // so the bolt must land first (same-tick ordering).
                 sim.GetCombatSystem()->ApplyDamage(sim, caster, unit, false, false,
                                                   CAttackType::SPELLS, CDamageType::MAGIC,
                                                   "", damage, 0.0f, 0, 0);
                 unit->AddBuff(std::make_unique<CBuffCyclone>(2.0f), sim);
             }
-            return false; // wanderers persist until expiry
+            return false;
         };
         game.AddHazard(std::move(twister));
     }

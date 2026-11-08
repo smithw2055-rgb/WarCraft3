@@ -9,8 +9,6 @@
 
 namespace {
 
-bool CannotCast(CSimulation&, CUnit*, int, CWidget*) { return false; }
-
 float ClampedFactor(float penalty) {
     float factor = 1.0f - penalty;
     if (factor < 0.05f) factor = 0.05f;
@@ -71,25 +69,15 @@ CAbilityItemSpellResist::CAbilityItemSpellResist(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AIsr"), CAbilityCategory::ITEM) {
     iconShowing_ = false;
     permanent_ = true;
+    SetPassiveSpell(true);
     SetTargetType(CSpellTargetType::NO_TARGET);
-}
-
-bool CAbilityItemSpellResist::CheckCanTarget(CSimulation& g, CUnit* u, int o, CWidget* t) const {
-    return CannotCast(g, u, o, t);
-}
-bool CAbilityItemSpellResist::CheckCanTargetPoint(CSimulation&, CUnit*, int, float, float) const {
-    return false;
-}
-bool CAbilityItemSpellResist::CheckCanTargetNoTarget(CSimulation&, CUnit*, int) const {
-    return false;
 }
 
 void CAbilityItemSpellResist::OnAdd(CSimulation& game, CUnit* unit) {
     if (!unit) return;
     appliedAttack_ = (int)std::lround(attackBonus_);
     if (appliedAttack_ != 0) unit->AddBonusDamage(appliedAttack_);
-    float taken = 1.0f - spellReduction_;
-    if (taken < 0.0f) taken = 0.0f;
+    float taken = std::max(0.0f, 1.0f - spellReduction_);
     unit->AddBuff(std::make_unique<CBuffDamageMod>(War3ID("BIsr"), taken, 1.0f, 1.0f, 0.0f), game);
 }
 
@@ -109,17 +97,8 @@ CAbilityItemMixedDefense::CAbilityItemMixedDefense(int handleId)
     : CAbilitySpellBase(handleId, War3ID("AIdd"), CAbilityCategory::ITEM) {
     iconShowing_ = false;
     permanent_ = true;
+    SetPassiveSpell(true);
     SetTargetType(CSpellTargetType::NO_TARGET);
-}
-
-bool CAbilityItemMixedDefense::CheckCanTarget(CSimulation& g, CUnit* u, int o, CWidget* t) const {
-    return CannotCast(g, u, o, t);
-}
-bool CAbilityItemMixedDefense::CheckCanTargetPoint(CSimulation&, CUnit*, int, float, float) const {
-    return false;
-}
-bool CAbilityItemMixedDefense::CheckCanTargetNoTarget(CSimulation&, CUnit*, int) const {
-    return false;
 }
 
 void CAbilityItemMixedDefense::OnAdd(CSimulation& game, CUnit* unit) {
@@ -161,8 +140,6 @@ void CAbilityMagicDefense::DoEffect(CSimulation& game, CUnit* caster) {
     }
     caster->AddBuff(std::make_unique<CBuffMagicImmune>(1.0e9f, War3ID("Bmdf")), game);
     appliedFactor_ = ClampedFactor(speedPenalty_);
-    // Speed penalty as a non-stacking table entry (key = its buff id), so
-    // it adds with Bloodlust/Frenzy instead of multiplying them.
     caster->SetNonStackingAttackSpeed(War3ID("Bmdf"), appliedFactor_ - 1.0f);
     active_ = true;
 }
@@ -208,30 +185,20 @@ CAbilityReplenish::CAbilityReplenish(int handleId, War3ID code, bool restoreLife
 
 void CAbilityReplenish::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster || amount_ <= 0.0f) return;
-    CPlayer* owner = game.GetPlayer(caster->GetPlayerIndex());
-    const float radiusSq = radius_ * radius_;
-    for (CUnit* other : game.GetUnits()) {
-        if (!other || other->IsDead()) continue;
-        const float dx = other->GetX() - caster->GetX();
-        const float dy = other->GetY() - caster->GetY();
-        if (dx * dx + dy * dy > radiusSq) continue;
-        const bool self = other == caster;
-        CPlayer* otherPlayer = game.GetPlayer(other->GetPlayerIndex());
-        const bool ally = owner && otherPlayer &&
-                          owner->HasAlliance(*otherPlayer, CAllianceType::PASSIVE);
-        if (!self && !ally) continue;
-        if (restoreLife_) {
-            const float missing = other->GetMaxLife() - other->GetLife();
-            if (missing <= 0.0f) continue;
-            const float gain = std::min(amount_, missing);
-            other->SetLife(game, other->GetLife() + gain);
-        } else {
-            const float missing = (float)other->GetMaxMana() - other->GetMana();
-            if (missing <= 0.0f) continue;
-            const float gain = std::min(amount_, missing);
-            other->SetMana(other->GetMana() + gain);
-        }
-    }
+    ForEachPassiveAllyInRange(game, caster, caster->GetX(), caster->GetY(), radius_, true,
+                              [&game, restoreLife = restoreLife_, amount = amount_](CUnit* other) {
+                                  if (restoreLife) {
+                                      const float missing = other->GetMaxLife() - other->GetLife();
+                                      if (missing > 0.0f) {
+                                          other->SetLife(game, other->GetLife() + std::min(amount, missing));
+                                      }
+                                  } else {
+                                      const float missing = static_cast<float>(other->GetMaxMana()) - other->GetMana();
+                                      if (missing > 0.0f) {
+                                          other->SetMana(other->GetMana() + std::min(amount, missing));
+                                      }
+                                  }
+                              });
 }
 
 void CAbilityReplenish::ApplyEffectData(const CAbilityDefFull& def, int level) {

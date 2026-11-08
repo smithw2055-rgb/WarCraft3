@@ -28,8 +28,6 @@ CAbilityDrunkenBrawler::CAbilityDrunkenBrawler(int handleId)
 
 void CAbilityDrunkenBrawler::OnAdd(CSimulation& game, CUnit* unit) {
     CAbilityCriticalStrike::OnAdd(game, unit);
-    // Dodge rides its own evasion source (alias ANdb), so removing the
-    // brawler never clears foreign evasion (ref evasionListeners list).
     if (unit) unit->AddEvasionSource(GetAlias(), dodge_);
 }
 
@@ -120,8 +118,7 @@ void CAbilityEntangleGoldMine::AdvanceConstruction(CSimulation& game) {
     if (const CUnitType* type = replacement_->GetUnitType()) {
         if (type->GetBuildTime() > 0) buildTime = static_cast<float>(type->GetBuildTime());
     }
-    float progress = replacement_->GetConstructionProgress() + game.GetSimStepTime();
-    if (progress > buildTime) progress = buildTime;
+    float progress = std::min(buildTime, replacement_->GetConstructionProgress() + game.GetSimStepTime());
     replacement_->SetConstructionProgress(progress);
     const float fraction = 0.1f + 0.9f * (progress / buildTime);
     replacement_->SetLife(game, replacement_->GetMaxLife() * fraction);
@@ -166,12 +163,12 @@ void CAbilityEntangledMine::OnTick(CSimulation& game, CUnit* unit) {
         if (index_ >= (int)unit->GetCargoUnits().size()) return;
     }
 
-    auto* gold = dynamic_cast<CAbilityGoldMine*>(parent_->GetAbility(War3ID("Agld")));
+    CAbility* gold = parent_->GetAbility(War3ID("Agld"));
     if (!gold || gold->GetGold() <= 0) {
         unit->SetLife(game, 0);
         return;
     }
-    const int gain = gold->GetGold() < goldPerInterval_ ? gold->GetGold() : goldPerInterval_;
+    const int gain = std::min(gold->GetGold(), goldPerInterval_);
     gold->SetGold(gold->GetGold() - gain);
     if (CPlayer* player = game.GetPlayer(unit->GetPlayerIndex())) {
         player->AddGold(gain);

@@ -461,6 +461,15 @@ size_t War3GameModule::UnregisterWar3AbilityCatalog() {
     return AbilityFactory::UnregisterModuleCreators(kModuleId);
 }
 
+void War3GameModule::RegisterCustomSpellDescriptor(const ABSpellDescriptor& desc) {
+    AbilityFactory::RegisterModuleSpellDescriptor(kModuleId, desc);
+    ++stats_.customSpellsRegistered;
+}
+
+size_t War3GameModule::GetRegisteredAbilityCount() const {
+    return AbilityFactory::GetModuleRegisteredCount(kModuleId);
+}
+
 bool War3GameModule::IsRepairAbilityAlias(War3ID abilityCode) {
     return (abilityCode == War3ID("Arep")) || (abilityCode == War3ID("Ahrp")) ||
            (abilityCode == War3ID("Aren")) || (abilityCode == War3ID("Arst"));
@@ -518,6 +527,7 @@ void War3GameModule::OnRegisterAbilities() {
 
 void War3GameModule::OnUnregisterAbilities() {
     UnregisterWar3AbilityCatalog();
+    customAutocastKinds_.clear();
 }
 
 void War3GameModule::OnAssembleUnitAbilities(CSimulation& sim,
@@ -2006,6 +2016,20 @@ void War3GameModule::OnAwardKillBountyAndXP(CSimulation& sim,
     }
 }
 
+int War3GameModule::GetAbilityAutocastKind(uint32_t abilityRawcode) const {
+    auto it = customAutocastKinds_.find(abilityRawcode);
+    if (it != customAutocastKinds_.end()) {
+        return it->second;
+    }
+    return static_cast<int>(GetAutocastKind(War3ID(abilityRawcode)));
+}
+
+void War3GameModule::RegisterAutocastAbility(War3ID abilityCode, int autocastKindOrd) {
+    if (abilityCode.value == 0) return;
+    customAutocastKinds_[abilityCode.value] = autocastKindOrd;
+    ++stats_.customAutocastRegistered;
+}
+
 bool War3GameModule::OnTryUnitIdleAutocast(CSimulation& sim, CUnit& unit) {
     ++stats_.autocastEvaluations;
     if (unit.IsDead() || unit.IsBuilding() || unit.IsPaused()) return false;
@@ -2019,8 +2043,10 @@ bool War3GameModule::OnTryUnitIdleAutocast(CSimulation& sim, CUnit& unit) {
     for (CAbility* ab : unit.GetAbilities()) {
         auto* spell = dynamic_cast<CAbilitySpellBase*>(ab);
         if (!spell || spell->IsDisabled() || spell->IsOnCooldown()) continue;
-        CAutocastKind kind = GetAutocastKind(spell->GetAlias());
-        if (kind == CAutocastKind::NONE) kind = GetAutocastKind(spell->GetCode());
+        auto kind = static_cast<CAutocastKind>(GetAbilityAutocastKind(spell->GetAlias().value));
+        if (kind == CAutocastKind::NONE) {
+            kind = static_cast<CAutocastKind>(GetAbilityAutocastKind(spell->GetCode().value));
+        }
         if (kind == CAutocastKind::NONE) continue;
         if (!spell->IsAutocastActive() && defaultAuto != spell->GetAlias() &&
             defaultAuto != spell->GetCode()) continue;

@@ -19,15 +19,15 @@ public:
     CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) override;
     CBehavior* BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) override;
 
-    // Resource state
-    CResourceType GetCarriedResourceType() const { return carriedType_; }
-    int GetCarriedAmount() const { return carriedAmount_; }
-    void SetCarried(CResourceType type, int amount) { carriedType_ = type; carriedAmount_ = amount; }
-    void ClearCarried() { carriedType_ = CResourceType::NONE; carriedAmount_ = 0; }
+    // Resource state (implements CAbility virtual harvest capability contract)
+    CResourceType GetCarriedResourceType() const override { return carriedAmount_ > 0 ? carriedType_ : CResourceType::NONE; }
+    int GetCarriedAmount() const override { return carriedAmount_; }
+    void SetCarried(CResourceType type, int amount) override { carriedType_ = type; carriedAmount_ = amount; }
+    void ClearCarried() override { carriedType_ = CResourceType::NONE; carriedAmount_ = 0; }
     int GetGoldCapacity() const { return goldCapacity_; }
     int GetLumberCapacity() const { return lumberCapacity_; }
-    int GetLastTargetHandle() const { return lastTargetHandle_; }
-    void SetLastTargetHandle(int handleId) { lastTargetHandle_ = handleId; }
+    int GetLastTargetHandle() const override { return lastTargetHandle_; }
+    void SetLastTargetHandle(int handleId) override { lastTargetHandle_ = handleId; }
 
     // Configuration
     void SetGoldCapacity(int cap) { goldCapacity_ = cap; }
@@ -35,7 +35,7 @@ public:
     void SetHarvestRange(float range) { harvestRange_ = range; }
 
     // Toggle state: if carrying resources, base order is RETURN_RESOURCES
-    bool IsCarryingResources() const { return carriedAmount_ > 0; }
+    bool IsCarryingResources() const override { return carriedAmount_ > 0; }
 
 private:
     CResourceType carriedType_ = CResourceType::NONE;

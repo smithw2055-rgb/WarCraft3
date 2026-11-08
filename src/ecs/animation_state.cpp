@@ -1,6 +1,4 @@
 #include "animation_utils.h"
-#include "ecs/abilities/ability_gold_mine.h"
-#include "ecs/abilities/ability_queue.h"
 #include <algorithm>
 #include <cctype>
 
@@ -22,13 +20,8 @@ bool IsUnitWorkingFromPassiveState(const CUnit* unit) {
     if (!unit) {
         return false;
     }
-    if (const auto* queueAbility = dynamic_cast<const CAbilityQueue*>(unit->GetAbility(War3ID("Aque")))) {
-        if (queueAbility->GetQueueCount() > 0) {
-            return true;
-        }
-    }
-    if (const auto* goldMineAbility = dynamic_cast<const CAbilityGoldMine*>(unit->GetAbility(War3ID("Agld")))) {
-        if (goldMineAbility->GetActiveMinerCount() > 0) {
+    for (const CAbility* ability : unit->GetAbilities()) {
+        if (ability && ability->IsActivelyWorking()) {
             return true;
         }
     }

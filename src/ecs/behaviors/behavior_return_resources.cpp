@@ -2,10 +2,7 @@
 #include "ecs/csimulation.h"
 #include "ecs/destructable.h"
 #include "ecs/unit.h"
-#include "ecs/abilities/ability_gold_mine.h"
 #include "ecs/player.h"
-#include "ecs/abilities/ability_harvest.h"
-#include "ecs/abilities/ability_return_resources.h"
 #include "ecs/behaviors/behavior_harvest.h"
 #include "ecs/orders/order.h"
 #include "ecs/pathing/pathfinding.h"
@@ -18,77 +15,122 @@
 
 namespace {
 
+CAbility* ResolveHarvestAbility(CUnit* unit, const CAbility* preferred) {
+    if (!unit) {
+        return nullptr;
+    }
+    if (preferred) {
+        for (CAbility* ab : unit->GetAbilities()) {
+            if (ab == preferred) {
+                return ab;
+            }
+        }
+    }
+    if (CAbility* ahar = unit->GetAbility(War3ID("Ahar"))) {
+        return ahar;
+    }
+    for (CAbility* ab : unit->GetAbilities()) {
+        if (ab && ab->IsCarryingResources()) {
+            return ab;
+        }
+    }
+    return nullptr;
+}
+
+bool HasActiveResourceMine(const CUnit* unit) {
+    if (!unit) {
+        return false;
+    }
+    if (const CAbility* overlay = unit->GetAbility(War3ID("Agl2"))) {
+        if (overlay->IsResourceMine()) return true;
+    }
+    if (const CAbility* base = unit->GetAbility(War3ID("Agld"))) {
+        if (base->IsResourceMine()) return true;
+    }
+    for (const auto& ab : unit->GetAbilities()) {
+        if (ab && ab->IsResourceMine()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool CanAcceptReturnedResource(const CUnit* targetUnit, CResourceType resourceType) {
     if (!targetUnit) {
         return false;
     }
-    auto* returnAbility = dynamic_cast<CAbilityReturnResources*>(targetUnit->GetAbility(War3ID("Aret")));
-    if (!returnAbility) {
-        return false;
+    if (const CAbility* returnAbility = targetUnit->GetAbility(War3ID("Aret"))) {
+        if (returnAbility->AcceptsResourceDropoff(resourceType)) {
+            return true;
+        }
     }
-    switch (resourceType) {
-        case CResourceType::GOLD:
-            return returnAbility->AcceptsGold();
-        case CResourceType::LUMBER:
-            return returnAbility->AcceptsLumber();
-        default:
-            return false;
+    for (const auto& ab : targetUnit->GetAbilities()) {
+        if (ab && ab->AcceptsResourceDropoff(resourceType)) {
+            return true;
+        }
     }
+    return false;
 }
 
 CUnit* FindNearestMine(CSimulation& simulation, const CUnit* worker) {
     if (!worker) {
         return nullptr;
     }
-    double bestDistSq = std::numeric_limits<double>::max();
-    CUnit* bestTarget = nullptr;
+
+    CUnit* nearest = nullptr;
+    float minDistSq = std::numeric_limits<float>::max();
     for (auto* otherUnit : simulation.GetUnits()) {
-        if (!otherUnit || otherUnit->IsDead()) {
+        if (!otherUnit || otherUnit->IsDead() || otherUnit == worker) {
             continue;
         }
-        if (!dynamic_cast<CAbilityGoldMine*>(otherUnit->GetAbility(War3ID("Agld")))) {
+        if (!HasActiveResourceMine(otherUnit)) {
             continue;
         }
-        const double distSq = otherUnit->DistanceSquared(worker->GetX(), worker->GetY());
-        if (distSq < bestDistSq) {
-            bestDistSq = distSq;
-            bestTarget = otherUnit;
+        const float dx = otherUnit->GetX() - worker->GetX();
+        const float dy = otherUnit->GetY() - worker->GetY();
+        const float distSq = dx * dx + dy * dy;
+        if (distSq < minDistSq) {
+            minDistSq = distSq;
+            nearest = otherUnit;
         }
     }
-    return bestTarget;
+    return nearest;
 }
 
-CDestructable* FindNearestTree(CSimulation& simulation, const CUnit* worker, CWidget* origin) {
-    if (!worker || !origin) {
-        return nullptr;
-    }
-    auto* destructableData = simulation.GetDestructableData();
-    if (!destructableData) {
+CDestructable* FindNearestTree(CSimulation& simulation, const CUnit* worker, const CWidget* origin) {
+    if (!worker) {
         return nullptr;
     }
 
-    double bestDistSq = std::numeric_limits<double>::max();
-    CDestructable* bestTarget = nullptr;
+    const float refX = origin ? origin->GetX() : worker->GetX();
+    const float refY = origin ? origin->GetY() : worker->GetY();
+    const auto* destructableData = simulation.GetDestructableData();
+
+    CDestructable* nearest = nullptr;
+    float minDistSq = std::numeric_limits<float>::max();
     for (auto* destructable : simulation.GetDestructables()) {
         if (!destructable || destructable->IsDead()) {
             continue;
         }
-        const auto* destructableType = destructableData->GetDestructable(destructable->GetTypeId());
-        if (!destructableType || !destructableType->isTree) {
+        if (!destructableData) {
+            return nullptr;
+        }
+        const auto* dt = destructableData->GetDestructable(destructable->GetTypeId());
+        if (!dt || !dt->isTree) {
             continue;
         }
-        const double dx = destructable->GetX() - origin->GetX();
-        const double dy = destructable->GetY() - origin->GetY();
-        const double distSq = dx * dx + dy * dy;
-        if (distSq < bestDistSq) {
-            bestDistSq = distSq;
-            bestTarget = destructable;
+        const float dx = destructable->GetX() - refX;
+        const float dy = destructable->GetY() - refY;
+        const float distSq = dx * dx + dy * dy;
+        if (distSq < minDistSq) {
+            minDistSq = distSq;
+            nearest = destructable;
         }
     }
-    return bestTarget;
+    return nearest;
 }
 
-}
+} // namespace
 
 CBehaviorReturnResources::CBehaviorReturnResources() {}
 
@@ -100,36 +142,35 @@ void CBehaviorReturnResources::SetTarget(CWidget* target) {
 void CBehaviorReturnResources::FindNearestDropoff(CSimulation& simulation) {
     if (!unit_) return;
 
-    auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(unit_->GetAbility(War3ID("Ahar")));
+    CAbility* harvestAbility = ResolveHarvestAbility(unit_, harvestAbility_);
     const CResourceType resourceType = harvestAbility ? harvestAbility->GetCarriedResourceType() : CResourceType::NONE;
     if (resourceType == CResourceType::NONE) {
         target_ = nullptr;
         return;
     }
 
-    float bestDist = 1e9f;
-    CWidget* bestTarget = nullptr;
+    float minDist = std::numeric_limits<float>::max();
+    CUnit* nearest = nullptr;
 
     for (auto* otherUnit : simulation.GetUnits()) {
-        if (otherUnit->IsDead()) continue;
+        if (!otherUnit || otherUnit->IsDead() || otherUnit == unit_) continue;
         if (otherUnit->GetPlayerIndex() != unit_->GetPlayerIndex()) continue;
+        if (otherUnit->IsConstructing()) continue;
+        if (!CanAcceptReturnedResource(otherUnit, resourceType)) continue;
 
-        if (CanAcceptReturnedResource(otherUnit, resourceType)) {
-            float dx = otherUnit->GetX() - unit_->GetX();
-            float dy = otherUnit->GetY() - unit_->GetY();
-            float dist = std::sqrt(dx * dx + dy * dy);
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestTarget = otherUnit;
-            }
+        float dx = otherUnit->GetX() - unit_->GetX();
+        float dy = otherUnit->GetY() - unit_->GetY();
+        float dist = dx * dx + dy * dy;
+        if (dist < minDist) {
+            minDist = dist;
+            nearest = otherUnit;
         }
     }
 
-    target_ = bestTarget;
+    target_ = nearest;
 }
 
 void CBehaviorReturnResources::Begin(CSimulation& simulation) {
-    (void)simulation;
     movingToDropoff_ = true;
     depositing_ = false;
     depositTimer_ = 0;
@@ -137,7 +178,7 @@ void CBehaviorReturnResources::Begin(CSimulation& simulation) {
     pathRecalcCooldown_ = 0;
     propelling_ = false;
 
-    if (!target_) {
+    if (!target_ || target_->IsDead()) {
         FindNearestDropoff(simulation);
     }
 }
@@ -148,15 +189,47 @@ void CBehaviorReturnResources::End(CSimulation& simulation) {
     propelling_ = false;
 }
 
+void CBehaviorReturnResources::DepositCarriedResources(CSimulation& simulation) {
+    if (!unit_) return;
+    auto* player = simulation.GetPlayer(unit_->GetPlayerIndex());
+    CAbility* harvestAbility = ResolveHarvestAbility(unit_, harvestAbility_);
+    if (!player || !harvestAbility) return;
+
+    const int amount = harvestAbility->GetCarriedAmount();
+    const CResourceType type = harvestAbility->GetCarriedResourceType();
+
+    if (type == CResourceType::GOLD) {
+        player->AddGold(player->ApplyUpkeepGoldTax(amount, &simulation));
+    } else if (type == CResourceType::LUMBER) {
+        player->AddLumber(amount);
+    }
+
+    CWidget* nextTarget = simulation.GetWidget(harvestAbility->GetLastTargetHandle());
+    if ((!nextTarget || nextTarget->IsDead()) && type == CResourceType::GOLD) {
+        nextTarget = FindNearestMine(simulation, unit_);
+    } else if ((!nextTarget || nextTarget->IsDead()) && type == CResourceType::LUMBER) {
+        CWidget* origin = simulation.GetWidget(harvestAbility->GetLastTargetHandle());
+        if (!origin) {
+            origin = unit_;
+        }
+        nextTarget = FindNearestTree(simulation, unit_, origin);
+    }
+
+    harvestAbility->ClearCarried();
+    if (nextTarget && !nextTarget->IsDead()) {
+        harvestAbility->SetLastTargetHandle(nextTarget->GetHandleId());
+        unit_->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, nextTarget));
+    }
+}
+
 bool CBehaviorReturnResources::Update(CSimulation& simulation) {
     if (!unit_) return true;
 
     if (!target_ || target_->IsDead()) {
-        // Try to find another dropoff
         FindNearestDropoff(simulation);
         if (!target_) {
             propelling_ = false;
-            return true; // no dropoff found
+            return true;
         }
     }
 
@@ -164,9 +237,6 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
         float dx = target_->GetX() - unit_->GetX();
         float dy = target_->GetY() - unit_->GetY();
         float dist = std::sqrt(dx * dx + dy * dy);
-        // Footprint-aware arrival: big town halls (collision ~176) can
-        // never be approached within a fixed 128 units, so dock at the
-        // footprint edge instead of orbiting it forever.
         float arrival = 128.0f;
         if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
             arrival = std::max(220.0f, targetUnit->GetCollisionSize() + 96.0f);
@@ -178,38 +248,8 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
             depositing_ = false;
             propelling_ = false;
             unit_->TurnTowardPoint(target_->GetX(), target_->GetY());
-
-            // Deposit resources immediately matching warsmash CBehaviorReturnResources
-            auto* player = simulation.GetPlayer(unit_->GetPlayerIndex());
-            auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(unit_->GetAbility(War3ID("Ahar")));
-            if (player && harvestAbility) {
-                int amount = harvestAbility->GetCarriedAmount();
-                CResourceType type = harvestAbility->GetCarriedResourceType();
-
-                if (type == CResourceType::GOLD) {
-                    player->AddGold(player->ApplyUpkeepGoldTax(amount, &simulation));
-                } else if (type == CResourceType::LUMBER) {
-                    player->AddLumber(amount);
-                }
-
-                CWidget* nextTarget = simulation.GetWidget(harvestAbility->GetLastTargetHandle());
-                if ((!nextTarget || nextTarget->IsDead()) && type == CResourceType::GOLD) {
-                    nextTarget = FindNearestMine(simulation, unit_);
-                } else if ((!nextTarget || nextTarget->IsDead()) && type == CResourceType::LUMBER) {
-                    CWidget* origin = simulation.GetWidget(harvestAbility->GetLastTargetHandle());
-                    if (!origin) {
-                        origin = unit_;
-                    }
-                    nextTarget = FindNearestTree(simulation, unit_, origin);
-                }
-
-                harvestAbility->ClearCarried();
-                if (nextTarget && !nextTarget->IsDead()) {
-                    harvestAbility->SetLastTargetHandle(nextTarget->GetHandleId());
-                    unit_->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, nextTarget));
-                }
-            }
-            return true; // behavior done
+            DepositCarriedResources(simulation);
+            return true;
         }
 
         pathRecalcCooldown_--;
@@ -221,8 +261,6 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
                                                 target_->GetX(), target_->GetY(),
                                                 std::max(0.0f, unit_->GetCollisionSize()),
                                                 unit_->GetMovementType(), unit_, worldPath)) {
-                    // Drop already-reached waypoints (ref CBehaviorHarvest:
-                    // degenerate refills treadmill forever otherwise).
                     const float stepReach = std::max(1.0f,
                         unit_->GetSpeed() * simulation.GetSimStepTime()) * 2.0f;
                     for (size_t i = 1; i < worldPath.size(); i++) {
@@ -265,9 +303,6 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
                 propelling_ = true;
             }
         } else {
-            // Direct approach when waypoints are exhausted (same rationale
-            // as CBehaviorHarvest): the step stays validated against the
-            // pathing map.
             if (!unit_->TurnTowardPoint(target_->GetX(), target_->GetY())) {
                 propelling_ = false;
                 return false;
@@ -294,38 +329,8 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
         depositTimer_ += dt;
 
         if (depositTimer_ >= depositDuration_) {
-            // Deposit resources
-            auto* player = simulation.GetPlayer(unit_->GetPlayerIndex());
-            auto* harvestAbility = dynamic_cast<CAbilityHarvest*>(unit_->GetAbility(War3ID("Ahar")));
-            if (player && harvestAbility) {
-                int amount = harvestAbility->GetCarriedAmount();
-                CResourceType type = harvestAbility->GetCarriedResourceType();
-
-                if (type == CResourceType::GOLD) {
-                    player->AddGold(player->ApplyUpkeepGoldTax(amount, &simulation));
-                } else if (type == CResourceType::LUMBER) {
-                    player->AddLumber(amount);
-                }
-
-                CWidget* nextTarget = simulation.GetWidget(harvestAbility->GetLastTargetHandle());
-                if ((!nextTarget || nextTarget->IsDead()) && type == CResourceType::GOLD) {
-                    nextTarget = FindNearestMine(simulation, unit_);
-                } else if ((!nextTarget || nextTarget->IsDead()) && type == CResourceType::LUMBER) {
-                    CWidget* origin = simulation.GetWidget(harvestAbility->GetLastTargetHandle());
-                    if (!origin) {
-                        origin = unit_;
-                    }
-                    nextTarget = FindNearestTree(simulation, unit_, origin);
-                }
-
-                harvestAbility->ClearCarried();
-                if (nextTarget && !nextTarget->IsDead()) {
-                    harvestAbility->SetLastTargetHandle(nextTarget->GetHandleId());
-                    unit_->IssueOrder(std::make_unique<COrderTargetWidget>(OrderIds::HARVEST, nextTarget));
-                }
-            }
-
-            return true; // behavior done
+            DepositCarriedResources(simulation);
+            return true;
         }
         return false;
     }

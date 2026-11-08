@@ -14,7 +14,6 @@
 #include "ecs/behaviors/behavior_attack_move.h"
 #include "ecs/orders/order.h"
 #include "data/combat_types.h"
-#include "ecs/abilities/ability_aura.h"
 #include "ecs/attribute_aggregator.h"
 #include "ecs/unit_components.h"
 #include "ecs/ecs_registry.h"

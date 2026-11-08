@@ -2,7 +2,6 @@
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"
 #include "ecs/player.h"
-#include "ecs/abilities/ability_build.h"
 #include "ecs/pathing/pathfinding.h"
 #include "ecs/pathing/world_collision.h"
 #include "data/unitdata.h"

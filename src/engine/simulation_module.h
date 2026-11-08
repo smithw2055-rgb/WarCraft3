@@ -29,6 +29,8 @@ namespace engine {
 struct SimulationModuleStats {
     uint64_t unitsAssembled = 0;
     uint64_t abilitiesAttached = 0;
+    uint64_t customSpellsRegistered = 0;
+    uint64_t customAutocastRegistered = 0;
     uint64_t itemsConfigured = 0;
     uint64_t destructablesConfigured = 0;
     uint64_t unitsCommitted = 0;
@@ -284,6 +286,12 @@ public:
     virtual bool OnTryUnitIdleAutocast(CSimulation& /*sim*/, CUnit& /*unit*/) {
         ++stats_.autocastEvaluations;
         return false;
+    }
+
+    // Phase 18: Resolves the autocast acquisition kind (0 = NONE, 1 = LOWEST_HP_ALLY, 2 = NEAREST_ENEMY)
+    // for a given ability rawcode.
+    virtual int GetAbilityAutocastKind(uint32_t /*abilityRawcode*/) const {
+        return 0;
     }
 
     // Negative buff duration multiplier (e.g., 0.25x when Resistant Skin 'Brsk' is active).

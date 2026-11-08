@@ -18,16 +18,8 @@ CAbilityFlameStrike::CAbilityFlameStrike(int handleId)
 }
 
 void CAbilityFlameStrike::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto AbilityBuilder waves (same instant multi-wave pattern
-    // as Blizzard / Rain of Fire).
-    if (!caster) return;
-    for (int w = 0; w < waves_; w++) {
-        ABEffectChain perUnit;
-        perUnit.Add(std::make_unique<ABActionDamageTarget>(
-            damagePerWave_, CAttackType::SPELLS, CDamageType::FIRE));
-        ABActionForEachInRange wave(radius_, std::move(perUnit));
-        wave.Run(game, caster, nullptr, true, x, y);
-    }
+    CastPointDamageWaves(game, caster, x, y, waves_, radius_, damagePerWave_,
+                         CAttackType::SPELLS, CDamageType::FIRE);
 }
 
 // ===== Death and Decay =====
@@ -40,8 +32,6 @@ CAbilityDeathAndDecay::CAbilityDeathAndDecay(int handleId)
 }
 
 void CAbilityDeathAndDecay::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto AbilityBuilder waves; each wave corrupts every unit in
-    // the area (friend and foe, caster exempt) for a max-life fraction.
     if (!caster) return;
     for (int w = 0; w < waves_; w++) {
         ABEffectChain perUnit;
@@ -67,15 +57,9 @@ CAbilityImpale::CAbilityImpale(int handleId)
 }
 
 void CAbilityImpale::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder line iteration (damage + stun
-    // corridor). The dead-target early-out matches the loop replaced.
     if (!target || !caster || target->IsDead()) return;
-    ABEffectChain perUnit;
-    perUnit.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
-                                                       CDamageType::NORMAL));
-    perUnit.Add(std::make_unique<ABActionStunTarget>(stunDuration_));
-    ABActionForEachInLine impale(range_, width_, std::move(perUnit));
-    impale.Run(game, caster, target, false, 0, 0);
+    CastLineDamageAndStun(game, caster, target, false, 0.0f, 0.0f,
+                          range_, width_, damage_, stunDuration_);
 }
 
 // ===== Fan of Knives =====
@@ -87,15 +71,9 @@ CAbilityFanOfKnives::CAbilityFanOfKnives(int handleId)
 }
 
 void CAbilityFanOfKnives::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto an AbilityBuilder iteration: only units owned by other
-    // players take damage (same player-index rule as the loop replaced).
-    if (!caster) return;
-    ABEffectChain perUnit;
-    perUnit.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
-                                                       CDamageType::NORMAL));
-    ABActionForEachInRange fan(radius_, std::move(perUnit));
-    fan.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
-    fan.Run(game, caster, nullptr, false, 0, 0);
+    CastCasterAreaDamageWaves(game, caster, 1, radius_, damage_,
+                              CAttackType::SPELLS, CDamageType::NORMAL,
+                              ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
 }
 
 // ===== Rain of Fire =====
@@ -108,16 +86,8 @@ CAbilityRainOfFire::CAbilityRainOfFire(int handleId)
 }
 
 void CAbilityRainOfFire::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto AbilityBuilder waves (same instant multi-wave pattern
-    // as Blizzard; the .j drop timing is a visual pass).
-    if (!caster) return;
-    for (int w = 0; w < waves_; w++) {
-        ABEffectChain perUnit;
-        perUnit.Add(std::make_unique<ABActionDamageTarget>(
-            damagePerWave_, CAttackType::SPELLS, CDamageType::FIRE));
-        ABActionForEachInRange wave(radius_, std::move(perUnit));
-        wave.Run(game, caster, nullptr, true, x, y);
-    }
+    CastPointDamageWaves(game, caster, x, y, waves_, radius_, damagePerWave_,
+                         CAttackType::SPELLS, CDamageType::FIRE);
 }
 
 // ===== Spiked Carapace =====
@@ -146,9 +116,6 @@ CAbilityDarkRitual::CAbilityDarkRitual(int handleId)
 }
 
 void CAbilityDarkRitual::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto AbilityBuilder pieces: a same-player non-hero victim
-    // (never the caster) dies, and its life force becomes caster mana
-    // (capped by the pool), computed up front like AbsorbMana.
     if (!target || !caster || target->IsDead() || target == caster) return;
     auto* victim = dynamic_cast<CUnit*>(target);
     if (!victim || victim->IsHero()) return;
@@ -171,8 +138,6 @@ CAbilityShadowStrike::CAbilityShadowStrike(int handleId)
 }
 
 void CAbilityShadowStrike::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder chain: poison hit plus slow and
-    // poison over time.
     const int casterHandle = caster ? caster->GetHandleId() : -1;
     ABEffectChain chain;
     chain.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,

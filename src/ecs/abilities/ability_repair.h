@@ -12,10 +12,10 @@ public:
     bool CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, CWidget* target) const override;
     CBehavior* Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) override;
 
-    // Configuration
-    float GetRepairRate() const { return repairRate_; }
+    // Configuration (implements CAbility virtual repair capability contract)
+    float GetRepairRate() const override { return repairRate_; }
     void SetRepairRate(float v) { repairRate_ = v; }
-    float GetRepairRange() const { return repairRange_; }
+    float GetRepairRange() const override { return repairRange_; }
     void SetRepairRange(float v) { repairRange_ = v; }
     int GetGoldCostPerHP() const { return goldCostPerHP_; }
     void SetGoldCostPerHP(int v) { goldCostPerHP_ = v; }

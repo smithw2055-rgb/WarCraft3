@@ -37,6 +37,7 @@ public:
     War3ID GetQueuedItem(int slot) const;
     CQueueItemType GetQueuedItemType(int slot) const;
     int GetQueueCount() const;
+    bool IsActivelyWorking() const override { return GetQueueCount() > 0; }
     float GetProgress() const { return progress_; }
     float GetBuildTime() const { return buildTime_; }
 

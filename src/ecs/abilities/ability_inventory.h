@@ -17,12 +17,12 @@ public:
     void OnRemove(CSimulation& game, CUnit* unit) override;
     void OnDeath(CSimulation& game, CUnit* unit) override;
 
-    // Item management
+    // Item management (implements CAbility virtual inventory capability contract)
     bool CanPickUpItem(CSimulation& game, CUnit* unit, CItem* item) const;
-    bool PickUpItem(CSimulation& game, CUnit* unit, CItem* item);
+    bool PickUpItem(CSimulation& game, CUnit* unit, CItem* item) override;
     bool PickUpItem(CSimulation& game, CUnit* unit, CItem* item, int slotPreference);
-    bool DropItem(CSimulation& game, CUnit* unit, int slot);
-    bool DropItemAt(CSimulation& game, CUnit* unit, int slot, float x, float y);
+    bool DropItem(CSimulation& game, CUnit* unit, int slot) override;
+    bool DropItemAt(CSimulation& game, CUnit* unit, int slot, float x, float y) override;
     bool DropItem(CSimulation& game, CUnit* unit, CItem* item);
     bool DropItemAt(CSimulation& game, CUnit* unit, CItem* item, float x, float y);
     // Silent detach (pawn/consumption): clears slot, bonuses and granted
@@ -33,12 +33,12 @@ public:
     bool MoveItemToSlot(CItem* item, int slot);
 
     // Slot access
-    CItem* GetItem(int slot) const;
+    CItem* GetItem(int slot) const override;
     int GetItemCount() const;
     int GetItemCapacity() const { return itemCapacity_; }
     int FindEmptySlot() const;
     int FindEmptySlot(int slotPreference) const;
-    int FindItemSlot(CItem* item) const;
+    int FindItemSlot(CItem* item) const override;
     bool HasItem(CItem* item) const;
 
     // Configuration

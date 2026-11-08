@@ -5,35 +5,135 @@
 #include "ecs/csimulation.h"
 #include "ecs/behaviors/behavior_stun.h"
 #include "data/unitdata.h"
+#include <algorithm>
 #include <memory>
+
+namespace {
+
+// Phase 18 Stage RR: Shared state-flag restoration & periodic AoE helpers
+// (eliminates duplicated buff-scanning loops across DivineShield, StoneForm,
+// Cyclone, Ensnare, Burrow, Ethereal, MagicImmune, Whirlwind, Explode,
+// Immolation, and PhoenixFire).
+
+void RefreshUnitInvulnerableFromBuffs(CUnit* target, const CBuff* excluding) {
+    if (!target) return;
+    bool hasOtherInvul = (target->GetAbility(War3ID("Avul")) != nullptr);
+    if (!hasOtherInvul) {
+        for (const auto& b : target->GetBuffs()) {
+            if (!b || b.get() == excluding) continue;
+            const War3ID bid = b->GetId();
+            if (bid == War3ID("Bdsh") || bid == War3ID("Bstm") || bid == War3ID("Bcyc")) {
+                hasOtherInvul = true;
+                break;
+            }
+        }
+    }
+    if (!hasOtherInvul) {
+        target->SetInvulnerable(false);
+    }
+}
+
+void RefreshUnitRootedFromBuffs(CUnit* target, const CBuff* excluding) {
+    if (!target) return;
+    bool hasOtherRoot = target->IsBuilding();
+    if (!hasOtherRoot) {
+        for (const auto& b : target->GetBuffs()) {
+            if (!b || b.get() == excluding) continue;
+            const War3ID bid = b->GetId();
+            if (bid == War3ID("Bbur") || bid == War3ID("Bena") || bid == War3ID("Bstm")) {
+                hasOtherRoot = true;
+                break;
+            }
+        }
+    }
+    if (!hasOtherRoot) {
+        target->SetRooted(false);
+    }
+}
+
+void RefreshUnitInvisibleFromBuffs(CUnit* target, const CBuff* excluding) {
+    if (!target) return;
+    bool hasOtherInvis = (target->GetAbility(War3ID("Apiv")) != nullptr);
+    if (!hasOtherInvis) {
+        for (const auto& b : target->GetBuffs()) {
+            if (!b || b.get() == excluding) continue;
+            const War3ID bid = b->GetId();
+            if (bid == War3ID("Bbur") || bid == War3ID("BOwk") || bid == War3ID("Binv")) {
+                hasOtherInvis = true;
+                break;
+            }
+        }
+    }
+    if (!hasOtherInvis) {
+        target->SetInvisible(false);
+    }
+}
+
+void RefreshUnitMagicImmuneFromBuffs(CUnit* target) {
+    if (!target) return;
+    int immuneCount = 0;
+    for (const auto& b : target->GetBuffs()) {
+        if (!b) continue;
+        if (dynamic_cast<const CBuffMagicImmune*>(b.get()) ||
+            dynamic_cast<const CBuffWhirlwind*>(b.get())) {
+            ++immuneCount;
+        }
+    }
+    if (immuneCount <= 1) {
+        target->SetMagicImmune(false);
+    }
+}
+
+void DamageEnemyUnitsInRadius(CSimulation& game, CUnit* source,
+                              float radius, float amount,
+                              CDamageType dmgType, bool isRanged = false) {
+    if (!source || amount <= 0.0f) return;
+    CPlayer* tp = game.GetPlayer(source->GetPlayerIndex());
+    const float radiusSq = radius * radius;
+    for (auto* unit : game.GetUnits()) {
+        if (!unit || unit->IsDead() || unit == source) continue;
+        CPlayer* up = game.GetPlayer(unit->GetPlayerIndex());
+        const bool isAlly = (unit->GetPlayerIndex() == source->GetPlayerIndex()) ||
+            (tp && up && (tp->HasAlliance(*up, CAllianceType::ALLIED) ||
+                          tp->HasAlliance(*up, CAllianceType::PASSIVE)));
+        if (isAlly) continue;
+        const float dx = unit->GetX() - source->GetX();
+        const float dy = unit->GetY() - source->GetY();
+        if (dx * dx + dy * dy <= radiusSq) {
+            unit->Damage(game, source, false, isRanged,
+                         CAttackType::SPELLS, dmgType, "", amount, 0);
+        }
+    }
+}
+
+void NotifySummonedUnit(CSimulation& game, int summonerHandle, CUnit* spawned) {
+    if (!spawned) return;
+    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
+        summonedCb(summonerHandle, spawned->GetHandleId());
+    }
+}
+
+} // namespace
 
 // ===== CBuffSlow =====
 CBuffSlow::CBuffSlow(float duration, float slowPercent, int casterHandle)
-    : CBuff(War3ID("Bslo"), duration, false), slowPercent_(slowPercent) {
+    : CBuffCloneable(War3ID("Bslo"), duration, false), slowPercent_(slowPercent) {
     casterHandleId_ = casterHandle;
 }
 
 void CBuffSlow::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
-    if (!target) return;
-    target->AddSpeedModifier(GetId(), -slowPercent_);
+    if (target) target->AddSpeedModifier(GetId(), -slowPercent_);
 }
 
 void CBuffSlow::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    if (!target) return;
-    target->RemoveSpeedModifier(GetId());
-}
-
-CBuff* CBuffSlow::Clone() const {
-    auto* copy = new CBuffSlow(duration_, slowPercent_, casterHandleId_);
-    copy->remaining_ = remaining_;
-    return copy;
+    if (target) target->RemoveSpeedModifier(GetId());
 }
 
 // ===== CBuffPoison =====
 CBuffPoison::CBuffPoison(float duration, float damagePerTick, int casterHandle)
-    : CBuff(War3ID("Bpoi"), duration, false), damagePerTick_(damagePerTick) {
+    : CBuffCloneable(War3ID("Bpoi"), duration, false), damagePerTick_(damagePerTick) {
     casterHandleId_ = casterHandle;
     SetPeriodic(true, 1.0f);
 }
@@ -46,23 +146,15 @@ void CBuffPoison::OnPeriodic(CSimulation& game, CUnit* target) {
     }
 }
 
-CBuff* CBuffPoison::Clone() const {
-    auto* copy = new CBuffPoison(duration_, damagePerTick_, casterHandleId_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffBloodlust =====
 CBuffBloodlust::CBuffBloodlust(float duration, float speedBonus, float attackSpeedBonus)
-    : CBuff(War3ID("Bblo"), duration, true)
+    : CBuffCloneable(War3ID("Bblo"), duration, true)
     , speedBonus_(speedBonus), attackSpeedBonus_(attackSpeedBonus) {}
 
 void CBuffBloodlust::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
     target->AddSpeedModifier(GetId(), speedBonus_);
-    // Non-stacking haste (ref ATKSPD max-within-key, here key Bblo):
-    // Bloodlust no longer multiplies with Endurance/Frenzy, it adds.
     target->SetNonStackingAttackSpeed(GetId(), attackSpeedBonus_);
 }
 
@@ -73,89 +165,23 @@ void CBuffBloodlust::OnRemove(CSimulation& game, CUnit* target) {
     target->ClearNonStackingAttackSpeed(GetId());
 }
 
-CBuff* CBuffBloodlust::Clone() const {
-    auto* copy = new CBuffBloodlust(duration_, speedBonus_, attackSpeedBonus_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffThorns =====
-CBuffThorns::CBuffThorns(float duration, float reflectPercent, War3ID id)
-    : CBuff(id, duration, true), reflectPercent_(reflectPercent) {}
-
-void CBuffThorns::OnApply(CSimulation& game, CUnit* target) {
-    (void)game; (void)target;
-    // Reflection is handled in CUnit::Damage via HasBuff(Bthr); no registration needed.
-}
-
-void CBuffThorns::OnRemove(CSimulation& game, CUnit* target) {
-    (void)game; (void)target;
-    // See OnApply: buff presence is the only state.
-}
-
-CBuff* CBuffThorns::Clone() const {
-    auto* copy = new CBuffThorns(duration_, reflectPercent_, GetId());
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffLifesteal =====
-CBuffLifesteal::CBuffLifesteal(float duration, float stealPercent)
-    : CBuff(War3ID("BUav"), duration, true), stealPercent_(stealPercent) {}
-
-void CBuffLifesteal::OnApply(CSimulation& game, CUnit* target) {
-    (void)game; (void)target;
-    // Steal is applied in CUnit::Damage via HasBuff(BUav); no registration needed.
-}
-
-void CBuffLifesteal::OnRemove(CSimulation& game, CUnit* target) {
-    (void)game; (void)target;
-    // See OnApply: buff presence is the only state.
-}
-
-CBuff* CBuffLifesteal::Clone() const {
-    auto* copy = new CBuffLifesteal(duration_, stealPercent_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffDivineShield =====
 CBuffDivineShield::CBuffDivineShield(float duration)
-    : CBuff(War3ID("Bdsh"), duration, true) {}
+    : CBuffCloneable(War3ID("Bdsh"), duration, true) {}
 
 void CBuffDivineShield::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
-    target->SetInvulnerable(true);
+    if (target) target->SetInvulnerable(true);
 }
 
 void CBuffDivineShield::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    if (!target) return;
-    bool hasOtherInvul = (target->GetAbility(War3ID("Avul")) != nullptr);
-    if (!hasOtherInvul) {
-        for (const auto& b : target->GetBuffs()) {
-            if (!b || b.get() == this) continue;
-            War3ID bid = b->GetId();
-            if (bid == War3ID("Bdsh") || bid == War3ID("Bstm") || bid == War3ID("Bcyc")) {
-                hasOtherInvul = true;
-                break;
-            }
-        }
-    }
-    if (!hasOtherInvul) {
-        target->SetInvulnerable(false);
-    }
-}
-
-CBuff* CBuffDivineShield::Clone() const {
-    auto* copy = new CBuffDivineShield(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
+    RefreshUnitInvulnerableFromBuffs(target, this);
 }
 
 // ===== CBuffEthereal =====
 CBuffEthereal::CBuffEthereal(float duration, War3ID id)
-    : CBuff(id, duration, false) {}
+    : CBuffCloneable(id, duration, false) {}
 
 void CBuffEthereal::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
@@ -165,8 +191,6 @@ void CBuffEthereal::OnApply(CSimulation& game, CUnit* target) {
 void CBuffEthereal::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
-    // Stacking-aware: OnRemove runs before erasure, so self still counts.
-    // Any remaining ethereal buff (whatever its id) keeps the flag.
     int count = 0;
     for (const auto& b : target->GetBuffs()) {
         if (b && dynamic_cast<const CBuffEthereal*>(b.get())) ++count;
@@ -174,15 +198,9 @@ void CBuffEthereal::OnRemove(CSimulation& game, CUnit* target) {
     if (count <= 1) target->SetEthereal(false);
 }
 
-CBuff* CBuffEthereal::Clone() const {
-    auto* copy = new CBuffEthereal(duration_, GetId());
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffMagicImmune =====
 CBuffMagicImmune::CBuffMagicImmune(float duration, War3ID id)
-    : CBuff(id, duration, true) {}
+    : CBuffCloneable(id, duration, true) {}
 
 void CBuffMagicImmune::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
@@ -191,23 +209,12 @@ void CBuffMagicImmune::OnApply(CSimulation& game, CUnit* target) {
 
 void CBuffMagicImmune::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    if (!target) return;
-    int count = 0;
-    for (const auto& b : target->GetBuffs()) {
-        if (b && dynamic_cast<const CBuffMagicImmune*>(b.get())) ++count;
-    }
-    if (count <= 1) target->SetMagicImmune(false);
-}
-
-CBuff* CBuffMagicImmune::Clone() const {
-    auto* copy = new CBuffMagicImmune(duration_, GetId());
-    copy->remaining_ = remaining_;
-    return copy;
+    RefreshUnitMagicImmuneFromBuffs(target);
 }
 
 // ===== CBuffStun =====
 CBuffStun::CBuffStun(float duration)
-    : CBuff(War3ID("Bstn"), duration, false) {}
+    : CBuffCloneable(War3ID("Bstn"), duration, false) {}
 
 void CBuffStun::OnApply(CSimulation& game, CUnit* target) {
     if (!target) return;
@@ -223,8 +230,6 @@ void CBuffStun::OnApply(CSimulation& game, CUnit* target) {
 void CBuffStun::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
-    // Only clear if the unit is still stunned (behavior may already have
-    // expired and been cleaned up by CUnit::Update).
     if (auto* behavior = target->GetCurrentBehavior()) {
         if (behavior->GetCategory() == CBehaviorCategory::STUN) {
             target->SetCurrentBehavior(nullptr);
@@ -241,104 +246,44 @@ void CBuffStun::OnRefresh(CSimulation& game, CUnit* target, const CBuff& newBuff
     }
 }
 
-CBuff* CBuffStun::Clone() const {
-    auto* copy = new CBuffStun(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffSleep =====
-// Canonical buff id BUsl (ref Units\AbilityBuffData.slk, Dreadlord Sleep).
 CBuffSleep::CBuffSleep(float duration)
-    : CBuff(War3ID("BUsl"), duration, false) {}
+    : CBuffCloneable(War3ID("BUsl"), duration, false) {}
 
 void CBuffSleep::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
-    // Sleep interrupts orders like stun, but any damage wakes the unit
-    // (handled in CUnit::Damage). No stun behavior: the unit simply idles.
     target->ClearOrders();
     target->SetCurrentBehavior(nullptr);
 }
 
-void CBuffSleep::OnRemove(CSimulation& game, CUnit* target) {
-    (void)game; (void)target;
-}
-
-CBuff* CBuffSleep::Clone() const {
-    auto* copy = new CBuffSleep(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffSilence =====
-// Canonical buff id BNsi (ref Units\AbilityBuffData.slk, Dark Ranger Silence).
-CBuffSilence::CBuffSilence(float duration)
-    : CBuff(War3ID("BNsi"), duration, false) {}
-
-CBuff* CBuffSilence::Clone() const {
-    auto* copy = new CBuffSilence(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffHex =====
-// Canonical buff id BOhx (ref Units\AbilityBuffData.slk, Shadow Hunter Hex).
-CBuffHex::CBuffHex(float duration)
-    : CBuff(War3ID("BOhx"), duration, false) {}
-
-CBuff* CBuffHex::Clone() const {
-    auto* copy = new CBuffHex(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffRejuvenation =====
 CBuffRejuvenation::CBuffRejuvenation(float duration, float healPerTick)
-    : CBuff(War3ID("Brej"), duration, true), healPerTick_(healPerTick) {
+    : CBuffCloneable(War3ID("Brej"), duration, true), healPerTick_(healPerTick) {
     SetPeriodic(true, 1.0f);
 }
 
 void CBuffRejuvenation::OnPeriodic(CSimulation& game, CUnit* target) {
     if (target && !target->IsDead()) {
-        float newLife = target->GetLife() + healPerTick_;
-        if (newLife > target->GetMaxLife()) newLife = target->GetMaxLife();
-        target->SetLife(game, newLife);
+        target->SetLife(game, std::min(target->GetMaxLife(), target->GetLife() + healPerTick_));
     }
-}
-
-CBuff* CBuffRejuvenation::Clone() const {
-    auto* copy = new CBuffRejuvenation(duration_, healPerTick_);
-    copy->remaining_ = remaining_;
-    return copy;
 }
 
 // ===== CBuffTimedLife =====
 CBuffTimedLife::CBuffTimedLife(War3ID alias, float duration)
-    : CBuff(alias, duration, false) {}
+    : CBuffCloneable(alias, duration, false) {}
 
 void CBuffTimedLife::OnRemove(CSimulation& game, CUnit* target) {
     if (!target || target->IsDead()) return;
-    // Summoned unit dissipates when its timed life runs out (ref
-    // CBuffTimedLife.onBuffRemove -> unit.kill). Lethal chaos damage keeps
-    // death callbacks and corpse flow consistent with normal kills.
-    // Dissipation is not damage: raised (invulnerable) summons such as
-    // Animate Dead still expire, so drop invulnerability first.
     target->SetInvulnerable(false);
     target->Damage(game, nullptr, false, false,
                    CAttackType::CHAOS, CDamageType::NORMAL,
                    "", 1e9f, 0);
 }
 
-CBuff* CBuffTimedLife::Clone() const {
-    auto* copy = new CBuffTimedLife(GetId(), duration_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffLifeDrain =====
 CBuffLifeDrain::CBuffLifeDrain(float duration, float drainPerTick, int casterHandle)
-    : CBuff(War3ID("ANdr"), duration, false), drainPerTick_(drainPerTick) {
+    : CBuffCloneable(War3ID("ANdr"), duration, false), drainPerTick_(drainPerTick) {
     casterHandleId_ = casterHandle;
     SetPeriodic(true, 1.0f);
 }
@@ -350,22 +295,14 @@ void CBuffLifeDrain::OnPeriodic(CSimulation& game, CUnit* target) {
                    "", drainPerTick_, 0);
     if (CUnit* caster = game.GetUnit(casterHandleId_)) {
         if (!caster->IsDead()) {
-            float newLife = caster->GetLife() + drainPerTick_;
-            if (newLife > caster->GetMaxLife()) newLife = caster->GetMaxLife();
-            caster->SetLife(game, newLife);
+            caster->SetLife(game, std::min(caster->GetMaxLife(), caster->GetLife() + drainPerTick_));
         }
     }
 }
 
-CBuff* CBuffLifeDrain::Clone() const {
-    auto* copy = new CBuffLifeDrain(duration_, drainPerTick_, casterHandleId_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffArmor =====
 CBuffArmor::CBuffArmor(War3ID id, float duration, int armorDelta, bool positive)
-    : CBuff(id, duration, positive), armorDelta_(armorDelta) {}
+    : CBuffCloneable(id, duration, positive), armorDelta_(armorDelta) {}
 
 void CBuffArmor::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
@@ -377,63 +314,46 @@ void CBuffArmor::OnRemove(CSimulation& game, CUnit* target) {
     if (target) target->AddBonusArmor(-armorDelta_);
 }
 
-CBuff* CBuffArmor::Clone() const {
-    auto* copy = new CBuffArmor(GetId(), duration_, armorDelta_, IsPositive());
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffDoom =====
 CBuffDoom::CBuffDoom(float duration, float damagePerTick, int casterHandle)
-    : CBuff(War3ID("BNdo"), duration, false), damagePerTick_(damagePerTick) {
+    : CBuffCloneable(War3ID("BNdo"), duration, false), damagePerTick_(damagePerTick) {
     casterHandleId_ = casterHandle;
     SetPeriodic(true, 1.0f);
 }
 
 void CBuffDoom::OnPeriodic(CSimulation& game, CUnit* target) {
-    if (!target || target->IsDead()) return;
-    target->Damage(game, nullptr, false, false,
-                   CAttackType::SPELLS, CDamageType::DEATH,
-                   "", damagePerTick_, 0);
+    if (target && !target->IsDead()) {
+        target->Damage(game, nullptr, false, false,
+                       CAttackType::SPELLS, CDamageType::DEATH,
+                       "", damagePerTick_, 0);
+    }
 }
 
 void CBuffDoom::OnDeath(CSimulation& game, CUnit* target) {
     if (!target) return;
-    // A unit that dies while doomed rises as a Doom Guard for the
-    // caster's side (ref Doom on-death spawn). Expiry on a living
-    // target spawns nothing, so this lives on OnDeath, not OnRemove.
     int owner = target->GetPlayerIndex();
     if (CUnit* caster = game.GetUnit(casterHandleId_)) {
         if (!caster->IsDead()) owner = caster->GetPlayerIndex();
     }
     CUnit* guard = game.CreateUnit(War3ID("nba2"), owner, target->GetX(), target->GetY(), 0);
-    if (guard) {
-        if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-            summonedCb(casterHandleId_, guard->GetHandleId());
-        }
-    }
-}
-
-CBuff* CBuffDoom::Clone() const {
-    auto* copy = new CBuffDoom(duration_, damagePerTick_, casterHandleId_);
-    copy->remaining_ = remaining_;
-    return copy;
+    NotifySummonedUnit(game, casterHandleId_, guard);
 }
 
 // ===== CBuffLightningShield =====
 CBuffLightningShield::CBuffLightningShield(float duration, float damagePerTick, float radius)
-    : CBuff(War3ID("Blsh"), duration, true)
+    : CBuffCloneable(War3ID("Blsh"), duration, true)
     , damagePerTick_(damagePerTick), radius_(radius) {
     SetPeriodic(true, 1.0f);
 }
 
 void CBuffLightningShield::OnPeriodic(CSimulation& game, CUnit* target) {
     if (!target || target->IsDead()) return;
+    const float radiusSq = radius_ * radius_;
     for (auto* unit : game.GetUnits()) {
         if (!unit || unit->IsDead() || unit == target) continue;
         const float dx = unit->GetX() - target->GetX();
         const float dy = unit->GetY() - target->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
+        if (dx * dx + dy * dy <= radiusSq) {
             unit->Damage(game, target, false, false,
                          CAttackType::SPELLS, CDamageType::LIGHTNING,
                          "", damagePerTick_, 0);
@@ -441,66 +361,29 @@ void CBuffLightningShield::OnPeriodic(CSimulation& game, CUnit* target) {
     }
 }
 
-CBuff* CBuffLightningShield::Clone() const {
-    auto* copy = new CBuffLightningShield(duration_, damagePerTick_, radius_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffPolymorph =====
-CBuffPolymorph::CBuffPolymorph(float duration)
-    : CBuffHex(duration) {
-    id_ = War3ID("Bply");
-}
-
-CBuff* CBuffPolymorph::Clone() const {
-    auto* copy = new CBuffPolymorph(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffInnerFire =====
 CBuffInnerFire::CBuffInnerFire(float duration, int bonusDamage, int bonusArmor,
                                War3ID buffId)
-    : CBuff(buffId, duration, true)
-    , bonusDamage_(bonusDamage), bonusArmor_(bonusArmor), buffId_(buffId) {}
+    : CBuffCloneable(buffId, duration, true)
+    , bonusDamage_(bonusDamage), bonusArmor_(bonusArmor) {}
 
 void CBuffInnerFire::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
-    // Non-stacking damage (ref MELEEATK/ALLATK max-within-key): a second
-    // same-id cast refreshes via AddBuff dedupe, so the single entry is
-    // exact; different ids (Roar vs Inner Fire) sum.
-    target->SetNonStackingDamageBonus(buffId_, bonusDamage_);
+    target->SetNonStackingDamageBonus(GetId(), bonusDamage_);
     target->AddBonusArmor(bonusArmor_);
 }
 
 void CBuffInnerFire::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
-    target->ClearNonStackingDamageBonus(buffId_);
+    target->ClearNonStackingDamageBonus(GetId());
     target->AddBonusArmor(-bonusArmor_);
-}
-
-CBuff* CBuffInnerFire::Clone() const {
-    auto* copy = new CBuffInnerFire(duration_, bonusDamage_, bonusArmor_, buffId_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffDefend =====
-CBuffDefend::CBuffDefend(float duration)
-    : CBuff(War3ID("Bdef"), duration, true) {}
-
-CBuff* CBuffDefend::Clone() const {
-    auto* copy = new CBuffDefend(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
 }
 
 // ===== CBuffClarity =====
 CBuffClarity::CBuffClarity(float duration, float regenBonus)
-    : CBuff(War3ID("Bclf"), duration, true), regenBonus_(regenBonus) {}
+    : CBuffCloneable(War3ID("Bclf"), duration, true), regenBonus_(regenBonus) {}
 
 void CBuffClarity::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
@@ -512,15 +395,9 @@ void CBuffClarity::OnRemove(CSimulation& game, CUnit* target) {
     if (target) target->AddBonusManaRegen(-regenBonus_);
 }
 
-CBuff* CBuffClarity::Clone() const {
-    auto* copy = new CBuffClarity(duration_, regenBonus_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffHealingWard =====
 CBuffHealingWard::CBuffHealingWard(float duration, float healPerTick, float radius)
-    : CBuff(War3ID("Bhwd"), duration, true)
+    : CBuffCloneable(War3ID("Bhwd"), duration, true)
     , healPerTick_(healPerTick), radius_(radius) {
     SetPeriodic(true, 1.0f);
 }
@@ -528,6 +405,7 @@ CBuffHealingWard::CBuffHealingWard(float duration, float healPerTick, float radi
 void CBuffHealingWard::OnPeriodic(CSimulation& game, CUnit* target) {
     if (!target || target->IsDead()) return;
     CPlayer* tp = game.GetPlayer(target->GetPlayerIndex());
+    const float radiusSq = radius_ * radius_;
     for (auto* unit : game.GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsBuilding()) continue;
         if (const auto* ut = unit->GetUnitType()) {
@@ -535,27 +413,20 @@ void CBuffHealingWard::OnPeriodic(CSimulation& game, CUnit* target) {
         }
         CPlayer* up = game.GetPlayer(unit->GetPlayerIndex());
         const bool isAlly = (unit->GetPlayerIndex() == target->GetPlayerIndex()) ||
-            (tp && up && (tp->HasAlliance(*up, CAllianceType::ALLIED) || tp->HasAlliance(*up, CAllianceType::PASSIVE)));
+            (tp && up && (tp->HasAlliance(*up, CAllianceType::ALLIED) ||
+                          tp->HasAlliance(*up, CAllianceType::PASSIVE)));
         if (!isAlly) continue;
         const float dx = unit->GetX() - target->GetX();
         const float dy = unit->GetY() - target->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            float life = unit->GetLife() + healPerTick_;
-            if (life > unit->GetMaxLife()) life = unit->GetMaxLife();
-            unit->SetLife(game, life);
+        if (dx * dx + dy * dy <= radiusSq) {
+            unit->SetLife(game, std::min(unit->GetMaxLife(), unit->GetLife() + healPerTick_));
         }
     }
 }
 
-CBuff* CBuffHealingWard::Clone() const {
-    auto* copy = new CBuffHealingWard(duration_, healPerTick_, radius_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffEnsnare =====
 CBuffEnsnare::CBuffEnsnare(float duration)
-    : CBuff(War3ID("Bena"), duration, false) {}
+    : CBuffCloneable(War3ID("Bena"), duration, false) {}
 
 void CBuffEnsnare::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
@@ -564,48 +435,16 @@ void CBuffEnsnare::OnApply(CSimulation& game, CUnit* target) {
 
 void CBuffEnsnare::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    if (!target) return;
-    bool hasOtherRoot = target->IsBuilding();
-    if (!hasOtherRoot) {
-        for (const auto& b : target->GetBuffs()) {
-            if (!b || b.get() == this) continue;
-            War3ID bid = b->GetId();
-            if (bid == War3ID("Bbur") || bid == War3ID("Bena") || bid == War3ID("Bstm")) {
-                hasOtherRoot = true;
-                break;
-            }
-        }
-    }
-    if (!hasOtherRoot) {
-        target->SetRooted(false);
-    }
-}
-
-CBuff* CBuffEnsnare::Clone() const {
-    auto* copy = new CBuffEnsnare(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffWindWalk =====
-CBuffWindWalk::CBuffWindWalk(float duration, float backstabDamage)
-    : CBuff(War3ID("BOwk"), duration, true), backstabDamage_(backstabDamage) {}
-
-CBuff* CBuffWindWalk::Clone() const {
-    auto* copy = new CBuffWindWalk(duration_, backstabDamage_);
-    copy->remaining_ = remaining_;
-    return copy;
+    RefreshUnitRootedFromBuffs(target, this);
 }
 
 // ===== CBuffBerserk =====
 CBuffBerserk::CBuffBerserk(float duration, float attackSpeedMul, float damageTakenMul)
-    : CBuff(War3ID("Babr"), duration, true)
+    : CBuffCloneable(War3ID("Babr"), duration, true)
     , attackSpeedMul_(attackSpeedMul), damageTakenMul_(damageTakenMul) {}
 
 void CBuffBerserk::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
-    // Stored as a factor (1.4); the table takes the additive bonus, so a
-    // lone Berserk still reads exactly 1.4x while stacking additively.
     if (target) target->SetNonStackingAttackSpeed(GetId(), attackSpeedMul_ - 1.0f);
 }
 
@@ -614,15 +453,9 @@ void CBuffBerserk::OnRemove(CSimulation& game, CUnit* target) {
     if (target) target->ClearNonStackingAttackSpeed(GetId());
 }
 
-CBuff* CBuffBerserk::Clone() const {
-    auto* copy = new CBuffBerserk(duration_, attackSpeedMul_, damageTakenMul_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffBurrow =====
 CBuffBurrow::CBuffBurrow(float duration)
-    : CBuff(War3ID("Bbur"), duration, true) {}
+    : CBuffCloneable(War3ID("Bbur"), duration, true) {}
 
 void CBuffBurrow::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
@@ -633,54 +466,20 @@ void CBuffBurrow::OnApply(CSimulation& game, CUnit* target) {
 
 void CBuffBurrow::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    if (!target) return;
-    bool hasOtherInvis = (target->GetAbility(War3ID("Apiv")) != nullptr);
-    if (!hasOtherInvis) {
-        for (const auto& b : target->GetBuffs()) {
-            if (!b || b.get() == this) continue;
-            War3ID bid = b->GetId();
-            if (bid == War3ID("Bbur") || bid == War3ID("BOwk") || bid == War3ID("Binv")) {
-                hasOtherInvis = true;
-                break;
-            }
-        }
-    }
-    if (!hasOtherInvis) {
-        target->SetInvisible(false);
-    }
-
-    bool hasOtherRoot = target->IsBuilding();
-    if (!hasOtherRoot) {
-        for (const auto& b : target->GetBuffs()) {
-            if (!b || b.get() == this) continue;
-            War3ID bid = b->GetId();
-            if (bid == War3ID("Bbur") || bid == War3ID("Bena") || bid == War3ID("Bstm")) {
-                hasOtherRoot = true;
-                break;
-            }
-        }
-    }
-    if (!hasOtherRoot) {
-        target->SetRooted(false);
-    }
-}
-
-CBuff* CBuffBurrow::Clone() const {
-    auto* copy = new CBuffBurrow(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
+    RefreshUnitInvisibleFromBuffs(target, this);
+    RefreshUnitRootedFromBuffs(target, this);
 }
 
 // ===== CBuffTransform =====
 CBuffTransform::CBuffTransform(War3ID id, float duration, War3ID formId)
-    : CBuff(id, duration, true), formId_(formId) {}
+    : CBuffCloneable(id, duration, true), formId_(formId) {}
 
 void CBuffTransform::OnApply(CSimulation& game, CUnit* target) {
     if (!target) return;
-    CUnitData* data = game.GetUnitData();
-    if (!data) return;
-    if (CUnitType* form = data->GetUnitType(formId_)) {
-        target->MorphTo(form, formId_);
+    if (CUnitData* data = game.GetUnitData()) {
+        if (CUnitType* form = data->GetUnitType(formId_)) {
+            target->MorphTo(form, formId_);
+        }
     }
 }
 
@@ -689,44 +488,28 @@ void CBuffTransform::OnRemove(CSimulation& game, CUnit* target) {
     if (target) target->Unmorph();
 }
 
-CBuff* CBuffTransform::Clone() const {
-    auto* copy = new CBuffTransform(GetId(), duration_, formId_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffAvatar =====
 CBuffAvatar::CBuffAvatar(float duration, int bonusDamage, int bonusLife)
-    : CBuff(War3ID("BAvt"), duration, true)
+    : CBuffCloneable(War3ID("BAvt"), duration, true)
     , bonusDamage_(bonusDamage), bonusLife_(bonusLife) {}
 
 void CBuffAvatar::OnApply(CSimulation& game, CUnit* target) {
     if (!target) return;
-    // Non-stacking damage (ref ALLATK key BHav): sums with Roar/Inner
-    // Fire per retail (different keys); two Avatars dedupe by buff id.
     target->SetNonStackingDamageBonus(GetId(), bonusDamage_);
-    target->AddBonusMaxLife((float)bonusLife_);
-    float life = target->GetLife() + (float)bonusLife_;
-    if (life > target->GetMaxLife()) life = target->GetMaxLife();
-    target->SetLife(game, life);
+    target->AddBonusMaxLife(static_cast<float>(bonusLife_));
+    target->SetLife(game, std::min(target->GetMaxLife(), target->GetLife() + static_cast<float>(bonusLife_)));
 }
 
 void CBuffAvatar::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
     if (!target) return;
     target->ClearNonStackingDamageBonus(GetId());
-    target->AddBonusMaxLife(-(float)bonusLife_);
-}
-
-CBuff* CBuffAvatar::Clone() const {
-    auto* copy = new CBuffAvatar(duration_, bonusDamage_, bonusLife_);
-    copy->remaining_ = remaining_;
-    return copy;
+    target->AddBonusMaxLife(-static_cast<float>(bonusLife_));
 }
 
 // ===== CBuffStoneForm =====
 CBuffStoneForm::CBuffStoneForm(float duration)
-    : CBuff(War3ID("Bstm"), duration, true) {}
+    : CBuffCloneable(War3ID("Bstm"), duration, true) {}
 
 void CBuffStoneForm::OnApply(CSimulation& game, CUnit* target) {
     (void)game;
@@ -737,76 +520,33 @@ void CBuffStoneForm::OnApply(CSimulation& game, CUnit* target) {
 
 void CBuffStoneForm::OnRemove(CSimulation& game, CUnit* target) {
     (void)game;
-    if (!target) return;
-    bool hasOtherInvul = (target->GetAbility(War3ID("Avul")) != nullptr);
-    if (!hasOtherInvul) {
-        for (const auto& b : target->GetBuffs()) {
-            if (!b || b.get() == this) continue;
-            War3ID bid = b->GetId();
-            if (bid == War3ID("Bdsh") || bid == War3ID("Bstm") || bid == War3ID("Bcyc")) {
-                hasOtherInvul = true;
-                break;
-            }
-        }
-    }
-    if (!hasOtherInvul) {
-        target->SetInvulnerable(false);
-    }
-
-    bool hasOtherRoot = target->IsBuilding();
-    if (!hasOtherRoot) {
-        for (const auto& b : target->GetBuffs()) {
-            if (!b || b.get() == this) continue;
-            War3ID bid = b->GetId();
-            if (bid == War3ID("Bbur") || bid == War3ID("Bena") || bid == War3ID("Bstm")) {
-                hasOtherRoot = true;
-                break;
-            }
-        }
-    }
-    if (!hasOtherRoot) {
-        target->SetRooted(false);
-    }
-}
-
-CBuff* CBuffStoneForm::Clone() const {
-    auto* copy = new CBuffStoneForm(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
+    RefreshUnitInvulnerableFromBuffs(target, this);
+    RefreshUnitRootedFromBuffs(target, this);
 }
 
 // ===== CBuffManaSiphon =====
 CBuffManaSiphon::CBuffManaSiphon(float duration, float manaPerTick, int casterHandle)
-    : CBuff(War3ID("Bsip"), duration, false), manaPerTick_(manaPerTick) {
+    : CBuffCloneable(War3ID("Bsip"), duration, false), manaPerTick_(manaPerTick) {
     casterHandleId_ = casterHandle;
     SetPeriodic(true, 1.0f);
 }
 
 void CBuffManaSiphon::OnPeriodic(CSimulation& game, CUnit* target) {
     if (!target || target->IsDead()) return;
-    float drained = manaPerTick_;
-    if (drained > target->GetMana()) drained = target->GetMana();
-    if (drained <= 0) return;
+    const float drained = std::min(manaPerTick_, target->GetMana());
+    if (drained <= 0.0f) return;
     target->SetMana(target->GetMana() - drained);
     if (CUnit* caster = game.GetUnit(casterHandleId_)) {
         if (!caster->IsDead()) {
-            float mana = caster->GetMana() + drained;
-            if (mana > (float)caster->GetMaxMana()) mana = (float)caster->GetMaxMana();
-            caster->SetMana(mana);
+            caster->SetMana(std::min(static_cast<float>(caster->GetMaxMana()), caster->GetMana() + drained));
         }
     }
-}
-
-CBuff* CBuffManaSiphon::Clone() const {
-    auto* copy = new CBuffManaSiphon(duration_, manaPerTick_, casterHandleId_);
-    copy->remaining_ = remaining_;
-    return copy;
 }
 
 // ===== CBuffSpawner =====
 CBuffSpawner::CBuffSpawner(float duration, War3ID spawnType, float interval,
                            float explodeDamage, float explodeRadius)
-    : CBuff(War3ID("Bspy"), duration, true), spawnType_(spawnType)
+    : CBuffCloneable(War3ID("Bspy"), duration, true), spawnType_(spawnType)
     , explodeDamage_(explodeDamage), explodeRadius_(explodeRadius) {
     SetPeriodic(true, interval);
 }
@@ -816,29 +556,18 @@ void CBuffSpawner::OnPeriodic(CSimulation& game, CUnit* target) {
     CUnit* spawned = game.CreateUnit(spawnType_, target->GetPlayerIndex(),
                                      target->GetX() + 64.0f, target->GetY(), 0);
     if (!spawned) return;
-    if (explodeDamage_ > 0) {
-        spawned->AddBuff(std::make_unique<CBuffExplode>(
-            explodeDamage_, explodeRadius_), game);
+    if (explodeDamage_ > 0.0f) {
+        spawned->AddBuff(std::make_unique<CBuffExplode>(explodeDamage_, explodeRadius_), game);
     }
-    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-        summonedCb(target->GetHandleId(), spawned->GetHandleId());
-    }
-}
-
-CBuff* CBuffSpawner::Clone() const {
-    auto* copy = new CBuffSpawner(duration_, spawnType_, periodicInterval_,
-                                  explodeDamage_, explodeRadius_);
-    copy->remaining_ = remaining_;
-    return copy;
+    NotifySummonedUnit(game, target->GetHandleId(), spawned);
 }
 
 // ===== CBuffSplit =====
 CBuffSplit::CBuffSplit(War3ID splitType, int count, War3ID childType, int childCount)
-    // Death-triggered: a session-long duration so expiry never preempts
-    // the split (expiry is a silent removal).
-    : CBuff(War3ID("Bspl"), 3600.0f, false)
+    : CBuffCloneable(War3ID("Bspl"), 3600.0f, false)
     , splitType_(splitType), count_(count)
     , childType_(childType), childCount_(childCount) {}
+
 void CBuffSplit::OnDeath(CSimulation& game, CUnit* target) {
     if (!target) return;
     for (int i = 0; i < count_; i++) {
@@ -847,53 +576,23 @@ void CBuffSplit::OnDeath(CSimulation& game, CUnit* target) {
                                        target->GetY(), 0);
         if (!child) continue;
         if (childCount_ > 0) {
-            child->AddBuff(std::make_unique<CBuffSplit>(
-                childType_, childCount_, War3ID(), 0), game);
+            child->AddBuff(std::make_unique<CBuffSplit>(childType_, childCount_, War3ID(), 0), game);
         }
-        if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-            summonedCb(target->GetHandleId(), child->GetHandleId());
-        }
+        NotifySummonedUnit(game, target->GetHandleId(), child);
     }
-}
-
-CBuff* CBuffSplit::Clone() const {
-    auto* copy = new CBuffSplit(splitType_, count_, childType_, childCount_);
-    copy->remaining_ = remaining_;
-    return copy;
 }
 
 // ===== CBuffExplode =====
 CBuffExplode::CBuffExplode(float damage, float radius)
-    : CBuff(War3ID("Bexp"), 3600.0f, false), damage_(damage), radius_(radius) {}
+    : CBuffCloneable(War3ID("Bexp"), 3600.0f, false), damage_(damage), radius_(radius) {}
 
 void CBuffExplode::OnDeath(CSimulation& game, CUnit* target) {
-    if (!target) return;
-    CPlayer* tp = game.GetPlayer(target->GetPlayerIndex());
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == target) continue;
-        CPlayer* up = game.GetPlayer(unit->GetPlayerIndex());
-        const bool isAlly = (unit->GetPlayerIndex() == target->GetPlayerIndex()) ||
-            (tp && up && (tp->HasAlliance(*up, CAllianceType::ALLIED) || tp->HasAlliance(*up, CAllianceType::PASSIVE)));
-        if (isAlly) continue;
-        const float dx = unit->GetX() - target->GetX();
-        const float dy = unit->GetY() - target->GetY();
-        if (dx * dx + dy * dy <= radius_ * radius_) {
-            unit->Damage(game, target, false, false,
-                         CAttackType::SPELLS, CDamageType::FIRE,
-                         "", damage_, 0);
-        }
-    }
-}
-
-CBuff* CBuffExplode::Clone() const {
-    auto* copy = new CBuffExplode(damage_, radius_);
-    copy->remaining_ = remaining_;
-    return copy;
+    DamageEnemyUnitsInRadius(game, target, radius_, damage_, CDamageType::FIRE, false);
 }
 
 // ===== CBuffDisease =====
 CBuffDisease::CBuffDisease(War3ID id, float duration, float damagePerTick)
-    : CBuff(id, duration, false), damagePerTick_(damagePerTick) {
+    : CBuffCloneable(id, duration, false), damagePerTick_(damagePerTick) {
     SetPeriodic(true, 1.0f);
 }
 
@@ -905,64 +604,39 @@ void CBuffDisease::OnPeriodic(CSimulation& game, CUnit* target) {
     }
 }
 
-CBuff* CBuffDisease::Clone() const {
-    auto* copy = new CBuffDisease(GetId(), duration_, damagePerTick_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffPhoenixRebirth =====
 CBuffPhoenixRebirth::CBuffPhoenixRebirth(float eggHatchDelay)
-    : CBuff(War3ID("Bphx"), 3600.0f, true), eggHatchDelay_(eggHatchDelay) {}
+    : CBuffCloneable(War3ID("Bphx"), 3600.0f, true), eggHatchDelay_(eggHatchDelay) {}
 
 void CBuffPhoenixRebirth::OnDeath(CSimulation& game, CUnit* target) {
     if (!target) return;
-    // The fallen phoenix leaves an egg; the egg hatches on expiry and
-    // the cycle chains (ref Phoenix rebirth).
     CUnit* egg = game.CreateUnit(War3ID("hpxe"), target->GetPlayerIndex(),
                                  target->GetX(), target->GetY(), 0);
     if (!egg) return;
-    egg->AddBuff(std::make_unique<CBuffHatchAfter>(
-        eggHatchDelay_, War3ID("hphx"), true), game);
-    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-        summonedCb(target->GetHandleId(), egg->GetHandleId());
-    }
-}
-
-CBuff* CBuffPhoenixRebirth::Clone() const {
-    auto* copy = new CBuffPhoenixRebirth(eggHatchDelay_);
-    copy->remaining_ = remaining_;
-    return copy;
+    egg->AddBuff(std::make_unique<CBuffHatchAfter>(eggHatchDelay_, War3ID("hphx"), true), game);
+    NotifySummonedUnit(game, target->GetHandleId(), egg);
 }
 
 // ===== CBuffHatchAfter =====
 CBuffHatchAfter::CBuffHatchAfter(float duration, War3ID hatchType, bool chainRebirth)
-    : CBuff(War3ID("Bhch"), duration, true)
+    : CBuffCloneable(War3ID("Bhch"), duration, true)
     , hatchType_(hatchType), chainRebirth_(chainRebirth) {}
 
 void CBuffHatchAfter::OnRemove(CSimulation& game, CUnit* target) {
-    if (!target || target->IsDead()) return; // a killed egg hatches nothing
+    if (!target || target->IsDead()) return;
     CUnit* hatched = game.CreateUnit(hatchType_, target->GetPlayerIndex(),
                                      target->GetX(), target->GetY(), 0);
     if (!hatched) return;
     if (chainRebirth_) {
         hatched->AddBuff(std::make_unique<CBuffPhoenixRebirth>(duration_), game);
     }
-    game.RemoveUnit(target); // the shell is consumed
-    if (const auto& summonedCb = game.GetUnitSummonedCallback()) {
-        summonedCb(target->GetHandleId(), hatched->GetHandleId());
-    }
-}
-
-CBuff* CBuffHatchAfter::Clone() const {
-    auto* copy = new CBuffHatchAfter(duration_, hatchType_, chainRebirth_);
-    copy->remaining_ = remaining_;
-    return copy;
+    game.RemoveUnit(target);
+    NotifySummonedUnit(game, target->GetHandleId(), hatched);
 }
 
 // ===== CBuffDigest =====
 CBuffDigest::CBuffDigest(float duration, float damagePerTick)
-    : CBuff(War3ID("Bdig"), duration, false), damagePerTick_(damagePerTick) {
+    : CBuffCloneable(War3ID("Bdig"), duration, false), damagePerTick_(damagePerTick) {
     SetPeriodic(true, 1.0f);
 }
 
@@ -974,55 +648,9 @@ void CBuffDigest::OnPeriodic(CSimulation& game, CUnit* target) {
     }
 }
 
-CBuff* CBuffDigest::Clone() const {
-    auto* copy = new CBuffDigest(duration_, damagePerTick_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffHowl =====
-CBuffHowl::CBuffHowl(float duration, float damageFactor)
-    : CBuff(War3ID("BNht"), duration, false), damageFactor_(damageFactor) {}
-
-CBuff* CBuffHowl::Clone() const {
-    auto* copy = new CBuffHowl(duration_, damageFactor_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffCurse =====
-CBuffCurse::CBuffCurse(float duration, float missChance)
-    : CBuff(War3ID("Bcrs"), duration, false), missChance_(missChance) {}
-
-CBuff* CBuffCurse::Clone() const {
-    auto* copy = new CBuffCurse(duration_, missChance_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffHaze =====
-CBuffHaze::CBuffHaze(float duration, float missChance)
-    : CBuff(War3ID("BNdh"), duration, false), missChance_(missChance) {}
-
-CBuff* CBuffHaze::Clone() const {
-    auto* copy = new CBuffHaze(duration_, missChance_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-// ===== CBuffManaShield =====
-CBuffManaShield::CBuffManaShield(float duration)
-    : CBuff(War3ID("BNms"), duration, true) {}
-
-CBuff* CBuffManaShield::Clone() const {
-    auto* copy = new CBuffManaShield(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
 // ===== CBuffCyclone =====
 CBuffCyclone::CBuffCyclone(float duration)
-    : CBuffStun(duration) {
+    : CBuffCloneable(duration) {
     id_ = War3ID("Bcyc");
 }
 
@@ -1033,34 +661,13 @@ void CBuffCyclone::OnApply(CSimulation& game, CUnit* target) {
 
 void CBuffCyclone::OnRemove(CSimulation& game, CUnit* target) {
     CBuffStun::OnRemove(game, target);
-    if (target) {
-        bool hasOtherInvul = (target->GetAbility(War3ID("Avul")) != nullptr);
-        if (!hasOtherInvul) {
-            for (const auto& b : target->GetBuffs()) {
-                if (!b || b.get() == this) continue;
-                War3ID bid = b->GetId();
-                if (bid == War3ID("Bdsh") || bid == War3ID("Bstm") || bid == War3ID("Bcyc")) {
-                    hasOtherInvul = true;
-                    break;
-                }
-            }
-        }
-        if (!hasOtherInvul) {
-            target->SetInvulnerable(false);
-        }
-    }
-}
-
-CBuff* CBuffCyclone::Clone() const {
-    auto* copy = new CBuffCyclone(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
+    RefreshUnitInvulnerableFromBuffs(target, this);
 }
 
 // ===== CBuffWhirlwind =====
 CBuffWhirlwind::CBuffWhirlwind(float duration, float damagePerSecond, float radius)
-    : CBuff(War3ID("BOww"), duration, true),
-      damagePerSecond_(damagePerSecond), radius_(radius) {
+    : CBuffCloneable(War3ID("BOww"), duration, true)
+    , damagePerSecond_(damagePerSecond), radius_(radius) {
     SetPeriodic(true, 1.0f);
 }
 
@@ -1073,137 +680,52 @@ void CBuffWhirlwind::OnApply(CSimulation&, CUnit* target) {
 void CBuffWhirlwind::OnRemove(CSimulation&, CUnit* target) {
     if (!target) return;
     target->SetAttacksDisabled(false);
-    int immune = 0;
-    for (const auto& buff : target->GetBuffs()) {
-        if (!buff) continue;
-        if (dynamic_cast<const CBuffMagicImmune*>(buff.get())
-            || dynamic_cast<const CBuffWhirlwind*>(buff.get())) {
-            immune++;
-        }
-    }
-    if (immune <= 1) target->SetMagicImmune(false);
+    RefreshUnitMagicImmuneFromBuffs(target);
 }
 
 void CBuffWhirlwind::OnPeriodic(CSimulation& game, CUnit* target) {
-    if (!target || target->IsDead()) return;
-    CPlayer* tp = game.GetPlayer(target->GetPlayerIndex());
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == target) continue;
-        CPlayer* up = game.GetPlayer(unit->GetPlayerIndex());
-        const bool isAlly = (unit->GetPlayerIndex() == target->GetPlayerIndex()) ||
-            (tp && up && (tp->HasAlliance(*up, CAllianceType::ALLIED) || tp->HasAlliance(*up, CAllianceType::PASSIVE)));
-        if (isAlly) continue;
-        const float dx = unit->GetX() - target->GetX();
-        const float dy = unit->GetY() - target->GetY();
-        if (dx * dx + dy * dy > radius_ * radius_) continue;
-        unit->Damage(game, target, false, true,
-                     CAttackType::SPELLS, CDamageType::NORMAL,
-                     "", damagePerSecond_, 0);
-    }
-}
-
-CBuff* CBuffWhirlwind::Clone() const {
-    auto* copy = new CBuffWhirlwind(duration_, damagePerSecond_, radius_);
-    copy->remaining_ = remaining_;
-    return copy;
+    DamageEnemyUnitsInRadius(game, target, radius_, damagePerSecond_, CDamageType::NORMAL, true);
 }
 
 // ===== CBuffImmolation =====
 CBuffImmolation::CBuffImmolation(float duration, float damagePerTick,
                                  float manaDrainPerSecond, float radius)
-    : CBuff(War3ID("BEim"), duration, true),
-      damagePerTick_(damagePerTick),
-      manaDrainPerSecond_(manaDrainPerSecond), radius_(radius) {
+    : CBuffCloneable(War3ID("BEim"), duration, true)
+    , damagePerTick_(damagePerTick)
+    , manaDrainPerSecond_(manaDrainPerSecond), radius_(radius) {
     SetPeriodic(true, 1.0f);
 }
 
 void CBuffImmolation::OnPeriodic(CSimulation& game, CUnit* target) {
     if (!target || target->IsDead()) return;
     if (target->GetMana() < manaDrainPerSecond_) {
-        // Gutter out like ref deactivate() when upkeep cannot be paid.
         SetRemaining(0.0f);
         return;
     }
     target->SetMana(target->GetMana() - manaDrainPerSecond_);
-    CPlayer* tp = game.GetPlayer(target->GetPlayerIndex());
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == target) continue;
-        CPlayer* up = game.GetPlayer(unit->GetPlayerIndex());
-        const bool isAlly = (unit->GetPlayerIndex() == target->GetPlayerIndex()) ||
-            (tp && up && (tp->HasAlliance(*up, CAllianceType::ALLIED) || tp->HasAlliance(*up, CAllianceType::PASSIVE)));
-        if (isAlly) continue;
-        const float dx = unit->GetX() - target->GetX();
-        const float dy = unit->GetY() - target->GetY();
-        if (dx * dx + dy * dy > radius_ * radius_) continue;
-        unit->Damage(game, target, false, false,
-                     CAttackType::SPELLS, CDamageType::FIRE,
-                     "", damagePerTick_, 0);
-    }
-}
-
-CBuff* CBuffImmolation::Clone() const {
-    auto* copy = new CBuffImmolation(duration_, damagePerTick_,
-                                     manaDrainPerSecond_, radius_);
-    copy->remaining_ = remaining_;
-    return copy;
+    DamageEnemyUnitsInRadius(game, target, radius_, damagePerTick_, CDamageType::FIRE, false);
 }
 
 // ===== CBuffPhoenixFire =====
 CBuffPhoenixFire::CBuffPhoenixFire(float duration, float damagePerSecond, float radius,
                                    float initialDamage)
-    : CBuff(War3ID("BPxf"), duration, true),
-      damagePerSecond_(damagePerSecond), radius_(radius), initialDamage_(initialDamage) {
+    : CBuffCloneable(War3ID("BPxf"), duration, true)
+    , damagePerSecond_(damagePerSecond), radius_(radius), initialDamage_(initialDamage) {
     SetPeriodic(true, 1.0f);
 }
 
-namespace {
-
-void ScorchNearby(CSimulation& game, CUnit* target, float radius, float amount) {
-    if (!target || target->IsDead() || amount <= 0.0f) return;
-    CPlayer* tp = game.GetPlayer(target->GetPlayerIndex());
-    for (auto* unit : game.GetUnits()) {
-        if (!unit || unit->IsDead() || unit == target) continue;
-        CPlayer* up = game.GetPlayer(unit->GetPlayerIndex());
-        const bool isAlly = (unit->GetPlayerIndex() == target->GetPlayerIndex()) ||
-            (tp && up && (tp->HasAlliance(*up, CAllianceType::ALLIED) || tp->HasAlliance(*up, CAllianceType::PASSIVE)));
-        if (isAlly) continue;
-        const float dx = unit->GetX() - target->GetX();
-        const float dy = unit->GetY() - target->GetY();
-        if (dx * dx + dy * dy > radius * radius) continue;
-        unit->Damage(game, target, false, false,
-                     CAttackType::SPELLS, CDamageType::FIRE,
-                     "", amount, 0);
-    }
-}
-
-} // namespace
-
 void CBuffPhoenixFire::OnApply(CSimulation& game, CUnit* target) {
-    ScorchNearby(game, target, radius_, initialDamage_);
+    DamageEnemyUnitsInRadius(game, target, radius_, initialDamage_, CDamageType::FIRE, false);
 }
 
 void CBuffPhoenixFire::OnPeriodic(CSimulation& game, CUnit* target) {
-    ScorchNearby(game, target, radius_, damagePerSecond_);
+    DamageEnemyUnitsInRadius(game, target, radius_, damagePerSecond_, CDamageType::FIRE, false);
 }
 
-CBuff* CBuffPhoenixFire::Clone() const {
-    auto* copy = new CBuffPhoenixFire(duration_, damagePerSecond_, radius_, initialDamage_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-CBuffSpellShield::CBuffSpellShield(float duration)
-    : CBuff(War3ID("BNss"), duration, true) {}
-
-CBuff* CBuffSpellShield::Clone() const {
-    auto* copy = new CBuffSpellShield(duration_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
+// ===== CBuffAuraStat =====
 CBuffAuraStat::CBuffAuraStat(War3ID auraCode, std::vector<Bonus> bonuses,
                              int casterHandle)
-    : CBuff(auraCode, 1e9f, true), bonuses_(std::move(bonuses)) {
+    : CBuffCloneable(auraCode, 1e9f, true), bonuses_(std::move(bonuses)) {
     casterHandleId_ = casterHandle;
 }
 
@@ -1223,34 +745,4 @@ void CBuffAuraStat::OnRemove(CSimulation& game, CUnit* target) {
         target->RemoveAuraStatBonus(bonus.type, bonus.percent, GetId(),
                                     GetCasterHandleId());
     }
-}
-
-CBuff* CBuffAuraStat::Clone() const {
-    auto* copy = new CBuffAuraStat(GetId(), bonuses_, casterHandleId_);
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-CBuffResistant::CBuffResistant()
-    : CBuff(War3ID("Brsk"), 1.0e9f, true) {}
-
-CBuff* CBuffResistant::Clone() const {
-    auto* copy = new CBuffResistant();
-    copy->remaining_ = remaining_;
-    return copy;
-}
-
-CBuffDamageMod::CBuffDamageMod(War3ID id, float spellsTaken, float magicTaken,
-                               float pierceTaken, float attackDealtAdd)
-    : CBuff(id, 1.0e9f, true)
-    , spellsTaken_(spellsTaken)
-    , magicTaken_(magicTaken)
-    , pierceTaken_(pierceTaken)
-    , attackDealtAdd_(attackDealtAdd) {}
-
-CBuff* CBuffDamageMod::Clone() const {
-    auto* copy = new CBuffDamageMod(GetId(), spellsTaken_, magicTaken_,
-                                    pierceTaken_, attackDealtAdd_);
-    copy->remaining_ = remaining_;
-    return copy;
 }

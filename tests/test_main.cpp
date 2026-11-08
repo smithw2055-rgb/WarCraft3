@@ -845,6 +845,14 @@ bool TestPhase16StageNN1UnitStateBitfieldPackingAndZeroAbilityHeaderCoupling();
 bool TestPhase16StageNN2War3ModuleCombatReactionsAndPassiveProcsVsPureEngine();
 bool TestPhase16StageOO1War3ModuleBountyDiceHeroXpSplitItemBonusesAndHeroCarry();
 bool TestPhase16StageOO2DynamicPluginVersion16AndRetailDriveMapsEndToEndSuite();
+bool TestPhase17StagePP1GenericCAbilityCapabilityContractAndZeroBehaviorHeaderCoupling();
+bool TestPhase17StagePP2DeclarativeSpellBasePrimitivesWaveLineAndAreaBuffs();
+bool TestPhase17StageQQ1UnifiedItemStatBonusSlotsAndWar3CustomSpellDescriptor();
+bool TestPhase17StageQQ2DynamicPluginVersion17AndCloudRetailMapsEndToEndSuite();
+bool TestPhase18StageRR1CompactCBuffCAbilityLayoutAndCRTPCloneFidelity();
+bool TestPhase18StageRR2UnifiedBuffStateRestorationAndPeriodicAoEHelpers();
+bool TestPhase18StageSS1PassiveSpellFlagAreaHealAndBlightedMineVirtualContract();
+bool TestPhase18StageSS2CustomAutocastSpellRegistrationAndDynamicPluginV18Suite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1685,6 +1693,14 @@ int main(int argc, char** argv) {
         {"Phase16 Stage NN2 War3Module combat reactions and passive procs vs PureEngine", TestPhase16StageNN2War3ModuleCombatReactionsAndPassiveProcsVsPureEngine},
         {"Phase16 Stage OO1 War3Module bounty dice hero XP item bonuses and hero carry", TestPhase16StageOO1War3ModuleBountyDiceHeroXpSplitItemBonusesAndHeroCarry},
         {"Phase16 Stage OO2 Dynamic plugin SO v16 and retail Drive maps end-to-end suite", TestPhase16StageOO2DynamicPluginVersion16AndRetailDriveMapsEndToEndSuite},
+        {"Phase17 Stage PP1 Generic CAbility capability contract and zero behavior header coupling", TestPhase17StagePP1GenericCAbilityCapabilityContractAndZeroBehaviorHeaderCoupling},
+        {"Phase17 Stage PP2 Declarative CAbilitySpellBase primitives wave line and area buffs", TestPhase17StagePP2DeclarativeSpellBasePrimitivesWaveLineAndAreaBuffs},
+        {"Phase17 Stage QQ1 Unified CAbilityItemStatBonus slots and War3 custom spell descriptor", TestPhase17StageQQ1UnifiedItemStatBonusSlotsAndWar3CustomSpellDescriptor},
+        {"Phase17 Stage QQ2 Dynamic plugin SO v17 and cloud retail maps end-to-end suite", TestPhase17StageQQ2DynamicPluginVersion17AndCloudRetailMapsEndToEndSuite},
+        {"Phase18 Stage RR1 Compact CBuff CAbility layout and CRTP clone fidelity", TestPhase18StageRR1CompactCBuffCAbilityLayoutAndCRTPCloneFidelity},
+        {"Phase18 Stage RR2 Unified CBuff state restoration and periodic AoE helpers", TestPhase18StageRR2UnifiedBuffStateRestorationAndPeriodicAoEHelpers},
+        {"Phase18 Stage SS1 Passive spell flag area heal and BlightedMine virtual contract", TestPhase18StageSS1PassiveSpellFlagAreaHealAndBlightedMineVirtualContract},
+        {"Phase18 Stage SS2 Custom autocast spell registration and dynamic plugin SO v18", TestPhase18StageSS2CustomAutocastSpellRegistrationAndDynamicPluginV18Suite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

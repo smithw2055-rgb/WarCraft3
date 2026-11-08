@@ -1,6 +1,6 @@
 #pragma once
 #include "ecs/behaviors/behavior.h"
-#include "ecs/abilities/ability_harvest.h"
+#include "ecs/ability.h"
 #include <deque>
 
 // CBehaviorReturnResources - worker carries resources back to town hall
@@ -10,7 +10,7 @@ public:
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::RETURN_RESOURCES; }
 
     void SetTarget(CWidget* target);
-    void SetHarvestAbility(const CAbilityHarvest* ability) { harvestAbility_ = ability; }
+    void SetHarvestAbility(const CAbility* ability) { harvestAbility_ = ability; }
     bool IsMovingToDropoff() const { return movingToDropoff_; }
     bool IsDepositing() const { return depositing_; }
     bool IsPropelling() const { return propelling_; }
@@ -23,8 +23,10 @@ public:
     void End(CSimulation& simulation) override;
 
 private:
+    void DepositCarriedResources(CSimulation& simulation);
+
     CWidget* target_ = nullptr;
-    const CAbilityHarvest* harvestAbility_ = nullptr;
+    const CAbility* harvestAbility_ = nullptr;
 
     // State
     bool movingToDropoff_ = true;

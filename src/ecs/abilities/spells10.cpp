@@ -18,29 +18,10 @@ CAbilitySearingArrows::CAbilitySearingArrows(int handleId)
     SetTargetType(CSpellTargetType::NO_TARGET);
 }
 
-namespace {
-
-class SearingArrowsEffect : public CAttackModifierEffect {
-public:
-    explicit SearingArrowsEffect(float bonusDamage) : bonusDamage_(bonusDamage) {}
-    void OnAttackLanded(CSimulation& game, CUnit* attacker, CUnit* victim,
-                        float damageDealt) override {
-        (void)damageDealt;
-        if (!victim) return;
-        victim->Damage(game, attacker, false, false,
-                       CAttackType::SPELLS, CDamageType::FIRE,
-                       "", bonusDamage_, 0);
-    }
-private:
-    float bonusDamage_;
-};
-
-} // namespace
-
 void CAbilitySearingArrows::OnAdd(CSimulation& game, CUnit* unit) {
     (void)game;
     if (unit) unit->SetAttackModifier(0, War3ID("AHfa"),
-        std::make_unique<SearingArrowsEffect>(bonusDamage_));
+        std::make_unique<CAttackBonusDamageEffect>(bonusDamage_));
 }
 
 void CAbilitySearingArrows::OnRemove(CSimulation& game, CUnit* unit) {
@@ -58,10 +39,9 @@ CAbilityEnsnare::CAbilityEnsnare(int handleId)
 }
 
 void CAbilityEnsnare::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto a single AbilityBuilder buff attach.
-    ABActionAddBuffTarget snare(
-        [duration = duration_]() { return std::make_unique<CBuffEnsnare>(duration); });
-    snare.Run(game, caster, target, false, 0, 0);
+    CastBuffOnTarget(game, caster, target, [duration = duration_]() {
+        return std::make_unique<CBuffEnsnare>(duration);
+    });
 }
 
 // ===== Ancestral Spirit =====
@@ -74,8 +54,6 @@ CAbilityAncestralSpirit::CAbilityAncestralSpirit(int handleId)
 }
 
 void CAbilityAncestralSpirit::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto a single AbilityBuilder tauren revive (ownership
-    // transfer included).
     ABActionAncestralRevive spirit;
     spirit.Run(game, caster, target, false, 0, 0);
 }
@@ -90,8 +68,6 @@ CAbilityHealingWardUnit::CAbilityHealingWardUnit(int handleId)
 }
 
 void CAbilityHealingWardUnit::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto a single AbilityBuilder create-and-buff (same shape as
-    // the item Healing Ward).
     if (!caster) return;
     ABActionCreateUnitWithBuff ward(
         wardType_, x, y,
@@ -112,14 +88,9 @@ CAbilityUnstableConcoction::CAbilityUnstableConcoction(int handleId)
 
 void CAbilityUnstableConcoction::DoEffect(CSimulation& game, CUnit* caster) {
     if (!caster) return;
-    // Migrated onto an AbilityBuilder iteration (enemies around the caster)
-    // plus a self-hit. Same coverage as the loop replaced.
-    ABEffectChain perUnit;
-    perUnit.Add(std::make_unique<ABActionDamageTarget>(
-        damage_, CAttackType::SPELLS, CDamageType::FIRE));
-    ABActionForEachInRange blast(radius_, std::move(perUnit));
-    blast.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
-    blast.Run(game, caster, nullptr, false, 0, 0);
+    CastCasterAreaDamageWaves(game, caster, 1, radius_, damage_,
+                              CAttackType::SPELLS, CDamageType::FIRE,
+                              ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
     ABActionDamageTarget selfHit(selfDamage_, CAttackType::SPELLS, CDamageType::FIRE);
     selfHit.Run(game, caster, caster, false, 0, 0);
 }
@@ -135,8 +106,6 @@ CAbilityAbolishMagic::CAbilityAbolishMagic(int handleId)
 
 void CAbilityAbolishMagic::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     if (!caster) return;
-    // Migrated onto an AbilityBuilder iteration (dispel per unit in radius;
-    // caster excluded via includeCaster=false, matching the loop replaced).
     ABEffectChain perUnit;
     perUnit.Add(std::make_unique<ABActionDispelTarget>(true, true));
     ABActionForEachInRange strip(radius_, std::move(perUnit));
@@ -154,19 +123,10 @@ CAbilityClusterRockets::CAbilityClusterRockets(int handleId)
 
 void CAbilityClusterRockets::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
     if (!caster) return;
-    // Two clusters straddling the target point (ref twin-rocket spread).
-    // Migrated onto two AbilityBuilder iterations centered at (x-75,y) and
-    // (x+75,y). Same enemy-only FIRE coverage as the loops replaced.
-    ABEffectChain westHit;
-    westHit.Add(std::make_unique<ABActionDamageTarget>(
-        damage_, CAttackType::SPELLS, CDamageType::FIRE));
-    ABActionForEachInRange west(radius_, std::move(westHit));
-    west.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
-    west.Run(game, caster, nullptr, true, x - 75.0f, y);
-    ABEffectChain eastHit;
-    eastHit.Add(std::make_unique<ABActionDamageTarget>(
-        damage_, CAttackType::SPELLS, CDamageType::FIRE));
-    ABActionForEachInRange east(radius_, std::move(eastHit));
-    east.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
-    east.Run(game, caster, nullptr, true, x + 75.0f, y);
+    CastPointDamageWaves(game, caster, x - 75.0f, y, 1, radius_, damage_,
+                         CAttackType::SPELLS, CDamageType::FIRE,
+                         ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+    CastPointDamageWaves(game, caster, x + 75.0f, y, 1, radius_, damage_,
+                         CAttackType::SPELLS, CDamageType::FIRE,
+                         ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
 }

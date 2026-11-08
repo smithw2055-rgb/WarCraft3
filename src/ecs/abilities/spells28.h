@@ -65,11 +65,14 @@ class CAbilityBlightedGoldMine : public CAbility {
 public:
     explicit CAbilityBlightedGoldMine(int handleId);
     void OnTick(CSimulation& game, CUnit* unit) override;
+    bool IsResourceMine() const override { return true; }
+    bool CanAddMiner() const override { return miners_ < maxMiners_; }
     bool AddMiner();
     void RemoveMiner();
-    int GetGold() const { return gold_; }
-    void SetGold(int v) { gold_ = v; }
+    int GetGold() const override { return gold_; }
+    void SetGold(int v) override { gold_ = v; }
     int GetMinerCount() const { return miners_; }
+    bool IsActivelyWorking() const override { return miners_ > 0 && gold_ > 0; }
 
 private:
     int gold_ = 12500;
@@ -81,12 +84,6 @@ private:
 };
 
 // Acolyte harvest (Aaha): stand at a haunted mine.
-//
-// ref CBehaviorAcolyteHarvest: the acolyte stays bound indefinitely (no
-// timeout) until death, removal, or a new order rebinds it elsewhere.
-// The binding is a mine-unit handle, not a raw ability pointer, so a dead
-// mine never dangles; Unbind() is idempotent. Gold itself trickles from
-// CAbilityBlightedGoldMine::OnTick (faster with more miners).
 class CAbilityAcolyteHarvest : public CAbilitySpellBase {
 public:
     explicit CAbilityAcolyteHarvest(int handleId);
@@ -104,10 +101,6 @@ private:
 };
 
 // Wisp harvest (Awha): lumber straight to the player, tree takes damage.
-//
-// ref CBehaviorWispHarvest: the wisp jumps onto the tree (instant
-// reposition, no walk/carry/return trips) and trickles lumber until the
-// tree dies. The tree is tracked by handle so a removed tree never dangles.
 class CAbilityWispHarvest : public CAbilitySpellBase {
 public:
     explicit CAbilityWispHarvest(int handleId);
@@ -160,8 +153,7 @@ public:
     void DoEffect(CSimulation& game, CUnit* caster) override;
 };
 
-// Way gate (Awrp). A smart order on a unit standing in the rect sends
-// that unit to the destination. Standing in the rect alone does not.
+// Way gate (Awrp).
 class CAbilityWayGate : public CAbility {
 public:
     explicit CAbilityWayGate(int handleId);
@@ -183,15 +175,13 @@ private:
     bool enabled_ = false;
 };
 
-// Shop purchase marker (Apit). Buying itself stays on Sell Items.
+// Shop purchase marker (Apit).
 class CAbilityShopPurchase : public CAbility {
 public:
     explicit CAbilityShopPurchase(int handleId);
 };
 
 // Neutral building (Aneu) and shop sharing (Aall): one shopper per player.
-// A still-valid shopper is kept; empty slots fill from units in range.
-// Aall only accepts the shop's own player.
 class CAbilityNeutralBuilding : public CAbility {
 public:
     static constexpr int kPlayerSlots = 12;
@@ -207,13 +197,7 @@ public:
 private:
     bool CanSelect(const CSimulation& game, const CUnit* shop, const CUnit* other) const;
     void Rescan(CSimulation& game, CUnit* shop);
-    // Explicit shoppers (NEUTRALINTERACT orders only): buyer intent for
-    // tavern hire. Kept apart from selected_[], which Rescan fills with
-    // any nearby unit (shoppers and merchandise alike).
     CUnit* shopper_[kPlayerSlots] = {};
-    // Tavern hero hire (retail awaken orders 852462-852465, targeted at the
-    // hero): buyer resolved from per-player selection, cost by awaken
-    // formula, ownership transfer. False when any gate fails (soft).
     bool HireFromTavern(CSimulation& game, CUnit* tavern, CUnit* hero);
     bool onlyAllies_;
     float radius_ = 400.0f;

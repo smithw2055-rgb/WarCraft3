@@ -3,7 +3,8 @@
 #include "ecs/csimulation.h"
 
 CBuff::CBuff(War3ID id, float duration, bool isPositive)
-    : id_(id), duration_(duration), remaining_(duration), isPositive_(isPositive) {}
+    : id_(id), duration_(duration), remaining_(duration),
+      isPositive_(isPositive), periodic_(false), suspended_(false) {}
 
 bool CBuff::AddStack() {
     if (stackCount_ < maxStacks_) {

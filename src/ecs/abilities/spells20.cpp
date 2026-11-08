@@ -15,8 +15,6 @@ CAbilityPossession::CAbilityPossession(int handleId)
 }
 
 void CAbilityPossession::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Charm's ownership branch (non-hero victims only), then the retail
-    // sacrifice: the banshee is removed once the victim converts.
     if (!target || !caster || target->IsDead()) return;
     auto* victim = dynamic_cast<CUnit*>(target);
     if (!victim) return;
@@ -34,7 +32,6 @@ void CAbilityPossession::DoEffect(CSimulation& game, CUnit* caster, CWidget* tar
             }),
         std::move(convert));
     possess.Run(game, caster, target, false, 0, 0);
-    // Sacrifice only on success: the victim changed sides to our player.
     if (beforePlayer != caster->GetPlayerIndex() &&
         victim->GetPlayerIndex() == caster->GetPlayerIndex()) {
         game.RemoveUnit(caster);
@@ -55,14 +52,10 @@ CAbilityStampede::CAbilityStampede(int handleId)
 }
 
 void CAbilityStampede::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    if (!caster) return;
-    ABEffectChain perUnit;
-    perUnit.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
-                                                       CDamageType::NORMAL));
-    perUnit.Add(std::make_unique<ABActionStunTarget>(slowDuration_));
-    ABActionForEachInLine stampede(range_, width_, std::move(perUnit));
-    stampede.SetFactionFilter(ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
-    stampede.Run(game, caster, nullptr, true, x, y);
+    CastLineDamageAndStun(game, caster, nullptr, true, x, y,
+                          range_, width_, damage_, slowDuration_,
+                          CAttackType::SPELLS, CDamageType::NORMAL,
+                          ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
 }
 
 void CAbilityStampede::ApplyEffectData(const CAbilityDefFull& def, int level) {

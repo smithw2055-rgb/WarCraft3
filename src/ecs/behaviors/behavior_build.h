@@ -3,7 +3,7 @@
 #include "resource/slk.h"
 #include <deque>
 
-enum class CBuildRace : uint8_t;
+#include "ecs/ability.h"
 
 // Build construction model
 enum class CBuildModel : uint8_t {

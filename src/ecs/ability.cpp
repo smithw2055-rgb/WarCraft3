@@ -3,7 +3,9 @@
 #include "ecs/csimulation.h"
 
 CAbility::CAbility(int handleId, War3ID code, CAbilityCategory category)
-    : handleId_(handleId), code_(code), alias_(code), category_(category) {}
+    : handleId_(handleId), code_(code), alias_(code), category_(category),
+      level_(1), physical_(0), permanent_(0), iconShowing_(1),
+      autocastActive_(false), passiveSpell_(false) {}
 
 void CAbility::SetDisabled(bool disabled, CAbilityDisableType type) {
     if (disabled) {

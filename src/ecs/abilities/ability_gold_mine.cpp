@@ -2,8 +2,44 @@
 #include "ecs/behaviors/behavior_harvest.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
-#include <iostream>
 #include <algorithm>
+
+namespace {
+
+void TickActiveMiners(CSimulation& game,
+                      std::vector<CBehaviorHarvest*>& activeMiners,
+                      CAbility& mineAbility) {
+    for (auto it = activeMiners.begin(); it != activeMiners.end();) {
+        CBehaviorHarvest* miner = *it;
+        if (!miner) {
+            it = activeMiners.erase(it);
+            continue;
+        }
+        if (game.GetGameTurnTick() >= miner->GetPopoutFromMineTurnTick()) {
+            int goldMined = 0;
+            const int available = mineAbility.GetGold();
+            if (available > 0) {
+                goldMined = std::min(available, miner->GetGoldCapacity());
+                mineAbility.SetGold(available - goldMined);
+            }
+            miner->PopoutFromMine(goldMined);
+            it = activeMiners.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void PushUniqueMiner(std::vector<CBehaviorHarvest*>& activeMiners,
+                     int capacity,
+                     CBehaviorHarvest* miner) {
+    if (!miner || static_cast<int>(activeMiners.size()) >= capacity) return;
+    if (std::find(activeMiners.begin(), activeMiners.end(), miner) == activeMiners.end()) {
+        activeMiners.push_back(miner);
+    }
+}
+
+} // namespace
 
 CAbilityGoldMine::CAbilityGoldMine(int handleId)
     : CAbility(handleId, War3ID("Agld"), CAbilityCategory::GOLD_MINE) {
@@ -15,41 +51,14 @@ void CAbilityGoldMine::OnAdd(CSimulation& game, CUnit* unit) {
 }
 
 void CAbilityGoldMine::OnTick(CSimulation& game, CUnit* unit) {
-    for (auto it = activeMiners_.begin(); it != activeMiners_.end();) {
-        CBehaviorHarvest* miner = *it;
-        if (!miner) {
-            it = activeMiners_.erase(it);
-            continue;
-        }
-        if (game.GetGameTurnTick() >= miner->GetPopoutFromMineTurnTick()) {
-            int goldMined = 0;
-            if (gold_ > 0) {
-                goldMined = std::min(gold_, miner->GetGoldCapacity());
-                gold_ -= goldMined;
-            }
-            miner->PopoutFromMine(goldMined);
-            it = activeMiners_.erase(it);
-        }
-        else {
-            ++it;
-        }
-    }
-
+    TickActiveMiners(game, activeMiners_, *this);
     if (unit && gold_ <= 0 && unit->GetLife() > 0.0f) {
         unit->SetLife(game, 0.0f);
     }
 }
 
 void CAbilityGoldMine::AddMiner(CBehaviorHarvest* miner) {
-    if (!miner) {
-        return;
-    }
-    if (GetActiveMinerCount() >= miningCapacity_) {
-        return; // full: entry is refused at CanAdd() sites; enforce here too
-    }
-    if (std::find(activeMiners_.begin(), activeMiners_.end(), miner) == activeMiners_.end()) {
-        activeMiners_.push_back(miner);
-    }
+    PushUniqueMiner(activeMiners_, miningCapacity_, miner);
 }
 
 void CAbilityGoldMine::RemoveMiner(CBehaviorHarvest* miner) {
@@ -76,11 +85,7 @@ void CAbilityOverlayedGoldMine::SetGold(int v) {
 }
 
 void CAbilityOverlayedGoldMine::AddMiner(CBehaviorHarvest* miner) {
-    if (!miner) return;
-    if (GetActiveMinerCount() >= miningCapacity_) return; // full (retail 5)
-    if (std::find(activeMiners_.begin(), activeMiners_.end(), miner) == activeMiners_.end()) {
-        activeMiners_.push_back(miner);
-    }
+    PushUniqueMiner(activeMiners_, miningCapacity_, miner);
 }
 
 void CAbilityOverlayedGoldMine::RemoveMiner(CBehaviorHarvest* miner) {
@@ -96,24 +101,7 @@ void CAbilityOverlayedGoldMine::RestoreParent() {
 
 void CAbilityOverlayedGoldMine::OnTick(CSimulation& game, CUnit* unit) {
     if (!unit || unit->IsDead()) return;
-    for (auto it = activeMiners_.begin(); it != activeMiners_.end();) {
-        CBehaviorHarvest* miner = *it;
-        if (!miner) {
-            it = activeMiners_.erase(it);
-            continue;
-        }
-        if (game.GetGameTurnTick() >= miner->GetPopoutFromMineTurnTick()) {
-            int goldMined = 0;
-            if (GetGold() > 0) {
-                goldMined = std::min(GetGold(), miner->GetGoldCapacity());
-                SetGold(GetGold() - goldMined);
-            }
-            miner->PopoutFromMine(goldMined);
-            it = activeMiners_.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    TickActiveMiners(game, activeMiners_, *this);
     if (GetGold() <= 0) unit->SetLife(game, 0);
 }
 

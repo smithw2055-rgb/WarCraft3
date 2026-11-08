@@ -15,11 +15,9 @@ CAbilityBanish::CAbilityBanish(int handleId)
 }
 
 void CAbilityBanish::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    ABActionAddBuffTarget banish(
-        [duration = duration_]() {
-            return std::make_unique<CBuffEthereal>(duration, War3ID("Bban"));
-        });
-    banish.Run(game, caster, target, false, 0, 0);
+    CastBuffOnTarget(game, caster, target, [duration = duration_]() {
+        return std::make_unique<CBuffEthereal>(duration, War3ID("Bban"));
+    });
 }
 
 void CAbilityBanish::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -36,11 +34,9 @@ CAbilityAntiMagicShell::CAbilityAntiMagicShell(int handleId)
 }
 
 void CAbilityAntiMagicShell::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    ABActionAddBuffTarget shell(
-        [duration = duration_]() {
-            return std::make_unique<CBuffMagicImmune>(duration, War3ID("Bam2"));
-        });
-    shell.Run(game, caster, target, false, 0, 0);
+    CastBuffOnTarget(game, caster, target, [duration = duration_]() {
+        return std::make_unique<CBuffMagicImmune>(duration, War3ID("Bam2"));
+    });
 }
 
 void CAbilityAntiMagicShell::ApplyEffectData(const CAbilityDefFull& def, int level) {

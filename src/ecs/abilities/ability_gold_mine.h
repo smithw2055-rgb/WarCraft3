@@ -13,21 +13,23 @@ public:
     void OnAdd(CSimulation& game, CUnit* unit) override;
     void OnTick(CSimulation& game, CUnit* unit) override;
 
-    // Gold management
-    int GetGold() const { return gold_; }
-    void SetGold(int v) { gold_ = v; }
+    // Gold management (implements CAbility virtual mine contract)
+    bool IsResourceMine() const override { return true; }
+    int GetGold() const override { return gold_; }
+    void SetGold(int v) override { gold_ = v; }
     void AddGold(int v) { gold_ += v; }
 
     // Mining capacity
     int GetMiningCapacity() const { return miningCapacity_; }
     void SetMiningCapacity(int v) { miningCapacity_ = v; }
     int GetActiveMinerCount() const { return static_cast<int>(activeMiners_.size()); }
-    bool CanAddMiner() const { return GetActiveMinerCount() < miningCapacity_; }
-    void AddMiner(CBehaviorHarvest* miner);
-    void RemoveMiner(CBehaviorHarvest* miner);
+    bool IsActivelyWorking() const override { return GetActiveMinerCount() > 0; }
+    bool CanAddMiner() const override { return GetActiveMinerCount() < miningCapacity_; }
+    void AddMiner(CBehaviorHarvest* miner) override;
+    void RemoveMiner(CBehaviorHarvest* miner) override;
 
     // Mining duration (seconds)
-    float GetMiningDuration() const { return miningDuration_; }
+    float GetMiningDuration() const override { return miningDuration_; }
     void SetMiningDuration(float v) { miningDuration_ = v; }
 
     // Gold per trip
@@ -36,8 +38,6 @@ public:
 
 private:
     int gold_ = 12500; // standard WC3 gold mine
-    // Retail Agld DataC1 (mining capacity) = 5; blighted/overlay mines
-    // match at 5. Wired from data when available via SetMiningCapacity.
     int miningCapacity_ = 5;
     float miningDuration_ = 5.0f; // seconds per mining trip
     int goldPerTrip_ = 10;
@@ -57,14 +57,16 @@ public:
     CUnit* GetParentUnit() const { return parentUnit_; }
     CAbilityGoldMine* GetParentMine() const { return parent_; }
 
-    int GetGold() const;
-    void SetGold(int v);
+    bool IsResourceMine() const override { return true; }
+    int GetGold() const override;
+    void SetGold(int v) override;
     int GetMiningCapacity() const { return miningCapacity_; }
     int GetActiveMinerCount() const { return static_cast<int>(activeMiners_.size()); }
-    bool CanAddMiner() const { return GetActiveMinerCount() < miningCapacity_; }
-    void AddMiner(CBehaviorHarvest* miner);
-    void RemoveMiner(CBehaviorHarvest* miner);
-    float GetMiningDuration() const { return miningDuration_; }
+    bool IsActivelyWorking() const override { return GetActiveMinerCount() > 0; }
+    bool CanAddMiner() const override { return GetActiveMinerCount() < miningCapacity_; }
+    void AddMiner(CBehaviorHarvest* miner) override;
+    void RemoveMiner(CBehaviorHarvest* miner) override;
+    float GetMiningDuration() const override { return miningDuration_; }
     void SetMiningDuration(float v) { miningDuration_ = v; }
 
 private:

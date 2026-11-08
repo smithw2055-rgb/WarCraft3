@@ -17,14 +17,7 @@ CAbilityHealingSpray::CAbilityHealingSpray(int handleId)
 }
 
 void CAbilityHealingSpray::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto an AbilityBuilder iteration: same-player units
-    // (caster included) around the point are healed.
-    if (!caster) return;
-    ABEffectChain perUnit;
-    perUnit.Add(std::make_unique<ABActionHealTarget>(healAmount_));
-    ABActionForEachInRange spray(radius_, std::move(perUnit), true);
-    spray.SetFactionFilter(ABFactionFilter::SAME_PLAYER_AS_CASTER);
-    spray.Run(game, caster, nullptr, true, x, y);
+    CastPointAreaHeal(game, caster, x, y, radius_, healAmount_);
 }
 
 // ===== Acid Bomb =====
@@ -37,7 +30,6 @@ CAbilityAcidBomb::CAbilityAcidBomb(int handleId)
 }
 
 void CAbilityAcidBomb::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder chain: armor curse plus poison.
     const int casterHandle = caster ? caster->GetHandleId() : -1;
     ABEffectChain chain;
     chain.Add(std::make_unique<ABActionAddBuffTarget>(
@@ -60,13 +52,10 @@ CAbilityChemicalRage::CAbilityChemicalRage(int handleId)
 }
 
 void CAbilityChemicalRage::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto an AbilityBuilder buff attach on the caster itself.
-    if (!caster) return;
-    ABActionAddBuffTarget rage(
-        [duration = duration_, speed = speedBonus_, attack = attackSpeedBonus_]() {
-            return std::make_unique<CBuffBloodlust>(duration, speed, attack);
-        });
-    rage.Run(game, caster, caster, false, 0, 0);
+    CastBuffOnSelf(game, caster,
+                   [duration = duration_, speed = speedBonus_, attack = attackSpeedBonus_]() {
+                       return std::make_unique<CBuffBloodlust>(duration, speed, attack);
+                   });
 }
 
 // ===== Transmute =====
@@ -79,8 +68,6 @@ CAbilityTransmute::CAbilityTransmute(int handleId)
 }
 
 void CAbilityTransmute::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder branch: an enemy non-hero is slain
-    // and its gold goes to the caster's player.
     if (!target || !caster || target->IsDead()) return;
     auto* victim = dynamic_cast<CUnit*>(target);
     if (!victim) return;
@@ -109,8 +96,6 @@ CAbilityBloodlustCast::CAbilityBloodlustCast(int handleId)
 }
 
 void CAbilityBloodlustCast::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder branch: no haste for the mechanical
-    // (ref unit-type immunity).
     ABEffectChain haste;
     haste.Add(std::make_unique<ABActionAddBuffTarget>(
         [duration = duration_, speed = speedBonus_, attack = attackSpeedBonus_]() {
@@ -145,10 +130,6 @@ CAbilityPurge::CAbilityPurge(int handleId)
 }
 
 void CAbilityPurge::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder chain: summoned victims burn first
-    // (checked pre-dispel), then buffs are stripped and slow applied. A
-    // burn kill leaves a corpse the later steps skip, matching the legacy
-    // early-out.
     const int casterHandle = caster ? caster->GetHandleId() : -1;
     ABEffectChain burn;
     burn.Add(std::make_unique<ABActionDamageTarget>(summonDamage_, CAttackType::SPELLS,
@@ -179,12 +160,10 @@ CAbilityLightningShield::CAbilityLightningShield(int handleId)
 }
 
 void CAbilityLightningShield::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto a single AbilityBuilder buff attach.
-    ABActionAddBuffTarget shield(
-        [duration = duration_, tick = damagePerTick_, radius = radius_]() {
-            return std::make_unique<CBuffLightningShield>(duration, tick, radius);
-        });
-    shield.Run(game, caster, target, false, 0, 0);
+    CastBuffOnTarget(game, caster, target,
+                     [duration = duration_, tick = damagePerTick_, radius = radius_]() {
+                         return std::make_unique<CBuffLightningShield>(duration, tick, radius);
+                     });
 }
 
 // ===== Raise Dead =====
@@ -196,9 +175,6 @@ CAbilityRaiseDead::CAbilityRaiseDead(int handleId)
 }
 
 void CAbilityRaiseDead::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto an AbilityBuilder iteration: corpses around the caster
-    // rise as skeletons (no timed life), capped at maxTargets. Graceful
-    // without unit data, like the loop replaced.
     if (!caster) return;
     ABEffectChain perUnit;
     perUnit.Add(std::make_unique<ABActionCreateUnitAtTarget>(skeletonType_));

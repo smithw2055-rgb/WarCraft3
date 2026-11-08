@@ -63,20 +63,10 @@ CAbilitySpellShieldArea::CAbilitySpellShieldArea(int handleId)
 }
 
 void CAbilitySpellShieldArea::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    if (!caster) return;
-    CPlayer* owner = game.GetPlayer(caster->GetPlayerIndex());
-    const float radiusSq = radius_ * radius_;
-    for (CUnit* other : game.GetUnits()) {
-        if (!other || other->IsDead()) continue;
-        const float dx = other->GetX() - x;
-        const float dy = other->GetY() - y;
-        if (dx * dx + dy * dy > radiusSq) continue;
-        CPlayer* otherPlayer = game.GetPlayer(other->GetPlayerIndex());
-        const bool ally = owner && otherPlayer &&
-                          owner->HasAlliance(*otherPlayer, CAllianceType::PASSIVE);
-        if (!ally && other != caster) continue;
-        other->AddBuff(std::make_unique<CBuffSpellShield>(duration_), game);
-    }
+    ForEachPassiveAllyInRange(game, caster, x, y, radius_, true,
+                              [&game, duration = duration_](CUnit* other) {
+                                  other->AddBuff(std::make_unique<CBuffSpellShield>(duration), game);
+                              });
 }
 
 void CAbilitySpellShieldArea::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -97,7 +87,6 @@ void CAbilityItemPermanentStats::DoEffect(CSimulation& game, CUnit* caster) {
     hero->SetAgilityBase(hero->GetAgility().base + agility_);
     hero->SetIntelligenceBase(hero->GetIntelligence().base + intelligence_);
     hero->SetStrengthBase(hero->GetStrength().base + strength_);
-    // Zero bonus still refreshes derived life and mana from the new bases.
     hero->AddStrengthBonus(game, caster, 0);
 }
 
@@ -230,6 +219,7 @@ CAbilityChaos::CAbilityChaos(int handleId)
     : CAbilitySpellBase(handleId, War3ID("Acha"), CAbilityCategory::SPELL) {
     iconShowing_ = false;
     permanent_ = true;
+    SetPassiveSpell(true);
     SetTargetType(CSpellTargetType::NO_TARGET);
 }
 
@@ -240,10 +230,6 @@ void CAbilityChaos::OnAdd(CSimulation& game, CUnit* unit) {
 
 void CAbilityChaos::OnRemove(CSimulation& game, CUnit* unit) {
     if (unit) unit->RemoveBuff(GetCode(), game);
-}
-
-bool CAbilityChaos::CheckCanTargetNoTarget(CSimulation&, CUnit*, int) const {
-    return false;
 }
 
 void CAbilityChaos::ApplyEffectData(const CAbilityDefFull& def, int level) {

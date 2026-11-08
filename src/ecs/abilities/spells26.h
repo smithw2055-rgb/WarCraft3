@@ -120,13 +120,12 @@ private:
     War3ID formId_;
 };
 
-// Chaos (Acha) morphs on add and restores on remove.
+// Chaos (Acha) morphs on add and restores on remove (uses SetPassiveSpell(true)).
 class CAbilityChaos : public CAbilitySpellBase {
 public:
     explicit CAbilityChaos(int handleId);
     void OnAdd(CSimulation& game, CUnit* unit) override;
     void OnRemove(CSimulation& game, CUnit* unit) override;
-    bool CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, int orderId) const override;
 protected:
     void ApplyEffectData(const CAbilityDefFull& def, int level) override;
 private:

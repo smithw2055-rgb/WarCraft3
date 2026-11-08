@@ -16,13 +16,10 @@ CAbilityWhirlwind::CAbilityWhirlwind(int handleId)
 }
 
 void CAbilityWhirlwind::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder buff attach.
-    if (!caster) return;
-    ABActionAddBuffTarget spin(
-        [duration = duration_, dps = damagePerSecond_, radius = radius_]() {
-            return std::make_unique<CBuffWhirlwind>(duration, dps, radius);
-        });
-    spin.Run(game, caster, caster, false, 0, 0);
+    CastBuffOnSelf(game, caster,
+                   [duration = duration_, dps = damagePerSecond_, radius = radius_]() {
+                       return std::make_unique<CBuffWhirlwind>(duration, dps, radius);
+                   });
 }
 
 void CAbilityWhirlwind::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -40,13 +37,10 @@ CAbilityImmolation::CAbilityImmolation(int handleId)
 }
 
 void CAbilityImmolation::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder buff attach.
-    if (!caster) return;
-    ABActionAddBuffTarget immolate(
-        [duration = duration_, tick = damagePerTick_, drain = manaDrain_, radius = radius_]() {
-            return std::make_unique<CBuffImmolation>(duration, tick, drain, radius);
-        });
-    immolate.Run(game, caster, caster, false, 0, 0);
+    CastBuffOnSelf(game, caster,
+                   [duration = duration_, tick = damagePerTick_, drain = manaDrain_, radius = radius_]() {
+                       return std::make_unique<CBuffImmolation>(duration, tick, drain, radius);
+                   });
 }
 
 void CAbilityImmolation::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -66,8 +60,6 @@ CAbilityForceOfNature::CAbilityForceOfNature(int handleId)
 }
 
 void CAbilityForceOfNature::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto an AbilityBuilder summon ring (treants on a 64-radius
-    // ring, each facing outward).
     if (!caster) return;
     ABActionSummonRing nature(treantType_, War3ID("AEfn"), count_, summonDuration_);
     nature.Run(game, caster, nullptr, true, x, y);
@@ -88,7 +80,6 @@ CAbilityOwlScout::CAbilityOwlScout(int handleId)
 }
 
 void CAbilityOwlScout::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder timed summon beside the caster.
     if (!caster) return;
     ABActionSummon owl(owlType_, War3ID("AEst"), 1, summonDuration_, 0.0f);
     owl.Run(game, caster, nullptr, true, caster->GetX() + 64.0f, caster->GetY());
@@ -108,7 +99,6 @@ CAbilitySummonHawk::CAbilitySummonHawk(int handleId)
 }
 
 void CAbilitySummonHawk::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder timed summon beside the caster.
     if (!caster) return;
     ABActionSummon hawk(hawkType_, War3ID("ANsw"), 1, summonDuration_, 0.0f);
     hawk.Run(game, caster, nullptr, true, caster->GetX() + 64.0f, caster->GetY());
@@ -129,20 +119,9 @@ CAbilityFactory::CAbilityFactory(int handleId)
 }
 
 void CAbilityFactory::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto a single AbilityBuilder create-and-buff (TimedLife
-    // plus Spawner; graceful without unit data like the code replaced).
-    if (!caster) return;
-    using BF = ABActionCreateUnitWithBuff::BuffFactory;
-    ABActionCreateUnitWithBuff factory(
-        factoryType_, x, y,
-        {BF([life = factoryLife_]() {
-             return std::make_unique<CBuffTimedLife>(War3ID("ANfy"), life);
-         }),
-         BF([life = factoryLife_, goblin = goblinType_, interval = spawnInterval_,
-             boom = explodeDamage_, radius = explodeRadius_]() {
-             return std::make_unique<CBuffSpawner>(life, goblin, interval, boom, radius);
-         })});
-    factory.Run(game, caster, nullptr, true, x, y);
+    CastTimedSpawnerUnit(game, caster, x, y,
+                         factoryType_, War3ID("ANfy"), factoryLife_,
+                         goblinType_, spawnInterval_, explodeDamage_, explodeRadius_);
 }
 
 void CAbilityFactory::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -164,8 +143,6 @@ void CAbilityKaboom::DoEffect(CSimulation& game, CUnit* caster, CWidget* target)
     (void)target;
     if (!caster) return;
     armed_ = true;
-    // Migrated detonation onto an AbilityBuilder kill (blast itself lives
-    // in OnDeath/Explode, outside DoEffect's reach).
     ABActionKillTarget boom;
     boom.Run(game, caster, caster, false, 0, 0);
 }
@@ -174,7 +151,6 @@ void CAbilityKaboom::DoEffect(CSimulation& game, CUnit* caster, float x, float y
     (void)x; (void)y;
     if (!caster) return;
     armed_ = true;
-    // Migrated detonation onto an AbilityBuilder kill (see above).
     ABActionKillTarget boom;
     boom.Run(game, caster, caster, false, 0, 0);
 }

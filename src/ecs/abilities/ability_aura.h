@@ -1,19 +1,9 @@
 #pragma once
 #include "ecs/ability.h"
-
-// Aura effect type
-enum class CAuraEffectType : uint8_t {
-    MOVE_SPEED, ATTACK_SPEED, ARMOR, DAMAGE, LIFE_REGEN, MANA_REGEN
-};
-
-// Aura bonus definition
-struct CAuraBonus {
-    CAuraEffectType type = CAuraEffectType::MOVE_SPEED;
-    float value = 0;
-    bool isPercent = false;
-};
+#include <vector>
 
 // CAbilityAura - passive aura that affects nearby units
+// (CAuraEffectType and CAuraBonus are defined in ecs/ability.h)
 class CAbilityAura : public CAbility {
 public:
     CAbilityAura(int handleId, War3ID code);

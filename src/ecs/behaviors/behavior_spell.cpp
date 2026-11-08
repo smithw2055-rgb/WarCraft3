@@ -1,7 +1,7 @@
 #include "behavior_spell.h"
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"
-#include "ecs/abilities/ability_spell_base.h"
+#include "ecs/ability.h"
 #include "ecs/pathing/pathfinding.h"
 #include "ecs/pathing/world_collision.h"
 #include <cmath>

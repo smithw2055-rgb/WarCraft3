@@ -2,7 +2,7 @@
 #include "ecs/behaviors/behavior.h"
 #include <deque>
 
-class CAbilitySpellBase;
+class CAbility;
 class CWidget;
 
 // CBehaviorSpell - handles the casting sequence for spells
@@ -12,7 +12,7 @@ public:
     CBehaviorSpell();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::SPELL; }
 
-    void SetSpellAbility(CAbilitySpellBase* ability) { spellAbility_ = ability; }
+    void SetSpellAbility(CAbility* ability) { spellAbility_ = ability; }
     void SetTarget(CWidget* target);
     void SetTargetPoint(float x, float y);
     void SetCastRange(float v) { castRange_ = v; }
@@ -32,7 +32,7 @@ public:
     void End(CSimulation& simulation) override;
 
 private:
-    CAbilitySpellBase* spellAbility_ = nullptr;
+    CAbility* spellAbility_ = nullptr;
     CWidget* target_ = nullptr;
     float targetX_ = 0, targetY_ = 0;
     bool hasPointTarget_ = false;

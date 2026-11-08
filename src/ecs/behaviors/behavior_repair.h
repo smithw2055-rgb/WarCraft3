@@ -2,7 +2,7 @@
 #include "ecs/behaviors/behavior.h"
 #include <deque>
 
-class CAbilityRepair;
+class CAbility;
 class CWidget;
 
 class CBehaviorRepair : public CBehavior {
@@ -10,7 +10,7 @@ public:
     CBehaviorRepair();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::BUILD; }
 
-    void SetRepairAbility(CAbilityRepair* ability) { repairAbility_ = ability; }
+    void SetRepairAbility(const CAbility* ability) { repairAbility_ = ability; }
     void SetTarget(CWidget* target);
     bool IsMovingToTarget() const { return movingToTarget_; }
     bool IsRepairing() const { return repairing_; }
@@ -26,7 +26,7 @@ private:
     bool ChargeRepairResources(CSimulation& simulation);
     void RefreshRepairRates();
 
-    CAbilityRepair* repairAbility_ = nullptr;
+    const CAbility* repairAbility_ = nullptr;
     CWidget* target_ = nullptr;
 
     bool movingToTarget_ = true;

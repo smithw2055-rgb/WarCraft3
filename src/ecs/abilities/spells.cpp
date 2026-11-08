@@ -5,7 +5,6 @@
 #include "ecs/buffs.h"
 #include "data/abilitydata.h"
 #include <cmath>
-#include <iostream>
 
 // ===== Blizzard =====
 CAbilityBlizzard::CAbilityBlizzard(int handleId)
@@ -18,16 +17,8 @@ CAbilityBlizzard::CAbilityBlizzard(int handleId)
 }
 
 void CAbilityBlizzard::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
-    // Migrated onto an AbilityBuilder wave: each wave runs a per-unit
-    // damage chain over the target area. Waves resolve instantly (the .j
-    // shard timing is a visual pass); the total matches the old loop.
-    for (int wave = 0; wave < waves_; wave++) {
-        ABEffectChain perUnit;
-        perUnit.Add(std::make_unique<ABActionDamageTarget>(
-            damagePerWave_, CAttackType::SPELLS, CDamageType::COLD));
-        ABActionForEachInRange shard(radius_, std::move(perUnit));
-        shard.Run(game, caster, nullptr, true, x, y);
-    }
+    CastPointDamageWaves(game, caster, x, y, waves_, radius_, damagePerWave_,
+                         CAttackType::SPELLS, CDamageType::COLD);
 }
 
 void CAbilityBlizzard::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -46,8 +37,6 @@ CAbilityHolyLight::CAbilityHolyLight(int handleId)
 }
 
 void CAbilityHolyLight::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder branch (ref HolyLight.j doEffect:
-    // undead take half damage as a ranged DIVINE bolt, others are healed).
     ABEffectChain smite;
     smite.Add(std::make_unique<ABActionDamageTarget>(
         healAmount_ * 0.5f, CAttackType::NORMAL, CDamageType::DIVINE, true));
@@ -71,11 +60,9 @@ CAbilityDivineShield::CAbilityDivineShield(int handleId)
 }
 
 void CAbilityDivineShield::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto a single AbilityBuilder buff attach.
-    if (!caster) return;
-    ABActionAddBuffTarget shield(
-        [duration = duration_]() { return std::make_unique<CBuffDivineShield>(duration); });
-    shield.Run(game, caster, caster, false, 0, 0);
+    CastBuffOnSelf(game, caster, [duration = duration_]() {
+        return std::make_unique<CBuffDivineShield>(duration);
+    });
 }
 
 void CAbilityDivineShield::ApplyEffectData(const CAbilityDefFull& def, int level) {
@@ -93,8 +80,6 @@ CAbilityThunderClap::CAbilityThunderClap(int handleId)
 }
 
 void CAbilityThunderClap::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto an AbilityBuilder iteration (damage + slow around the
-    // caster). Same coverage as the loop replaced.
     if (!caster) return;
     const int casterHandle = caster->GetHandleId();
     ABEffectChain perUnit;
@@ -123,8 +108,6 @@ CAbilityStormBolt::CAbilityStormBolt(int handleId)
 }
 
 void CAbilityStormBolt::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // StormBolt.j doEffect: a homing missile whose on-hit deals damage and
-    // stuns. Nothing lands at cast time; flight time applies.
     ABActionMissileStun bolt(damage_, stunDuration_, 800.0f,
                              CAttackType::SPELLS, CDamageType::LIGHTNING);
     bolt.Run(game, caster, target, false, 0, 0);
@@ -145,9 +128,6 @@ CAbilityWarStomp::CAbilityWarStomp(int handleId)
 }
 
 void CAbilityWarStomp::DoEffect(CSimulation& game, CUnit* caster) {
-    // Migrated onto an AbilityBuilder iteration (damage + stun per unit in
-    // radius around the caster, caster excluded). Same coverage as the
-    // hand-rolled loop it replaces.
     if (!caster) return;
     ABEffectChain perUnit;
     perUnit.Add(std::make_unique<ABActionDamageTarget>(
@@ -172,8 +152,6 @@ CAbilityDeathCoil::CAbilityDeathCoil(int handleId)
 }
 
 void CAbilityDeathCoil::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder branch: allied undead are healed,
-    // everyone else takes DEATH damage. Same rule as the code replaced.
     ABEffectChain mend;
     mend.Add(std::make_unique<ABActionHealTarget>(healAmount_));
     ABEffectChain harm;
@@ -203,10 +181,6 @@ CAbilityFrostNova::CAbilityFrostNova(int handleId)
 }
 
 void CAbilityFrostNova::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder pair: direct COLD hit on the primary
-    // target, then a splash (reduced damage + slow) around it. The primary
-    // is excluded from the splash, and the caster is included when in
-    // radius -- both match the hand-rolled loop this replaces.
     ABEffectChain direct;
     direct.Add(std::make_unique<ABActionDamageTarget>(damage_, CAttackType::SPELLS,
                                                       CDamageType::COLD));
@@ -240,7 +214,6 @@ CAbilityManaBurn::CAbilityManaBurn(int handleId)
 }
 
 void CAbilityManaBurn::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto a single AbilityBuilder action (burn + feedback damage).
     ABActionManaBurn burn(manaBurned_, CAttackType::SPELLS, CDamageType::MIND);
     burn.Run(game, caster, target, false, 0, 0);
 }
@@ -260,8 +233,6 @@ CAbilityEntanglingRoots::CAbilityEntanglingRoots(int handleId)
 }
 
 void CAbilityEntanglingRoots::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    // Migrated onto an AbilityBuilder chain: pin (ensnare) plus burn-over-
-    // duration (poison). No upfront nuke, matching the code replaced.
     const int casterHandle = caster ? caster->GetHandleId() : -1;
     ABEffectChain chain;
     chain.Add(std::make_unique<ABActionAddBuffTarget>(
