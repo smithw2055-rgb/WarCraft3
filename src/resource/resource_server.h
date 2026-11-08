@@ -236,6 +236,13 @@ public:
     void MountMemoryFile(const std::string& virtualPath, std::vector<uint8_t> bytes);
     void UnmountMemoryFiles();
 
+    // Phase 29: VFS Path Aliasing / Redirection (e.g. HD asset pack or module override)
+    void RegisterPathAlias(const std::string& fromUriOrPath, const std::string& toUriOrPath);
+    bool UnregisterPathAlias(const std::string& fromUriOrPath);
+    void ClearPathAliases();
+    std::string ResolvePathAlias(const std::string& uriOrPath) const;
+    size_t GetPathAliasCount() const;
+
     // Read raw file bytes through the VFS layer (Memory Overlay -> Custom Reader -> MpqManager -> Local Disk)
     bool ReadRawBytes(const std::string& uriOrPath, std::vector<uint8_t>& outBytes) const;
     bool FileExists(const std::string& uriOrPath) const;
@@ -322,6 +329,12 @@ private:
     bool workerRunning_ = false;
     bool workerBusy_ = false;
     std::thread workerThread_;
+    std::unordered_map<std::string, std::string> pathAliases_;
+
+    template <typename T, typename BuilderFn>
+    ResourceRef<T> LoadOrInsertCached(const std::string& typedKey,
+                                      ResourceKind kind,
+                                      BuilderFn&& buildUnlocked);
 };
 
 template <>

@@ -73,6 +73,7 @@
 #include "ecs/item.h"
 #include "ecs/player.h"
 #include "ecs/unit.h"
+#include "resource/resource_server.h"
 
 namespace war3 {
 
@@ -3082,7 +3083,7 @@ int War3GameModule::OnCheckCustomCellPassability(int cellX,
 namespace {
 
 struct War3ModulePodSnapshot {
-    uint32_t magic = 0x38324D57u; // "WM28"
+    uint32_t magic = 0x39324D57u; // "WM29"
     float defenseArmorFactor = 0.06f;
     float bountyMultiplier = 1.0f;
     float experienceMultiplier = 1.0f;
@@ -3098,6 +3099,7 @@ struct War3ModulePodSnapshot {
     uint32_t customFormationRankCount = 0;
     uint32_t customUpkeepLabelCount = 0;
     uint32_t customUnitSoundCount = 0;
+    uint32_t customAssetPathAliasCount = 0;
 };
 static_assert(std::is_trivially_copyable_v<War3ModulePodSnapshot>,
               "War3ModulePodSnapshot must be trivially copyable");
@@ -3195,6 +3197,7 @@ void War3GameModule::OnCaptureModuleSnapshot(const CSimulation& /*sim*/,
     pod.customFormationRankCount = static_cast<uint32_t>(customUnitFormationRanks_.size());
     pod.customUpkeepLabelCount = static_cast<uint32_t>(customUpkeepLabels_.size());
     pod.customUnitSoundCount = static_cast<uint32_t>(customUnitSoundOverrides_.size());
+    pod.customAssetPathAliasCount = static_cast<uint32_t>(customAssetPathAliases_.size());
 
     outBytes.clear();
     AppendModulePod(outBytes, pod);
@@ -3276,6 +3279,15 @@ void War3GameModule::OnCaptureModuleSnapshot(const CSimulation& /*sim*/,
         AppendModuleString(outBytes, entry.hitClip);
         AppendModuleString(outBytes, entry.deathClip);
     }
+
+    std::vector<std::string> aliasKeys;
+    aliasKeys.reserve(customAssetPathAliases_.size());
+    for (const auto& [k, _] : customAssetPathAliases_) aliasKeys.push_back(k);
+    std::sort(aliasKeys.begin(), aliasKeys.end());
+    for (const std::string& k : aliasKeys) {
+        AppendModuleString(outBytes, k);
+        AppendModuleString(outBytes, customAssetPathAliases_.at(k));
+    }
 }
 
 bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
@@ -3286,7 +3298,8 @@ bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
     size_t offset = 0;
     War3ModulePodSnapshot pod{};
     if (!ReadModulePod(data, size, offset, pod)) return false;
-    if (pod.magic != 0x38324D57u && pod.magic != 0x36324D57u && pod.magic != 0x35324D57u) return false;
+    if (pod.magic != 0x39324D57u && pod.magic != 0x38324D57u &&
+        pod.magic != 0x36324D57u && pod.magic != 0x35324D57u) return false;
 
     const size_t expectedExtra =
         static_cast<size_t>(pod.sightMultiplierCount) * sizeof(War3SightMultiplierEntryPod) +
@@ -3369,6 +3382,17 @@ bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
             return false;
         }
         customUnitSoundOverrides_[raw] = std::move(entry);
+    }
+
+    customAssetPathAliases_.clear();
+    for (uint32_t i = 0; i < pod.customAssetPathAliasCount; ++i) {
+        std::string key;
+        std::string target;
+        if (!ReadModuleString(data, size, offset, key) ||
+            !ReadModuleString(data, size, offset, target)) {
+            return false;
+        }
+        customAssetPathAliases_[std::move(key)] = std::move(target);
     }
 
     return true;
@@ -3575,6 +3599,16 @@ uint64_t War3GameModule::OnComputeModuleStateHash(const CSimulation& /*sim*/) co
             mixString(entry.deathClip);
         }
     }
+    if (!customAssetPathAliases_.empty()) {
+        std::vector<std::string> sortedKeys;
+        sortedKeys.reserve(customAssetPathAliases_.size());
+        for (const auto& [k, _] : customAssetPathAliases_) sortedKeys.push_back(k);
+        std::sort(sortedKeys.begin(), sortedKeys.end());
+        for (const std::string& k : sortedKeys) {
+            mixString(k);
+            mixString(customAssetPathAliases_.at(k));
+        }
+    }
     return h;
 }
 
@@ -3700,6 +3734,46 @@ bool War3GameModule::OnResolveUnitCombatSound(const CSimulation& sim,
     } else {
         outClipKey = "Sound/Units/Combat/MetalMediumSlice_" + std::to_string(unitHandle);
     }
+    return true;
+}
+
+// ============================================================================
+// Phase 29: Pluggable Asset Path Aliases & VFS Redirection
+// ============================================================================
+
+void War3GameModule::RegisterAssetPathAlias(const std::string& fromUriOrPath,
+                                            const std::string& toUriOrPath,
+                                            resource::ResourceServer* targetServer) {
+    const auto parsed = resource::ResourceServer::ParseUri(fromUriOrPath);
+    if (parsed.canonicalCacheKey.empty() || toUriOrPath.empty()) return;
+    customAssetPathAliases_[parsed.canonicalCacheKey] = toUriOrPath;
+    if (targetServer) {
+        targetServer->RegisterPathAlias(fromUriOrPath, toUriOrPath);
+    }
+}
+
+bool War3GameModule::UnregisterAssetPathAlias(const std::string& fromUriOrPath,
+                                              resource::ResourceServer* targetServer) {
+    const auto parsed = resource::ResourceServer::ParseUri(fromUriOrPath);
+    if (targetServer) {
+        targetServer->UnregisterPathAlias(fromUriOrPath);
+    }
+    return customAssetPathAliases_.erase(parsed.canonicalCacheKey) > 0;
+}
+
+bool War3GameModule::HasAssetPathAlias(const std::string& fromUriOrPath) const {
+    const auto parsed = resource::ResourceServer::ParseUri(fromUriOrPath);
+    return customAssetPathAliases_.count(parsed.canonicalCacheKey) > 0;
+}
+
+bool War3GameModule::OnResolveAssetPathAlias(const std::string& uriOrPath,
+                                             std::string& outRedirectedUriOrPath) const {
+    const auto parsed = resource::ResourceServer::ParseUri(uriOrPath);
+    auto it = customAssetPathAliases_.find(parsed.canonicalCacheKey);
+    if (it == customAssetPathAliases_.end()) {
+        return false;
+    }
+    outRedirectedUriOrPath = it->second;
     return true;
 }
 

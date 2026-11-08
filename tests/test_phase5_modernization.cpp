@@ -8700,7 +8700,7 @@ bool TestPhase28StageMMM2DynamicPluginSOV28AndCloudRetailMapsEndToEndSuite() {
         {
             auto dynSimMod = loader.CreateSimulationModule(pluginKey);
             TEST_ASSERT(dynSimMod != nullptr);
-            TEST_ASSERT(dynSimMod->GetModuleVersion() == 28u);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 28u);
         }
         TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
     }
@@ -8717,7 +8717,198 @@ bool TestPhase28StageMMM2DynamicPluginSOV28AndCloudRetailMapsEndToEndSuite() {
         std::fclose(mf);
 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
-        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 28u);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 28u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+
+// ============================================================================
+// Phase 29 Modernization Tests: EngineProfiler O(1) Ring-Buffer & RenderGraph
+// Dynamic Sorted Passes, ResourceServer Generic Cache Kernel & VFS Path Aliases,
+// and War3GameModule Version 29
+// ============================================================================
+
+bool TestPhase29StageNNN1EngineProfilerO1RingBufferAndRenderGraphDynamicSortedPasses() {
+    // 1. Verify EngineProfiler O(1) circular ring buffer beyond kMaxRollingSamplesPerZone (256)
+    core::EngineProfiler prof;
+    prof.Reset();
+
+    // Push 300 samples: first 44 are 10us, latest 256 are 100..355us
+    for (int i = 0; i < 44; ++i) {
+        prof.RecordZoneSample("SimStep", "Simulation", static_cast<uint64_t>(i * 10), 10);
+    }
+    for (int i = 0; i < 256; ++i) {
+        prof.RecordZoneSample("SimStep", "Simulation", static_cast<uint64_t>((44 + i) * 100), static_cast<uint64_t>(100 + i));
+    }
+
+    core::ProfileZoneSummary summary;
+    TEST_ASSERT(prof.GetZoneSummary("SimStep", summary));
+    TEST_ASSERT(summary.callCount == 300u);
+    TEST_NEAR(summary.minMicros, 10.0, 1e-4);
+    TEST_NEAR(summary.maxMicros, 355.0, 1e-4);
+    // Rolling window of latest 256 samples is [100..355], so P50 must be >= 227 (old 10us samples overwritten!)
+    TEST_ASSERT(summary.p50Micros >= 227.0 && summary.p50Micros <= 229.0);
+
+    // 2. Verify RenderGraph RegisterCustomPass topological ordering and RemovePass
+    render::RenderGraph graph;
+    TEST_ASSERT(graph.GetPassCount() == 7u);
+
+    const auto customMinimapPassId = static_cast<render::RenderGraphPassId>(550); // Between Portrait (500) and UI (600)
+    bool customPassRan = false;
+    graph.RegisterCustomPass(customMinimapPassId, "CustomMinimapFogPass",
+        [&](render::RenderGraphContext& /*ctx*/, render::RenderGraphPassMetrics& m) {
+            customPassRan = true;
+            m.itemsProcessed = 4;
+            m.drawCallsSubmitted = 2;
+        });
+    TEST_ASSERT(graph.GetPassCount() == 8u);
+
+    render::RenderGraphContext ctx;
+    ctx.uiOverlayCommandCount = 12;
+    graph.ExecuteFrame(ctx);
+    TEST_ASSERT(customPassRan);
+
+    const auto& allMetrics = graph.GetAllPassMetrics();
+    TEST_ASSERT(allMetrics.size() == 8u);
+    // Pass at index 6 should be CustomMinimapFogPass (550), right before UiOverlayPass (600) at index 7!
+    TEST_ASSERT(allMetrics[6].passId == customMinimapPassId);
+    TEST_ASSERT(allMetrics[6].drawCallsSubmitted == 2);
+    TEST_ASSERT(allMetrics[7].passId == render::RenderGraphPassId::UiOverlayPass);
+
+    TEST_ASSERT(graph.RemovePass(customMinimapPassId));
+    TEST_ASSERT(graph.GetPassCount() == 7u);
+    return true;
+}
+
+bool TestPhase29StageNNN2ResourceServerGenericCacheKernelAndVfsPathAliases() {
+    resource::ResourceServer srv;
+    std::vector<uint8_t> hdBytes = {0x48, 0x44, 0x5F, 0x4D, 0x45, 0x53, 0x48}; // "HD_MESH"
+    srv.MountMemoryFile("Units/Human/Footman/Footman_HD.bin", hdBytes);
+
+    // Register a VFS path alias redirecting legacy Footman.bin -> Footman_HD.bin
+    srv.RegisterPathAlias("mpq://Units/Human/Footman/Footman.bin", "Units/Human/Footman/Footman_HD.bin");
+    TEST_ASSERT(srv.GetPathAliasCount() == 1u);
+    TEST_ASSERT(srv.FileExists("Units\\Human\\Footman\\footman.bin"));
+
+    auto binRes1 = srv.LoadRawBinary("Units/Human/Footman/Footman.bin");
+    TEST_ASSERT(binRes1 != nullptr);
+    TEST_ASSERT(binRes1->bytes == hdBytes);
+
+    // Second load hits generic LoadOrInsertCached<T> cache
+    const uint64_t hitsBefore = srv.GetStats().cacheHits;
+    auto binRes2 = srv.LoadRawBinary("mpq://units\\human\\footman\\FOOTMAN.BIN");
+    TEST_ASSERT(binRes2 == binRes1);
+    TEST_ASSERT(srv.GetStats().cacheHits == hitsBefore + 1u);
+    TEST_ASSERT(srv.FindCached("Units/Human/Footman/Footman.bin", resource::ResourceKind::RawBinary) == binRes1);
+
+    // Chained alias resolution (Footman_Legacy.bin -> Footman.bin -> Footman_HD.bin)
+    srv.RegisterPathAlias("Units/Human/Footman/Footman_Legacy.bin", "Units/Human/Footman/Footman.bin");
+    TEST_ASSERT(srv.ResolvePathAlias("Units/Human/Footman/Footman_Legacy.bin") == "Units/Human/Footman/Footman_HD.bin");
+    TEST_ASSERT(srv.UnregisterPathAlias("Units/Human/Footman/Footman_Legacy.bin"));
+
+    TEST_ASSERT(srv.UnregisterPathAlias("Units/Human/Footman/Footman.bin"));
+    TEST_ASSERT(srv.GetPathAliasCount() == 0u);
+    return true;
+}
+
+bool TestPhase29StageOOO1War3GameModuleV29AssetPathAliasesAndSoundModelRedirection() {
+    resource::ResourceServer srv;
+    const std::string slkText = "ID;P\nC;X1;Y1;K\"unitID\"\nC;X1;Y2;K\"hfoo\"\nE\n";
+    std::vector<uint8_t> customSlkBytes(slkText.begin(), slkText.end());
+    srv.MountMemoryFile("CustomMod/UnitBalance_Custom.slk", customSlkBytes);
+
+    CSimulation sim;
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    sim.SetSimulationModule(war3Mod);
+    TEST_ASSERT(war3Mod->GetModuleVersion() == 29u);
+    const uint64_t hashBefore = war3Mod->OnComputeModuleStateHash(sim);
+
+    war3Mod->RegisterAssetPathAlias(
+        "Units/UnitBalance.slk",
+        "CustomMod/UnitBalance_Custom.slk",
+        &srv);
+    TEST_ASSERT(war3Mod->HasAssetPathAlias("units\\unitbalance.slk"));
+    const uint64_t hashWithAlias = war3Mod->OnComputeModuleStateHash(sim);
+    TEST_ASSERT(hashWithAlias != hashBefore);
+
+    std::string redirected;
+    TEST_ASSERT(war3Mod->OnResolveAssetPathAlias("mpq://Units/UnitBalance.slk", redirected));
+    TEST_ASSERT(redirected == "CustomMod/UnitBalance_Custom.slk");
+
+    // Loading Units/UnitBalance.slk from srv transparently loads CustomMod/UnitBalance_Custom.slk!
+    auto slkRes = srv.LoadSlkTable("Units/UnitBalance.slk");
+    TEST_ASSERT(slkRes != nullptr);
+    TEST_ASSERT(slkRes->GetState() == resource::ResourceLoadState::Loaded);
+
+    // Verify WM29 module snapshot round-trip preserves customAssetPathAliases_
+    std::vector<uint8_t> modSnap;
+    war3Mod->OnCaptureModuleSnapshot(sim, modSnap);
+    TEST_ASSERT(war3Mod->UnregisterAssetPathAlias("Units/UnitBalance.slk", &srv));
+    TEST_ASSERT(!war3Mod->HasAssetPathAlias("Units/UnitBalance.slk"));
+    TEST_ASSERT(war3Mod->OnRestoreModuleSnapshot(sim, modSnap.data(), modSnap.size()));
+    TEST_ASSERT(war3Mod->HasAssetPathAlias("Units/UnitBalance.slk"));
+    TEST_ASSERT(war3Mod->OnComputeModuleStateHash(sim) == hashWithAlias);
+
+    TEST_ASSERT(war3Mod->UnregisterAssetPathAlias("Units/UnitBalance.slk", &srv));
+    TEST_ASSERT(!war3Mod->HasAssetPathAlias("Units/UnitBalance.slk"));
+    return true;
+}
+
+bool TestPhase29StageOOO2DynamicPluginSOV29AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath29 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths29[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths29) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath29 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath29.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase29PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath29));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() == 29u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(2)TerenasStand.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(12)WormWar.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 29u);
 
         MpqManager mpq;
         CSimulation mapSim;

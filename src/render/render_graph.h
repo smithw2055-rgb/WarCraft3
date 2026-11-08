@@ -1,8 +1,8 @@
 #pragma once
 // ============================================================================
-// Stage N: Declarative RenderGraph, TerrainChunkGrid Frustum Culling,
-//          ParticleRibbonBatcher & MdxSharedMeshRegistry
-//          (Inspired by Godot 4 RenderingServer & Unity URP RenderGraph)
+// Stage N & Phase 29: Declarative RenderGraph, TerrainChunkGrid Frustum Culling,
+// ParticleRibbonBatcher & MdxSharedMeshRegistry with Dynamic Sorted Passes
+// (Inspired by Godot 4 RenderingServer & Unity URP RenderGraph)
 // ============================================================================
 #include <cstddef>
 #include <cstdint>
@@ -249,6 +249,15 @@ public:
     void SetPassCallback(RenderGraphPassId passId, PassExecuteFn fn);
     bool SetPassEnabled(RenderGraphPassId passId, bool enabled);
     bool IsPassEnabled(RenderGraphPassId passId) const;
+
+    // Phase 29: Register or replace a custom render pass, automatically keeping
+    // passes sorted in ascending order of static_cast<int>(passId).
+    void RegisterCustomPass(RenderGraphPassId passId,
+                            const std::string& name,
+                            PassExecuteFn fn,
+                            bool enabled = true);
+    bool RemovePass(RenderGraphPassId passId);
+    size_t GetPassCount() const { return passes_.size(); }
 
     void ExecuteFrame(RenderGraphContext& ctx);
 

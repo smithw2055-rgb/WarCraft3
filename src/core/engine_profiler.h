@@ -1,8 +1,8 @@
 #pragma once
 // ============================================================================
-// Stage U: Hierarchical EngineProfiler, Rolling P50/P95/P99 Frame Telemetry
-//          & Chrome Trace / Perfetto JSON Exporter
-//          (Inspired by Unity ProfilerMarker & Godot 4 Performance/Monitors)
+// Stage U & Phase 29: Hierarchical EngineProfiler, O(1) Ring-Buffered
+// P50/P95/P99 Frame Telemetry & Chrome Trace / Perfetto JSON Exporter
+// (Inspired by Unity ProfilerMarker & Godot 4 Performance/Monitors)
 // ============================================================================
 #include <chrono>
 #include <cstddef>
@@ -84,6 +84,7 @@ private:
         double totalMicros = 0.0;
         double minMicros = 0.0;
         double maxMicros = 0.0;
+        size_t rollingWriteCursor = 0;
         std::vector<double> rollingSamples;
     };
 
@@ -94,6 +95,7 @@ private:
     uint64_t currentFrame_ = 0;
     uint64_t currentFrameStartMicros_ = 0;
     uint64_t completedFrames_ = 0;
+    size_t traceWriteCursor_ = 0;
 
     mutable std::mutex mutex_;
     std::unordered_map<std::string, ZoneBucket> zones_;

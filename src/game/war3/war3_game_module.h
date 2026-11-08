@@ -79,7 +79,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 28u; }
+    uint32_t GetModuleVersion() const override { return 29u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -541,6 +541,17 @@ public:
                                   bool isDeath,
                                   std::string& outClipKey) const override;
 
+    // Phase 29: Pluggable Asset Path Alias Redirection & ResourceServer Sync
+    void RegisterAssetPathAlias(const std::string& fromPath,
+                                const std::string& toPath,
+                                resource::ResourceServer* optionalServer = nullptr);
+    bool UnregisterAssetPathAlias(const std::string& fromPath,
+                                  resource::ResourceServer* optionalServer = nullptr);
+    bool HasAssetPathAlias(const std::string& fromPath) const;
+
+    bool OnResolveAssetPathAlias(const std::string& requestedPath,
+                                 std::string& outRedirectedPath) const override;
+
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 
     bool OnCheckSpellEffectReaction(CSimulation& sim,
@@ -608,6 +619,7 @@ private:
     std::unordered_map<uint32_t, int> customUnitFormationRanks_;
     std::unordered_map<int, std::string> customUpkeepLabels_;
     std::unordered_map<uint32_t, CustomUnitSoundEntry> customUnitSoundOverrides_;
+    std::unordered_map<std::string, std::string> customAssetPathAliases_;
     std::unordered_map<int32_t, CustomGlobalCommandFn> customGlobalCommands_;
     uint32_t mutedPlayerMask_ = 0;
     uint32_t tributeCommandsExecuted_ = 0;

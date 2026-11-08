@@ -893,6 +893,10 @@ bool TestPhase28StageLLL1ZeroAllocRenderInterpolationSwapAndBoneAtlasFastReset()
 bool TestPhase28StageLLL2AudioServerPrecomputedBusGainsAndPluggableCombatSoundRouting();
 bool TestPhase28StageMMM1UIDataBinderCustomReactivePropertiesAndUpkeepFormatter();
 bool TestPhase28StageMMM2DynamicPluginSOV28AndCloudRetailMapsEndToEndSuite();
+bool TestPhase29StageNNN1EngineProfilerO1RingBufferAndRenderGraphDynamicSortedPasses();
+bool TestPhase29StageNNN2ResourceServerGenericCacheKernelAndVfsPathAliases();
+bool TestPhase29StageOOO1War3GameModuleV29AssetPathAliasesAndSoundModelRedirection();
+bool TestPhase29StageOOO2DynamicPluginSOV29AndCloudRetailMapsEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1781,6 +1785,10 @@ int main(int argc, char** argv) {
         {"Phase28 Stage LLL2 AudioServer precomputed bus gains and pluggable combat sound routing", TestPhase28StageLLL2AudioServerPrecomputedBusGainsAndPluggableCombatSoundRouting},
         {"Phase28 Stage MMM1 UIDataBinder custom reactive properties and upkeep formatter", TestPhase28StageMMM1UIDataBinderCustomReactivePropertiesAndUpkeepFormatter},
         {"Phase28 Stage MMM2 Dynamic plugin SO v28 and cloud retail maps end-to-end suite", TestPhase28StageMMM2DynamicPluginSOV28AndCloudRetailMapsEndToEndSuite},
+        {"Phase29 Stage NNN1 EngineProfiler O(1) ring buffer and RenderGraph dynamic sorted passes", TestPhase29StageNNN1EngineProfilerO1RingBufferAndRenderGraphDynamicSortedPasses},
+        {"Phase29 Stage NNN2 ResourceServer generic cache kernel and VFS path aliases", TestPhase29StageNNN2ResourceServerGenericCacheKernelAndVfsPathAliases},
+        {"Phase29 Stage OOO1 War3GameModule v29 asset path aliases and redirection", TestPhase29StageOOO1War3GameModuleV29AssetPathAliasesAndSoundModelRedirection},
+        {"Phase29 Stage OOO2 Dynamic plugin SO v29 and cloud retail maps end-to-end suite", TestPhase29StageOOO2DynamicPluginSOV29AndCloudRetailMapsEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

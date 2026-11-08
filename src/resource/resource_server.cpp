@@ -201,8 +201,52 @@ void ResourceServer::UnmountMemoryFiles() {
     memoryFiles_.clear();
 }
 
+void ResourceServer::RegisterPathAlias(const std::string& fromUriOrPath, const std::string& toUriOrPath) {
+    const ParsedVfsUri fromParsed = ParseUri(fromUriOrPath);
+    if (fromParsed.canonicalCacheKey.empty() || toUriOrPath.empty()) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    pathAliases_[fromParsed.canonicalCacheKey] = toUriOrPath;
+}
+
+bool ResourceServer::UnregisterPathAlias(const std::string& fromUriOrPath) {
+    const ParsedVfsUri fromParsed = ParseUri(fromUriOrPath);
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pathAliases_.erase(fromParsed.canonicalCacheKey) > 0;
+}
+
+void ResourceServer::ClearPathAliases() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pathAliases_.clear();
+}
+
+std::string ResourceServer::ResolvePathAlias(const std::string& uriOrPath) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (pathAliases_.empty()) return uriOrPath;
+    std::string current = uriOrPath;
+    for (int hop = 0; hop < 8; ++hop) {
+        const ParsedVfsUri parsed = ParseUri(current);
+        auto it = pathAliases_.find(parsed.canonicalCacheKey);
+        if (it == pathAliases_.end() || it->second == current) {
+            break;
+        }
+        const ParsedVfsUri nextParsed = ParseUri(it->second);
+        if (nextParsed.canonicalCacheKey == parsed.canonicalCacheKey) {
+            current = it->second;
+            break;
+        }
+        current = it->second;
+    }
+    return current;
+}
+
+size_t ResourceServer::GetPathAliasCount() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pathAliases_.size();
+}
+
 bool ResourceServer::ReadRawBytes(const std::string& uriOrPath, std::vector<uint8_t>& outBytes) const {
-    const ParsedVfsUri parsed = ParseUri(uriOrPath);
+    const std::string resolvedPath = ResolvePathAlias(uriOrPath);
+    const ParsedVfsUri parsed = ParseUri(resolvedPath);
     if (parsed.rawArchivePath.empty()) return false;
 
     const MpqManager* mpq = nullptr;
@@ -243,7 +287,8 @@ bool ResourceServer::ReadRawBytes(const std::string& uriOrPath, std::vector<uint
 }
 
 bool ResourceServer::FileExists(const std::string& uriOrPath) const {
-    const ParsedVfsUri parsed = ParseUri(uriOrPath);
+    const std::string resolvedPath = ResolvePathAlias(uriOrPath);
+    const ParsedVfsUri parsed = ParseUri(resolvedPath);
     if (parsed.rawArchivePath.empty()) return false;
 
     const MpqManager* mpq = nullptr;
@@ -287,8 +332,25 @@ ResourceRef<Resource> ResourceServer::GetByRid(RID rid) const {
 }
 
 ResourceRef<Resource> ResourceServer::FindCached(const std::string& uriOrPath, ResourceKind kind) const {
-    const ParsedVfsUri parsed = ParseUri(uriOrPath);
-    const std::string typedKey = MakeTypedCacheKey(parsed.canonicalCacheKey, kind);
+    const std::string resolved = ResolvePathAlias(uriOrPath);
+    ParsedVfsUri parsed = ParseUri(resolved);
+    std::string canonicalKey = parsed.canonicalCacheKey;
+    if (kind == ResourceKind::MdxModel) {
+        if (parsed.rawArchivePath.size() <= 4) {
+            parsed = ParseUri(resolved + ".mdx");
+        } else {
+            const std::string ext = ToLowerAscii(parsed.rawArchivePath.substr(parsed.rawArchivePath.size() - 4));
+            if (ext != ".mdx" && ext != ".mdl") {
+                parsed = ParseUri(resolved + ".mdx");
+            }
+        }
+        canonicalKey = parsed.canonicalCacheKey;
+        if (canonicalKey.size() >= 4 &&
+            canonicalKey.substr(canonicalKey.size() - 4) == ".mdl") {
+            canonicalKey = canonicalKey.substr(0, canonicalKey.size() - 4) + ".mdx";
+        }
+    }
+    const std::string typedKey = MakeTypedCacheKey(canonicalKey, kind);
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = ridByTypedKey_.find(typedKey);
     if (it == ridByTypedKey_.end()) return nullptr;
@@ -296,10 +358,10 @@ ResourceRef<Resource> ResourceServer::FindCached(const std::string& uriOrPath, R
     return (rit != resourcesByRid_.end()) ? rit->second : nullptr;
 }
 
-ResourceRef<RawBinaryResource> ResourceServer::LoadRawBinary(const std::string& uriOrPath) {
-    const ParsedVfsUri parsed = ParseUri(uriOrPath);
-    const std::string typedKey = MakeTypedCacheKey(parsed.canonicalCacheKey, ResourceKind::RawBinary);
-
+template <typename T, typename BuilderFn>
+ResourceRef<T> ResourceServer::LoadOrInsertCached(const std::string& typedKey,
+                                                  ResourceKind kind,
+                                                  BuilderFn&& buildUnlocked) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = ridByTypedKey_.find(typedKey);
@@ -307,207 +369,116 @@ ResourceRef<RawBinaryResource> ResourceServer::LoadRawBinary(const std::string& 
             auto rit = resourcesByRid_.find(it->second);
             if (rit != resourcesByRid_.end()) {
                 cacheHits_++;
-                return std::static_pointer_cast<RawBinaryResource>(rit->second);
+                return std::static_pointer_cast<T>(rit->second);
             }
         }
         cacheMisses_++;
     }
 
-    std::vector<uint8_t> bytes;
-    if (!ReadRawBytes(uriOrPath, bytes)) {
+    ResourceRef<T> res = buildUnlocked();
+    if (!res) {
         std::lock_guard<std::mutex> lock(mutex_);
         loadFailures_++;
         return nullptr;
     }
-
-    auto res = std::make_shared<RawBinaryResource>();
-    res->path_ = parsed.rawArchivePath;
-    res->canonicalKey_ = parsed.canonicalCacheKey;
-    res->state_ = ResourceLoadState::Loaded;
-    res->bytes = std::move(bytes);
 
     std::lock_guard<std::mutex> lock(mutex_);
     auto existingIt = ridByTypedKey_.find(typedKey);
     if (existingIt != ridByTypedKey_.end()) {
         auto rit = resourcesByRid_.find(existingIt->second);
         if (rit != resourcesByRid_.end()) {
-            return std::static_pointer_cast<RawBinaryResource>(rit->second);
+            return std::static_pointer_cast<T>(rit->second);
         }
     }
-    res->rid_ = AllocateRidLocked(ResourceKind::RawBinary);
+    res->rid_ = AllocateRidLocked(kind);
     ridByTypedKey_[typedKey] = res->rid_;
     resourcesByRid_[res->rid_] = res;
     return res;
+}
+
+ResourceRef<RawBinaryResource> ResourceServer::LoadRawBinary(const std::string& uriOrPath) {
+    const std::string resolved = ResolvePathAlias(uriOrPath);
+    const ParsedVfsUri parsed = ParseUri(resolved);
+    const std::string typedKey = MakeTypedCacheKey(parsed.canonicalCacheKey, ResourceKind::RawBinary);
+    return LoadOrInsertCached<RawBinaryResource>(typedKey, ResourceKind::RawBinary, [&]() -> ResourceRef<RawBinaryResource> {
+        std::vector<uint8_t> bytes;
+        if (!ReadRawBytes(resolved, bytes)) return nullptr;
+        auto res = std::make_shared<RawBinaryResource>();
+        res->path_ = parsed.rawArchivePath;
+        res->canonicalKey_ = parsed.canonicalCacheKey;
+        res->state_ = ResourceLoadState::Loaded;
+        res->bytes = std::move(bytes);
+        return res;
+    });
 }
 
 ResourceRef<SlkTableResource> ResourceServer::LoadSlkTable(const std::string& uriOrPath) {
-    const ParsedVfsUri parsed = ParseUri(uriOrPath);
+    const std::string resolved = ResolvePathAlias(uriOrPath);
+    const ParsedVfsUri parsed = ParseUri(resolved);
     const std::string typedKey = MakeTypedCacheKey(parsed.canonicalCacheKey, ResourceKind::SlkTable);
-
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = ridByTypedKey_.find(typedKey);
-        if (it != ridByTypedKey_.end()) {
-            auto rit = resourcesByRid_.find(it->second);
-            if (rit != resourcesByRid_.end()) {
-                cacheHits_++;
-                return std::static_pointer_cast<SlkTableResource>(rit->second);
-            }
-        }
-        cacheMisses_++;
-    }
-
-    std::vector<uint8_t> bytes;
-    if (!ReadRawBytes(uriOrPath, bytes) || bytes.empty()) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        loadFailures_++;
-        return nullptr;
-    }
-
-    auto res = std::make_shared<SlkTableResource>();
-    if (!res->table.Load(bytes.data(), bytes.size())) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        loadFailures_++;
-        return nullptr;
-    }
-    res->path_ = parsed.rawArchivePath;
-    res->canonicalKey_ = parsed.canonicalCacheKey;
-    res->byteSize = bytes.size();
-    res->state_ = ResourceLoadState::Loaded;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto existingIt = ridByTypedKey_.find(typedKey);
-    if (existingIt != ridByTypedKey_.end()) {
-        auto rit = resourcesByRid_.find(existingIt->second);
-        if (rit != resourcesByRid_.end()) {
-            return std::static_pointer_cast<SlkTableResource>(rit->second);
-        }
-    }
-    res->rid_ = AllocateRidLocked(ResourceKind::SlkTable);
-    ridByTypedKey_[typedKey] = res->rid_;
-    resourcesByRid_[res->rid_] = res;
-    return res;
+    return LoadOrInsertCached<SlkTableResource>(typedKey, ResourceKind::SlkTable, [&]() -> ResourceRef<SlkTableResource> {
+        std::vector<uint8_t> bytes;
+        if (!ReadRawBytes(resolved, bytes) || bytes.empty()) return nullptr;
+        auto res = std::make_shared<SlkTableResource>();
+        if (!res->table.Load(bytes.data(), bytes.size())) return nullptr;
+        res->path_ = parsed.rawArchivePath;
+        res->canonicalKey_ = parsed.canonicalCacheKey;
+        res->byteSize = bytes.size();
+        res->state_ = ResourceLoadState::Loaded;
+        return res;
+    });
 }
 
 ResourceRef<TxtTableResource> ResourceServer::LoadTxtTable(const std::string& uriOrPath) {
-    const ParsedVfsUri parsed = ParseUri(uriOrPath);
+    const std::string resolved = ResolvePathAlias(uriOrPath);
+    const ParsedVfsUri parsed = ParseUri(resolved);
     const std::string typedKey = MakeTypedCacheKey(parsed.canonicalCacheKey, ResourceKind::TxtTable);
-
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = ridByTypedKey_.find(typedKey);
-        if (it != ridByTypedKey_.end()) {
-            auto rit = resourcesByRid_.find(it->second);
-            if (rit != resourcesByRid_.end()) {
-                cacheHits_++;
-                return std::static_pointer_cast<TxtTableResource>(rit->second);
-            }
-        }
-        cacheMisses_++;
-    }
-
-    std::vector<uint8_t> bytes;
-    if (!ReadRawBytes(uriOrPath, bytes) || bytes.empty()) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        loadFailures_++;
-        return nullptr;
-    }
-
-    auto res = std::make_shared<TxtTableResource>();
-    if (!res->table.Load(bytes.data(), bytes.size())) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        loadFailures_++;
-        return nullptr;
-    }
-    res->path_ = parsed.rawArchivePath;
-    res->canonicalKey_ = parsed.canonicalCacheKey;
-    res->byteSize = bytes.size();
-    res->state_ = ResourceLoadState::Loaded;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto existingIt = ridByTypedKey_.find(typedKey);
-    if (existingIt != ridByTypedKey_.end()) {
-        auto rit = resourcesByRid_.find(existingIt->second);
-        if (rit != resourcesByRid_.end()) {
-            return std::static_pointer_cast<TxtTableResource>(rit->second);
-        }
-    }
-    res->rid_ = AllocateRidLocked(ResourceKind::TxtTable);
-    ridByTypedKey_[typedKey] = res->rid_;
-    resourcesByRid_[res->rid_] = res;
-    return res;
+    return LoadOrInsertCached<TxtTableResource>(typedKey, ResourceKind::TxtTable, [&]() -> ResourceRef<TxtTableResource> {
+        std::vector<uint8_t> bytes;
+        if (!ReadRawBytes(resolved, bytes) || bytes.empty()) return nullptr;
+        auto res = std::make_shared<TxtTableResource>();
+        if (!res->table.Load(bytes.data(), bytes.size())) return nullptr;
+        res->path_ = parsed.rawArchivePath;
+        res->canonicalKey_ = parsed.canonicalCacheKey;
+        res->byteSize = bytes.size();
+        res->state_ = ResourceLoadState::Loaded;
+        return res;
+    });
 }
 
 ResourceRef<BlpImageResource> ResourceServer::LoadBlpImage(const std::string& uriOrPath, bool decodeAllMips) {
-    const ParsedVfsUri parsed = ParseUri(uriOrPath);
+    const std::string resolved = ResolvePathAlias(uriOrPath);
+    const ParsedVfsUri parsed = ParseUri(resolved);
     const std::string typedKey = MakeTypedCacheKey(parsed.canonicalCacheKey, ResourceKind::BlpImage);
-
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = ridByTypedKey_.find(typedKey);
-        if (it != ridByTypedKey_.end()) {
-            auto rit = resourcesByRid_.find(it->second);
-            if (rit != resourcesByRid_.end()) {
-                cacheHits_++;
-                return std::static_pointer_cast<BlpImageResource>(rit->second);
-            }
+    return LoadOrInsertCached<BlpImageResource>(typedKey, ResourceKind::BlpImage, [&]() -> ResourceRef<BlpImageResource> {
+        std::vector<uint8_t> bytes;
+        if (!ReadRawBytes(resolved, bytes) || bytes.empty()) return nullptr;
+        auto res = std::make_shared<BlpImageResource>();
+        if (decodeAllMips) {
+            if (!DecodeBLPLevels(bytes.data(), bytes.size(), res->mipChain) || res->mipChain.empty()) return nullptr;
+            res->baseImage = res->mipChain.front();
+        } else {
+            if (!DecodeBLP(bytes.data(), bytes.size(), res->baseImage, 0)) return nullptr;
         }
-        cacheMisses_++;
-    }
-
-    std::vector<uint8_t> bytes;
-    if (!ReadRawBytes(uriOrPath, bytes) || bytes.empty()) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        loadFailures_++;
-        return nullptr;
-    }
-
-    auto res = std::make_shared<BlpImageResource>();
-    if (decodeAllMips) {
-        if (!DecodeBLPLevels(bytes.data(), bytes.size(), res->mipChain) || res->mipChain.empty()) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            loadFailures_++;
-            return nullptr;
-        }
-        res->baseImage = res->mipChain.front();
-    } else {
-        if (!DecodeBLP(bytes.data(), bytes.size(), res->baseImage, 0)) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            loadFailures_++;
-            return nullptr;
-        }
-    }
-
-    res->path_ = parsed.rawArchivePath;
-    res->canonicalKey_ = parsed.canonicalCacheKey;
-    res->state_ = ResourceLoadState::Loaded;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto existingIt = ridByTypedKey_.find(typedKey);
-    if (existingIt != ridByTypedKey_.end()) {
-        auto rit = resourcesByRid_.find(existingIt->second);
-        if (rit != resourcesByRid_.end()) {
-            return std::static_pointer_cast<BlpImageResource>(rit->second);
-        }
-    }
-    res->rid_ = AllocateRidLocked(ResourceKind::BlpImage);
-    ridByTypedKey_[typedKey] = res->rid_;
-    resourcesByRid_[res->rid_] = res;
-    return res;
+        res->path_ = parsed.rawArchivePath;
+        res->canonicalKey_ = parsed.canonicalCacheKey;
+        res->state_ = ResourceLoadState::Loaded;
+        return res;
+    });
 }
 
 ResourceRef<MdxModelResource> ResourceServer::LoadMdxModel(const std::string& uriOrPath) {
-    ParsedVfsUri parsed = ParseUri(uriOrPath);
+    const std::string resolved = ResolvePathAlias(uriOrPath);
+    ParsedVfsUri parsed = ParseUri(resolved);
     if (parsed.rawArchivePath.size() <= 4) {
-        parsed = ParseUri(uriOrPath + ".mdx");
+        parsed = ParseUri(resolved + ".mdx");
     } else {
         const std::string ext = ToLowerAscii(parsed.rawArchivePath.substr(parsed.rawArchivePath.size() - 4));
         if (ext != ".mdx" && ext != ".mdl") {
-            parsed = ParseUri(uriOrPath + ".mdx");
+            parsed = ParseUri(resolved + ".mdx");
         }
     }
 
-    // Unify .mdx and .mdl under the `.mdx` canonical cache key so sibling fallbacks share the same slot
     std::string canonicalModelKey = parsed.canonicalCacheKey;
     if (canonicalModelKey.size() >= 4 &&
         canonicalModelKey.substr(canonicalModelKey.size() - 4) == ".mdl") {
@@ -515,137 +486,75 @@ ResourceRef<MdxModelResource> ResourceServer::LoadMdxModel(const std::string& ur
     }
     const std::string typedKey = MakeTypedCacheKey(canonicalModelKey, ResourceKind::MdxModel);
 
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = ridByTypedKey_.find(typedKey);
-        if (it != ridByTypedKey_.end()) {
-            auto rit = resourcesByRid_.find(it->second);
-            if (rit != resourcesByRid_.end()) {
-                cacheHits_++;
-                return std::static_pointer_cast<MdxModelResource>(rit->second);
+    return LoadOrInsertCached<MdxModelResource>(typedKey, ResourceKind::MdxModel, [&]() -> ResourceRef<MdxModelResource> {
+        auto tryParseModelBytes = [](const std::string& filePath,
+                                     const std::vector<uint8_t>& bytes,
+                                     MdxModel& outModel,
+                                     bool& outIsMdl) -> bool {
+            if (bytes.empty()) return false;
+            std::string ext;
+            if (filePath.size() >= 4) {
+                ext = ToLowerAscii(filePath.substr(filePath.size() - 4));
+            }
+            if (ext == ".mdl") {
+                outIsMdl = true;
+                std::string text(bytes.begin(), bytes.end());
+                return MdlLoad(text.c_str(), text.size(), outModel);
+            }
+            outIsMdl = false;
+            if (MdxLoad(bytes.data(), bytes.size(), outModel)) {
+                return true;
+            }
+            std::string text(bytes.begin(), bytes.end());
+            if (MdlLoad(text.c_str(), text.size(), outModel)) {
+                outIsMdl = true;
+                return true;
+            }
+            return false;
+        };
+
+        std::vector<uint8_t> bytes;
+        MdxModel model;
+        bool isMdl = false;
+        bool loaded = false;
+
+        if (ReadRawBytes(parsed.rawArchivePath, bytes)) {
+            loaded = tryParseModelBytes(parsed.rawArchivePath, bytes, model, isMdl);
+        }
+        if (!loaded) {
+            const std::string sibling = SiblingModelExtensionPath(parsed.rawArchivePath);
+            if (!sibling.empty() && ReadRawBytes(sibling, bytes)) {
+                loaded = tryParseModelBytes(sibling, bytes, model, isMdl);
             }
         }
-        cacheMisses_++;
-    }
+        if (!loaded) return nullptr;
 
-    auto tryParseModelBytes = [](const std::string& filePath,
-                                 const std::vector<uint8_t>& bytes,
-                                 MdxModel& outModel,
-                                 bool& outIsMdl) -> bool {
-        if (bytes.empty()) return false;
-        std::string ext;
-        if (filePath.size() >= 4) {
-            ext = ToLowerAscii(filePath.substr(filePath.size() - 4));
-        }
-        if (ext == ".mdl") {
-            outIsMdl = true;
-            std::string text(bytes.begin(), bytes.end());
-            return MdlLoad(text.c_str(), text.size(), outModel);
-        }
-        outIsMdl = false;
-        if (MdxLoad(bytes.data(), bytes.size(), outModel)) {
-            return true;
-        }
-        // Fallback: if a file named .mdx actually contains MDL text
-        std::string text(bytes.begin(), bytes.end());
-        if (MdlLoad(text.c_str(), text.size(), outModel)) {
-            outIsMdl = true;
-            return true;
-        }
-        return false;
-    };
-
-    std::vector<uint8_t> bytes;
-    MdxModel model;
-    bool isMdl = false;
-    bool loaded = false;
-
-    if (ReadRawBytes(parsed.rawArchivePath, bytes)) {
-        loaded = tryParseModelBytes(parsed.rawArchivePath, bytes, model, isMdl);
-    }
-
-    if (!loaded) {
-        const std::string sibling = SiblingModelExtensionPath(parsed.rawArchivePath);
-        if (!sibling.empty() && ReadRawBytes(sibling, bytes)) {
-            loaded = tryParseModelBytes(sibling, bytes, model, isMdl);
-        }
-    }
-
-    if (!loaded) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        loadFailures_++;
-        return nullptr;
-    }
-
-    auto res = std::make_shared<MdxModelResource>();
-    res->path_ = parsed.rawArchivePath;
-    res->canonicalKey_ = canonicalModelKey;
-    res->sourceByteSize = bytes.size();
-    res->loadedFromMdlText = isMdl;
-    res->model = std::move(model);
-    res->state_ = ResourceLoadState::Loaded;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto existingIt = ridByTypedKey_.find(typedKey);
-    if (existingIt != ridByTypedKey_.end()) {
-        auto rit = resourcesByRid_.find(existingIt->second);
-        if (rit != resourcesByRid_.end()) {
-            return std::static_pointer_cast<MdxModelResource>(rit->second);
-        }
-    }
-    res->rid_ = AllocateRidLocked(ResourceKind::MdxModel);
-    ridByTypedKey_[typedKey] = res->rid_;
-    resourcesByRid_[res->rid_] = res;
-    return res;
+        auto res = std::make_shared<MdxModelResource>();
+        res->path_ = parsed.rawArchivePath;
+        res->canonicalKey_ = canonicalModelKey;
+        res->sourceByteSize = bytes.size();
+        res->loadedFromMdlText = isMdl;
+        res->model = std::move(model);
+        res->state_ = ResourceLoadState::Loaded;
+        return res;
+    });
 }
 
 ResourceRef<AudioClipResource> ResourceServer::LoadAudioClip(const std::string& uriOrPath) {
-    const ParsedVfsUri parsed = ParseUri(uriOrPath);
+    const std::string resolved = ResolvePathAlias(uriOrPath);
+    const ParsedVfsUri parsed = ParseUri(resolved);
     const std::string typedKey = MakeTypedCacheKey(parsed.canonicalCacheKey, ResourceKind::AudioClip);
-
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = ridByTypedKey_.find(typedKey);
-        if (it != ridByTypedKey_.end()) {
-            auto rit = resourcesByRid_.find(it->second);
-            if (rit != resourcesByRid_.end()) {
-                cacheHits_++;
-                return std::static_pointer_cast<AudioClipResource>(rit->second);
-            }
-        }
-        cacheMisses_++;
-    }
-
-    std::vector<uint8_t> bytes;
-    if (!ReadRawBytes(uriOrPath, bytes)) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        loadFailures_++;
-        return nullptr;
-    }
-
-    auto res = std::make_shared<AudioClipResource>();
-    if (!AudioClipResource::ParseAudioContainer(parsed.rawArchivePath, bytes, *res)) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        loadFailures_++;
-        return nullptr;
-    }
-    res->path_ = parsed.rawArchivePath;
-    res->canonicalKey_ = parsed.canonicalCacheKey;
-    res->bytes = std::move(bytes);
-    res->state_ = ResourceLoadState::Loaded;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto existingIt = ridByTypedKey_.find(typedKey);
-    if (existingIt != ridByTypedKey_.end()) {
-        auto rit = resourcesByRid_.find(existingIt->second);
-        if (rit != resourcesByRid_.end()) {
-            return std::static_pointer_cast<AudioClipResource>(rit->second);
-        }
-    }
-    res->rid_ = AllocateRidLocked(ResourceKind::AudioClip);
-    ridByTypedKey_[typedKey] = res->rid_;
-    resourcesByRid_[res->rid_] = res;
-    return res;
+    return LoadOrInsertCached<AudioClipResource>(typedKey, ResourceKind::AudioClip, [&]() -> ResourceRef<AudioClipResource> {
+        std::vector<uint8_t> bytes;
+        if (!ReadRawBytes(resolved, bytes)) return nullptr;
+        auto res = std::make_shared<AudioClipResource>();
+        if (!AudioClipResource::ParseAudioContainer(parsed.rawArchivePath, bytes, *res)) return nullptr;
+        res->path_ = parsed.rawArchivePath;
+        res->canonicalKey_ = parsed.canonicalCacheKey;
+        res->bytes = std::move(bytes);
+        res->state_ = ResourceLoadState::Loaded;
+        return res;
+    });
 }
 
 ResourceRef<Resource> ResourceServer::LoadByKindInternal(const std::string& uriOrPath, ResourceKind kind) {

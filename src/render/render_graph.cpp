@@ -387,6 +387,33 @@ bool RenderGraph::IsPassEnabled(RenderGraphPassId passId) const {
     return false;
 }
 
+void RenderGraph::RegisterCustomPass(RenderGraphPassId passId,
+                                     const std::string& name,
+                                     PassExecuteFn fn,
+                                     bool enabled) {
+    for (auto& p : passes_) {
+        if (p.id == passId) {
+            p.name = name;
+            p.enabled = enabled;
+            p.callback = std::move(fn);
+            return;
+        }
+    }
+    passes_.push_back({passId, name, enabled, std::move(fn)});
+    std::stable_sort(passes_.begin(), passes_.end(),
+                     [](const PassEntry& a, const PassEntry& b) {
+                         return static_cast<int>(a.id) < static_cast<int>(b.id);
+                     });
+}
+
+bool RenderGraph::RemovePass(RenderGraphPassId passId) {
+    auto it = std::remove_if(passes_.begin(), passes_.end(),
+                             [&](const PassEntry& p) { return p.id == passId; });
+    if (it == passes_.end()) return false;
+    passes_.erase(it, passes_.end());
+    return true;
+}
+
 void RenderGraph::ExecuteFrame(RenderGraphContext& ctx) {
     ctx.frustum = Frustum::FromViewProj(ctx.proj * ctx.view);
     if (ctx.renderServer &&

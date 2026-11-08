@@ -20,6 +20,7 @@ void EngineProfiler::Reset() {
     currentFrame_ = 0;
     currentFrameStartMicros_ = 0;
     completedFrames_ = 0;
+    traceWriteCursor_ = 0;
     zones_.clear();
     counters_.clear();
     traceEvents_.clear();
@@ -62,26 +63,28 @@ void EngineProfiler::RecordZoneSample(const std::string& name,
         b.name = name;
         b.minMicros = dur;
         b.maxMicros = dur;
+        b.rollingSamples.reserve(kMaxRollingSamplesPerZone);
     } else {
         b.minMicros = std::min(b.minMicros, dur);
         b.maxMicros = std::max(b.maxMicros, dur);
     }
     b.callCount++;
     b.totalMicros += dur;
-    if (b.rollingSamples.size() >= kMaxRollingSamplesPerZone) {
-        b.rollingSamples.erase(b.rollingSamples.begin());
-    }
-    b.rollingSamples.push_back(dur);
 
+    // Phase 29: O(1) ring-buffer sample insertion (eliminates O(N) vector::erase(begin()))
+    if (b.rollingSamples.size() < kMaxRollingSamplesPerZone) {
+        b.rollingSamples.push_back(dur);
+    } else {
+        b.rollingSamples[b.rollingWriteCursor] = dur;
+        b.rollingWriteCursor = (b.rollingWriteCursor + 1) % kMaxRollingSamplesPerZone;
+    }
+
+    TraceEventRecord rec{name, category, startMicros, durationMicros, threadId, depth};
     if (traceEvents_.size() < kMaxTraceEvents) {
-        TraceEventRecord rec;
-        rec.name = name;
-        rec.category = category;
-        rec.startMicros = startMicros;
-        rec.durationMicros = durationMicros;
-        rec.threadId = threadId;
-        rec.depth = depth;
         traceEvents_.push_back(std::move(rec));
+    } else {
+        traceEvents_[traceWriteCursor_] = std::move(rec);
+        traceWriteCursor_ = (traceWriteCursor_ + 1) % kMaxTraceEvents;
     }
 }
 
@@ -151,9 +154,13 @@ std::string EngineProfiler::ExportChromeTraceJson(size_t maxEvents) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::ostringstream oss;
     oss << "{\"traceEvents\":[";
-    const size_t count = std::min(maxEvents, traceEvents_.size());
+    const size_t total = traceEvents_.size();
+    const size_t count = std::min(maxEvents, total);
+    const size_t oldestIdx = (total == kMaxTraceEvents) ? (traceWriteCursor_ % total) : 0;
+    const size_t startOffset = total - count;
     for (size_t i = 0; i < count; ++i) {
-        const TraceEventRecord& ev = traceEvents_[i];
+        const size_t ringIdx = (oldestIdx + startOffset + i) % total;
+        const TraceEventRecord& ev = traceEvents_[ringIdx];
         if (i > 0) oss << ",";
         oss << "{\"name\":\"" << ev.name << "\""
             << ",\"cat\":\"" << ev.category << "\""

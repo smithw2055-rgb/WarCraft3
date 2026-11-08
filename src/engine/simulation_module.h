@@ -564,6 +564,14 @@ public:
         return false;
     }
 
+    // ========================================================================
+    // Phase 29: Pluggable Asset Path Alias Redirection Hook
+    // ========================================================================
+    virtual bool OnResolveAssetPathAlias(const std::string& /*requestedPath*/,
+                                         std::string& /*outRedirectedPath*/) const {
+        return false;
+    }
+
     const SimulationModuleStats& GetModuleStats() const { return stats_; }
     void ResetModuleStats() { stats_ = {}; }
 
