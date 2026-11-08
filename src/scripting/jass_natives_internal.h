@@ -484,3 +484,221 @@ inline bool TriggerSleepsHonored(const std::shared_ptr<JassNativesData>& data) {
     if (it == data->triggers.end() || !it->second) return true;
     return it->second->waitOnSleeps;
 }
+
+
+// ============================================================================
+// Phase 31 (Track A): Context-Aware Typed JASS Native Binder (`JassContextBinder`)
+// Automatically unpacks primitive types, domain pointers (`CUnit*`, `JassGroup*`,
+// `JassTimer*`, `JassTrigger*`, `JassLocation*`, `JassRect*`, `JassRegion*`,
+// `JassForce*`, `CItem*`, `CDestructable*`, `CWidget*`, `CPlayer*`, etc.), and
+// non-null domain references (`CUnit&`, `JassGroup&`, `JassTimer&`, etc.) with
+// zero-boilerplate null short-circuiting.
+// ============================================================================
+namespace jass {
+
+struct JassBindContext {
+    JassNativesData* data = nullptr;
+    CSimulation* sim = nullptr;
+};
+
+namespace detail {
+
+template <typename PtrT>
+inline PtrT ResolveDomainPtr(const JassBindContext& ctx, const std::vector<JassValue>& args, size_t index) {
+    if (index >= args.size() || !ctx.data) return nullptr;
+    const int h = args[index].intVal;
+    if constexpr (std::is_same_v<PtrT, CUnit*> || std::is_same_v<PtrT, const CUnit*>) {
+        if (!ctx.sim) return nullptr;
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::UNIT);
+        return id >= 0 ? ctx.sim->GetUnit(id) : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, CItem*> || std::is_same_v<PtrT, const CItem*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::ITEM);
+        if (id < 0) return nullptr;
+        auto it = ctx.data->items.find(id);
+        return it != ctx.data->items.end() ? it->second : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, CDestructable*> || std::is_same_v<PtrT, const CDestructable*>) {
+        if (!ctx.sim) return nullptr;
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::DESTRUCTABLE);
+        return id >= 0 ? ctx.sim->GetDestructable(id) : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, CWidget*> || std::is_same_v<PtrT, const CWidget*>) {
+        if (!ctx.sim) return nullptr;
+        JassHandleInfo* info = ctx.data->GetHandleInfo(h);
+        if (!info) return nullptr;
+        if (info->type == JassHandleInfo::UNIT) return ctx.sim->GetUnit(info->id);
+        if (info->type == JassHandleInfo::DESTRUCTABLE) return ctx.sim->GetDestructable(info->id);
+        if (info->type == JassHandleInfo::ITEM) {
+            auto it = ctx.data->items.find(info->id);
+            return it != ctx.data->items.end() ? it->second : nullptr;
+        }
+        return nullptr;
+    } else if constexpr (std::is_same_v<PtrT, CPlayer*> || std::is_same_v<PtrT, const CPlayer*>) {
+        if (!ctx.sim) return nullptr;
+        int pid = ctx.data->GetSimHandle(h, JassHandleInfo::PLAYER);
+        if (pid < 0 && h >= 0 && h < 24) pid = h;
+        return pid >= 0 ? ctx.sim->GetPlayer(pid) : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassGroup*> || std::is_same_v<PtrT, const JassGroup*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::GROUP);
+        auto it = id >= 0 ? ctx.data->groups.find(id) : ctx.data->groups.end();
+        return it != ctx.data->groups.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassForce*> || std::is_same_v<PtrT, const JassForce*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::FORCE);
+        auto it = id >= 0 ? ctx.data->forces.find(id) : ctx.data->forces.end();
+        return it != ctx.data->forces.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassTimer*> || std::is_same_v<PtrT, const JassTimer*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::TIMER);
+        auto it = id >= 0 ? ctx.data->timers.find(id) : ctx.data->timers.end();
+        return it != ctx.data->timers.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassTimerDialog*> || std::is_same_v<PtrT, const JassTimerDialog*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::TIMER_DIALOG);
+        auto it = id >= 0 ? ctx.data->timerDialogs.find(id) : ctx.data->timerDialogs.end();
+        return it != ctx.data->timerDialogs.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassTrigger*> || std::is_same_v<PtrT, const JassTrigger*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::TRIGGER);
+        auto it = id >= 0 ? ctx.data->triggers.find(id) : ctx.data->triggers.end();
+        return it != ctx.data->triggers.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassLocation*> || std::is_same_v<PtrT, const JassLocation*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::LOCATION);
+        auto it = id >= 0 ? ctx.data->locations.find(id) : ctx.data->locations.end();
+        return it != ctx.data->locations.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassRect*> || std::is_same_v<PtrT, const JassRect*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::RECT);
+        auto it = id >= 0 ? ctx.data->rects.find(id) : ctx.data->rects.end();
+        return it != ctx.data->rects.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassRegion*> || std::is_same_v<PtrT, const JassRegion*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::REGION);
+        auto it = id >= 0 ? ctx.data->regions.find(id) : ctx.data->regions.end();
+        return it != ctx.data->regions.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassSound*> || std::is_same_v<PtrT, const JassSound*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::SOUND);
+        auto it = id >= 0 ? ctx.data->sounds.find(id) : ctx.data->sounds.end();
+        return it != ctx.data->sounds.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassTextTag*> || std::is_same_v<PtrT, const JassTextTag*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::TEXT_TAG);
+        auto it = id >= 0 ? ctx.data->textTags.find(id) : ctx.data->textTags.end();
+        return it != ctx.data->textTags.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassEffect*> || std::is_same_v<PtrT, const JassEffect*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::EFFECT);
+        auto it = id >= 0 ? ctx.data->effects.find(id) : ctx.data->effects.end();
+        return it != ctx.data->effects.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassQuest*> || std::is_same_v<PtrT, const JassQuest*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::QUEST);
+        auto it = id >= 0 ? ctx.data->quests.find(id) : ctx.data->quests.end();
+        return it != ctx.data->quests.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassQuestItem*> || std::is_same_v<PtrT, const JassQuestItem*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::QUEST_ITEM);
+        auto it = id >= 0 ? ctx.data->questItems.find(id) : ctx.data->questItems.end();
+        return it != ctx.data->questItems.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassImage*> || std::is_same_v<PtrT, const JassImage*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::IMAGE);
+        auto it = id >= 0 ? ctx.data->images.find(id) : ctx.data->images.end();
+        return it != ctx.data->images.end() ? it->second.get() : nullptr;
+    } else if constexpr (std::is_same_v<PtrT, JassUbersplat*> || std::is_same_v<PtrT, const JassUbersplat*>) {
+        const int id = ctx.data->GetSimHandle(h, JassHandleInfo::UBERSPLAT);
+        auto it = id >= 0 ? ctx.data->ubersplats.find(id) : ctx.data->ubersplats.end();
+        return it != ctx.data->ubersplats.end() ? it->second.get() : nullptr;
+    } else {
+        return nullptr;
+    }
+}
+
+template <typename R>
+inline JassValue DefaultJassReturn() {
+    using CleanR = remove_cvref_t<R>;
+    if constexpr (std::is_void_v<CleanR> || std::is_same_v<CleanR, JassValue>) {
+        return JassValue::Null();
+    } else if constexpr (std::is_same_v<CleanR, int>) {
+        return JassValue::Int(0);
+    } else if constexpr (std::is_same_v<CleanR, float> || std::is_same_v<CleanR, double>) {
+        return JassValue::Real(0.0f);
+    } else if constexpr (std::is_same_v<CleanR, bool>) {
+        return JassValue::Bool(false);
+    } else if constexpr (std::is_same_v<CleanR, std::string> || std::is_same_v<CleanR, const char*>) {
+        return JassValue::Str("");
+    } else {
+        return JassValue::Null();
+    }
+}
+
+template <typename T>
+inline bool ValidateArgPresentAndResolved(const JassBindContext& ctx,
+                                          const std::vector<JassValue>& args,
+                                          size_t index) {
+    if (index >= args.size()) return false;
+    if constexpr (std::is_lvalue_reference_v<T> &&
+                  !std::is_same_v<remove_cvref_t<T>, std::string> &&
+                  !std::is_same_v<remove_cvref_t<T>, JassValue>) {
+        using PtrT = std::remove_reference_t<T>*;
+        return ResolveDomainPtr<PtrT>(ctx, args, index) != nullptr;
+    }
+    return true;
+}
+
+template <typename T>
+inline decltype(auto) ExtractContextArg(const JassBindContext& ctx,
+                                        const std::vector<JassValue>& args,
+                                        size_t index) {
+    if constexpr (std::is_lvalue_reference_v<T> &&
+                  !std::is_same_v<remove_cvref_t<T>, std::string> &&
+                  !std::is_same_v<remove_cvref_t<T>, JassValue>) {
+        using PtrT = std::remove_reference_t<T>*;
+        return *ResolveDomainPtr<PtrT>(ctx, args, index);
+    } else if constexpr (std::is_pointer_v<remove_cvref_t<T>> &&
+                         !std::is_same_v<remove_cvref_t<T>, const char*>) {
+        return ResolveDomainPtr<remove_cvref_t<T>>(ctx, args, index);
+    } else {
+        return ExtractArg<T>(args, index);
+    }
+}
+
+template <typename Callable, typename Tuple, size_t... Is>
+JassValue InvokeContextTyped(Callable& fn,
+                             const JassBindContext& ctx,
+                             const std::vector<JassValue>& args,
+                             std::index_sequence<Is...>) {
+    using R = typename function_traits<Callable>::return_type;
+    if (!(ValidateArgPresentAndResolved<std::tuple_element_t<Is, Tuple>>(ctx, args, Is) && ...)) {
+        return DefaultJassReturn<R>();
+    }
+    if constexpr (std::is_void_v<R>) {
+        fn(ExtractContextArg<std::tuple_element_t<Is, Tuple>>(ctx, args, Is)...);
+        return JassValue::Null();
+    } else {
+        return PackReturn(fn(ExtractContextArg<std::tuple_element_t<Is, Tuple>>(ctx, args, Is)...));
+    }
+}
+
+} // namespace detail
+
+class JassContextBinder {
+public:
+    JassContextBinder(JassVM& vm, std::shared_ptr<JassNativesData> data, CSimulation* sim = nullptr)
+        : vm_(vm), data_(std::move(data)), sim_(sim) {}
+
+    template <typename Callable>
+    void Bind(const char* name, Callable&& fn) {
+        using Traits = detail::function_traits<Callable>;
+        using Tuple = typename Traits::args_tuple;
+        auto data = data_;
+        auto sim = sim_;
+        vm_.RegisterNative(
+            name,
+            [callable = std::forward<Callable>(fn), data, sim](const std::vector<JassValue>& args) mutable -> JassValue {
+                const JassBindContext ctx{data.get(), sim};
+                return detail::InvokeContextTyped<std::decay_t<Callable>, Tuple>(
+                    callable, ctx, args, std::make_index_sequence<Traits::arity>{});
+            });
+    }
+
+    void BindNoOp(const char* name) {
+        vm_.RegisterNative(name, [](const std::vector<JassValue>&) -> JassValue {
+            return JassValue::Null();
+        });
+    }
+
+private:
+    JassVM& vm_;
+    std::shared_ptr<JassNativesData> data_;
+    CSimulation* sim_;
+};
+
+} // namespace jass

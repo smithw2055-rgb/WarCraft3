@@ -317,3 +317,366 @@ void CAbilityDataDrivenSpell::DoEffect(CSimulation& game, CUnit* caster) {
     }
     CAbilitySpellBase::DoEffect(game, caster);
 }
+
+// ============================================================
+// Phase 30 (Track B): SpellArchetypeRule Table-Driven Execution
+// ============================================================
+void SpellArchetypeRule::ApplyDef(const CAbilityDefFull& def, int level) {
+    if (slotParam0 >= 0) {
+        param0 = def.DataFloatAt(level, slotParam0, param0);
+    } else if (slotParam0 == -2) {
+        param0 = static_cast<float>(def.DataIntAt(level, 0, static_cast<int>(param0)));
+    }
+    if (slotParam1 >= 0) {
+        param1 = def.DataFloatAt(level, slotParam1, param1);
+    }
+    if (slotParam2 >= 0) {
+        param2 = def.DataFloatAt(level, slotParam2, param2);
+    }
+    if (scaleRadiusFromArea) {
+        const float a = def.AreaAt(level);
+        if (a > 0.0f) radius = a;
+    }
+    if (scaleDurationFromDur) {
+        const float d = def.DurationAt(level);
+        if (d > 0.0f) duration = d;
+    }
+    if (scaleAuxId0FromUnitId) {
+        auxId0 = def.UnitIdAt(level, War3ID(auxId0)).value;
+    }
+    if (effectKind == SpellArchetypeEffectKind::TIMED_SPAWNER_FACTORY) {
+        const std::string goblin = def.DataAt(level, 1);
+        if (!goblin.empty()) auxId1 = War3ID::FromString(goblin).value;
+    } else if (effectKind == SpellArchetypeEffectKind::CASTER_AREA_HOWL && slotParam0 == -3) {
+        param0 = 1.0f - def.DataFloatAt(level, 0, 1.0f - param0);
+    } else if (effectKind == SpellArchetypeEffectKind::TARGET_FAERIE_FIRE && slotParam0 == -4) {
+        param0 = static_cast<float>(-def.DataIntAt(level, 0, static_cast<int>(-param0)));
+    }
+}
+
+void SpellArchetypeRule::Execute(CSimulation& game, CUnit* caster, CWidget* target,
+                                 bool hasPoint, float x, float y) const {
+    using K = SpellArchetypeEffectKind;
+    const int casterHandle = caster ? caster->GetHandleId() : -1;
+    switch (effectKind) {
+    case K::POINT_WAVE_DAMAGE:
+        CAbilitySpellBase::CastPointDamageWaves(
+            game, caster, x, y, static_cast<int>(param0), radius, param1,
+            attackType, damageType, factionFilter);
+        break;
+    case K::CASTER_WAVE_DAMAGE:
+        CAbilitySpellBase::CastCasterAreaDamageWaves(
+            game, caster, static_cast<int>(param0), radius, param1,
+            attackType, damageType, factionFilter);
+        break;
+    case K::LINE_DAMAGE_STUN:
+        CAbilitySpellBase::CastLineDamageAndStun(
+            game, caster, target, hasPoint, x, y,
+            radius, param2, param0, duration, attackType, damageType, factionFilter);
+        break;
+    case K::POINT_AREA_HEAL:
+        CAbilitySpellBase::CastPointAreaHeal(game, caster, x, y, radius, param0);
+        break;
+    case K::SELF_HEAL:
+        if (caster) {
+            ABActionHealTarget heal(param0);
+            heal.Run(game, caster, caster, false, 0.0f, 0.0f);
+        }
+        break;
+    case K::SELF_MANA:
+        if (caster) {
+            const float mana = std::min(caster->GetMana() + param0,
+                                        static_cast<float>(caster->GetMaxMana()));
+            ABActionSetManaTarget setMana(mana);
+            setMana.Run(game, caster, caster, false, 0.0f, 0.0f);
+        }
+        break;
+    case K::TARGET_HEAL: {
+        ABActionHealTarget heal(param0);
+        heal.Run(game, caster, target, false, 0.0f, 0.0f);
+        break;
+    }
+    case K::TARGET_MANA_BURN: {
+        ABActionManaBurn burn(static_cast<int>(param0), attackType, damageType);
+        burn.Run(game, caster, target, false, 0.0f, 0.0f);
+        break;
+    }
+    case K::TARGET_MANA_STEAL: {
+        ABActionManaSteal steal(param0);
+        steal.Run(game, caster, target, false, 0.0f, 0.0f);
+        break;
+    }
+    case K::SELF_DIVINE_SHIELD:
+        CAbilitySpellBase::CastBuffOnSelf(game, caster, [dur = duration]() {
+            return std::make_unique<CBuffDivineShield>(dur);
+        });
+        break;
+    case K::SELF_STONE_FORM:
+        CAbilitySpellBase::CastBuffOnSelf(game, caster, [dur = duration]() {
+            return std::make_unique<CBuffStoneForm>(dur);
+        });
+        break;
+    case K::SELF_BURROW:
+        CAbilitySpellBase::CastBuffOnSelf(game, caster, [dur = duration]() {
+            return std::make_unique<CBuffBurrow>(dur);
+        });
+        break;
+    case K::SELF_DEFEND:
+        CAbilitySpellBase::CastBuffOnSelf(game, caster, [dur = duration]() {
+            return std::make_unique<CBuffDefend>(dur);
+        });
+        break;
+    case K::SELF_MANA_SHIELD:
+        CAbilitySpellBase::CastBuffOnSelf(game, caster, [dur = duration]() {
+            return std::make_unique<CBuffManaShield>(dur);
+        });
+        break;
+    case K::SELF_IMMOLATION:
+        CAbilitySpellBase::CastBuffOnSelf(
+            game, caster, [dur = duration, tick = param0, drain = param1, rad = radius]() {
+                return std::make_unique<CBuffImmolation>(dur, tick, drain, rad);
+            });
+        break;
+    case K::SELF_WHIRLWIND:
+        CAbilitySpellBase::CastBuffOnSelf(
+            game, caster, [dur = duration, dps = param0, rad = radius]() {
+                return std::make_unique<CBuffWhirlwind>(dur, dps, rad);
+            });
+        break;
+    case K::SELF_WIND_WALK:
+        CAbilitySpellBase::CastBuffOnSelf(
+            game, caster, [dur = duration, backstab = param0]() {
+                return std::make_unique<CBuffWindWalk>(dur, backstab);
+            });
+        break;
+    case K::SELF_BERSERK:
+        CAbilitySpellBase::CastBuffOnSelf(
+            game, caster, [dur = duration, atk = param0, taken = param1]() {
+                return std::make_unique<CBuffBerserk>(dur, atk, taken);
+            });
+        break;
+    case K::SELF_AVATAR:
+        CAbilitySpellBase::CastBuffOnSelf(
+            game, caster, [dur = duration, dmg = static_cast<int>(param0), life = static_cast<int>(param1)]() {
+                return std::make_unique<CBuffAvatar>(dur, dmg, life);
+            });
+        break;
+    case K::SELF_CHEMICAL_RAGE:
+        CAbilitySpellBase::CastBuffOnSelf(
+            game, caster, [dur = duration, spd = param0, aspd = param1]() {
+                return std::make_unique<CBuffBloodlust>(dur, spd, aspd);
+            });
+        break;
+    case K::SELF_CLARITY:
+        CAbilitySpellBase::CastBuffOnSelf(
+            game, caster, [dur = duration, regen = param0]() {
+                return std::make_unique<CBuffClarity>(dur, regen);
+            });
+        break;
+    case K::SELF_ARMOR_BUFF:
+        CAbilitySpellBase::CastBuffOnSelf(
+            game, caster, [id = War3ID(auxId0), dur = duration, bonus = static_cast<int>(param0)]() {
+                return std::make_unique<CBuffArmor>(id, dur, bonus, true);
+            });
+        break;
+    case K::SELF_TRANSFORM:
+        CAbilitySpellBase::CastBuffOnSelf(
+            game, caster, [bid = War3ID(auxId0), dur = duration, fid = War3ID(auxId1)]() {
+                return std::make_unique<CBuffTransform>(bid, dur, fid);
+            });
+        break;
+    case K::TARGET_SLOW_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, pct = param0, casterHandle]() {
+                return std::make_unique<CBuffSlow>(dur, pct, casterHandle);
+            });
+        break;
+    case K::TARGET_HEX_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(game, caster, target, [dur = duration]() {
+            return std::make_unique<CBuffHex>(dur);
+        });
+        break;
+    case K::TARGET_POLYMORPH_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(game, caster, target, [dur = duration]() {
+            return std::make_unique<CBuffPolymorph>(dur);
+        });
+        break;
+    case K::TARGET_CYCLONE_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(game, caster, target, [dur = duration]() {
+            return std::make_unique<CBuffCyclone>(dur);
+        });
+        break;
+    case K::TARGET_ENSNARE_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(game, caster, target, [dur = duration]() {
+            return std::make_unique<CBuffEnsnare>(dur);
+        });
+        break;
+    case K::TARGET_CURSE_BUFF:
+        if (auto* unit = dynamic_cast<CUnit*>(target)) {
+            if (!unit->IsDead()) {
+                unit->AddBuff(std::make_unique<CBuffCurse>(duration, param0), game);
+            }
+        }
+        break;
+    case K::TARGET_INVISIBILITY_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(game, caster, target, [dur = duration]() {
+            return std::make_unique<CBuffWindWalk>(dur, 0.0f);
+        });
+        break;
+    case K::TARGET_BANISH_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, bid = War3ID(auxId0)]() {
+                return std::make_unique<CBuffEthereal>(dur, bid);
+            });
+        break;
+    case K::TARGET_ANTIMAGIC_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, bid = War3ID(auxId0)]() {
+                return std::make_unique<CBuffMagicImmune>(dur, bid);
+            });
+        break;
+    case K::TARGET_REJUVENATION_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, tick = param0]() {
+                return std::make_unique<CBuffRejuvenation>(dur, tick);
+            });
+        break;
+    case K::TARGET_INNER_FIRE_BUFF:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, dmg = static_cast<int>(param0), arm = static_cast<int>(param1)]() {
+                return std::make_unique<CBuffInnerFire>(dur, dmg, arm);
+            });
+        break;
+    case K::TARGET_LIGHTNING_SHIELD:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, tick = param0, rad = radius]() {
+                return std::make_unique<CBuffLightningShield>(dur, tick, rad);
+            });
+        break;
+    case K::TARGET_FROST_ARMOR:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, bonus = static_cast<int>(param1)]() {
+                return std::make_unique<CBuffArmor>(War3ID("BUfa"), dur, bonus, true);
+            });
+        break;
+    case K::TARGET_FAERIE_FIRE:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, pen = static_cast<int>(param0)]() {
+                return std::make_unique<CBuffArmor>(War3ID("Bfae"), dur, pen, false);
+            });
+        break;
+    case K::TARGET_LIFE_DRAIN:
+        if (target && caster && !target->IsDead()) {
+            CAbilitySpellBase::CastBuffOnTarget(
+                game, caster, target, [dur = duration, tick = param0, casterHandle]() {
+                    return std::make_unique<CBuffLifeDrain>(dur, tick, casterHandle);
+                });
+        }
+        break;
+    case K::TARGET_SIPHON_MANA:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, tick = param0, casterHandle]() {
+                return std::make_unique<CBuffManaSiphon>(dur, tick, casterHandle);
+            });
+        break;
+    case K::TARGET_DOOM:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, dps = param0, casterHandle]() {
+                return std::make_unique<CBuffDoom>(dur, dps, casterHandle);
+            });
+        break;
+    case K::TARGET_UNHOLY_FRENZY:
+        CAbilitySpellBase::CastBuffOnTarget(
+            game, caster, target, [dur = duration, atk = param0]() {
+                return std::make_unique<CBuffBerserk>(dur, atk, 1.0f);
+            });
+        break;
+    case K::POINT_SILENCE_AREA:
+        CAbilitySpellBase::CastPointAreaBuff(game, caster, x, y, radius, [dur = duration]() {
+            return std::make_unique<CBuffSilence>(dur);
+        });
+        break;
+    case K::POINT_REVEAL_DUST_FLARE:
+        CAbilitySpellBase::CastPointAreaBuff(
+            game, caster, x, y, radius, [dur = duration]() {
+                return std::make_unique<CBuffArmor>(War3ID("Bfae"), dur, 0, false);
+            }, ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+        break;
+    case K::CASTER_AREA_ROAR:
+        CAbilitySpellBase::CastCasterAreaBuff(
+            game, caster, radius,
+            [dur = duration, dmg = static_cast<int>(param0), bid = War3ID(auxId0)]() {
+                return bid.value != 0
+                    ? std::make_unique<CBuffInnerFire>(dur, dmg, 0, bid)
+                    : std::make_unique<CBuffInnerFire>(dur, dmg, 0);
+            });
+        break;
+    case K::CASTER_AREA_HOWL:
+        CAbilitySpellBase::CastCasterAreaBuff(
+            game, caster, radius, [dur = duration, factor = param0]() {
+                return std::make_unique<CBuffHowl>(dur, factor);
+            }, ABFactionFilter::OTHER_PLAYER_THAN_CASTER);
+        break;
+    case K::CASTER_AREA_VOODOO:
+        CAbilitySpellBase::CastCasterAreaBuff(
+            game, caster, radius, [dur = duration]() {
+                return std::make_unique<CBuffDivineShield>(dur);
+            }, ABFactionFilter::SAME_PLAYER_AS_CASTER, true);
+        break;
+    case K::SUMMON_TIMED_UNIT:
+        if (caster) {
+            ABActionSummon summon(War3ID(auxId0), War3ID(rawcode),
+                                  static_cast<int>(param1), duration, param2);
+            summon.Run(game, caster, nullptr, true,
+                       caster->GetX() + radius, caster->GetY() + param0);
+        }
+        break;
+    case K::SUMMON_TIMED_RING:
+        if (caster) {
+            ABActionSummonRing ring(War3ID(auxId0), War3ID(rawcode),
+                                    static_cast<int>(param0), duration);
+            ring.Run(game, caster, nullptr, true, x, y);
+        }
+        break;
+    case K::TIMED_SPAWNER_FACTORY:
+        CAbilitySpellBase::CastTimedSpawnerUnit(
+            game, caster, x, y, War3ID(auxId0), War3ID(rawcode), duration,
+            War3ID(auxId1), param2, param0, radius);
+        break;
+    case K::GRANT_CASTER_GOLD:
+        if (caster) {
+            if (CPlayer* player = game.GetPlayer(caster->GetPlayerIndex())) {
+                player->AddGold(static_cast<int>(param0));
+            }
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+CAbilityTableRuleSpell::CAbilityTableRuleSpell(int handleId, const SpellArchetypeRule& initialRule)
+    : CAbilitySpellBase(handleId, War3ID(initialRule.rawcode), initialRule.category)
+    , rule_(initialRule) {
+    SetTargetType(rule_.targetType);
+    SetCastRange(rule_.castRange);
+    SetCastPoint(rule_.castPoint);
+    SetCooldown(rule_.cooldown);
+    SetManaCost(rule_.manaCost);
+}
+
+void CAbilityTableRuleSpell::ApplyEffectData(const CAbilityDefFull& def, int level) {
+    rule_.ApplyDef(def, level);
+}
+
+void CAbilityTableRuleSpell::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
+    rule_.Execute(game, caster, target, false, 0.0f, 0.0f);
+}
+
+void CAbilityTableRuleSpell::DoEffect(CSimulation& game, CUnit* caster, float x, float y) {
+    rule_.Execute(game, caster, nullptr, true, x, y);
+}
+
+void CAbilityTableRuleSpell::DoEffect(CSimulation& game, CUnit* caster) {
+    rule_.Execute(game, caster, nullptr, false, 0.0f, 0.0f);
+}

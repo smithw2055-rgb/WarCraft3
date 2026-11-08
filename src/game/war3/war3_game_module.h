@@ -37,6 +37,7 @@
 
 #include "data/combat_types.h"
 #include "ecs/buff.h"
+#include "ecs/abilities/ability_spell_base.h"
 #include "ecs/melee_ai.h"
 #include "engine/dynamic_module_loader.h"
 #include "engine/engine_kernel.h"
@@ -79,7 +80,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 29u; }
+    uint32_t GetModuleVersion() const override { return 31u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -552,6 +553,39 @@ public:
     bool OnResolveAssetPathAlias(const std::string& requestedPath,
                                  std::string& outRedirectedPath) const override;
 
+    // Phase 30 (Track B): Pluggable Table-Driven Spell Archetype Rules
+    void RegisterSpellArchetypeRule(const SpellArchetypeRule& rule);
+    bool UnregisterSpellArchetypeRule(War3ID code);
+    bool HasSpellArchetypeRule(War3ID code) const;
+    const SpellArchetypeRule* FindSpellArchetypeRule(War3ID code) const;
+    bool OnHasSpellArchetypeRule(uint32_t rawcode) const override;
+
+    // Phase 31 (Track A): Pluggable Custom Script Natives
+    using CustomScriptNativeFn = std::function<int(const std::vector<int>& intArgs)>;
+    void RegisterCustomScriptNative(const std::string& nativeName, CustomScriptNativeFn fn);
+    bool UnregisterCustomScriptNative(const std::string& nativeName);
+    bool HasCustomScriptNative(const std::string& nativeName) const;
+    int InvokeCustomScriptNative(const std::string& nativeName, const std::vector<int>& intArgs) const;
+    bool OnHasCustomScriptNative(const std::string& nativeName) const override;
+    size_t GetRegisteredCustomScriptNativeCount() const { return customScriptNatives_.size(); }
+
+    template <typename VmType>
+    void BindCustomScriptNativesToVm(VmType& vm) const {
+        for (const auto& [name, fn] : customScriptNatives_) {
+            if (!fn) continue;
+            auto cb = fn;
+            vm.RegisterNative(name, [cb](const auto& jassArgs) {
+                using JVal = typename std::decay_t<decltype(jassArgs)>::value_type;
+                std::vector<int> intArgs;
+                intArgs.reserve(jassArgs.size());
+                for (const auto& arg : jassArgs) {
+                    intArgs.push_back(arg.intVal);
+                }
+                return JVal::Int(cb(intArgs));
+            });
+        }
+    }
+
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 
     bool OnCheckSpellEffectReaction(CSimulation& sim,
@@ -632,6 +666,8 @@ private:
     bool requireZeroUnitsForDefeat_ = false;
     bool matchEnded_ = false;
     int winningPlayerIndex_ = -1;
+    std::unordered_map<uint32_t, SpellArchetypeRule> customSpellArchetypeRules_;
+    std::unordered_map<std::string, CustomScriptNativeFn> customScriptNatives_;
 };
 
 } // namespace war3

@@ -1,60 +1,12 @@
 #include "scripting/jass_natives_internal.h"
-
 void JassNatives::RegisterGroupNatives() {
-    vm_.RegisterNative("CreateGroup", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        auto group = std::make_shared<JassGroup>();
-        int id = data->nextGroupId++;
-        data->groups[id] = group;
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::GROUP, id));
-    });
-    vm_.RegisterNative("DestroyGroup", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
-        if (simId >= 0) { data->groups.erase(simId); data->FreeHandle(args[0].intVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GroupAddUnit", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
-        if (simId >= 0) {
-            auto it = data->groups.find(simId);
-            if (it != data->groups.end()) {
-                auto& vec = it->second->unitHandles;
-                if (std::find(vec.begin(), vec.end(), args[1].intVal) == vec.end())
-                    vec.push_back(args[1].intVal);
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GroupRemoveUnit", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
-        if (simId >= 0) {
-            auto it = data->groups.find(simId);
-            if (it != data->groups.end()) {
-                auto& vec = it->second->unitHandles;
-                vec.erase(std::remove(vec.begin(), vec.end(), args[1].intVal), vec.end());
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GroupClear", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
-        if (simId >= 0) { auto it = data->groups.find(simId); if (it != data->groups.end()) it->second->unitHandles.clear(); }
-        return JassValue::Null();
-    });
-    auto filterFuncAt = [](const std::vector<JassValue>& args, size_t index) -> std::string {
-        return (args.size() > index && args[index].type == JassValue::STRING) ? args[index].strVal : "";
-    };
-    auto acceptFilteredUnit = [data = data_, vmPtr = vmPtr_](int unitHandle, const std::string& filterFunc) {
-        if (filterFunc.empty() || !vmPtr) return true;
-        const int previousFilterUnit = data->filterUnitHandle;
-        data->filterUnitHandle = unitHandle;
-        const bool accepted = JassValueToBool(CallSyncFunction(vmPtr, filterFunc));
-        data->filterUnitHandle = previousFilterUnit;
-        return accepted;
-    };
+    vm_.RegisterNative("CreateGroup", [data = data_](const std::vector<JassValue>&) -> JassValue { auto group = std::make_shared<JassGroup>(); int id = data->nextGroupId++; data->groups[id] = group; return JassValue::Int(data->AllocHandle(JassHandleInfo::GROUP, id)); });
+    vm_.RegisterNative("DestroyGroup", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP); if (simId >= 0) { data->groups.erase(simId); data->FreeHandle(args[0].intVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GroupAddUnit", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP); if (simId >= 0) { auto it = data->groups.find(simId); if (it != data->groups.end()) { auto& vec = it->second->unitHandles; if (std::find(vec.begin(), vec.end(), args[1].intVal) == vec.end()) vec.push_back(args[1].intVal); } } return JassValue::Null(); });
+    vm_.RegisterNative("GroupRemoveUnit", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP); if (simId >= 0) { auto it = data->groups.find(simId); if (it != data->groups.end()) { auto& vec = it->second->unitHandles; vec.erase(std::remove(vec.begin(), vec.end(), args[1].intVal), vec.end()); } } return JassValue::Null(); });
+    vm_.RegisterNative("GroupClear", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP); if (simId >= 0) { auto it = data->groups.find(simId); if (it != data->groups.end()) it->second->unitHandles.clear(); } return JassValue::Null(); });
+    auto filterFuncAt = [](const std::vector<JassValue>& args, size_t index) -> std::string { return (args.size() > index && args[index].type == JassValue::STRING) ? args[index].strVal : ""; };
+    auto acceptFilteredUnit = [data = data_, vmPtr = vmPtr_](int unitHandle, const std::string& filterFunc) { if (filterFunc.empty() || !vmPtr) return true; const int previousFilterUnit = data->filterUnitHandle; data->filterUnitHandle = unitHandle; const bool accepted = JassValueToBool(CallSyncFunction(vmPtr, filterFunc)); data->filterUnitHandle = previousFilterUnit; return accepted; };
     vm_.RegisterNative("GroupEnumUnitsOfType", [data = data_, sim = sim_, filterFuncAt, acceptFilteredUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
@@ -225,8 +177,6 @@ void JassNatives::RegisterGroupNatives() {
         const std::string& funcName = args[1].strVal;
         if (funcName.empty()) return JassValue::Null();
         const int previousEnumUnit = data->enumUnitHandle;
-        // Snapshot: callbacks may add/remove units (GroupRemoveUnit,
-        // DestroyGroup) while iterating.
         const std::vector<int> snapshot = git->second->unitHandles;
         for (int uh : snapshot) {
             data->enumUnitHandle = uh;
@@ -235,22 +185,8 @@ void JassNatives::RegisterGroupNatives() {
         data->enumUnitHandle = previousEnumUnit;
         return JassValue::Null();
     });
-    vm_.RegisterNative("FirstOfGroup", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
-        if (simId < 0) return JassValue::Int(0);
-        auto git = data->groups.find(simId);
-        if (git == data->groups.end() || git->second->unitHandles.empty()) return JassValue::Int(0);
-        return JassValue::Int(git->second->unitHandles.front());
-    });
-    vm_.RegisterNative("CountUnitsInGroup", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
-        if (simId < 0) return JassValue::Int(0);
-        auto git = data->groups.find(simId);
-        if (git == data->groups.end()) return JassValue::Int(0);
-        return JassValue::Int((int)git->second->unitHandles.size());
-    });
+    vm_.RegisterNative("FirstOfGroup", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP); if (simId < 0) return JassValue::Int(0); auto git = data->groups.find(simId); if (git == data->groups.end() || git->second->unitHandles.empty()) return JassValue::Int(0); return JassValue::Int(git->second->unitHandles.front()); });
+    vm_.RegisterNative("CountUnitsInGroup", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP); if (simId < 0) return JassValue::Int(0); auto git = data->groups.find(simId); if (git == data->groups.end()) return JassValue::Int(0); return JassValue::Int((int)git->second->unitHandles.size()); });
     vm_.RegisterNative("IsUnitInGroup", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
@@ -260,16 +196,7 @@ void JassNatives::RegisterGroupNatives() {
         auto& vec = git->second->unitHandles;
         return JassValue::Bool(std::find(vec.begin(), vec.end(), args[1].intVal) != vec.end());
     });
-    // Group size/index access (ref Jass2 groupGetSize/groupGetUnitAt):
-    // GroupUnitAt is 0-based; out-of-range returns null (0).
-    auto groupSize = [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
-        if (simId < 0) return JassValue::Int(0);
-        auto git = data->groups.find(simId);
-        if (git == data->groups.end()) return JassValue::Int(0);
-        return JassValue::Int((int)git->second->unitHandles.size());
-    };
+    auto groupSize = [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP); if (simId < 0) return JassValue::Int(0); auto git = data->groups.find(simId); if (git == data->groups.end()) return JassValue::Int(0); return JassValue::Int((int)git->second->unitHandles.size()); };
     vm_.RegisterNative("GroupGetSize", groupSize);
     vm_.RegisterNative("BlzGroupGetSize", groupSize);
     auto groupUnitAt = [data = data_](const std::vector<JassValue>& args) -> JassValue {
@@ -284,9 +211,6 @@ void JassNatives::RegisterGroupNatives() {
     };
     vm_.RegisterNative("GroupUnitAt", groupUnitAt);
     vm_.RegisterNative("BlzGroupUnitAt", groupUnitAt);
-    // Enum units around a unit (ref GroupEnumUnitsInRangeOfUnit): clears the
-    // group, then adds units within radius of the center unit, applying the
-    // optional filter. Counted variant stops after countLimit additions.
     auto enumInRangeOfUnit = [data = data_, sim = sim_, vmPtr = vmPtr_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3) return JassValue::Null();
         const int groupSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::GROUP);
@@ -328,27 +252,9 @@ void JassNatives::RegisterGroupNatives() {
     vm_.RegisterNative("GroupEnumUnitsInRangeOfUnit", enumInRangeOfUnit);
     vm_.RegisterNative("GroupEnumUnitsInRangeOfUnitCounted", enumInRangeOfUnit);
 }
-
-// ============================================================
-// 7. Force natives
-// ============================================================
 void JassNatives::RegisterForceNatives() {
-    vm_.RegisterNative("CreateForce", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        if (std::getenv("WARSMASH_COUNT_FORCES")) {
-            static int n = 0;
-            std::cerr << "[FORCE] create #" << ++n << std::endl;
-        }
-        auto force = std::make_shared<JassForce>();
-        int id = data->nextForceId++;
-        data->forces[id] = force;
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::FORCE, id));
-    });
-    vm_.RegisterNative("DestroyForce", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
-        if (simId >= 0) { data->forces.erase(simId); data->FreeHandle(args[0].intVal); }
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("CreateForce", [data = data_](const std::vector<JassValue>&) -> JassValue { if (std::getenv("WARSMASH_COUNT_FORCES")) { static int n = 0; std::cerr << "[FORCE] create #" << ++n << std::endl; } auto force = std::make_shared<JassForce>(); int id = data->nextForceId++; data->forces[id] = force; return JassValue::Int(data->AllocHandle(JassHandleInfo::FORCE, id)); });
+    vm_.RegisterNative("DestroyForce", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE); if (simId >= 0) { data->forces.erase(simId); data->FreeHandle(args[0].intVal); } return JassValue::Null(); });
     vm_.RegisterNative("ForceAddPlayer", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
@@ -371,25 +277,9 @@ void JassNatives::RegisterForceNatives() {
         v.erase(std::remove(v.begin(), v.end(), pSim), v.end());
         return JassValue::Null();
     });
-    vm_.RegisterNative("ForceClear", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
-        if (simId >= 0) { auto fit = data->forces.find(simId); if (fit != data->forces.end()) fit->second->playerIds.clear(); }
-        return JassValue::Null();
-    });
-    auto addPlayerToForce = [data = data_](JassForce& force, int playerId) {
-        if (std::find(force.playerIds.begin(), force.playerIds.end(), playerId) == force.playerIds.end()) {
-            force.playerIds.push_back(playerId);
-        }
-    };
-    auto acceptPlayer = [data = data_, vmPtr = vmPtr_](int playerId, const std::string& filterFunc) {
-        if (filterFunc.empty() || !vmPtr) return true;
-        const int previousFilterPlayer = data->filterPlayerHandle;
-        data->filterPlayerHandle = data->AllocHandle(JassHandleInfo::PLAYER, playerId);
-        const bool accepted = JassValueToBool(CallSyncFunction(vmPtr, filterFunc));
-        data->filterPlayerHandle = previousFilterPlayer;
-        return accepted;
-    };
+    vm_.RegisterNative("ForceClear", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE); if (simId >= 0) { auto fit = data->forces.find(simId); if (fit != data->forces.end()) fit->second->playerIds.clear(); } return JassValue::Null(); });
+    auto addPlayerToForce = [data = data_](JassForce& force, int playerId) { if (std::find(force.playerIds.begin(), force.playerIds.end(), playerId) == force.playerIds.end()) { force.playerIds.push_back(playerId); } };
+    auto acceptPlayer = [data = data_, vmPtr = vmPtr_](int playerId, const std::string& filterFunc) { if (filterFunc.empty() || !vmPtr) return true; const int previousFilterPlayer = data->filterPlayerHandle; data->filterPlayerHandle = data->AllocHandle(JassHandleInfo::PLAYER, playerId); const bool accepted = JassValueToBool(CallSyncFunction(vmPtr, filterFunc)); data->filterPlayerHandle = previousFilterPlayer; return accepted; };
     vm_.RegisterNative("ForceEnumPlayers", [data = data_, sim = sim_, addPlayerToForce, acceptPlayer](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         int forceId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
@@ -397,14 +287,10 @@ void JassNatives::RegisterForceNatives() {
         auto fit = data->forces.find(forceId);
         if (fit == data->forces.end()) return JassValue::Null();
         const std::string filterFunc = (args.size() > 1 && args[1].type == JassValue::STRING) ? args[1].strVal : "";
-        // Enumerate full player slots (ref bj_MAX_PLAYER_SLOTS), not just
-        // live sim players, so bj_FORCE_ALL_PLAYERS covers slots 12-15.
         const int simCount = sim ? sim->GetPlayerCount() : 0;
         const int playerCount = std::max(simCount, 16);
         for (int playerId = 0; playerId < playerCount; ++playerId) {
-            if (acceptPlayer(playerId, filterFunc)) {
-                addPlayerToForce(*fit->second, playerId);
-            }
+            if (acceptPlayer(playerId, filterFunc)) { addPlayerToForce(*fit->second, playerId); }
         }
         return JassValue::Null();
     });
@@ -438,9 +324,7 @@ void JassNatives::RegisterForceNatives() {
         const std::string filterFunc = (args.size() > 2 && args[2].type == JassValue::STRING) ? args[2].strVal : "";
         for (int playerId = 0; playerId < sim->GetPlayerCount(); ++playerId) {
             CPlayer* player = sim->GetPlayer(playerId);
-            if (player && sourcePlayer->HasAlliance(*player, CAllianceType::PASSIVE) && acceptPlayer(playerId, filterFunc)) {
-                addPlayerToForce(*fit->second, playerId);
-            }
+            if (player && sourcePlayer->HasAlliance(*player, CAllianceType::PASSIVE) && acceptPlayer(playerId, filterFunc)) { addPlayerToForce(*fit->second, playerId); }
         }
         return JassValue::Null();
     });
@@ -455,9 +339,7 @@ void JassNatives::RegisterForceNatives() {
         const std::string filterFunc = (args.size() > 2 && args[2].type == JassValue::STRING) ? args[2].strVal : "";
         for (int playerId = 0; playerId < sim->GetPlayerCount(); ++playerId) {
             CPlayer* player = sim->GetPlayer(playerId);
-            if (player && !sourcePlayer->HasAlliance(*player, CAllianceType::PASSIVE) && acceptPlayer(playerId, filterFunc)) {
-                addPlayerToForce(*fit->second, playerId);
-            }
+            if (player && !sourcePlayer->HasAlliance(*player, CAllianceType::PASSIVE) && acceptPlayer(playerId, filterFunc)) { addPlayerToForce(*fit->second, playerId); }
         }
         return JassValue::Null();
     });
@@ -470,7 +352,6 @@ void JassNatives::RegisterForceNatives() {
         const std::string& funcName = args[1].strVal;
         if (funcName.empty()) return JassValue::Null();
         const int previousEnumPlayer = data->enumPlayerHandle;
-        // Snapshot: callback may mutate the force.
         const std::vector<int> snapshot = fit->second->playerIds;
         for (int playerId : snapshot) {
             data->enumPlayerHandle = data->AllocHandle(JassHandleInfo::PLAYER, playerId);
@@ -479,71 +360,17 @@ void JassNatives::RegisterForceNatives() {
         data->enumPlayerHandle = previousEnumPlayer;
         return JassValue::Null();
     });
-    vm_.RegisterNative("CountPlayersInForce", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE);
-        if (simId < 0) return JassValue::Int(0);
-        auto fit = data->forces.find(simId);
-        if (fit == data->forces.end()) return JassValue::Int(0);
-        return JassValue::Int((int)fit->second->playerIds.size());
-    });
+    vm_.RegisterNative("CountPlayersInForce", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::FORCE); if (simId < 0) return JassValue::Int(0); auto fit = data->forces.find(simId); if (fit == data->forces.end()) return JassValue::Int(0); return JassValue::Int((int)fit->second->playerIds.size()); });
 }
-
-// ============================================================
-// 8. Location natives
-// ============================================================
-
 void JassNatives::RegisterUnitNatives() {
-    vm_.RegisterNative("ConvertPrimaryTag", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        const int ordinal = args[0].intVal;
-        if (!JassAnimationPrimaryTagName(ordinal)[0]) return JassValue::Null();
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::PRIMARY_TAG, ordinal));
-    });
-    vm_.RegisterNative("ConvertSecondaryTag", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        const int ordinal = args[0].intVal;
-        if (!JassAnimationSecondaryTagName(ordinal)[0]) return JassValue::Null();
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::SECONDARY_TAG, ordinal));
-    });
-    vm_.RegisterNative("CreatePrimaryTags", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        const int id = data->nextPrimaryTagSetId++;
-        data->primaryTagSets[id] = {};
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::PRIMARY_TAGS, id));
-    });
-    vm_.RegisterNative("CreateSecondaryTags", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        const int id = data->nextSecondaryTagSetId++;
-        data->secondaryTagSets[id] = {};
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::SECONDARY_TAGS, id));
-    });
-    vm_.RegisterNative("PrimaryTagsAdd", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS);
-        const int tag = data->GetSimHandle(args[1].intVal, JassHandleInfo::PRIMARY_TAG);
-        if (setId < 0 || tag < 0) return JassValue::Bool(false);
-        return JassValue::Bool(data->primaryTagSets[setId].insert(tag).second);
-    });
-    vm_.RegisterNative("SecondaryTagsAdd", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS);
-        const int tag = data->GetSimHandle(args[1].intVal, JassHandleInfo::SECONDARY_TAG);
-        if (setId < 0 || tag < 0) return JassValue::Bool(false);
-        return JassValue::Bool(data->secondaryTagSets[setId].insert(tag).second);
-    });
-    vm_.RegisterNative("PrimaryTagsRemove", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS);
-        const int tag = data->GetSimHandle(args[1].intVal, JassHandleInfo::PRIMARY_TAG);
-        if (setId < 0 || tag < 0) return JassValue::Bool(false);
-        return JassValue::Bool(data->primaryTagSets[setId].erase(tag) > 0);
-    });
-    vm_.RegisterNative("SecondaryTagsRemove", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS);
-        const int tag = data->GetSimHandle(args[1].intVal, JassHandleInfo::SECONDARY_TAG);
-        if (setId < 0 || tag < 0) return JassValue::Bool(false);
-        return JassValue::Bool(data->secondaryTagSets[setId].erase(tag) > 0);
-    });
+    vm_.RegisterNative("ConvertPrimaryTag", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); const int ordinal = args[0].intVal; if (!JassAnimationPrimaryTagName(ordinal)[0]) return JassValue::Null(); return JassValue::Int(data->AllocHandle(JassHandleInfo::PRIMARY_TAG, ordinal)); });
+    vm_.RegisterNative("ConvertSecondaryTag", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); const int ordinal = args[0].intVal; if (!JassAnimationSecondaryTagName(ordinal)[0]) return JassValue::Null(); return JassValue::Int(data->AllocHandle(JassHandleInfo::SECONDARY_TAG, ordinal)); });
+    vm_.RegisterNative("CreatePrimaryTags", [data = data_](const std::vector<JassValue>&) -> JassValue { const int id = data->nextPrimaryTagSetId++; data->primaryTagSets[id] = {}; return JassValue::Int(data->AllocHandle(JassHandleInfo::PRIMARY_TAGS, id)); });
+    vm_.RegisterNative("CreateSecondaryTags", [data = data_](const std::vector<JassValue>&) -> JassValue { const int id = data->nextSecondaryTagSetId++; data->secondaryTagSets[id] = {}; return JassValue::Int(data->AllocHandle(JassHandleInfo::SECONDARY_TAGS, id)); });
+    vm_.RegisterNative("PrimaryTagsAdd", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS); const int tag = data->GetSimHandle(args[1].intVal, JassHandleInfo::PRIMARY_TAG); if (setId < 0 || tag < 0) return JassValue::Bool(false); return JassValue::Bool(data->primaryTagSets[setId].insert(tag).second); });
+    vm_.RegisterNative("SecondaryTagsAdd", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS); const int tag = data->GetSimHandle(args[1].intVal, JassHandleInfo::SECONDARY_TAG); if (setId < 0 || tag < 0) return JassValue::Bool(false); return JassValue::Bool(data->secondaryTagSets[setId].insert(tag).second); });
+    vm_.RegisterNative("PrimaryTagsRemove", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS); const int tag = data->GetSimHandle(args[1].intVal, JassHandleInfo::PRIMARY_TAG); if (setId < 0 || tag < 0) return JassValue::Bool(false); return JassValue::Bool(data->primaryTagSets[setId].erase(tag) > 0); });
+    vm_.RegisterNative("SecondaryTagsRemove", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS); const int tag = data->GetSimHandle(args[1].intVal, JassHandleInfo::SECONDARY_TAG); if (setId < 0 || tag < 0) return JassValue::Bool(false); return JassValue::Bool(data->secondaryTagSets[setId].erase(tag) > 0); });
     vm_.RegisterNative("PrimaryTagsContains", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);
         const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS);
@@ -560,46 +387,12 @@ void JassNatives::RegisterUnitNatives() {
         auto it = data->secondaryTagSets.find(setId);
         return JassValue::Bool(it != data->secondaryTagSets.end() && it->second.count(tag) > 0);
     });
-    vm_.RegisterNative("PrimaryTagsSize", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS);
-        auto it = data->primaryTagSets.find(setId);
-        return JassValue::Int(it != data->primaryTagSets.end() ? (int)it->second.size() : 0);
-    });
-    vm_.RegisterNative("SecondaryTagsSize", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS);
-        auto it = data->secondaryTagSets.find(setId);
-        return JassValue::Int(it != data->secondaryTagSets.end() ? (int)it->second.size() : 0);
-    });
-    vm_.RegisterNative("PrimaryTagsAny", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS);
-        auto it = data->primaryTagSets.find(setId);
-        if (it == data->primaryTagSets.end() || it->second.empty()) return JassValue::Null();
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::PRIMARY_TAG, *it->second.begin()));
-    });
-    vm_.RegisterNative("SecondaryTagsAny", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS);
-        auto it = data->secondaryTagSets.find(setId);
-        if (it == data->secondaryTagSets.end() || it->second.empty()) return JassValue::Null();
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::SECONDARY_TAG, *it->second.begin()));
-    });
-    vm_.RegisterNative("DestroyPrimaryTags", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS);
-        if (setId >= 0) data->primaryTagSets.erase(setId);
-        data->FreeHandle(args[0].intVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("DestroySecondaryTags", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS);
-        if (setId >= 0) data->secondaryTagSets.erase(setId);
-        data->FreeHandle(args[0].intVal);
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("PrimaryTagsSize", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS); auto it = data->primaryTagSets.find(setId); return JassValue::Int(it != data->primaryTagSets.end() ? (int)it->second.size() : 0); });
+    vm_.RegisterNative("SecondaryTagsSize", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS); auto it = data->secondaryTagSets.find(setId); return JassValue::Int(it != data->secondaryTagSets.end() ? (int)it->second.size() : 0); });
+    vm_.RegisterNative("PrimaryTagsAny", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS); auto it = data->primaryTagSets.find(setId); if (it == data->primaryTagSets.end() || it->second.empty()) return JassValue::Null(); return JassValue::Int(data->AllocHandle(JassHandleInfo::PRIMARY_TAG, *it->second.begin())); });
+    vm_.RegisterNative("SecondaryTagsAny", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS); auto it = data->secondaryTagSets.find(setId); if (it == data->secondaryTagSets.end() || it->second.empty()) return JassValue::Null(); return JassValue::Int(data->AllocHandle(JassHandleInfo::SECONDARY_TAG, *it->second.begin())); });
+    vm_.RegisterNative("DestroyPrimaryTags", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS); if (setId >= 0) data->primaryTagSets.erase(setId); data->FreeHandle(args[0].intVal); return JassValue::Null(); });
+    vm_.RegisterNative("DestroySecondaryTags", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); const int setId = data->GetSimHandle(args[0].intVal, JassHandleInfo::SECONDARY_TAGS); if (setId >= 0) data->secondaryTagSets.erase(setId); data->FreeHandle(args[0].intVal); return JassValue::Null(); });
     vm_.RegisterNative("PopulateTags", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3) return JassValue::Null();
         const int primarySetId = data->GetSimHandle(args[0].intVal, JassHandleInfo::PRIMARY_TAGS);
@@ -616,7 +409,6 @@ void JassNatives::RegisterUnitNatives() {
         secondarySet.insert(secondaryTags.begin(), secondaryTags.end());
         return JassValue::Null();
     });
-
     auto createUnitByTypeId = [data = data_, sim = sim_](int playerArg, War3ID typeId,
                                                           float x, float y, float facing,
                                                           bool addTechUnlocked = true) -> JassValue {
@@ -626,13 +418,10 @@ void JassNatives::RegisterUnitNatives() {
         CUnit* unit = sim->CreateUnit(typeId, playerId, x, y, facing);
         if (!unit) return JassValue::Null();
         if (addTechUnlocked) {
-            if (CPlayer* player = sim->GetPlayer(playerId)) {
-                player->AddTechUnlocked(*sim, typeId);
-            }
+            if (CPlayer* player = sim->GetPlayer(playerId)) { player->AddTechUnlocked(*sim, typeId); }
         }
         return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
     };
-
     vm_.RegisterNative("CreateUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (!sim || args.size() < 5) return JassValue::Null();
         int playerId = ResolvePlayerId(data, args[0].intVal);
@@ -642,20 +431,12 @@ void JassNatives::RegisterUnitNatives() {
         War3ID w3id((uint32_t)unitTypeId);
         CUnit* unit = sim->CreateUnit(w3id, playerId, x, y, facing);
         if (unit) {
-            if (CPlayer* player = sim->GetPlayer(playerId)) {
-                player->AddTechUnlocked(*sim, w3id);
-            }
+            if (CPlayer* player = sim->GetPlayer(playerId)) { player->AddTechUnlocked(*sim, w3id); }
         }
         if (unit) return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId()));
         return JassValue::Null();
     });
-    vm_.RegisterNative("CreateUnitByName", [sim = sim_, createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue {
-        if (!sim || args.size() < 5) return JassValue::Null();
-        const int typeId = UnitIdFromLegacyName(sim, args[1].strVal);
-        if (typeId == 0) return JassValue::Null();
-        return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)typeId),
-                                  args[2].AsReal(), args[3].AsReal(), args[4].AsReal());
-    });
+    vm_.RegisterNative("CreateUnitByName", [sim = sim_, createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue { if (!sim || args.size() < 5) return JassValue::Null(); const int typeId = UnitIdFromLegacyName(sim, args[1].strVal); if (typeId == 0) return JassValue::Null(); return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)typeId), args[2].AsReal(), args[3].AsReal(), args[4].AsReal()); });
     vm_.RegisterNative("CreateUnitAtLoc", [data = data_, createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4) return JassValue::Null();
         float x = 0.0f;
@@ -686,59 +467,17 @@ void JassNatives::RegisterUnitNatives() {
         }
         return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)typeId), x, y, args[3].realVal);
     });
-    vm_.RegisterNative("CreateCorpse", [data = data_, sim = sim_, createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue {
-        if (!sim || args.size() < 5) return JassValue::Null();
-        JassValue handle = createUnitByTypeId(args[0].intVal, War3ID((uint32_t)args[1].intVal),
-                                             args[2].realVal, args[3].realVal, args[4].realVal,
-                                             false);
-        int simId = data->GetSimHandle(handle.intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit) unit->SetLife(*sim, 0.0f);
-        }
-        return handle;
-    });
-    vm_.RegisterNative("BlzCreateUnitWithSkin", [createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 6) return JassValue::Null();
-        return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)args[1].intVal),
-                                  args[2].realVal, args[3].realVal, args[4].realVal,
-                                  false);
-    });
-    vm_.RegisterNative("RemoveUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (!sim || args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit) sim->RemoveUnit(unit);
-            data->FreeHandle(args[0].intVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("KillUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (!sim || args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetLife(*sim, 0.0f); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitLookAt", [](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("ResetUnitLookAt", [](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("CreateCorpse", [data = data_, sim = sim_, createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue { if (!sim || args.size() < 5) return JassValue::Null(); JassValue handle = createUnitByTypeId(args[0].intVal, War3ID((uint32_t)args[1].intVal), args[2].realVal, args[3].realVal, args[4].realVal, false); int simId = data->GetSimHandle(handle.intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetLife(*sim, 0.0f); } return handle; });
+    vm_.RegisterNative("BlzCreateUnitWithSkin", [createUnitByTypeId](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 6) return JassValue::Null(); return createUnitByTypeId(args[0].intVal, War3ID((uint32_t)args[1].intVal), args[2].realVal, args[3].realVal, args[4].realVal, false); });
+    vm_.RegisterNative("RemoveUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (!sim || args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) sim->RemoveUnit(unit); data->FreeHandle(args[0].intVal); } return JassValue::Null(); });
+    vm_.RegisterNative("KillUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (!sim || args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetLife(*sim, 0.0f); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitLookAt", [](const std::vector<JassValue>&) { return JassValue::Null(); });
+    vm_.RegisterNative("ResetUnitLookAt", [](const std::vector<JassValue>&) { return JassValue::Null(); });
     vm_.RegisterNative("UnitResetCooldown", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        // Retail resets every ability cooldown on the unit (ref per-ability
-        // resetCooldown swept across the sheet, plus JASS-side timers).
         if (args.empty() || !data) return JassValue::Null();
         const int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         if (uSim < 0) return JassValue::Null();
-        for (auto it = data->abilityCooldowns.begin(); it != data->abilityCooldowns.end();) {
-            if ((int)(it->first >> 32) == uSim) {
-                it = data->abilityCooldowns.erase(it);
-            } else {
-                ++it;
-            }
-        }
+        for (auto it = data->abilityCooldowns.begin(); it != data->abilityCooldowns.end();) { if ((int)(it->first >> 32) == uSim) { it = data->abilityCooldowns.erase(it); } else { ++it; } }
         if (sim) {
             if (CUnit* unit = sim->GetUnit(uSim)) {
                 for (CAbility* ability : unit->GetAbilities()) {
@@ -749,8 +488,6 @@ void JassNatives::RegisterUnitNatives() {
         return JassValue::Null();
     });
     vm_.RegisterNative("SetUnitOwner", [data = data_, sim = sim_, this](const std::vector<JassValue>& args) -> JassValue {
-        // Retail SetUnitOwner(unit, player): args[1] is the new owner (the old
-        // code resolved args[0], the unit handle, as a player).
         if (!sim || args.size() < 2) return JassValue::Null();
         const int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         const int newOwner = ResolvePlayerId(data, args[1].intVal);
@@ -758,28 +495,15 @@ void JassNatives::RegisterUnitNatives() {
             if (CUnit* unit = sim->GetUnit(simId)) {
                 const int prevOwner = unit->GetPlayerIndex();
                 unit->SetPlayerIndex(newOwner);
-                if (prevOwner != newOwner) {
-                    FireChangeOwnerEvent(simId, prevOwner);
-                }
+                if (prevOwner != newOwner) { FireChangeOwnerEvent(simId, prevOwner); }
             }
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("RemoveGuardPosition", [](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("RecycleGuardPosition", [](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("RemoveAllGuardPositions", [](const std::vector<JassValue>&) -> JassValue {
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetUnitTypeId", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Int(unit->GetTypeId().value); }
-        return JassValue::Int(0);
-    });
+    vm_.RegisterNative("RemoveGuardPosition", [](const std::vector<JassValue>&) { return JassValue::Null(); });
+    vm_.RegisterNative("RecycleGuardPosition", [](const std::vector<JassValue>&) { return JassValue::Null(); });
+    vm_.RegisterNative("RemoveAllGuardPositions", [](const std::vector<JassValue>&) { return JassValue::Null(); });
+    vm_.RegisterNative("GetUnitTypeId", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Int(unit->GetTypeId().value); } return JassValue::Int(0); });
     vm_.RegisterNative("GetUnitState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Real(0);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
@@ -796,38 +520,10 @@ void JassNatives::RegisterUnitNatives() {
         }
         return JassValue::Real(0);
     });
-    vm_.RegisterNative("SetUnitState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit) {
-                switch (args[1].intVal) {
-                    case 0: unit->SetLife(*sim, args[2].realVal); break;
-                    case 2: unit->SetMana(args[2].realVal); break;
-                }
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetUnitX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetX()); }
-        return JassValue::Real(0);
-    });
-    vm_.RegisterNative("GetUnitY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetY()); }
-        return JassValue::Real(0);
-    });
-    vm_.RegisterNative("GetUnitFacing", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetFacing()); }
-        return JassValue::Real(0);
-    });
+    vm_.RegisterNative("SetUnitState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) { switch (args[1].intVal) { case 0: unit->SetLife(*sim, args[2].realVal); break; case 2: unit->SetMana(args[2].realVal); break; } } } return JassValue::Null(); });
+    vm_.RegisterNative("GetUnitX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetX()); } return JassValue::Real(0); });
+    vm_.RegisterNative("GetUnitY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetY()); } return JassValue::Real(0); });
+    vm_.RegisterNative("GetUnitFacing", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetFacing()); } return JassValue::Real(0); });
     vm_.RegisterNative("GetUnitLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         auto loc = std::make_shared<JassLocation>();
         if (!args.empty() && sim) {
@@ -844,49 +540,11 @@ void JassNatives::RegisterUnitNatives() {
         data->locations[id] = loc;
         return JassValue::Int(data->AllocHandle(JassHandleInfo::LOCATION, id));
     });
-    vm_.RegisterNative("SetUnitUserData", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) {
-            data->unitUserData[simId] = args[1].intVal;
-        }
-        (void)sim;
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetUnitUserData", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0) return JassValue::Int(0);
-        auto it = data->unitUserData.find(simId);
-        return JassValue::Int(it != data->unitUserData.end() ? it->second : 0);
-    });
-    vm_.RegisterNative("SetUnitX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit) unit->SetPositionAndCheckUnstuck(args[1].realVal, unit->GetY(), *sim);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit) unit->SetPositionAndCheckUnstuck(unit->GetX(), args[1].realVal, *sim);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitPosition", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit) unit->SetPositionAndCheckUnstuck(args[1].realVal, args[2].realVal, *sim);
-        }
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("SetUnitUserData", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { data->unitUserData[simId] = args[1].intVal; } (void)sim; return JassValue::Null(); });
+    vm_.RegisterNative("GetUnitUserData", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0) return JassValue::Int(0); auto it = data->unitUserData.find(simId); return JassValue::Int(it != data->unitUserData.end() ? it->second : 0); });
+    vm_.RegisterNative("SetUnitX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPositionAndCheckUnstuck(args[1].realVal, unit->GetY(), *sim); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPositionAndCheckUnstuck(unit->GetX(), args[1].realVal, *sim); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitPosition", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPositionAndCheckUnstuck(args[1].realVal, args[2].realVal, *sim); } return JassValue::Null(); });
     vm_.RegisterNative("SetUnitPositionLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
@@ -894,9 +552,7 @@ void JassNatives::RegisterUnitNatives() {
         if (simId >= 0 && locSim >= 0) {
             CUnit* unit = sim->GetUnit(simId);
             auto locIt = data->locations.find(locSim);
-            if (unit && locIt != data->locations.end()) {
-                unit->SetPositionAndCheckUnstuck(locIt->second->x, locIt->second->y, *sim);
-            }
+            if (unit && locIt != data->locations.end()) { unit->SetPositionAndCheckUnstuck(locIt->second->x, locIt->second->y, *sim); }
         }
         return JassValue::Null();
     });
@@ -909,9 +565,6 @@ void JassNatives::RegisterUnitNatives() {
             CWidget* tgt = sim->GetUnit(tgtSim);
             if (src && tgt) {
                 float dmg = args[2].realVal;
-                // UnitDamageTarget(whichUnit, target, amount, attack, ranged,
-                //                   attackType, damageType, weaponType)
-                // Mirror ref CAttackTypeJass.VALUES / CDamageType ordinals.
                 bool isAttack = args.size() > 3 ? JassValueToBool(args[3]) : true;
                 bool isRanged = args.size() > 4 ? JassValueToBool(args[4]) : false;
                 CAttackType attackType = CAttackType::NORMAL;
@@ -929,12 +582,6 @@ void JassNatives::RegisterUnitNatives() {
                 }
                 CDamageType damageType = CDamageType::NORMAL;
                 if (args.size() > 6) {
-                    // Ref CDamageType ordinal: 4=NORMAL, 5=ENHANCED, 8=FIRE,
-                    // 9=COLD, 10=LIGHTNING, 11=POISON, 12=DISEASE, 13=DIVINE,
-                    // 14=MAGIC, 15=SONIC, 16=ACID, 17=FORCE, 18=DEATH,
-                    // 19=MIND, 20=PLANT, 21=DEFENSIVE, 22=DEMOLITION,
-                    // 23=SLOW_POISON, 24=SPIRIT_LINK, 25=SHADOW_STRIKE,
-                    // 26=UNIVERSAL (common.j ConvertDamageType ids).
                     switch (args[6].intVal) {
                         case 4: damageType = CDamageType::NORMAL; break;
                         case 5: damageType = CDamageType::ENHANCED; break;
@@ -1042,58 +689,19 @@ void JassNatives::RegisterUnitNatives() {
         src->IssueOrder(std::make_unique<COrderTargetPoint>(w3id.value, args[2].realVal, args[3].realVal));
         return JassValue::Bool(true);
     });
-    vm_.RegisterNative("SetUnitFacing", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetFacing(args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitFacingTimed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetFacing(args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0 || !sim) return JassValue::Null();
-        CUnit* unit = sim->GetUnit(simId);
-        if (!unit) return JassValue::Null();
-        if (data->unitSetAnimation) data->unitSetAnimation(simId, args[1].strVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitAnimationByIndex", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0 || !sim) return JassValue::Null();
-        if (data->unitSetAnimationByIndex) data->unitSetAnimationByIndex(simId, args[1].intVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitAnimationWithRarity", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0 || !sim) return JassValue::Null();
-        if (data->unitSetAnimation) data->unitSetAnimation(simId, args[1].strVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("QueueUnitAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0 || !sim) return JassValue::Null();
-        if (data->unitQueueAnimation) data->unitQueueAnimation(simId, args[1].strVal);
-        else if (data->unitSetAnimation) data->unitSetAnimation(simId, args[1].strVal);
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("SetUnitFacing", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetFacing(args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitFacingTimed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetFacing(args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0 || !sim) return JassValue::Null(); CUnit* unit = sim->GetUnit(simId); if (!unit) return JassValue::Null(); if (data->unitSetAnimation) data->unitSetAnimation(simId, args[1].strVal); return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitAnimationByIndex", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0 || !sim) return JassValue::Null(); if (data->unitSetAnimationByIndex) data->unitSetAnimationByIndex(simId, args[1].intVal); return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitAnimationWithRarity", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0 || !sim) return JassValue::Null(); if (data->unitSetAnimation) data->unitSetAnimation(simId, args[1].strVal); return JassValue::Null(); });
+    vm_.RegisterNative("QueueUnitAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0 || !sim) return JassValue::Null(); if (data->unitQueueAnimation) data->unitQueueAnimation(simId, args[1].strVal); else if (data->unitSetAnimation) data->unitSetAnimation(simId, args[1].strVal); return JassValue::Null(); });
     vm_.RegisterNative("SetUnitAnimationByTag", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 6) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         if (simId < 0 || !sim || !sim->GetUnit(simId)) return JassValue::Null();
         const std::string primary = ResolvePrimaryTagName(data, args[2].intVal);
         std::vector<std::string> secondary = ResolveSecondaryTagNames(data, args[3].intVal);
-        if (data->unitSetAnimationByTags) {
-            data->unitSetAnimationByTags(simId, primary, secondary, args[4].realVal, 0.0f, JassValueToBool(args[1]));
-        }
+        if (data->unitSetAnimationByTags) { data->unitSetAnimationByTags(simId, primary, secondary, args[4].realVal, 0.0f, JassValueToBool(args[1])); }
         return JassValue::Null();
     });
     vm_.RegisterNative("SetUnitAnimationByTagWithDuration", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
@@ -1102,9 +710,7 @@ void JassNatives::RegisterUnitNatives() {
         if (simId < 0 || !sim || !sim->GetUnit(simId)) return JassValue::Null();
         const std::string primary = ResolvePrimaryTagName(data, args[2].intVal);
         std::vector<std::string> secondary = ResolveSecondaryTagNames(data, args[3].intVal);
-        if (data->unitSetAnimationByTags) {
-            data->unitSetAnimationByTags(simId, primary, secondary, 1.0f, args[4].realVal, JassValueToBool(args[1]));
-        }
+        if (data->unitSetAnimationByTags) { data->unitSetAnimationByTags(simId, primary, secondary, 1.0f, args[4].realVal, JassValueToBool(args[1])); }
         return JassValue::Null();
     });
     vm_.RegisterNative("SetUnitAnimationToWalk", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
@@ -1113,9 +719,7 @@ void JassNatives::RegisterUnitNatives() {
         if (simId < 0 || !sim || !sim->GetUnit(simId)) return JassValue::Null();
         if (data->unitSetAnimationByTags) {
             data->unitSetAnimationByTags(simId, "walk", {}, 1.0f, 0.0f, JassValueToBool(args[1]));
-        } else if (data->unitSetAnimation) {
-            data->unitSetAnimation(simId, "walk");
-        }
+        } else if (data->unitSetAnimation) { data->unitSetAnimation(simId, "walk"); }
         return JassValue::Null();
     });
     vm_.RegisterNative("SetUnitAnimationByIndexEx", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
@@ -1136,13 +740,7 @@ void JassNatives::RegisterUnitNatives() {
         else if (data->unitSetAnimationByTags) data->unitSetAnimationByTags(simId, primary, secondary, 1.0f, 0.0f, false);
         return JassValue::Null();
     });
-    vm_.RegisterNative("AddUnitAnimationProperties", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0 || !sim) return JassValue::Null();
-        if (data->unitAddAnimationProperties) data->unitAddAnimationProperties(simId, args[1].strVal, args[2].boolVal);
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("AddUnitAnimationProperties", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0 || !sim) return JassValue::Null(); if (data->unitAddAnimationProperties) data->unitAddAnimationProperties(simId, args[1].strVal, args[2].boolVal); return JassValue::Null(); });
     vm_.RegisterNative("AddUnitAnimationSecondaryTag", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
@@ -1165,71 +763,16 @@ void JassNatives::RegisterUnitNatives() {
         if (data->unitAddAnimationProperties) data->unitAddAnimationProperties(simId, tag, false);
         return JassValue::Bool(true);
     });
-    vm_.RegisterNative("ForceResetUnitCurrentAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim && sim->GetUnit(simId) && data->unitForceResetAnimation) {
-            data->unitForceResetAnimation(simId);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitTimeScale", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetTimeScale(args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitScale", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetScale(args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitColor", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPlayerColor(args[1].intVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitVertexColor", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 5) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit) unit->SetVertexColor(args[1].intVal, args[2].intVal, args[3].intVal, args[4].intVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitPathing", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPathingEnabled(args[1].boolVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("PauseUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetHidden(args.size() > 1 ? args[1].boolVal : true); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("ShowUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetHidden(!args[1].boolVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("IsUnitHidden", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Bool(unit->IsHidden()); }
-        return JassValue::Bool(false);
-    });
-    vm_.RegisterNative("IsUnitPaused", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Bool(unit->IsHidden()); }
-        return JassValue::Bool(false);
-    });
+    vm_.RegisterNative("ForceResetUnitCurrentAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim && sim->GetUnit(simId) && data->unitForceResetAnimation) { data->unitForceResetAnimation(simId); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitTimeScale", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetTimeScale(args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitScale", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetScale(args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitColor", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPlayerColor(args[1].intVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitVertexColor", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 5) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetVertexColor(args[1].intVal, args[2].intVal, args[3].intVal, args[4].intVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitPathing", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPathingEnabled(args[1].boolVal); } return JassValue::Null(); });
+    vm_.RegisterNative("PauseUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetHidden(args.size() > 1 ? args[1].boolVal : true); } return JassValue::Null(); });
+    vm_.RegisterNative("ShowUnit", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetHidden(!args[1].boolVal); } return JassValue::Null(); });
+    vm_.RegisterNative("IsUnitHidden", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Bool(unit->IsHidden()); } return JassValue::Bool(false); });
+    vm_.RegisterNative("IsUnitPaused", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Bool(unit->IsHidden()); } return JassValue::Bool(false); });
     vm_.RegisterNative("IsUnitVisible", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Bool(true);
         const int unitId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
@@ -1240,9 +783,6 @@ void JassNatives::RegisterUnitNatives() {
         return JassValue::Bool(sim->GetFogSystem()->IsVisibleTo(player, unit->GetX(), unit->GetY()));
     });
     vm_.RegisterNative("IsUnitInvisible", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        // Invisible to the player: stealthed and no unit of that player sees
-        // through it (ref stealth/detection; same-player and Faerie Fire
-        // reveal via IsInvisibleTo).
         if (args.size() < 2 || !sim) return JassValue::Bool(false);
         const int unitId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         const int player = ResolvePlayerId(data, args[1].intVal);
@@ -1255,43 +795,16 @@ void JassNatives::RegisterUnitNatives() {
         }
         return JassValue::Bool(true);
     });
-    vm_.RegisterNative("IsUnitSelected", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        // Local selection set (ref MeleeUI selection); the player arg is
-        // accepted for signature parity.
-        if (args.empty() || !data) return JassValue::Bool(false);
-        const int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (uSim < 0) return JassValue::Bool(false);
-        return JassValue::Bool(data->selectedUnits.count(uSim) > 0);
-    });
-    vm_.RegisterNative("IsUnitAlly", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Bool(false);
-        const int unitId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        const int playerId = ResolvePlayerId(data, args[1].intVal);
-        CUnit* unit = sim->GetUnit(unitId);
-        return JassValue::Bool(unit && unit->GetPlayerIndex() == playerId);
-    });
-    vm_.RegisterNative("IsUnitEnemy", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Bool(false);
-        const int unitId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        const int playerId = ResolvePlayerId(data, args[1].intVal);
-        CUnit* unit = sim->GetUnit(unitId);
-        return JassValue::Bool(unit && unit->GetPlayerIndex() != playerId);
-    });
-    vm_.RegisterNative("GetUnitRace", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0 || !sim) return JassValue::Int(0);
-        CUnit* unit = sim->GetUnit(simId);
-        if (!unit || !unit->GetUnitType()) return JassValue::Int(0);
-        return JassValue::Int(UnitRaceToJassOrdinal(unit->GetUnitType()->GetUnitRace().name));
-    });
+    vm_.RegisterNative("IsUnitSelected", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !data) return JassValue::Bool(false); const int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (uSim < 0) return JassValue::Bool(false); return JassValue::Bool(data->selectedUnits.count(uSim) > 0); });
+    vm_.RegisterNative("IsUnitAlly", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Bool(false); const int unitId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); const int playerId = ResolvePlayerId(data, args[1].intVal); CUnit* unit = sim->GetUnit(unitId); return JassValue::Bool(unit && unit->GetPlayerIndex() == playerId); });
+    vm_.RegisterNative("IsUnitEnemy", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Bool(false); const int unitId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); const int playerId = ResolvePlayerId(data, args[1].intVal); CUnit* unit = sim->GetUnit(unitId); return JassValue::Bool(unit && unit->GetPlayerIndex() != playerId); });
+    vm_.RegisterNative("GetUnitRace", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0 || !sim) return JassValue::Int(0); CUnit* unit = sim->GetUnit(simId); if (!unit || !unit->GetUnitType()) return JassValue::Int(0); return JassValue::Int(UnitRaceToJassOrdinal(unit->GetUnitType()->GetUnitRace().name)); });
     vm_.RegisterNative("IsUnitRace", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         if (simId < 0 || !sim) return JassValue::Bool(false);
         CUnit* unit = sim->GetUnit(simId);
         if (!unit || !unit->GetUnitType()) return JassValue::Bool(false);
-        // Ref Jass2 IsUnitRace compares unit race against a race handle id.
         return JassValue::Bool(UnitRaceToJassOrdinal(unit->GetUnitType()->GetUnitRace().name) == args[1].intVal);
     });
     vm_.RegisterNative("IsUnitIdType", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
@@ -1302,23 +815,22 @@ void JassNatives::RegisterUnitNatives() {
         if (!unit) return JassValue::Bool(false);
         CUnitType* ut = unit->GetUnitType();
         const int idType = args[1].intVal;
-        // common.j UNIT_TYPE_* ordinals.
         switch (idType) {
-            case 0: return JassValue::Bool(unit->IsHero()); // HERO
-            case 1: return JassValue::Bool(unit->IsDead()); // DEAD
-            case 2: return JassValue::Bool(ut && ut->IsBuilding()); // STRUCTURE
-            case 3: return JassValue::Bool(ut && ut->GetMovementType() == PathingGridMovementType::FLY); // FLYING
-            case 4: return JassValue::Bool(ut && ut->GetMovementType() != PathingGridMovementType::FLY); // GROUND
-            case 5: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::GIANT)); // GIANT
-            case 6: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::UNDEAD)); // UNDEAD
-            case 7: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::SUMMONED)); // SUMMONED
-            case 8: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::MECHANICAL)); // MECHANICAL
-            case 9: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::PEON)); // PEON
-            case 10: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::SAPPER)); // SAPPER
-            case 11: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::TOWNHALL)); // TOWNHALL
-            case 12: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::ANCIENT)); // ANCIENT
-            case 13: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::TREE)); // TREE
-            case 14: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::WARD)); // WARD
+            case 0: return JassValue::Bool(unit->IsHero());
+            case 1: return JassValue::Bool(unit->IsDead());
+            case 2: return JassValue::Bool(ut && ut->IsBuilding());
+            case 3: return JassValue::Bool(ut && ut->GetMovementType() == PathingGridMovementType::FLY);
+            case 4: return JassValue::Bool(ut && ut->GetMovementType() != PathingGridMovementType::FLY);
+            case 5: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::GIANT));
+            case 6: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::UNDEAD));
+            case 7: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::SUMMONED));
+            case 8: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::MECHANICAL));
+            case 9: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::PEON));
+            case 10: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::SAPPER));
+            case 11: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::TOWNHALL));
+            case 12: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::ANCIENT));
+            case 13: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::TREE));
+            case 14: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::WARD));
             default: return JassValue::Bool(false);
         }
     });
@@ -1331,56 +843,47 @@ void JassNatives::RegisterUnitNatives() {
         int typeCode = args[1].intVal;
         CUnitType* ut = unit->GetUnitType();
         switch (typeCode) {
-            case 0: return JassValue::Bool(unit->IsHero()); // HERO
-            case 1: return JassValue::Bool(unit->IsDead()); // DEAD
-            case 2: return JassValue::Bool(ut && ut->IsBuilding()); // STRUCTURE
-            case 3: return JassValue::Bool(ut && ut->GetMovementType() == PathingGridMovementType::FLY); // FLYING
-            case 4: return JassValue::Bool(ut && ut->GetMovementType() != PathingGridMovementType::FLY); // GROUND
-            case 5: { // ATTACKS_FLYING
+            case 0: return JassValue::Bool(unit->IsHero());
+            case 1: return JassValue::Bool(unit->IsDead());
+            case 2: return JassValue::Bool(ut && ut->IsBuilding());
+            case 3: return JassValue::Bool(ut && ut->GetMovementType() == PathingGridMovementType::FLY);
+            case 4: return JassValue::Bool(ut && ut->GetMovementType() != PathingGridMovementType::FLY);
+            case 5: {
                 if (!ut) return JassValue::Bool(false);
                 auto& attacks = ut->GetAttacks();
                 for (auto& a : attacks) { if (a.CanTargetAir()) return JassValue::Bool(true); }
                 return JassValue::Bool(false);
             }
-            case 6: { // ATTACKS_GROUND
+            case 6: {
                 if (!ut) return JassValue::Bool(false);
                 auto& attacks = ut->GetAttacks();
                 for (auto& a : attacks) { if (a.CanTargetGround()) return JassValue::Bool(true); }
                 return JassValue::Bool(false);
             }
-            case 7: { // MELEE_ATTACKER
+            case 7: {
                 if (!ut) return JassValue::Bool(false);
                 auto& attacks = ut->GetAttacks();
                 for (auto& a : attacks) { if (a.GetRange() < 200.0f) return JassValue::Bool(true); }
                 return JassValue::Bool(false);
             }
-            case 8: { // RANGED_ATTACKER
+            case 8: {
                 if (!ut) return JassValue::Bool(false);
                 auto& attacks = ut->GetAttacks();
                 for (auto& a : attacks) { if (a.GetRange() >= 200.0f) return JassValue::Bool(true); }
                 return JassValue::Bool(false);
             }
-            case 9: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::GIANT)); // GIANT
-            case 10: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::SUMMONED)); // SUMMONED
-            case 14: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::UNDEAD)); // UNDEAD
-            case 15: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::MECHANICAL)); // MECHANICAL
-            case 16: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::PEON)); // PEON
-            case 17: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::SAPPER)); // SAPPER
-            case 18: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::TOWNHALL)); // TOWNHALL
-            case 19: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::ANCIENT)); // ANCIENT
+            case 9: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::GIANT));
+            case 10: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::SUMMONED));
+            case 14: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::UNDEAD));
+            case 15: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::MECHANICAL));
+            case 16: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::PEON));
+            case 17: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::SAPPER));
+            case 18: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::TOWNHALL));
+            case 19: return JassValue::Bool(ut && ut->GetClassifications().count(CUnitClassification::ANCIENT));
             default: return JassValue::Bool(false);
         }
     });
-    vm_.RegisterNative("GetUnitAbilityLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0) return JassValue::Int(0);
-        CUnit* unit = sim->GetUnit(simId);
-        if (!unit) return JassValue::Int(0);
-        War3ID abilId((int)args[1].intVal);
-        CAbility* ab = unit->GetAbility(abilId);
-        return JassValue::Int(ab ? ab->GetLevel() : 0);
-    });
+    vm_.RegisterNative("GetUnitAbilityLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0) return JassValue::Int(0); CUnit* unit = sim->GetUnit(simId); if (!unit) return JassValue::Int(0); War3ID abilId((int)args[1].intVal); CAbility* ab = unit->GetAbility(abilId); return JassValue::Int(ab ? ab->GetLevel() : 0); });
     vm_.RegisterNative("SetUnitAbilityLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3) return JassValue::Int(0);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
@@ -1402,124 +905,23 @@ void JassNatives::RegisterUnitNatives() {
         CUnitType* ut = unit->GetUnitType();
         return JassValue::Real(ut ? ut->GetDefaultAcquisitionRange() : 0.0f);
     });
-    vm_.RegisterNative("GetUnitDefaultAcquireRange", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0) return JassValue::Real(0);
-        CUnit* unit = sim->GetUnit(simId);
-        if (!unit) return JassValue::Real(0);
-        CUnitType* ut = unit->GetUnitType();
-        return JassValue::Real(ut ? ut->GetDefaultAcquisitionRange() : 0.0f);
-    });
-    vm_.RegisterNative("SetUnitAcquireRange", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetAcquireRange(args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitExploded", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetLife(*sim, 0.0f); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetUnitInvulnerable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetInvulnerable(args[1].boolVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetUnitMoveSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real((float)unit->GetSpeed()); }
-        return JassValue::Real(0);
-    });
-    vm_.RegisterNative("SetUnitMoveSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetSpeed((int)args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetUnitDefaultMoveSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0) return JassValue::Real(0);
-        CUnit* unit = sim->GetUnit(simId);
-        if (!unit) return JassValue::Real(0);
-        CUnitType* ut = unit->GetUnitType();
-        return JassValue::Real(ut ? (float)ut->GetSpeed() : 0.0f);
-    });
-    vm_.RegisterNative("GetUnitFlyHeight", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetFlyHeight()); }
-        return JassValue::Real(0);
-    });
-    vm_.RegisterNative("SetUnitFlyHeight", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetFlyingHeight(args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetUnitTurnSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0) return JassValue::Real(0);
-        CUnit* unit = sim->GetUnit(simId);
-        if (!unit) return JassValue::Real(0);
-        return JassValue::Real(unit->GetTurnRate());
-    });
-    vm_.RegisterNative("SetUnitTurnSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetTurnRate(args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetUnitPropWindow", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0) return JassValue::Real(0);
-        CUnit* unit = sim->GetUnit(simId);
-        if (!unit) return JassValue::Real(0);
-        return JassValue::Real(unit->GetEffectivePropWindow());
-    });
-    vm_.RegisterNative("SetUnitPropWindow", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPropWindow(args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetUnitFoodUsed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Int(unit->GetFoodUsed()); }
-        return JassValue::Int(0);
-    });
-    vm_.RegisterNative("GetUnitFoodMade", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Int(unit->GetFoodMade()); }
-        return JassValue::Int(0);
-    });
-    vm_.RegisterNative("GetUnitName", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Str("");
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit && unit->GetUnitType()) return JassValue::Str(unit->GetUnitType()->GetName());
-        }
-        return JassValue::Str("");
-    });
-    vm_.RegisterNative("GetUnitPointValue", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId < 0) return JassValue::Int(0);
-        CUnit* unit = sim->GetUnit(simId);
-        if (!unit) return JassValue::Int(0);
-        CUnitType* ut = unit->GetUnitType();
-        return JassValue::Int(ut ? ut->GetPointValue() : 0);
-    });
+    vm_.RegisterNative("GetUnitDefaultAcquireRange", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0) return JassValue::Real(0); CUnit* unit = sim->GetUnit(simId); if (!unit) return JassValue::Real(0); CUnitType* ut = unit->GetUnitType(); return JassValue::Real(ut ? ut->GetDefaultAcquisitionRange() : 0.0f); });
+    vm_.RegisterNative("SetUnitAcquireRange", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetAcquireRange(args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitExploded", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetLife(*sim, 0.0f); } return JassValue::Null(); });
+    vm_.RegisterNative("SetUnitInvulnerable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetInvulnerable(args[1].boolVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GetUnitMoveSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real((float)unit->GetSpeed()); } return JassValue::Real(0); });
+    vm_.RegisterNative("SetUnitMoveSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetSpeed((int)args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GetUnitDefaultMoveSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0) return JassValue::Real(0); CUnit* unit = sim->GetUnit(simId); if (!unit) return JassValue::Real(0); CUnitType* ut = unit->GetUnitType(); return JassValue::Real(ut ? (float)ut->GetSpeed() : 0.0f); });
+    vm_.RegisterNative("GetUnitFlyHeight", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetFlyHeight()); } return JassValue::Real(0); });
+    vm_.RegisterNative("SetUnitFlyHeight", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetFlyingHeight(args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GetUnitTurnSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0) return JassValue::Real(0); CUnit* unit = sim->GetUnit(simId); if (!unit) return JassValue::Real(0); return JassValue::Real(unit->GetTurnRate()); });
+    vm_.RegisterNative("SetUnitTurnSpeed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetTurnRate(args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GetUnitPropWindow", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0) return JassValue::Real(0); CUnit* unit = sim->GetUnit(simId); if (!unit) return JassValue::Real(0); return JassValue::Real(unit->GetEffectivePropWindow()); });
+    vm_.RegisterNative("SetUnitPropWindow", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetPropWindow(args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GetUnitFoodUsed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Int(unit->GetFoodUsed()); } return JassValue::Int(0); });
+    vm_.RegisterNative("GetUnitFoodMade", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Int(unit->GetFoodMade()); } return JassValue::Int(0); });
+    vm_.RegisterNative("GetUnitName", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Str(""); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit && unit->GetUnitType()) return JassValue::Str(unit->GetUnitType()->GetName()); } return JassValue::Str(""); });
+    vm_.RegisterNative("GetUnitPointValue", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId < 0) return JassValue::Int(0); CUnit* unit = sim->GetUnit(simId); if (!unit) return JassValue::Int(0); CUnitType* ut = unit->GetUnitType(); return JassValue::Int(ut ? ut->GetPointValue() : 0); });
     vm_.RegisterNative("GetUnitRallyPoint", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty() || !data) return JassValue::Int(0);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
@@ -1540,100 +942,27 @@ void JassNatives::RegisterUnitNatives() {
         if (simId < 0 || locId < 0 || !sim) return JassValue::Null();
         CUnit* unit = sim->GetUnit(simId);
         auto it = data->locations.find(locId);
-        if (unit && it != data->locations.end() && it->second) {
-            unit->SetRallyPoint(it->second->x, it->second->y);
-        }
+        if (unit && it != data->locations.end() && it->second) { unit->SetRallyPoint(it->second->x, it->second->y); }
         return JassValue::Null();
     });
 }
-
-// ============================================================
-// 12. Widget natives
-// ============================================================
 void JassNatives::RegisterWidgetNatives() {
-    vm_.RegisterNative("GetWidgetLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetLife()); }
-        return JassValue::Real(0);
-    });
-    vm_.RegisterNative("SetWidgetLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetLife(*sim, args[1].realVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetWidgetX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetX()); }
-        return JassValue::Real(0);
-    });
-    vm_.RegisterNative("GetWidgetY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetY()); }
-        return JassValue::Real(0);
-    });
+    vm_.RegisterNative("GetWidgetLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetLife()); } return JassValue::Real(0); });
+    vm_.RegisterNative("SetWidgetLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetLife(*sim, args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GetWidgetX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetX()); } return JassValue::Real(0); });
+    vm_.RegisterNative("GetWidgetY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetY()); } return JassValue::Real(0); });
 }
-
-// ============================================================
-// 13. Player natives
-// ============================================================
 void JassNatives::RegisterPlayerNatives() {
-    vm_.RegisterNative("Player", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::PLAYER, args[0].intVal));
-    });
-    vm_.RegisterNative("GetLocalPlayer", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        const int index = data ? data->localPlayerIndex : 0;
-        return JassValue::Int(data ? data->AllocHandle(JassHandleInfo::PLAYER, index) : 0);
-    });
-    vm_.RegisterNative("GetOwningPlayer", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit) return JassValue::Int(data->AllocHandle(JassHandleInfo::PLAYER, unit->GetPlayerIndex()));
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetPlayerId", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(-1);
-        return JassValue::Int(data->GetSimHandle(args[0].intVal, JassHandleInfo::PLAYER));
-    });
-    vm_.RegisterNative("GetPlayerName", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Str("Player");
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                return JassValue::Str(p->GetName());
-            }
-        }
-        return JassValue::Str("Player");
-    });
-    vm_.RegisterNative("SetPlayerName", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                p->SetName(args[1].strVal);
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetPlayerController", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                return JassValue::Int((int)p->GetController());
-            }
-        }
-        return JassValue::Int(0);
-    });
+    vm_.RegisterNative("Player", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); return JassValue::Int(data->AllocHandle(JassHandleInfo::PLAYER, args[0].intVal)); });
+    vm_.RegisterNative("GetLocalPlayer", [data = data_](const std::vector<JassValue>&) -> JassValue { const int index = data ? data->localPlayerIndex : 0; return JassValue::Int(data ? data->AllocHandle(JassHandleInfo::PLAYER, index) : 0); });
+    vm_.RegisterNative("GetOwningPlayer", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Int(data->AllocHandle(JassHandleInfo::PLAYER, unit->GetPlayerIndex())); } return JassValue::Null(); });
+    vm_.RegisterNative("GetPlayerId", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(-1); return JassValue::Int(data->GetSimHandle(args[0].intVal, JassHandleInfo::PLAYER)); });
+    vm_.RegisterNative("GetPlayerName", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Str("Player"); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { return JassValue::Str(p->GetName()); } } return JassValue::Str("Player"); });
+    vm_.RegisterNative("SetPlayerName", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { p->SetName(args[1].strVal); } } return JassValue::Null(); });
+    vm_.RegisterNative("GetPlayerController", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { return JassValue::Int((int)p->GetController()); } } return JassValue::Int(0); });
     vm_.RegisterNative("GetPlayerSlotState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);
         const int playerId = ResolvePlayerId(data, args[0].intVal);
-        // Closed slots read EMPTY even though sim keeps 12 index-stable
-        // players (ref RemovePlayer/slotActive; melee setup skips them).
         if (playerId >= 0 && playerId < (int)data->playerMapConfig.size() &&
             !data->playerMapConfig[playerId].slotActive) {
             return JassValue::Int(0);
@@ -1645,11 +974,7 @@ void JassNatives::RegisterPlayerNatives() {
         }
         return JassValue::Int(0);
     });
-    vm_.RegisterNative("GetPlayerState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Int(0);
-        int playerId = ResolvePlayerId(data, args[0].intVal);
-        return JassValue::Int((int)GetPlayerStateValue(*sim, playerId, args[1].intVal));
-    });
+    vm_.RegisterNative("GetPlayerState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Int(0); int playerId = ResolvePlayerId(data, args[0].intVal); return JassValue::Int((int)GetPlayerStateValue(*sim, playerId, args[1].intVal)); });
     vm_.RegisterNative("SetPlayerState", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !sim) return JassValue::Null();
         auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
@@ -1668,17 +993,8 @@ void JassNatives::RegisterPlayerNatives() {
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("IsPlayerAlly", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Bool(false);
-        auto* p1 = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
-        auto* p2 = sim->GetPlayer(ResolvePlayerId(data, args[1].intVal));
-        if (p1 && p2) return JassValue::Bool(p1->HasAlliance(*p2, CAllianceType::ALLIED));
-        return JassValue::Bool(false);
-    });
-    vm_.RegisterNative("IsPlayerEnemy", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        return JassValue::Bool(ResolvePlayerId(data, args[0].intVal) != ResolvePlayerId(data, args[1].intVal));
-    });
+    vm_.RegisterNative("IsPlayerAlly", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Bool(false); auto* p1 = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal)); auto* p2 = sim->GetPlayer(ResolvePlayerId(data, args[1].intVal)); if (p1 && p2) return JassValue::Bool(p1->HasAlliance(*p2, CAllianceType::ALLIED)); return JassValue::Bool(false); });
+    vm_.RegisterNative("IsPlayerEnemy", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); return JassValue::Bool(ResolvePlayerId(data, args[0].intVal) != ResolvePlayerId(data, args[1].intVal)); });
     vm_.RegisterNative("IsPlayerInForce", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2) return JassValue::Bool(false);
         int playerId = ResolvePlayerId(data, args[0].intVal);
@@ -1688,64 +1004,14 @@ void JassNatives::RegisterPlayerNatives() {
         if (fit == data->forces.end()) return JassValue::Bool(false);
         return JassValue::Bool(std::find(fit->second->playerIds.begin(), fit->second->playerIds.end(), playerId) != fit->second->playerIds.end());
     });
-    vm_.RegisterNative("IsPlayerObserver", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                return JassValue::Bool(p->IsObserver());
-            }
-        }
-        return JassValue::Bool(false);
-    });
-    vm_.RegisterNative("IsPlayerRacePrefSet", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        // Ref CBasePlayer.isRacePrefSet: single stored preference (set clears
-        // then adds); unset (-1) never matches (retail IsPlayerRacePrefSet).
-        if (args.size() < 2 || !data) return JassValue::Bool(false);
-        const int p = ResolvePlayerId(data, args[0].intVal);
-        if (p < 0 || p >= 24) return JassValue::Bool(false);
-        return JassValue::Bool(data->playerMapConfig[p].racePreference == args[1].intVal);
-    });
-    vm_.RegisterNative("GetPlayerRace", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                return JassValue::Int(p->GetRace());
-            }
-        }
-        return JassValue::Int(0);
-    });
-    vm_.RegisterNative("GetPlayerColor", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                return JassValue::Int(p->GetColor());
-            }
-        }
-        return JassValue::Int(0);
-    });
-    vm_.RegisterNative("GetPlayerStartLocation", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        const int playerId = ResolvePlayerId(data, args[0].intVal);
-        if (playerId >= 0 && playerId < (int)data->playerMapConfig.size()) {
-            const int startIndex = data->playerMapConfig[playerId].startLocationIndex;
-            return JassValue::Int(startIndex >= 0 ? startIndex : playerId);
-        }
-        return JassValue::Int(0);
-    });
-    vm_.RegisterNative("GetPlayerTechMaxAllowed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Int(-1);
-        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
-        if (p) return JassValue::Int(p->GetTechMaxAllowed(War3ID((uint32_t)args[1].intVal)));
-        return JassValue::Int(-1);
-    });
-    vm_.RegisterNative("SetPlayerTechMaxAllowed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
-        if (p) p->SetTechMaxAllowed(War3ID((uint32_t)args[1].intVal), args[2].intVal);
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("IsPlayerObserver", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { return JassValue::Bool(p->IsObserver()); } } return JassValue::Bool(false); });
+    vm_.RegisterNative("IsPlayerRacePrefSet", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !data) return JassValue::Bool(false); const int p = ResolvePlayerId(data, args[0].intVal); if (p < 0 || p >= 24) return JassValue::Bool(false); return JassValue::Bool(data->playerMapConfig[p].racePreference == args[1].intVal); });
+    vm_.RegisterNative("GetPlayerRace", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { return JassValue::Int(p->GetRace()); } } return JassValue::Int(0); });
+    vm_.RegisterNative("GetPlayerColor", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { return JassValue::Int(p->GetColor()); } } return JassValue::Int(0); });
+    vm_.RegisterNative("GetPlayerStartLocation", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); const int playerId = ResolvePlayerId(data, args[0].intVal); if (playerId >= 0 && playerId < (int)data->playerMapConfig.size()) { const int startIndex = data->playerMapConfig[playerId].startLocationIndex; return JassValue::Int(startIndex >= 0 ? startIndex : playerId); } return JassValue::Int(0); });
+    vm_.RegisterNative("GetPlayerTechMaxAllowed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Int(-1); auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal)); if (p) return JassValue::Int(p->GetTechMaxAllowed(War3ID((uint32_t)args[1].intVal))); return JassValue::Int(-1); });
+    vm_.RegisterNative("SetPlayerTechMaxAllowed", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal)); if (p) p->SetTechMaxAllowed(War3ID((uint32_t)args[1].intVal), args[2].intVal); return JassValue::Null(); });
     vm_.RegisterNative("SetPlayerAbilityAvailable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        // Ref CPlayer.setAbilityEnabled + fireRequirementUpdateForAbilities.
         if (args.size() < 3 || !sim) return JassValue::Null();
         CPlayer* player = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
         if (!player) return JassValue::Null();
@@ -1755,21 +1021,12 @@ void JassNatives::RegisterPlayerNatives() {
         for (CUnit* unit : player->GetUnits()) {
             if (!unit) continue;
             for (CAbility* ability : unit->GetAbilities()) {
-                if (ability && ability->GetAlias() == code) {
-                    ability->SetDisabled(!available, CAbilityDisableType::PLAYER);
-                }
+                if (ability && ability->GetAlias() == code) { ability->SetDisabled(!available, CAbilityDisableType::PLAYER); }
             }
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("SetPlayerTechResearched", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
-        if (p) p->SetTechLevel(*sim, War3ID((uint32_t)args[1].intVal), args[2].intVal);
-        return JassValue::Null();
-    });
-    // Research levels on top of the current level (ref addTechResearched;
-    // unknown upgrade ids are ignored like the ref upgrade-type guard).
+    vm_.RegisterNative("SetPlayerTechResearched", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal)); if (p) p->SetTechLevel(*sim, War3ID((uint32_t)args[1].intVal), args[2].intVal); return JassValue::Null(); });
     vm_.RegisterNative("AddPlayerTechResearched", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !sim) return JassValue::Null();
         auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
@@ -1779,34 +1036,10 @@ void JassNatives::RegisterPlayerNatives() {
         p->SetTechLevel(*sim, id, p->GetTechLevel(id) + std::max(0, args[2].intVal));
         return JassValue::Null();
     });
-    vm_.RegisterNative("GetPlayerTechResearched", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Int(0);
-        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
-        return JassValue::Int(p ? p->GetTechLevel(War3ID((uint32_t)args[1].intVal)) : 0);
-    });
-    vm_.RegisterNative("GetPlayerTechCount", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim) return JassValue::Int(0);
-        auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal));
-        return JassValue::Int(p ? p->GetTechCount() : 0);
-    });
-    vm_.RegisterNative("GetPlayerUnitCount", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim) return JassValue::Int(0);
-        const int playerId = ResolvePlayerId(data, args[0].intVal);
-        int count = 0;
-        for (auto* unit : sim->GetUnits()) {
-            if (unit && unit->GetPlayerIndex() == playerId) ++count;
-        }
-        return JassValue::Int(count);
-    });
-    vm_.RegisterNative("GetPlayerStructureCount", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim) return JassValue::Int(0);
-        const int playerId = ResolvePlayerId(data, args[0].intVal);
-        int count = 0;
-        for (auto* unit : sim->GetUnits()) {
-            if (unit && unit->GetPlayerIndex() == playerId && unit->IsBuilding()) ++count;
-        }
-        return JassValue::Int(count);
-    });
+    vm_.RegisterNative("GetPlayerTechResearched", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Int(0); auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal)); return JassValue::Int(p ? p->GetTechLevel(War3ID((uint32_t)args[1].intVal)) : 0); });
+    vm_.RegisterNative("GetPlayerTechCount", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim) return JassValue::Int(0); auto* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal)); return JassValue::Int(p ? p->GetTechCount() : 0); });
+    vm_.RegisterNative("GetPlayerUnitCount", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim) return JassValue::Int(0); const int playerId = ResolvePlayerId(data, args[0].intVal); int count = 0; for (auto* unit : sim->GetUnits()) { if (unit && unit->GetPlayerIndex() == playerId) ++count; } return JassValue::Int(count); });
+    vm_.RegisterNative("GetPlayerStructureCount", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim) return JassValue::Int(0); const int playerId = ResolvePlayerId(data, args[0].intVal); int count = 0; for (auto* unit : sim->GetUnits()) { if (unit && unit->GetPlayerIndex() == playerId && unit->IsBuilding()) ++count; } return JassValue::Int(count); });
     vm_.RegisterNative("SetPlayerAlliance", [this, data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4 || !sim) return JassValue::Null();
         const int sourcePlayerId = ResolvePlayerId(data, args[0].intVal);
@@ -1818,70 +1051,19 @@ void JassNatives::RegisterPlayerNatives() {
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("GetPlayerHandicap", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(1.0f);
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                return JassValue::Real(p->GetHandicap());
-            }
-        }
-        return JassValue::Real(1.0f);
-    });
-    vm_.RegisterNative("SetPlayerHandicap", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                p->SetHandicap(args[1].realVal);
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetPlayerHandicapXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(1.0f);
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                return JassValue::Real(p->GetHandicapXP());
-            }
-        }
-        return JassValue::Real(1.0f);
-    });
-    vm_.RegisterNative("SetPlayerHandicapXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (sim) {
-            if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) {
-                p->SetHandicapXP(args[1].realVal);
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetAllyColorFilterState", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (!args.empty() && data) data->allyColorFilter = args[0].intVal != 0;
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("GetPlayerHandicap", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(1.0f); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { return JassValue::Real(p->GetHandicap()); } } return JassValue::Real(1.0f); });
+    vm_.RegisterNative("SetPlayerHandicap", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { p->SetHandicap(args[1].realVal); } } return JassValue::Null(); });
+    vm_.RegisterNative("GetPlayerHandicapXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(1.0f); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { return JassValue::Real(p->GetHandicapXP()); } } return JassValue::Real(1.0f); });
+    vm_.RegisterNative("SetPlayerHandicapXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (sim) { if (CPlayer* p = sim->GetPlayer(ResolvePlayerId(data, args[0].intVal))) { p->SetHandicapXP(args[1].realVal); } } return JassValue::Null(); });
+    vm_.RegisterNative("SetAllyColorFilterState", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (!args.empty() && data) data->allyColorFilter = args[0].intVal != 0; return JassValue::Null(); });
 }
-
-// ============================================================
-// 14. Hero natives
-// ============================================================
 void JassNatives::RegisterHeroNatives() {
-    vm_.RegisterNative("GetHeroLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            return JassValue::Int(hero->GetHeroLevel());
-        }
-        if (sim) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Int(unit->GetHeroLevel()); }
-        return JassValue::Int(0);
-    });
+    vm_.RegisterNative("GetHeroLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (CAbility* hero = FindHeroAbility(sim, simId)) { return JassValue::Int(hero->GetHeroLevel()); } if (sim) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Int(unit->GetHeroLevel()); } return JassValue::Int(0); });
     vm_.RegisterNative("SetHeroLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         if (simId < 0) return JassValue::Null();
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            hero->SetHeroLevel(*sim, sim->GetUnit(simId), args[1].intVal);
-        } else if (CUnit* unit = sim->GetUnit(simId)) {
-            unit->SetHeroLevel(args[1].intVal);
-        }
+        if (CAbility* hero = FindHeroAbility(sim, simId)) { hero->SetHeroLevel(*sim, sim->GetUnit(simId), args[1].intVal); } else if (CUnit* unit = sim->GetUnit(simId)) { unit->SetHeroLevel(args[1].intVal); }
         return JassValue::Null();
     });
     vm_.RegisterNative("ReviveHeroLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
@@ -1892,91 +1074,38 @@ void JassNatives::RegisterHeroNatives() {
         CUnit* unit = sim->GetUnit(unitId);
         if (!unit) return JassValue::Int(0);
         auto locIt = data->locations.find(locId);
-        if (locIt != data->locations.end() && locIt->second) {
-            unit->SetPosition(locIt->second->x, locIt->second->y);
-        }
+        if (locIt != data->locations.end() && locIt->second) { unit->SetPosition(locIt->second->x, locIt->second->y); }
         unit->SetLife(*sim, std::max(1.0f, unit->GetMaxLife() * 0.5f));
         return JassValue::Int(args[0].intVal);
     });
-    vm_.RegisterNative("GetHeroXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        if (CAbility* hero = FindHeroAbility(sim, data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT))) {
-            return JassValue::Int(hero->GetXP());
-        }
-        return JassValue::Int(0);
-    });
-    vm_.RegisterNative("SetHeroXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        if (CAbility* hero = FindHeroAbility(sim, data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT))) {
-            hero->SetXP(*sim, sim->GetUnit(data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT)), args[1].intVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("AddHeroXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            hero->AddXP(*sim, sim->GetUnit(simId), args[1].intVal);
-        }
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("GetHeroXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); if (CAbility* hero = FindHeroAbility(sim, data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT))) { return JassValue::Int(hero->GetXP()); } return JassValue::Int(0); });
+    vm_.RegisterNative("SetHeroXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); if (CAbility* hero = FindHeroAbility(sim, data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT))) { hero->SetXP(*sim, sim->GetUnit(data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT)), args[1].intVal); } return JassValue::Null(); });
+    vm_.RegisterNative("AddHeroXP", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (CAbility* hero = FindHeroAbility(sim, simId)) { hero->AddXP(*sim, sim->GetUnit(simId), args[1].intVal); } return JassValue::Null(); });
     vm_.RegisterNative("GetHeroStr", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            return JassValue::Int(hero->GetStrength().GetCurrent(hero->GetHeroLevel()));
-        }
+        if (CAbility* hero = FindHeroAbility(sim, simId)) { return JassValue::Int(hero->GetStrength().GetCurrent(hero->GetHeroLevel())); }
         if (sim) { CUnit* unit = sim->GetUnit(simId); if (unit && unit->GetUnitType()) return JassValue::Int(unit->GetUnitType()->GetStartingStrength()); }
         return JassValue::Int(0);
     });
     vm_.RegisterNative("GetHeroAgi", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            return JassValue::Int(hero->GetAgility().GetCurrent(hero->GetHeroLevel()));
-        }
+        if (CAbility* hero = FindHeroAbility(sim, simId)) { return JassValue::Int(hero->GetAgility().GetCurrent(hero->GetHeroLevel())); }
         if (sim) { CUnit* unit = sim->GetUnit(simId); if (unit && unit->GetUnitType()) return JassValue::Int(unit->GetUnitType()->GetStartingAgility()); }
         return JassValue::Int(0);
     });
     vm_.RegisterNative("GetHeroInt", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Int(0);
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            return JassValue::Int(hero->GetIntelligence().GetCurrent(hero->GetHeroLevel()));
-        }
+        if (CAbility* hero = FindHeroAbility(sim, simId)) { return JassValue::Int(hero->GetIntelligence().GetCurrent(hero->GetHeroLevel())); }
         if (sim) { CUnit* unit = sim->GetUnit(simId); if (unit && unit->GetUnitType()) return JassValue::Int(unit->GetUnitType()->GetStartingIntelligence()); }
         return JassValue::Int(0);
     });
-    vm_.RegisterNative("SetHeroStr", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            hero->SetStrengthBase(args[1].intVal);
-            hero->AddStrengthBonus(*sim, sim->GetUnit(simId), 0);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetHeroAgi", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            hero->SetAgilityBase(args[1].intVal);
-            hero->AddAgilityBonus(*sim, sim->GetUnit(simId), 0);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetHeroInt", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            hero->SetIntelligenceBase(args[1].intVal);
-            hero->AddIntelligenceBonus(*sim, sim->GetUnit(simId), 0);
-        }
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("SetHeroStr", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (CAbility* hero = FindHeroAbility(sim, simId)) { hero->SetStrengthBase(args[1].intVal); hero->AddStrengthBonus(*sim, sim->GetUnit(simId), 0); } return JassValue::Null(); });
+    vm_.RegisterNative("SetHeroAgi", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (CAbility* hero = FindHeroAbility(sim, simId)) { hero->SetAgilityBase(args[1].intVal); hero->AddAgilityBonus(*sim, sim->GetUnit(simId), 0); } return JassValue::Null(); });
+    vm_.RegisterNative("SetHeroInt", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (CAbility* hero = FindHeroAbility(sim, simId)) { hero->SetIntelligenceBase(args[1].intVal); hero->AddIntelligenceBonus(*sim, sim->GetUnit(simId), 0); } return JassValue::Null(); });
     vm_.RegisterNative("ModifyHeroStat", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        // (whichHero, statId, modifyMethod, value): stat 0=Str,1=Agi,2=Int;
-        // method 0=set,1=add,2=subtract (common.j MODIFY_HERO_*).
         if (args.size() < 4 || !sim) return JassValue::Null();
         int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         CAbility* hero = FindHeroAbility(sim, simId);
@@ -2001,68 +1130,17 @@ void JassNatives::RegisterHeroNatives() {
         return JassValue::Null();
     });
     vm_.RegisterNative("UnitAddHeroAbility", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(true); });
-    vm_.RegisterNative("SelectHeroSkill", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            hero->SelectHeroSkill(*sim, sim->GetUnit(simId), War3ID((uint32_t)args[1].intVal));
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetHeroSkillPoints", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        if (CAbility* hero = FindHeroAbility(sim, data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT))) {
-            return JassValue::Int(hero->GetSkillPoints());
-        }
-        return JassValue::Int(0);
-    });
-    vm_.RegisterNative("UnitModifySkillPoints", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        CAbility* hero = FindHeroAbility(sim, data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT));
-        if (!hero) return JassValue::Bool(false);
-        hero->SetSkillPoints(std::max(0, hero->GetSkillPoints() + args[1].intVal));
-        return JassValue::Bool(true);
-    });
-    vm_.RegisterNative("UnitStripHeroLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Bool(false);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (CAbility* hero = FindHeroAbility(sim, simId)) {
-            return JassValue::Bool(hero->StripLevels(*sim, sim->GetUnit(simId), args[1].intVal));
-        }
-        return JassValue::Bool(false);
-    });
+    vm_.RegisterNative("SelectHeroSkill", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (CAbility* hero = FindHeroAbility(sim, simId)) { hero->SelectHeroSkill(*sim, sim->GetUnit(simId), War3ID((uint32_t)args[1].intVal)); } return JassValue::Null(); });
+    vm_.RegisterNative("GetHeroSkillPoints", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); if (CAbility* hero = FindHeroAbility(sim, data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT))) { return JassValue::Int(hero->GetSkillPoints()); } return JassValue::Int(0); });
+    vm_.RegisterNative("UnitModifySkillPoints", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); CAbility* hero = FindHeroAbility(sim, data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT)); if (!hero) return JassValue::Bool(false); hero->SetSkillPoints(std::max(0, hero->GetSkillPoints() + args[1].intVal)); return JassValue::Bool(true); });
+    vm_.RegisterNative("UnitStripHeroLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Bool(false); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (CAbility* hero = FindHeroAbility(sim, simId)) { return JassValue::Bool(hero->StripLevels(*sim, sim->GetUnit(simId), args[1].intVal)); } return JassValue::Bool(false); });
     vm_.RegisterNative("UnitRemoveHeroAbility", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Bool(false); });
 }
-
-// ============================================================
-// 15. Item natives
-// ============================================================
 void JassNatives::RegisterItemNatives() {
-    vm_.RegisterNative("CreateItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Int(0);
-        War3ID w3id((uint32_t)args[0].intVal);
-        float x = args[1].realVal, y = args[2].realVal;
-        return JassValue::Int(data ? data->CreateItemHandle(sim, w3id, x, y) : 0);
-    });
-    vm_.RegisterNative("BlzCreateItemWithSkin", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Int(0);
-        War3ID w3id((uint32_t)args[0].intVal);
-        float x = args[1].realVal, y = args[2].realVal;
-        return JassValue::Int(data ? data->CreateItemHandle(sim, w3id, x, y) : 0);
-    });
-    vm_.RegisterNative("ChooseRandomItem", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Int(0);
-        const War3ID itemId = sim->GetItemData()->ChooseRandomItem(
-            args[0].intVal, [sim]() { return sim->SimRand01(); });
-        return JassValue::Int((int)itemId.value);
-    });
-    vm_.RegisterNative("ChooseRandomItemEx", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim || !sim->GetItemData()) return JassValue::Int(0);
-        const CItemClass itemClass = ItemClassFromJassOrdinal(args[0].intVal);
-        const War3ID itemId = sim->GetItemData()->ChooseRandomItem(
-            itemClass, args[1].intVal, [sim]() { return sim->SimRand01(); });
-        return JassValue::Int((int)itemId.value);
-    });
+    vm_.RegisterNative("CreateItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Int(0); War3ID w3id((uint32_t)args[0].intVal); float x = args[1].realVal, y = args[2].realVal; return JassValue::Int(data ? data->CreateItemHandle(sim, w3id, x, y) : 0); });
+    vm_.RegisterNative("BlzCreateItemWithSkin", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Int(0); War3ID w3id((uint32_t)args[0].intVal); float x = args[1].realVal, y = args[2].realVal; return JassValue::Int(data ? data->CreateItemHandle(sim, w3id, x, y) : 0); });
+    vm_.RegisterNative("ChooseRandomItem", [sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Int(0); const War3ID itemId = sim->GetItemData()->ChooseRandomItem( args[0].intVal, [sim]() { return sim->SimRand01(); }); return JassValue::Int((int)itemId.value); });
+    vm_.RegisterNative("ChooseRandomItemEx", [sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim || !sim->GetItemData()) return JassValue::Int(0); const CItemClass itemClass = ItemClassFromJassOrdinal(args[0].intVal); const War3ID itemId = sim->GetItemData()->ChooseRandomItem( itemClass, args[1].intVal, [sim]() { return sim->SimRand01(); }); return JassValue::Int((int)itemId.value); });
     vm_.RegisterNative("CreateItemLoc", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Int(0);
         int locId = data->GetSimHandle(args[1].intVal, JassHandleInfo::LOCATION);
@@ -2072,174 +1150,41 @@ void JassNatives::RegisterItemNatives() {
         War3ID w3id((uint32_t)args[0].intVal);
         return JassValue::Int(data ? data->CreateItemHandle(sim, w3id, locIt->second->x, locIt->second->y) : 0);
     });
-    vm_.RegisterNative("RemoveItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        const int itemId = data ? data->GetSimHandle(args[0].intVal, JassHandleInfo::ITEM) : -1;
-        if (sim && itemId >= 0) {
-            if (auto* item = GetJassItem(data, args[0].intVal)) {
-                item->SetLife(*sim, 0.0f);
-                sim->RemoveItem(item);
-            }
-        }
-        if (itemId >= 0) {
-            data->items.erase(itemId);
-            data->FreeHandle(args[0].intVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetItemTypeId", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        (void)sim;
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Int(item ? (int)item->GetTypeId().value : 0);
-    });
-    vm_.RegisterNative("GetItemLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(100);
-        (void)sim;
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Real(item ? item->GetLife() : 100.0f);
-    });
-    vm_.RegisterNative("SetItemLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetLife(*sim, args[1].realVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetItemX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        (void)sim;
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Real(item ? item->GetX() : 0.0f);
-    });
-    vm_.RegisterNative("GetItemY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        (void)sim;
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Real(item ? item->GetY() : 0.0f);
-    });
-    vm_.RegisterNative("SetItemPosition", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Null();
-        (void)sim;
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetPosition(args[1].realVal, args[2].realVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetItemDropOnDeath", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetDroppedOnDeath(args[1].boolVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetItemDroppable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetDroppable(args[1].boolVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetItemPawnable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetPawnable(args[1].boolVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetItemInvulnerable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetInvulnerable(args[1].boolVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("IsItemInvulnerable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Bool(item ? item->IsInvulnerable() : false);
-    });
-    vm_.RegisterNative("SetItemVisible", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetHidden(!args[1].boolVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("IsItemVisible", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Bool(item ? !item->IsHidden() : false);
-    });
-    vm_.RegisterNative("IsItemPowerup", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Bool(item ? item->IsPowerup() : false);
-    });
-    vm_.RegisterNative("IsItemOwned", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Bool(item ? item->GetOwner() != nullptr : false);
-    });
-    vm_.RegisterNative("IsItemSellable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
-        auto* item = GetJassItem(data, args[0].intVal);
-        const CItemType* type = item ? sim->GetItemData()->GetItem(item->GetTypeId()) : nullptr;
-        return JassValue::Bool(type ? type->sellable : false);
-    });
-    vm_.RegisterNative("IsItemPawnable", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Bool(item ? item->IsPawnable() : false);
-    });
-    vm_.RegisterNative("IsItemIdPowerup", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
-        const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
-        return JassValue::Bool(type ? type->powerup : false);
-    });
-    vm_.RegisterNative("IsItemIdSellable", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
-        const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
-        return JassValue::Bool(type ? type->sellable : false);
-    });
-    vm_.RegisterNative("IsItemIdPawnable", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
-        const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
-        return JassValue::Bool(type ? type->pawnable : false);
-    });
-    vm_.RegisterNative("IsItemIdPerishable", [sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false);
-        const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal));
-        return JassValue::Bool(type ? type->perishable : false);
-    });
+    vm_.RegisterNative("RemoveItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); const int itemId = data ? data->GetSimHandle(args[0].intVal, JassHandleInfo::ITEM) : -1; if (sim && itemId >= 0) { if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetLife(*sim, 0.0f); sim->RemoveItem(item); } } if (itemId >= 0) { data->items.erase(itemId); data->FreeHandle(args[0].intVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GetItemTypeId", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); (void)sim; auto* item = GetJassItem(data, args[0].intVal); return JassValue::Int(item ? (int)item->GetTypeId().value : 0); });
+    vm_.RegisterNative("GetItemLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(100); (void)sim; auto* item = GetJassItem(data, args[0].intVal); return JassValue::Real(item ? item->GetLife() : 100.0f); });
+    vm_.RegisterNative("SetItemLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetLife(*sim, args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GetItemX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); (void)sim; auto* item = GetJassItem(data, args[0].intVal); return JassValue::Real(item ? item->GetX() : 0.0f); });
+    vm_.RegisterNative("GetItemY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); (void)sim; auto* item = GetJassItem(data, args[0].intVal); return JassValue::Real(item ? item->GetY() : 0.0f); });
+    vm_.RegisterNative("SetItemPosition", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Null(); (void)sim; if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetPosition(args[1].realVal, args[2].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetItemDropOnDeath", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetDroppedOnDeath(args[1].boolVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetItemDroppable", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetDroppable(args[1].boolVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetItemPawnable", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetPawnable(args[1].boolVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetItemInvulnerable", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetInvulnerable(args[1].boolVal); } return JassValue::Null(); });
+    vm_.RegisterNative("IsItemInvulnerable", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Bool(item ? item->IsInvulnerable() : false); });
+    vm_.RegisterNative("SetItemVisible", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetHidden(!args[1].boolVal); } return JassValue::Null(); });
+    vm_.RegisterNative("IsItemVisible", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Bool(item ? !item->IsHidden() : false); });
+    vm_.RegisterNative("IsItemPowerup", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Bool(item ? item->IsPowerup() : false); });
+    vm_.RegisterNative("IsItemOwned", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Bool(item ? item->GetOwner() != nullptr : false); });
+    vm_.RegisterNative("IsItemSellable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false); auto* item = GetJassItem(data, args[0].intVal); const CItemType* type = item ? sim->GetItemData()->GetItem(item->GetTypeId()) : nullptr; return JassValue::Bool(type ? type->sellable : false); });
+    vm_.RegisterNative("IsItemPawnable", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Bool(item ? item->IsPawnable() : false); });
+    vm_.RegisterNative("IsItemIdPowerup", [sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false); const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal)); return JassValue::Bool(type ? type->powerup : false); });
+    vm_.RegisterNative("IsItemIdSellable", [sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false); const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal)); return JassValue::Bool(type ? type->sellable : false); });
+    vm_.RegisterNative("IsItemIdPawnable", [sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false); const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal)); return JassValue::Bool(type ? type->pawnable : false); });
+    vm_.RegisterNative("IsItemIdPerishable", [sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Bool(false); const CItemType* type = sim->GetItemData()->GetItem(War3ID((uint32_t)args[0].intVal)); return JassValue::Bool(type ? type->perishable : false); });
     vm_.RegisterNative("EnumItemsInRect", [data = data_, sim = sim_, vmPtr = vmPtr_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         const int rectId = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
         if (rectId < 0) return JassValue::Null();
         auto rectIt = data->rects.find(rectId);
         if (rectIt == data->rects.end()) return JassValue::Null();
-
         const std::string filterFunc = (args.size() > 1 && args[1].type == JassValue::STRING) ? args[1].strVal : "";
         const std::string actionFunc = (args.size() > 2 && args[2].type == JassValue::STRING) ? args[2].strVal : "";
         const int previousFilterItem = data->filterItemHandle;
         const int previousEnumItem = data->enumItemHandle;
         const auto rect = rectIt->second;
-
         std::vector<int> matchingItems;
-        auto acceptItem = [&](int itemId, CItem* item) {
-            if (!item || item->IsDead() || item->IsHidden()) return;
-            data->items[itemId] = item;
-            const int itemHandle = data->AllocHandle(JassHandleInfo::ITEM, itemId);
-            bool accepted = true;
-            if (!filterFunc.empty() && vmPtr) {
-                data->filterItemHandle = itemHandle;
-                accepted = JassValueToBool(CallSyncFunction(vmPtr, filterFunc));
-            }
-            if (accepted) {
-                matchingItems.push_back(itemHandle);
-            }
-        };
-
+        auto acceptItem = [&](int itemId, CItem* item) { if (!item || item->IsDead() || item->IsHidden()) return; data->items[itemId] = item; const int itemHandle = data->AllocHandle(JassHandleInfo::ITEM, itemId); bool accepted = true; if (!filterFunc.empty() && vmPtr) { data->filterItemHandle = itemHandle; accepted = JassValueToBool(CallSyncFunction(vmPtr, filterFunc)); } if (accepted) { matchingItems.push_back(itemHandle); } };
         bool usedWorldCollision = false;
         if (sim && sim->GetWorldCollision()) {
             std::vector<CItem*> worldItems;
@@ -2261,7 +1206,6 @@ void JassNatives::RegisterItemNatives() {
                 acceptItem(itemId, item);
             }
         }
-
         data->filterItemHandle = previousFilterItem;
         if (!actionFunc.empty() && vmPtr) {
             for (int itemHandle : matchingItems) {
@@ -2272,84 +1216,25 @@ void JassNatives::RegisterItemNatives() {
         data->enumItemHandle = previousEnumItem;
         return JassValue::Null();
     });
-    vm_.RegisterNative("GetItemPlayer", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        auto* item = GetJassItem(data, args[0].intVal);
-        auto* owner = item ? item->GetOwner() : nullptr;
-        return owner ? JassValue::Int(data->AllocHandle(JassHandleInfo::PLAYER, owner->GetPlayerIndex()))
-                     : JassValue::Null();
-    });
-    vm_.RegisterNative("SetItemPlayer", [](const std::vector<JassValue>&) -> JassValue { return JassValue::Null(); });
-    vm_.RegisterNative("GetItemCharges", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Int(item ? item->GetCharges() : 0);
-    });
-    vm_.RegisterNative("SetItemCharges", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetCharges(args[1].intVal);
-            item->SetCharged(args[1].intVal > 0);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetItemName", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Str("");
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Str(item ? item->GetName() : "");
-    });
-    vm_.RegisterNative("GetItemLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Int(0);
-        auto* item = GetJassItem(data, args[0].intVal);
-        if (!item) return JassValue::Int(0);
-        const CItemType* type = sim->GetItemData()->GetItem(item->GetTypeId());
-        return JassValue::Int(type ? type->level : 0);
-    });
-    vm_.RegisterNative("GetItemType", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Int(item ? (int)item->GetItemClass() : 0);
-    });
-    vm_.RegisterNative("SetItemDropID", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetDropId(War3ID((uint32_t)args[1].intVal));
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetItemDropID", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Int(item ? (int)item->GetDropId().value : 0);
-    });
-    vm_.RegisterNative("GetItemUserData", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        auto* item = GetJassItem(data, args[0].intVal);
-        return JassValue::Int(item ? item->GetUserData() : 0);
-    });
-    vm_.RegisterNative("SetItemUserData", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (auto* item = GetJassItem(data, args[0].intVal)) {
-            item->SetUserData(args[1].intVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitAddItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Bool(false);
-        CUnit* unit = nullptr;
-        CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal, &unit);
-        CItem* item = GetJassItem(data, args[1].intVal);
-        return JassValue::Bool(inventory && item && inventory->PickUpItem(*sim, unit, item));
-    });
+    vm_.RegisterNative("GetItemPlayer", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); auto* item = GetJassItem(data, args[0].intVal); auto* owner = item ? item->GetOwner() : nullptr; return owner ? JassValue::Int(data->AllocHandle(JassHandleInfo::PLAYER, owner->GetPlayerIndex())) : JassValue::Null(); });
+    vm_.RegisterNative("SetItemPlayer", [](const std::vector<JassValue>&) { return JassValue::Null(); });
+    vm_.RegisterNative("GetItemCharges", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Int(item ? item->GetCharges() : 0); });
+    vm_.RegisterNative("SetItemCharges", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetCharges(args[1].intVal); item->SetCharged(args[1].intVal > 0); } return JassValue::Null(); });
+    vm_.RegisterNative("GetItemName", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Str(""); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Str(item ? item->GetName() : ""); });
+    vm_.RegisterNative("GetItemLevel", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim || !sim->GetItemData()) return JassValue::Int(0); auto* item = GetJassItem(data, args[0].intVal); if (!item) return JassValue::Int(0); const CItemType* type = sim->GetItemData()->GetItem(item->GetTypeId()); return JassValue::Int(type ? type->level : 0); });
+    vm_.RegisterNative("GetItemType", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Int(item ? (int)item->GetItemClass() : 0); });
+    vm_.RegisterNative("SetItemDropID", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetDropId(War3ID((uint32_t)args[1].intVal)); } return JassValue::Null(); });
+    vm_.RegisterNative("GetItemDropID", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Int(item ? (int)item->GetDropId().value : 0); });
+    vm_.RegisterNative("GetItemUserData", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); auto* item = GetJassItem(data, args[0].intVal); return JassValue::Int(item ? item->GetUserData() : 0); });
+    vm_.RegisterNative("SetItemUserData", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (auto* item = GetJassItem(data, args[0].intVal)) { item->SetUserData(args[1].intVal); } return JassValue::Null(); });
+    vm_.RegisterNative("UnitAddItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Bool(false); CUnit* unit = nullptr; CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal, &unit); CItem* item = GetJassItem(data, args[1].intVal); return JassValue::Bool(inventory && item && inventory->PickUpItem(*sim, unit, item)); });
     vm_.RegisterNative("UnitAddItemById", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Int(0);
         CUnit* unit = ResolveJassUnit(data, sim, args[0].intVal);
         if (!unit) return JassValue::Int(0);
         const int itemHandle = data ? data->CreateItemHandle(sim, War3ID((uint32_t)args[1].intVal), unit->GetX(), unit->GetY()) : 0;
         if (CItem* item = GetJassItem(data, itemHandle)) {
-            if (CAbility* inventory = unit->GetAbility(War3ID("AInv"))) {
-                inventory->PickUpItem(*sim, unit, item);
-            }
+            if (CAbility* inventory = unit->GetAbility(War3ID("AInv"))) { inventory->PickUpItem(*sim, unit, item); }
         }
         return JassValue::Int(itemHandle);
     });
@@ -2359,21 +1244,11 @@ void JassNatives::RegisterItemNatives() {
         if (!unit) return JassValue::Int(0);
         const int itemHandle = data ? data->CreateItemHandle(sim, War3ID((uint32_t)args[1].intVal), unit->GetX(), unit->GetY()) : 0;
         if (CItem* item = GetJassItem(data, itemHandle)) {
-            if (CAbility* inventory = unit->GetAbility(War3ID("AInv"))) {
-                inventory->PickUpItem(*sim, unit, item, args[2].intVal);
-            }
+            if (CAbility* inventory = unit->GetAbility(War3ID("AInv"))) { inventory->PickUpItem(*sim, unit, item, args[2].intVal); }
         }
         return JassValue::Int(itemHandle);
     });
-    vm_.RegisterNative("UnitRemoveItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        CUnit* unit = nullptr;
-        CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal, &unit);
-        if (CItem* item = GetJassItem(data, args[1].intVal); inventory && item) {
-            inventory->DropItem(*sim, unit, item);
-        }
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("UnitRemoveItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); CUnit* unit = nullptr; CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal, &unit); if (CItem* item = GetJassItem(data, args[1].intVal); inventory && item) { inventory->DropItem(*sim, unit, item); } return JassValue::Null(); });
     vm_.RegisterNative("UnitRemoveItemFromSlot", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !sim) return JassValue::Int(0);
         CUnit* unit = nullptr;
@@ -2384,36 +1259,11 @@ void JassNatives::RegisterItemNatives() {
         inventory->DropItem(*sim, unit, args[1].intVal);
         return JassValue::Int(handle);
     });
-    vm_.RegisterNative("UnitHasItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Bool(false);
-        CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal);
-        CItem* item = GetJassItem(data, args[1].intVal);
-        return JassValue::Bool(inventory && item && inventory->HasItem(item));
-    });
-    vm_.RegisterNative("UnitItemInSlot", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Int(0);
-        CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal);
-        CItem* item = inventory ? inventory->GetItem(args[1].intVal) : nullptr;
-        return JassValue::Int(item ? data->AllocHandle(JassHandleInfo::ITEM, item->GetHandleId()) : 0);
-    });
-    vm_.RegisterNative("UnitInventorySize", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim) return JassValue::Int(0);
-        CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal);
-        return JassValue::Int(inventory ? inventory->GetItemCapacity() : 0);
-    });
-    vm_.RegisterNative("UnitDropItemPoint", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 4 || !sim) return JassValue::Bool(false);
-        CUnit* unit = nullptr;
-        CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal, &unit);
-        CItem* item = GetJassItem(data, args[1].intVal);
-        return JassValue::Bool(inventory && item && inventory->DropItemAt(*sim, unit, item, args[2].realVal, args[3].realVal));
-    });
-    vm_.RegisterNative("UnitDropItemSlot", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Bool(false);
-        CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal);
-        CItem* item = GetJassItem(data, args[1].intVal);
-        return JassValue::Bool(inventory && item && inventory->MoveItemToSlot(item, args[2].intVal));
-    });
+    vm_.RegisterNative("UnitHasItem", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Bool(false); CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal); CItem* item = GetJassItem(data, args[1].intVal); return JassValue::Bool(inventory && item && inventory->HasItem(item)); });
+    vm_.RegisterNative("UnitItemInSlot", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Int(0); CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal); CItem* item = inventory ? inventory->GetItem(args[1].intVal) : nullptr; return JassValue::Int(item ? data->AllocHandle(JassHandleInfo::ITEM, item->GetHandleId()) : 0); });
+    vm_.RegisterNative("UnitInventorySize", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim) return JassValue::Int(0); CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal); return JassValue::Int(inventory ? inventory->GetItemCapacity() : 0); });
+    vm_.RegisterNative("UnitDropItemPoint", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 4 || !sim) return JassValue::Bool(false); CUnit* unit = nullptr; CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal, &unit); CItem* item = GetJassItem(data, args[1].intVal); return JassValue::Bool(inventory && item && inventory->DropItemAt(*sim, unit, item, args[2].realVal, args[3].realVal)); });
+    vm_.RegisterNative("UnitDropItemSlot", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Bool(false); CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal); CItem* item = GetJassItem(data, args[1].intVal); return JassValue::Bool(inventory && item && inventory->MoveItemToSlot(item, args[2].intVal)); });
     vm_.RegisterNative("UnitDropItemTarget", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !sim) return JassValue::Bool(false);
         CUnit* unit = nullptr;
@@ -2423,25 +1273,11 @@ void JassNatives::RegisterItemNatives() {
         return JassValue::Bool(inventory && item && target &&
                                inventory->DropItemAt(*sim, unit, item, target->GetX(), target->GetY()));
     });
-    auto unitUseItemFn = [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Bool(false);
-        CUnit* unit = nullptr;
-        CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal, &unit);
-        CItem* item = GetJassItem(data, args[1].intVal);
-        return JassValue::Bool(inventory && item && inventory->UseItem(*sim, unit, item));
-    };
+    auto unitUseItemFn = [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Bool(false); CUnit* unit = nullptr; CAbility* inventory = FindUnitInventory(data, sim, args[0].intVal, &unit); CItem* item = GetJassItem(data, args[1].intVal); return JassValue::Bool(inventory && item && inventory->UseItem(*sim, unit, item)); };
     vm_.RegisterNative("UnitUseItem", unitUseItemFn);
-    vm_.RegisterNative("UnitUseItemPoint", [unitUseItemFn](const std::vector<JassValue>& args) -> JassValue {
-        return args.size() < 4 ? JassValue::Bool(false) : unitUseItemFn(args);
-    });
-    vm_.RegisterNative("UnitUseItemTarget", [unitUseItemFn](const std::vector<JassValue>& args) -> JassValue {
-        return args.size() < 3 ? JassValue::Bool(false) : unitUseItemFn(args);
-    });
+    vm_.RegisterNative("UnitUseItemPoint", [unitUseItemFn](const std::vector<JassValue>& args) -> JassValue { return args.size() < 4 ? JassValue::Bool(false) : unitUseItemFn(args); });
+    vm_.RegisterNative("UnitUseItemTarget", [unitUseItemFn](const std::vector<JassValue>& args) -> JassValue { return args.size() < 3 ? JassValue::Bool(false) : unitUseItemFn(args); });
 }
-
-// ============================================================
-// 16. Destructable natives
-// ============================================================
 void JassNatives::RegisterDestructableNatives() {
     vm_.RegisterNative("CreateDestructable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 5 || !sim) return JassValue::Int(0);
@@ -2453,169 +1289,36 @@ void JassNatives::RegisterDestructableNatives() {
         int jassHandle = data->AllocHandle(JassHandleInfo::DESTRUCTABLE, dest->GetHandleId());
         return JassValue::Int(jassHandle);
     });
-    vm_.RegisterNative("CreateDestructableZ", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 5 || !sim) return JassValue::Int(0);
-        War3ID w3id((uint32_t)args[0].intVal);
-        float x = args[1].realVal, y = args[2].realVal;
-        auto* dest = sim->CreateDestructable(w3id, x, y, 100.0f);
-        if (!dest) return JassValue::Int(0);
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::DESTRUCTABLE, dest->GetHandleId()));
-    });
-    vm_.RegisterNative("CreateDeadDestructable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 5 || !sim) return JassValue::Int(0);
-        War3ID w3id((uint32_t)args[0].intVal);
-        float x = args[1].realVal, y = args[2].realVal;
-        auto* dest = sim->CreateDestructable(w3id, x, y, 0.0f);
-        if (!dest) return JassValue::Int(0);
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::DESTRUCTABLE, dest->GetHandleId()));
-    });
-    vm_.RegisterNative("CreateDeadDestructableZ", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 5 || !sim) return JassValue::Int(0);
-        War3ID w3id((uint32_t)args[0].intVal);
-        float x = args[1].realVal, y = args[2].realVal;
-        auto* dest = sim->CreateDestructable(w3id, x, y, 0.0f);
-        if (!dest) return JassValue::Int(0);
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::DESTRUCTABLE, dest->GetHandleId()));
-    });
-    vm_.RegisterNative("RemoveDestructable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Null();
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        if (sim) {
-            if (auto* destructable = sim->GetDestructable(id)) {
-                sim->RemoveDestructable(destructable);
-            }
-        }
-        if (id >= 0) data->FreeHandle(args[0].intVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("KillDestructable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim) return JassValue::Null();
-        const int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        if (auto* destructable = sim->GetDestructable(id)) {
-            destructable->SetLife(*sim, 0.0f);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetDestructableTypeId", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        if (!sim) return JassValue::Int(0);
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        auto* destructable = sim->GetDestructable(id);
-        return JassValue::Int(destructable ? (int)destructable->GetTypeId().value : 0);
-    });
-    vm_.RegisterNative("GetDestructableLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(100);
-        if (!sim) return JassValue::Real(100);
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        auto* destructable = sim->GetDestructable(id);
-        return JassValue::Real(destructable ? destructable->GetLife() : 100.0f);
-    });
-    vm_.RegisterNative("SetDestructableLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        if (auto* destructable = sim->GetDestructable(id)) {
-            destructable->SetLife(*sim, args[1].realVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetDestructableMaxLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim) return JassValue::Real(100);
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        auto* destructable = sim->GetDestructable(id);
-        return JassValue::Real(destructable ? destructable->GetMaxLife() : 100.0f);
-    });
-    vm_.RegisterNative("SetDestructableMaxLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        if (auto* destructable = sim->GetDestructable(id)) {
-            destructable->SetMaxLife(args[1].realVal);
-            if (destructable->GetLife() > destructable->GetMaxLife()) {
-                destructable->SetLife(*sim, destructable->GetMaxLife());
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("GetDestructableX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        if (!sim) return JassValue::Real(0);
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        auto* destructable = sim->GetDestructable(id);
-        return JassValue::Real(destructable ? destructable->GetX() : 0.0f);
-    });
-    vm_.RegisterNative("GetDestructableY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        if (!sim) return JassValue::Real(0);
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        auto* destructable = sim->GetDestructable(id);
-        return JassValue::Real(destructable ? destructable->GetY() : 0.0f);
-    });
-    vm_.RegisterNative("DestructableRestoreLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        // (destructable, life, birth): restore life up to max.
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        if (id >= 0) {
-            if (auto* destructable = sim->GetDestructable(id)) {
-                destructable->SetLife(*sim, std::min(args[1].realVal, destructable->GetMaxLife()));
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("QueueDestructableAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        if (id >= 0) {
-            if (auto* destructable = sim->GetDestructable(id)) destructable->QueueAnimation(args[1].strVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("SetDestructableAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !sim) return JassValue::Null();
-        int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE);
-        if (id >= 0) {
-            if (auto* destructable = sim->GetDestructable(id)) destructable->SetAnimation(args[1].strVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("WaygateActivate", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetWaygateActive(args[1].boolVal); }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("WaygateSetDestination", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) {
-            CUnit* unit = sim->GetUnit(simId);
-            if (unit) unit->SetWaygateDestination(args[1].realVal, args[2].realVal);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("WaygateGetDestinationX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetWaygateX()); }
-        return JassValue::Real(0);
-    });
-    vm_.RegisterNative("WaygateGetDestinationY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Real(0);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetWaygateY()); }
-        return JassValue::Real(0);
-    });
+    vm_.RegisterNative("CreateDestructableZ", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 5 || !sim) return JassValue::Int(0); War3ID w3id((uint32_t)args[0].intVal); float x = args[1].realVal, y = args[2].realVal; auto* dest = sim->CreateDestructable(w3id, x, y, 100.0f); if (!dest) return JassValue::Int(0); return JassValue::Int(data->AllocHandle(JassHandleInfo::DESTRUCTABLE, dest->GetHandleId())); });
+    vm_.RegisterNative("CreateDeadDestructable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 5 || !sim) return JassValue::Int(0); War3ID w3id((uint32_t)args[0].intVal); float x = args[1].realVal, y = args[2].realVal; auto* dest = sim->CreateDestructable(w3id, x, y, 0.0f); if (!dest) return JassValue::Int(0); return JassValue::Int(data->AllocHandle(JassHandleInfo::DESTRUCTABLE, dest->GetHandleId())); });
+    vm_.RegisterNative("CreateDeadDestructableZ", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 5 || !sim) return JassValue::Int(0); War3ID w3id((uint32_t)args[0].intVal); float x = args[1].realVal, y = args[2].realVal; auto* dest = sim->CreateDestructable(w3id, x, y, 0.0f); if (!dest) return JassValue::Int(0); return JassValue::Int(data->AllocHandle(JassHandleInfo::DESTRUCTABLE, dest->GetHandleId())); });
+    vm_.RegisterNative("RemoveDestructable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Null(); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); if (sim) { if (auto* destructable = sim->GetDestructable(id)) { sim->RemoveDestructable(destructable); } } if (id >= 0) data->FreeHandle(args[0].intVal); return JassValue::Null(); });
+    vm_.RegisterNative("KillDestructable", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim) return JassValue::Null(); const int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); if (auto* destructable = sim->GetDestructable(id)) { destructable->SetLife(*sim, 0.0f); } return JassValue::Null(); });
+    vm_.RegisterNative("GetDestructableTypeId", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); if (!sim) return JassValue::Int(0); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); auto* destructable = sim->GetDestructable(id); return JassValue::Int(destructable ? (int)destructable->GetTypeId().value : 0); });
+    vm_.RegisterNative("GetDestructableLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(100); if (!sim) return JassValue::Real(100); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); auto* destructable = sim->GetDestructable(id); return JassValue::Real(destructable ? destructable->GetLife() : 100.0f); });
+    vm_.RegisterNative("SetDestructableLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); if (auto* destructable = sim->GetDestructable(id)) { destructable->SetLife(*sim, args[1].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("GetDestructableMaxLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim) return JassValue::Real(100); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); auto* destructable = sim->GetDestructable(id); return JassValue::Real(destructable ? destructable->GetMaxLife() : 100.0f); });
+    vm_.RegisterNative("SetDestructableMaxLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); if (auto* destructable = sim->GetDestructable(id)) { destructable->SetMaxLife(args[1].realVal); if (destructable->GetLife() > destructable->GetMaxLife()) { destructable->SetLife(*sim, destructable->GetMaxLife()); } } return JassValue::Null(); });
+    vm_.RegisterNative("GetDestructableX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); if (!sim) return JassValue::Real(0); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); auto* destructable = sim->GetDestructable(id); return JassValue::Real(destructable ? destructable->GetX() : 0.0f); });
+    vm_.RegisterNative("GetDestructableY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); if (!sim) return JassValue::Real(0); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); auto* destructable = sim->GetDestructable(id); return JassValue::Real(destructable ? destructable->GetY() : 0.0f); });
+    vm_.RegisterNative("DestructableRestoreLife", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); if (id >= 0) { if (auto* destructable = sim->GetDestructable(id)) { destructable->SetLife(*sim, std::min(args[1].realVal, destructable->GetMaxLife())); } } return JassValue::Null(); });
+    vm_.RegisterNative("QueueDestructableAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); if (id >= 0) { if (auto* destructable = sim->GetDestructable(id)) destructable->QueueAnimation(args[1].strVal); } return JassValue::Null(); });
+    vm_.RegisterNative("SetDestructableAnimation", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !sim) return JassValue::Null(); int id = data->GetSimHandle(args[0].intVal, JassHandleInfo::DESTRUCTABLE); if (id >= 0) { if (auto* destructable = sim->GetDestructable(id)) destructable->SetAnimation(args[1].strVal); } return JassValue::Null(); });
+    vm_.RegisterNative("WaygateActivate", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetWaygateActive(args[1].boolVal); } return JassValue::Null(); });
+    vm_.RegisterNative("WaygateSetDestination", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) unit->SetWaygateDestination(args[1].realVal, args[2].realVal); } return JassValue::Null(); });
+    vm_.RegisterNative("WaygateGetDestinationX", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetWaygateX()); } return JassValue::Real(0); });
+    vm_.RegisterNative("WaygateGetDestinationY", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Real(0); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (simId >= 0 && sim) { CUnit* unit = sim->GetUnit(simId); if (unit) return JassValue::Real(unit->GetWaygateY()); } return JassValue::Real(0); });
     vm_.RegisterNative("EnumDestructablesInRect", [data = data_, sim = sim_, vmPtr = vmPtr_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty()) return JassValue::Null();
         const int rectId = data->GetSimHandle(args[0].intVal, JassHandleInfo::RECT);
         if (rectId < 0) return JassValue::Null();
         auto rectIt = data->rects.find(rectId);
         if (rectIt == data->rects.end()) return JassValue::Null();
-
         const std::string filterFunc = (args.size() > 1 && args[1].type == JassValue::STRING) ? args[1].strVal : "";
         const std::string actionFunc = (args.size() > 2 && args[2].type == JassValue::STRING) ? args[2].strVal : "";
         const int previousFilterDest = data->filterDestructableHandle;
         const int previousEnumDest = data->enumDestructableHandle;
         const auto rect = rectIt->second;
-
         std::vector<int> matching;
         if (sim) {
             for (CDestructable* dest : sim->GetDestructables()) {
@@ -2630,15 +1333,11 @@ void JassNatives::RegisterDestructableNatives() {
                     data->filterDestructableHandle = destHandle;
                     accepted = JassValueToBool(CallSyncFunction(vmPtr, filterFunc));
                 }
-                if (accepted) {
-                    matching.push_back(destHandle);
-                }
+                if (accepted) { matching.push_back(destHandle); }
             }
         }
-
         data->filterDestructableHandle = previousFilterDest;
         if (!actionFunc.empty() && vmPtr && vmPtr->HasFunction(actionFunc)) {
-            // Snapshot: the action may kill/remove destructables.
             for (int destHandle : matching) {
                 data->enumDestructableHandle = destHandle;
                 CallSyncFunction(vmPtr, actionFunc);
@@ -2648,162 +1347,44 @@ void JassNatives::RegisterDestructableNatives() {
         return JassValue::Null();
     });
 }
-
-// ============================================================
-// 17. Trigger & Event natives
-// ============================================================
-
 void JassNatives::RegisterOrderIdNatives() {
-    // Shared issuers: same dispatch as the string-order twins, but the
-    // order id comes straight from the script (ref ById natives).
-    auto issueNoTarget = [data = data_, sim = sim_](int unitHandle, int orderId) -> bool {
-        if (orderId <= 0 || !sim) return false;
-        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
-        if (uSim < 0) return false;
-        CUnit* u = sim->GetUnit(uSim);
-        if (!u) return false;
-        u->IssueOrder(std::make_unique<COrderNoTarget>(orderId));
-        return true;
-    };
-    auto issuePoint = [data = data_, sim = sim_](int unitHandle, int orderId, float x, float y) -> bool {
-        if (orderId <= 0 || !sim) return false;
-        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
-        if (uSim < 0) return false;
-        CUnit* u = sim->GetUnit(uSim);
-        if (!u) return false;
-        u->IssueOrder(std::make_unique<COrderTargetPoint>(orderId, x, y));
-        return true;
-    };
-    auto issueTarget = [data = data_, sim = sim_](int unitHandle, int orderId, int targetHandle) -> bool {
-        if (orderId <= 0 || !sim) return false;
-        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
-        if (uSim < 0) return false;
-        CUnit* u = sim->GetUnit(uSim);
-        if (!u) return false;
-        CWidget* target = ResolveOrderTargetWidget(data, sim, targetHandle);
-        if (!target) return false;
-        u->IssueOrder(std::make_unique<COrderTargetWidget>(orderId, target));
-        return true;
-    };
-    auto groupUnits = [data = data_](int groupHandle) -> std::vector<int> {
-        int simId = data->GetSimHandle(groupHandle, JassHandleInfo::GROUP);
-        if (simId < 0) return {};
-        auto git = data->groups.find(simId);
-        if (git == data->groups.end()) return {};
-        return git->second->unitHandles;
-    };
-    auto locationXY = [data = data_](int locHandle, float& x, float& y) -> bool {
-        int locSim = data->GetSimHandle(locHandle, JassHandleInfo::LOCATION);
-        if (locSim < 0) return false;
-        auto it = data->locations.find(locSim);
-        if (it == data->locations.end()) return false;
-        x = it->second->x;
-        y = it->second->y;
-        return true;
-    };
-
-    vm_.RegisterNative("IssueImmediateOrderById", [issueNoTarget](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        return JassValue::Bool(issueNoTarget(args[0].intVal, args[1].intVal));
-    });
-    vm_.RegisterNative("IssuePointOrderById", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 4) return JassValue::Bool(false);
-        return JassValue::Bool(issuePoint(args[0].intVal, args[1].intVal, args[2].realVal, args[3].realVal));
-    });
-    vm_.RegisterNative("IssuePointOrderByIdLoc", [issuePoint, locationXY](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Bool(false);
-        float x = 0, y = 0;
-        if (!locationXY(args[2].intVal, x, y)) return JassValue::Bool(false);
-        return JassValue::Bool(issuePoint(args[0].intVal, args[1].intVal, x, y));
-    });
-    vm_.RegisterNative("IssueTargetOrderById", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Bool(false);
-        return JassValue::Bool(issueTarget(args[0].intVal, args[1].intVal, args[2].intVal));
-    });
+    auto issueNoTarget = [data = data_, sim = sim_](int unitHandle, int orderId) -> bool { if (orderId <= 0 || !sim) return false; int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT); if (uSim < 0) return false; CUnit* u = sim->GetUnit(uSim); if (!u) return false; u->IssueOrder(std::make_unique<COrderNoTarget>(orderId)); return true; };
+    auto issuePoint = [data = data_, sim = sim_](int unitHandle, int orderId, float x, float y) -> bool { if (orderId <= 0 || !sim) return false; int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT); if (uSim < 0) return false; CUnit* u = sim->GetUnit(uSim); if (!u) return false; u->IssueOrder(std::make_unique<COrderTargetPoint>(orderId, x, y)); return true; };
+    auto issueTarget = [data = data_, sim = sim_](int unitHandle, int orderId, int targetHandle) -> bool { if (orderId <= 0 || !sim) return false; int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT); if (uSim < 0) return false; CUnit* u = sim->GetUnit(uSim); if (!u) return false; CWidget* target = ResolveOrderTargetWidget(data, sim, targetHandle); if (!target) return false; u->IssueOrder(std::make_unique<COrderTargetWidget>(orderId, target)); return true; };
+    auto groupUnits = [data = data_](int groupHandle) -> std::vector<int> { int simId = data->GetSimHandle(groupHandle, JassHandleInfo::GROUP); if (simId < 0) return {}; auto git = data->groups.find(simId); if (git == data->groups.end()) return {}; return git->second->unitHandles; };
+    auto locationXY = [data = data_](int locHandle, float& x, float& y) -> bool { int locSim = data->GetSimHandle(locHandle, JassHandleInfo::LOCATION); if (locSim < 0) return false; auto it = data->locations.find(locSim); if (it == data->locations.end()) return false; x = it->second->x; y = it->second->y; return true; };
+    vm_.RegisterNative("IssueImmediateOrderById", [issueNoTarget](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); return JassValue::Bool(issueNoTarget(args[0].intVal, args[1].intVal)); });
+    vm_.RegisterNative("IssuePointOrderById", [issuePoint](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 4) return JassValue::Bool(false); return JassValue::Bool(issuePoint(args[0].intVal, args[1].intVal, args[2].realVal, args[3].realVal)); });
+    vm_.RegisterNative("IssuePointOrderByIdLoc", [issuePoint, locationXY](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Bool(false); float x = 0, y = 0; if (!locationXY(args[2].intVal, x, y)) return JassValue::Bool(false); return JassValue::Bool(issuePoint(args[0].intVal, args[1].intVal, x, y)); });
+    vm_.RegisterNative("IssueTargetOrderById", [issueTarget](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Bool(false); return JassValue::Bool(issueTarget(args[0].intVal, args[1].intVal, args[2].intVal)); });
     vm_.RegisterNative("IssueBuildOrderById", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 4 || !sim) return JassValue::Bool(false);
         int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         if (uSim < 0) return JassValue::Bool(false);
         CUnit* u = sim->GetUnit(uSim);
         if (!u) return JassValue::Bool(false);
-        // args[1] is the building/unit rawcode used as order id (ref).
         u->IssueOrder(std::make_unique<COrderTargetPoint>((int)(uint32_t)args[1].intVal, args[2].realVal, args[3].realVal));
         return JassValue::Bool(true);
     });
-    // Instant orders execute through the same queue; behaviorally identical
-    // here because orders dispatch on the next sim tick (ref instant queue).
-    vm_.RegisterNative("IssueInstantPointOrder", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 4) return JassValue::Bool(false);
-        return JassValue::Bool(issuePoint(args[0].intVal, ParseOrderString(args[1].strVal), args[2].realVal, args[3].realVal));
-    });
-    vm_.RegisterNative("IssueInstantPointOrderById", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 4) return JassValue::Bool(false);
-        return JassValue::Bool(issuePoint(args[0].intVal, args[1].intVal, args[2].realVal, args[3].realVal));
-    });
-    vm_.RegisterNative("IssueInstantTargetOrder", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Bool(false);
-        return JassValue::Bool(issueTarget(args[0].intVal, ParseOrderString(args[1].strVal), args[2].intVal));
-    });
-    vm_.RegisterNative("IssueInstantTargetOrderById", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Bool(false);
-        return JassValue::Bool(issueTarget(args[0].intVal, args[1].intVal, args[2].intVal));
-    });
-    // Neutral orders: the sim has no neutral-order gate, so these issue
-    // exactly like player orders (ref neutral dispatch without controller).
-    vm_.RegisterNative("IssueNeutralImmediateOrderById", [issueNoTarget](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Bool(false);
-        return JassValue::Bool(issueNoTarget(args[1].intVal, args[2].intVal));
-    });
-    vm_.RegisterNative("IssueNeutralPointOrderById", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 5) return JassValue::Bool(false);
-        return JassValue::Bool(issuePoint(args[1].intVal, args[2].intVal, args[3].realVal, args[4].realVal));
-    });
-    vm_.RegisterNative("IssueNeutralTargetOrderById", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 4) return JassValue::Bool(false);
-        return JassValue::Bool(issueTarget(args[1].intVal, args[2].intVal, args[3].intVal));
-    });
-    vm_.RegisterNative("IssueNeutralImmediateOrder", [issueNoTarget](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Bool(false);
-        return JassValue::Bool(issueNoTarget(args[1].intVal, ParseOrderString(args[2].strVal)));
-    });
-    vm_.RegisterNative("IssueNeutralPointOrder", [issuePoint](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 5) return JassValue::Bool(false);
-        return JassValue::Bool(issuePoint(args[1].intVal, ParseOrderString(args[2].strVal), args[3].realVal, args[4].realVal));
-    });
-    vm_.RegisterNative("IssueNeutralTargetOrder", [issueTarget](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 4) return JassValue::Bool(false);
-        return JassValue::Bool(issueTarget(args[1].intVal, ParseOrderString(args[2].strVal), args[3].intVal));
-    });
-
-    vm_.RegisterNative("GroupImmediateOrderById", [data = data_, sim = sim_, groupUnits](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || args[1].intVal <= 0 || !sim) return JassValue::Bool(false);
-        for (int uh : groupUnits(args[0].intVal)) {
-            int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
-            if (uSim >= 0) {
-                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderNoTarget>(args[1].intVal));
-            }
-        }
-        return JassValue::Bool(true);
-    });
-    vm_.RegisterNative("GroupPointOrderById", [data = data_, sim = sim_, groupUnits](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 4 || args[1].intVal <= 0 || !sim) return JassValue::Bool(false);
-        for (int uh : groupUnits(args[0].intVal)) {
-            int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
-            if (uSim >= 0) {
-                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetPoint>(args[1].intVal, args[2].realVal, args[3].realVal));
-            }
-        }
-        return JassValue::Bool(true);
-    });
+    vm_.RegisterNative("IssueInstantPointOrder", [issuePoint](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 4) return JassValue::Bool(false); return JassValue::Bool(issuePoint(args[0].intVal, ParseOrderString(args[1].strVal), args[2].realVal, args[3].realVal)); });
+    vm_.RegisterNative("IssueInstantPointOrderById", [issuePoint](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 4) return JassValue::Bool(false); return JassValue::Bool(issuePoint(args[0].intVal, args[1].intVal, args[2].realVal, args[3].realVal)); });
+    vm_.RegisterNative("IssueInstantTargetOrder", [issueTarget](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Bool(false); return JassValue::Bool(issueTarget(args[0].intVal, ParseOrderString(args[1].strVal), args[2].intVal)); });
+    vm_.RegisterNative("IssueInstantTargetOrderById", [issueTarget](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Bool(false); return JassValue::Bool(issueTarget(args[0].intVal, args[1].intVal, args[2].intVal)); });
+    vm_.RegisterNative("IssueNeutralImmediateOrderById", [issueNoTarget](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Bool(false); return JassValue::Bool(issueNoTarget(args[1].intVal, args[2].intVal)); });
+    vm_.RegisterNative("IssueNeutralPointOrderById", [issuePoint](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 5) return JassValue::Bool(false); return JassValue::Bool(issuePoint(args[1].intVal, args[2].intVal, args[3].realVal, args[4].realVal)); });
+    vm_.RegisterNative("IssueNeutralTargetOrderById", [issueTarget](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 4) return JassValue::Bool(false); return JassValue::Bool(issueTarget(args[1].intVal, args[2].intVal, args[3].intVal)); });
+    vm_.RegisterNative("IssueNeutralImmediateOrder", [issueNoTarget](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Bool(false); return JassValue::Bool(issueNoTarget(args[1].intVal, ParseOrderString(args[2].strVal))); });
+    vm_.RegisterNative("IssueNeutralPointOrder", [issuePoint](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 5) return JassValue::Bool(false); return JassValue::Bool(issuePoint(args[1].intVal, ParseOrderString(args[2].strVal), args[3].realVal, args[4].realVal)); });
+    vm_.RegisterNative("IssueNeutralTargetOrder", [issueTarget](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 4) return JassValue::Bool(false); return JassValue::Bool(issueTarget(args[1].intVal, ParseOrderString(args[2].strVal), args[3].intVal)); });
+    vm_.RegisterNative("GroupImmediateOrderById", [data = data_, sim = sim_, groupUnits](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || args[1].intVal <= 0 || !sim) return JassValue::Bool(false); for (int uh : groupUnits(args[0].intVal)) { int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT); if (uSim >= 0) { if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderNoTarget>(args[1].intVal)); } } return JassValue::Bool(true); });
+    vm_.RegisterNative("GroupPointOrderById", [data = data_, sim = sim_, groupUnits](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 4 || args[1].intVal <= 0 || !sim) return JassValue::Bool(false); for (int uh : groupUnits(args[0].intVal)) { int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT); if (uSim >= 0) { if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetPoint>(args[1].intVal, args[2].realVal, args[3].realVal)); } } return JassValue::Bool(true); });
     vm_.RegisterNative("GroupPointOrderByIdLoc", [data = data_, sim = sim_, groupUnits, locationXY](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || args[1].intVal <= 0 || !sim) return JassValue::Bool(false);
         float x = 0, y = 0;
         if (!locationXY(args[2].intVal, x, y)) return JassValue::Bool(false);
         for (int uh : groupUnits(args[0].intVal)) {
             int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
-            if (uSim >= 0) {
-                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetPoint>(args[1].intVal, x, y));
-            }
+            if (uSim >= 0) { if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetPoint>(args[1].intVal, x, y)); }
         }
         return JassValue::Bool(true);
     });
@@ -2815,9 +1396,7 @@ void JassNatives::RegisterOrderIdNatives() {
         if (!locationXY(args[2].intVal, x, y)) return JassValue::Bool(false);
         for (int uh : groupUnits(args[0].intVal)) {
             int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
-            if (uSim >= 0) {
-                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetPoint>(orderId, x, y));
-            }
+            if (uSim >= 0) { if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetPoint>(orderId, x, y)); }
         }
         return JassValue::Bool(true);
     });
@@ -2827,181 +1406,44 @@ void JassNatives::RegisterOrderIdNatives() {
         if (!target) return JassValue::Bool(false);
         for (int uh : groupUnits(args[0].intVal)) {
             int uSim = data->GetSimHandle(uh, JassHandleInfo::UNIT);
-            if (uSim >= 0) {
-                if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetWidget>(args[1].intVal, target));
-            }
+            if (uSim >= 0) { if (CUnit* u = sim->GetUnit(uSim)) u->IssueOrder(std::make_unique<COrderTargetWidget>(args[1].intVal, target)); }
         }
         return JassValue::Bool(true);
     });
 }
-
-// ============================================================
-// 25. Terrain / rect / region query natives
-// ============================================================
-
 void JassNatives::RegisterUnitStateNatives() {
-    auto getUnit = [data = data_, sim = sim_](int unitHandle) -> CUnit* {
-        if (!sim) return nullptr;
-        int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT);
-        return uSim >= 0 ? sim->GetUnit(uSim) : nullptr;
-    };
-
-    vm_.RegisterNative("UnitAddType", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        if (!u) return JassValue::Bool(false);
-        u->AddUnitTypeFlag(args[1].intVal);
-        return JassValue::Bool(true);
-    });
-    vm_.RegisterNative("UnitRemoveType", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        if (!u) return JassValue::Bool(false);
-        u->RemoveUnitTypeFlag(args[1].intVal);
-        return JassValue::Bool(true);
-    });
-    vm_.RegisterNative("UnitMakeAbilityPermanent", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        if (!u) return JassValue::Bool(false);
-        CAbility* ability = u->GetAbility(War3ID((uint32_t)args[2].intVal));
-        if (!ability) return JassValue::Bool(false);
-        ability->SetPermanent(args[1].boolVal);
-        return JassValue::Bool(true);
-    });
-    vm_.RegisterNative("UnitApplyTimedLife", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        CUnit* u = getUnit(args[0].intVal);
-        if (!u) return JassValue::Null();
-        if (const auto* mod = sim->GetSimulationModule()) {
-            if (CBuff* timed = mod->CreateTimedLifeBuff((uint32_t)args[1].intVal, args[2].realVal)) {
-                u->AddBuff(std::unique_ptr<CBuff>(timed), *sim);
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitPauseTimedLife", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        CUnit* u = getUnit(args[0].intVal);
-        if (!u) return JassValue::Null();
-        for (const auto& buff : u->GetBuffs()) {
-            if (buff && buff->IsTimedLife()) {
-                buff->SetSuspended(args[1].boolVal);
-            }
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitAddSleep", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (CUnit* u = getUnit(args[0].intVal)) u->SetCanSleep(args[1].boolVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitAddSleepPerm", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (CUnit* u = getUnit(args[0].intVal)) u->SetCanSleepPerm(args[1].boolVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitCanSleep", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        return JassValue::Bool(u && u->CanSleep());
-    });
-    vm_.RegisterNative("UnitCanSleepPerm", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        return JassValue::Bool(u && u->CanSleepPerm());
-    });
-    vm_.RegisterNative("UnitIsSleeping", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        return JassValue::Bool(u && u->IsAsleep());
-    });
-    vm_.RegisterNative("UnitWakeUp", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty() || !sim) return JassValue::Null();
-        if (CUnit* u = getUnit(args[0].intVal)) u->RemoveBuff(War3ID("BUsl"), *sim);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitIgnoreAlarm", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        if (!u) return JassValue::Bool(false);
-        u->SetIgnoreAlarm(args[1].boolVal);
-        return JassValue::Bool(true);
-    });
-    vm_.RegisterNative("UnitIgnoreAlarmToggled", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        return JassValue::Bool(u && u->IsAlarmIgnored());
-    });
+    auto getUnit = [data = data_, sim = sim_](int unitHandle) -> CUnit* { if (!sim) return nullptr; int uSim = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT); return uSim >= 0 ? sim->GetUnit(uSim) : nullptr; };
+    vm_.RegisterNative("UnitAddType", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); if (!u) return JassValue::Bool(false); u->AddUnitTypeFlag(args[1].intVal); return JassValue::Bool(true); });
+    vm_.RegisterNative("UnitRemoveType", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); if (!u) return JassValue::Bool(false); u->RemoveUnitTypeFlag(args[1].intVal); return JassValue::Bool(true); });
+    vm_.RegisterNative("UnitMakeAbilityPermanent", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); if (!u) return JassValue::Bool(false); CAbility* ability = u->GetAbility(War3ID((uint32_t)args[2].intVal)); if (!ability) return JassValue::Bool(false); ability->SetPermanent(args[1].boolVal); return JassValue::Bool(true); });
+    vm_.RegisterNative("UnitApplyTimedLife", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); CUnit* u = getUnit(args[0].intVal); if (!u) return JassValue::Null(); if (const auto* mod = sim->GetSimulationModule()) { if (CBuff* timed = mod->CreateTimedLifeBuff((uint32_t)args[1].intVal, args[2].realVal)) { u->AddBuff(std::unique_ptr<CBuff>(timed), *sim); } } return JassValue::Null(); });
+    vm_.RegisterNative("UnitPauseTimedLife", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); CUnit* u = getUnit(args[0].intVal); if (!u) return JassValue::Null(); for (const auto& buff : u->GetBuffs()) { if (buff && buff->IsTimedLife()) { buff->SetSuspended(args[1].boolVal); } } return JassValue::Null(); });
+    vm_.RegisterNative("UnitAddSleep", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (CUnit* u = getUnit(args[0].intVal)) u->SetCanSleep(args[1].boolVal); return JassValue::Null(); });
+    vm_.RegisterNative("UnitAddSleepPerm", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (CUnit* u = getUnit(args[0].intVal)) u->SetCanSleepPerm(args[1].boolVal); return JassValue::Null(); });
+    vm_.RegisterNative("UnitCanSleep", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); return JassValue::Bool(u && u->CanSleep()); });
+    vm_.RegisterNative("UnitCanSleepPerm", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); return JassValue::Bool(u && u->CanSleepPerm()); });
+    vm_.RegisterNative("UnitIsSleeping", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); return JassValue::Bool(u && u->IsAsleep()); });
+    vm_.RegisterNative("UnitWakeUp", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !sim) return JassValue::Null(); if (CUnit* u = getUnit(args[0].intVal)) u->RemoveBuff(War3ID("BUsl"), *sim); return JassValue::Null(); });
+    vm_.RegisterNative("UnitIgnoreAlarm", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); if (!u) return JassValue::Bool(false); u->SetIgnoreAlarm(args[1].boolVal); return JassValue::Bool(true); });
+    vm_.RegisterNative("UnitIgnoreAlarmToggled", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); return JassValue::Bool(u && u->IsAlarmIgnored()); });
     vm_.RegisterNative("UnitShareVision", [data = data_, getUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3) return JassValue::Null();
         int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         if (uSim < 0 || !getUnit(args[0].intVal)) return JassValue::Null();
-        // Shared with the fog sight pass via the unit, and kept here for scripts.
         const int player = ResolvePlayerId(data, args[1].intVal);
         if (CUnit* u = getUnit(args[0].intVal)) u->SetSharesVisionWith(player, args[2].boolVal);
-        if (args[2].boolVal) {
-            data->unitSharedVision[uSim].insert(player);
-        } else {
+        if (args[2].boolVal) { data->unitSharedVision[uSim].insert(player); } else {
             data->unitSharedVision[uSim].erase(player);
         }
         return JassValue::Null();
     });
-    vm_.RegisterNative("UnitSetConstructionProgress", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        CUnit* u = getUnit(args[0].intVal);
-        if (!u) return JassValue::Null();
-        // Retail takes percent; the field stores seconds (see behavior_build).
-        float buildTime = 1.0f;
-        if (u->GetUnitType() && u->GetUnitType()->GetBuildTime() > 0) {
-            buildTime = (float)u->GetUnitType()->GetBuildTime();
-        }
-        u->SetConstructionProgress(args[1].intVal / 100.0f * buildTime);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitSetUpgradeProgress", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (CUnit* u = getUnit(args[0].intVal)) u->SetUpgradeProgress((float)args[1].intVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitSetUsesAltIcon", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2) return JassValue::Null();
-        if (CUnit* u = getUnit(args[0].intVal)) u->SetUsesAltIcon(args[1].boolVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitCountBuffsEx", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 8) return JassValue::Int(0);
-        CUnit* u = getUnit(args[0].intVal);
-        if (!u) return JassValue::Int(0);
-        int count = 0;
-        for (const auto& buff : u->GetBuffs()) {
-            if (BuffExMatches(buff.get(), args[1].boolVal, args[2].boolVal, args[5].boolVal)) count++;
-        }
-        return JassValue::Int(count);
-    });
-    vm_.RegisterNative("UnitHasBuffsEx", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 8) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        if (!u) return JassValue::Bool(false);
-        for (const auto& buff : u->GetBuffs()) {
-            if (BuffExMatches(buff.get(), args[1].boolVal, args[2].boolVal, args[5].boolVal)) return JassValue::Bool(true);
-        }
-        return JassValue::Bool(false);
-    });
-    vm_.RegisterNative("UnitRemoveBuffs", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 3 || !sim) return JassValue::Null();
-        if (CUnit* u = getUnit(args[0].intVal)) {
-            u->RemoveBuffsIf(*sim, args[1].boolVal, args[2].boolVal, false);
-        }
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("UnitRemoveBuffsEx", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 8 || !sim) return JassValue::Null();
-        if (CUnit* u = getUnit(args[0].intVal)) {
-            u->RemoveBuffsIf(*sim, args[1].boolVal, args[2].boolVal, args[5].boolVal);
-        }
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("UnitSetConstructionProgress", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); CUnit* u = getUnit(args[0].intVal); if (!u) return JassValue::Null(); float buildTime = 1.0f; if (u->GetUnitType() && u->GetUnitType()->GetBuildTime() > 0) { buildTime = (float)u->GetUnitType()->GetBuildTime(); } u->SetConstructionProgress(args[1].intVal / 100.0f * buildTime); return JassValue::Null(); });
+    vm_.RegisterNative("UnitSetUpgradeProgress", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (CUnit* u = getUnit(args[0].intVal)) u->SetUpgradeProgress((float)args[1].intVal); return JassValue::Null(); });
+    vm_.RegisterNative("UnitSetUsesAltIcon", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2) return JassValue::Null(); if (CUnit* u = getUnit(args[0].intVal)) u->SetUsesAltIcon(args[1].boolVal); return JassValue::Null(); });
+    vm_.RegisterNative("UnitCountBuffsEx", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 8) return JassValue::Int(0); CUnit* u = getUnit(args[0].intVal); if (!u) return JassValue::Int(0); int count = 0; for (const auto& buff : u->GetBuffs()) { if (BuffExMatches(buff.get(), args[1].boolVal, args[2].boolVal, args[5].boolVal)) count++; } return JassValue::Int(count); });
+    vm_.RegisterNative("UnitHasBuffsEx", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 8) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); if (!u) return JassValue::Bool(false); for (const auto& buff : u->GetBuffs()) { if (BuffExMatches(buff.get(), args[1].boolVal, args[2].boolVal, args[5].boolVal)) return JassValue::Bool(true); } return JassValue::Bool(false); });
+    vm_.RegisterNative("UnitRemoveBuffs", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 3 || !sim) return JassValue::Null(); if (CUnit* u = getUnit(args[0].intVal)) { u->RemoveBuffsIf(*sim, args[1].boolVal, args[2].boolVal, false); } return JassValue::Null(); });
+    vm_.RegisterNative("UnitRemoveBuffsEx", [getUnit, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 8 || !sim) return JassValue::Null(); if (CUnit* u = getUnit(args[0].intVal)) { u->RemoveBuffsIf(*sim, args[1].boolVal, args[2].boolVal, args[5].boolVal); } return JassValue::Null(); });
     vm_.RegisterNative("UnitDamagePoint", [data = data_, sim = sim_, getUnit](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 11 || !sim) return JassValue::Bool(false);
         CUnit* source = getUnit(args[0].intVal);
@@ -3013,17 +1455,8 @@ void JassNatives::RegisterUnitStateNatives() {
         const bool isRanged = args[7].boolVal;
         const CAttackType attackType = ToScriptAttackType(args[8].intVal);
         const CDamageType damageType = ToScriptDamageType(args[9].intVal);
-        auto strike = [sim, source, radius, x, y, amount, isAttack, isRanged, attackType, damageType]() {
-            for (CUnit* target : sim->GetUnits()) {
-                if (!target || target->IsDead()) continue;
-                const float dx = target->GetX() - x, dy = target->GetY() - y;
-                if (dx * dx + dy * dy > radius * radius) continue;
-                target->Damage(*sim, source, isAttack, isRanged, attackType, damageType, "", amount, 0);
-            }
-        };
-        if (delay > 0.0f) {
-            sim->AddDelayedAction(delay, std::move(strike));
-        } else {
+        auto strike = [sim, source, radius, x, y, amount, isAttack, isRanged, attackType, damageType]() { for (CUnit* target : sim->GetUnits()) { if (!target || target->IsDead()) continue; const float dx = target->GetX() - x, dy = target->GetY() - y; if (dx * dx + dy * dy > radius * radius) continue; target->Damage(*sim, source, isAttack, isRanged, attackType, damageType, "", amount, 0); } };
+        if (delay > 0.0f) { sim->AddDelayedAction(delay, std::move(strike)); } else {
             strike();
         }
         return JassValue::Bool(true);
@@ -3032,37 +1465,16 @@ void JassNatives::RegisterUnitStateNatives() {
         if (args.size() < 5) return JassValue::Null();
         int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
         if (uSim < 0 || !getUnit(args[0].intVal)) return JassValue::Null();
-        // Retained for the minimap/renderer indicator pass.
         JassNativesData::JassUnitIndicator ind;
         ind.red = args[1].intVal; ind.green = args[2].intVal;
         ind.blue = args[3].intVal; ind.alpha = args[4].intVal;
         data->unitIndicators[uSim] = ind;
         return JassValue::Null();
     });
-    vm_.RegisterNative("SetUnitFog", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 5) return JassValue::Null();
-        data->globalUnitFog.a = args[0].realVal;
-        data->globalUnitFog.b = args[1].realVal;
-        data->globalUnitFog.c = args[2].realVal;
-        data->globalUnitFog.d = args[3].realVal;
-        data->globalUnitFog.e = args[4].realVal;
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("WaygateIsActive", [getUnit](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Bool(false);
-        CUnit* u = getUnit(args[0].intVal);
-        return JassValue::Bool(u && u->IsWaygateActive());
-    });
-    vm_.RegisterNative("CachePlayerHeroData", [](const std::vector<JassValue>&) -> JassValue {
-        // Hero persistence needs the save system, which does not exist yet.
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("SetUnitFog", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 5) return JassValue::Null(); data->globalUnitFog.a = args[0].realVal; data->globalUnitFog.b = args[1].realVal; data->globalUnitFog.c = args[2].realVal; data->globalUnitFog.d = args[3].realVal; data->globalUnitFog.e = args[4].realVal; return JassValue::Null(); });
+    vm_.RegisterNative("WaygateIsActive", [getUnit](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Bool(false); CUnit* u = getUnit(args[0].intVal); return JassValue::Bool(u && u->IsWaygateActive()); });
+    vm_.RegisterNative("CachePlayerHeroData", [](const std::vector<JassValue>&) { return JassValue::Null(); });
 }
-
-// ============================================================
-// 30. Camera + game-flow natives
-// ============================================================
-
 namespace {
 enum RefTargetType {
     RTT_AIR = 0, RTT_ALIVE = 1, RTT_ALLIES = 2, RTT_DEAD = 3, RTT_DEBRIS = 4,
@@ -3074,24 +1486,14 @@ enum RefTargetType {
     RTT_WARD = 25, RTT_ANCIENT = 26, RTT_NONANCIENT = 27, RTT_FRIEND = 28,
     RTT_BRIDGE = 29, RTT_DECORATION = 30,
 };
-
-// Mirror of ref CUnit.canBeTargetedBy core rules. Returns "" when the
-// target is valid, otherwise the CommandStringErrorKeys key (same strings
-// GetTargetError surfaces in ref). Approximations vs ref are marked:
-// visibility uses hidden/invisible state (no fog lookup); flying uses the
-// movement type (no targetedAs set); wards/trees use classifications.
 std::string CheckTargetAllowed(CSimulation& sim, CUnit* target, CUnit* source,
                                const std::unordered_set<int>& allowed, bool targeted = true) {
     if (!target || !source) return "Targetunit";
     const bool self = target->GetHandleId() == source->GetHandleId();
     auto has = [&](int t) { return allowed.count(t) > 0; };
     if (self && has(RTT_NOTSELF) && !has(RTT_SELF)) return "Notself";
-    if (has(RTT_PLAYERUNITS) && source->GetPlayerIndex() != target->GetPlayerIndex()) {
-        return "Targetowned";
-    }
-    if (has(31) && target->IsMagicImmune()) return "Immunetomagic"; // NON_MAGIC_IMMUNE
-    // Visibility approx: hidden or unseen-invisible targets can't be picked
-    // (ref only checks this for targeted effects).
+    if (has(RTT_PLAYERUNITS) && source->GetPlayerIndex() != target->GetPlayerIndex()) { return "Targetowned"; }
+    if (has(31) && target->IsMagicImmune()) return "Immunetomagic";
     if (targeted && (target->IsHidden() || target->IsInvisibleTo(source))) return "Targetunit";
     const CUnitType* type = target->GetUnitType();
     const bool isBuilding = target->IsBuilding();
@@ -3099,8 +1501,6 @@ std::string CheckTargetAllowed(CSimulation& sim, CUnit* target, CUnit* source,
     const bool tgtGround = !isBuilding && !isFlying;
     const bool tgtStructure = isBuilding;
     const bool tgtAir = isFlying;
-    // Ref gate: containsAll(targetedAs) OR none of GROUND/STRUCTURE/AIR is
-    // even mentioned (empty/orthogonal sets fall into the alliance block).
     const bool anyAs = has(RTT_GROUND) || has(RTT_STRUCTURE) || has(RTT_AIR);
     const bool coversAs = ((has(RTT_GROUND) || !tgtGround) && (has(RTT_STRUCTURE) || !tgtStructure) &&
                            (has(RTT_AIR) || !tgtAir)) ||
@@ -3165,39 +1565,12 @@ std::string CheckTargetAllowed(CSimulation& sim, CUnit* target, CUnit* source,
     if (tgtAir && !has(RTT_AIR)) return "Noair";
     return "Notthisunit";
 }
-} // namespace
-
+}
 void JassNatives::RegisterTargetingNatives() {
-    vm_.RegisterNative("CreateTargetTypes", [data = data_](const std::vector<JassValue>&) -> JassValue {
-        if (!data) return JassValue::Int(0);
-        int id = data->nextTargetTypeSetId++;
-        data->targetTypeSets[id] = {};
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::TARGET_TYPES, id));
-    });
-    vm_.RegisterNative("TargetTypesAdd", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !data) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::TARGET_TYPES);
-        if (simId < 0) return JassValue::Null();
-        data->targetTypeSets[simId].insert(args[1].intVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("TargetTypesRemove", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !data) return JassValue::Null();
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::TARGET_TYPES);
-        if (simId < 0) return JassValue::Null();
-        auto it = data->targetTypeSets.find(simId);
-        if (it != data->targetTypeSets.end()) it->second.erase(args[1].intVal);
-        return JassValue::Null();
-    });
-    vm_.RegisterNative("TargetTypesContains", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !data) return JassValue::Bool(false);
-        int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::TARGET_TYPES);
-        if (simId < 0) return JassValue::Bool(false);
-        auto it = data->targetTypeSets.find(simId);
-        return JassValue::Bool(it != data->targetTypeSets.end() && it->second.count(args[1].intVal) > 0);
-    });
-    // Parse a string list into a target-types set (ref parseTargetTypeSet):
-    // same name table as ParseTargetType; unknown names are skipped.
+    vm_.RegisterNative("CreateTargetTypes", [data = data_](const std::vector<JassValue>&) -> JassValue { if (!data) return JassValue::Int(0); int id = data->nextTargetTypeSetId++; data->targetTypeSets[id] = {}; return JassValue::Int(data->AllocHandle(JassHandleInfo::TARGET_TYPES, id)); });
+    vm_.RegisterNative("TargetTypesAdd", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !data) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::TARGET_TYPES); if (simId < 0) return JassValue::Null(); data->targetTypeSets[simId].insert(args[1].intVal); return JassValue::Null(); });
+    vm_.RegisterNative("TargetTypesRemove", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !data) return JassValue::Null(); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::TARGET_TYPES); if (simId < 0) return JassValue::Null(); auto it = data->targetTypeSets.find(simId); if (it != data->targetTypeSets.end()) it->second.erase(args[1].intVal); return JassValue::Null(); });
+    vm_.RegisterNative("TargetTypesContains", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !data) return JassValue::Bool(false); int simId = data->GetSimHandle(args[0].intVal, JassHandleInfo::TARGET_TYPES); if (simId < 0) return JassValue::Bool(false); auto it = data->targetTypeSets.find(simId); return JassValue::Bool(it != data->targetTypeSets.end() && it->second.count(args[1].intVal) > 0); });
     vm_.RegisterNative("ParseTargetTypes", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.empty() || !data) return JassValue::Int(0);
         int listSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::STRING_LIST);
@@ -3212,9 +1585,6 @@ void JassNatives::RegisterTargetingNatives() {
         }
         return JassValue::Int(data->AllocHandle(JassHandleInfo::TARGET_TYPES, id));
     });
-    // Validity natives take a target-types set directly. Ref threads the
-    // set through ability level-data (no level-data framework here), and an
-    // empty set is valid per ref. Destructables/items only check liveness.
     auto checkTarget = [data = data_, sim = sim_](const std::vector<JassValue>& args) -> std::string {
         if (args.size() < 3 || !sim) return "Targetunit";
         int setSim = data->GetSimHandle(args[2].intVal, JassHandleInfo::TARGET_TYPES);
@@ -3237,17 +1607,9 @@ void JassNatives::RegisterTargetingNatives() {
         }
         return "Targetunit";
     };
-    vm_.RegisterNative("IsValidTarget", [checkTarget](const std::vector<JassValue>& args) -> JassValue {
-        return JassValue::Bool(checkTarget(args).empty());
-    });
-    vm_.RegisterNative("IsUnitValidTarget", [checkTarget](const std::vector<JassValue>& args) -> JassValue {
-        return JassValue::Bool(checkTarget(args).empty());
-    });
-    vm_.RegisterNative("GetTargetError", [checkTarget](const std::vector<JassValue>& args) -> JassValue {
-        return JassValue::Str(checkTarget(args));
-    });
-    // Unit-only error query with an explicit targeted flag (ref
-    // GetUnitTargetError threads targetedEffect into the visibility rule).
+    vm_.RegisterNative("IsValidTarget", [checkTarget](const std::vector<JassValue>& args) -> JassValue { return JassValue::Bool(checkTarget(args).empty()); });
+    vm_.RegisterNative("IsUnitValidTarget", [checkTarget](const std::vector<JassValue>& args) -> JassValue { return JassValue::Bool(checkTarget(args).empty()); });
+    vm_.RegisterNative("GetTargetError", [checkTarget](const std::vector<JassValue>& args) -> JassValue { return JassValue::Str(checkTarget(args)); });
     vm_.RegisterNative("GetUnitTargetError", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !sim) return JassValue::Str("Targetunit");
         int setSim = data->GetSimHandle(args[2].intVal, JassHandleInfo::TARGET_TYPES);
@@ -3263,14 +1625,7 @@ void JassNatives::RegisterTargetingNatives() {
         return JassValue::Str(CheckTargetAllowed(*sim, target, source, allowed, targeted));
     });
 }
-
-// ============================================================
-// 37c. Stat-bonus / state-mod natives (ref bonus API)
-// ============================================================
 namespace {
-// NonStackingStatBuffType ordinal -> aura slot. Returns false for types
-// with no aura slot (MAXHP/MAXMP handled JASS-side; HPSTEAL/THORNS have
-// no unit mutator and stay stored-only).
 bool StatBonusAuraSlot(int type, CAuraEffectType& slot, bool& percent) {
     switch (type) {
         case 0: slot = CAuraEffectType::DAMAGE; percent = false; return true;
@@ -3293,13 +1648,11 @@ bool StatBonusAuraSlot(int type, CAuraEffectType& slot, bool& percent) {
         default: return false;
     }
 }
-} // namespace
-
+}
 void JassNatives::RecomputeMaxStatBonus(int unitSim, int type) {
     if (!data_ || !sim_) return;
     CUnit* unit = sim_->GetUnit(unitSim);
     if (!unit) return;
-    // Strongest active value wins; PCT scales the type's base max.
     float best = 0.0f;
     bool have = false;
     for (const auto& [id, bonus] : data_->statBonuses) {
@@ -3321,19 +1674,14 @@ void JassNatives::RecomputeMaxStatBonus(int unitSim, int type) {
     const float target = have ? best : 0.0f;
     if (target != applied) {
         const float delta = target - applied;
-        if (type == 18 || type == 19) {
-            unit->AddBonusMaxLife(delta);
-        } else {
+        if (type == 18 || type == 19) { unit->AddBonusMaxLife(delta); } else {
             unit->AddBonusMaxMana((int)std::lround(delta));
         }
-        if (have) {
-            data_->maxStatApplied[key] = target;
-        } else {
+        if (have) { data_->maxStatApplied[key] = target; } else {
             data_->maxStatApplied.erase(key);
         }
     }
 }
-
 void JassNatives::RecomputeStateMod(int unitSim, int type) {
     if (!data_ || !sim_) return;
     CUnit* unit = sim_->GetUnit(unitSim);
@@ -3346,33 +1694,18 @@ void JassNatives::RecomputeStateMod(int unitSim, int type) {
             break;
         }
     }
-    // Only mapped flags have unit setters; the rest stay stored.
     switch (type) {
-        case 0: unit->SetEthereal(on); break; // ETHEREAL
-        case 4: unit->SetMagicImmune(on); break; // MAGIC_IMMUNE
-        case 17: unit->SetInvulnerable(on); break; // INVULNERABLE
-        case 18: unit->SetInvisible(on); break; // INVISIBLE
-        case 19: unit->SetDetector(on); break; // DETECTOR
+        case 0: unit->SetEthereal(on); break;
+        case 4: unit->SetMagicImmune(on); break;
+        case 17: unit->SetInvulnerable(on); break;
+        case 18: unit->SetInvisible(on); break;
+        case 19: unit->SetDetector(on); break;
         default: break;
     }
 }
-
 void JassNatives::RegisterBonusNatives() {
-    auto getBonus = [data = data_](int handle) -> std::shared_ptr<JassNativesData::JassStatBonus> {
-        if (!data) return nullptr;
-        int simId = data->GetSimHandle(handle, JassHandleInfo::STAT_BONUS);
-        if (simId < 0) return nullptr;
-        auto it = data->statBonuses.find(simId);
-        return it != data->statBonuses.end() ? it->second : nullptr;
-    };
-    auto getMod = [data = data_](int handle) -> std::shared_ptr<JassNativesData::JassStateMod> {
-        if (!data) return nullptr;
-        int simId = data->GetSimHandle(handle, JassHandleInfo::STATE_MOD);
-        if (simId < 0) return nullptr;
-        auto it = data->stateMods.find(simId);
-        return it != data->stateMods.end() ? it->second : nullptr;
-    };
-    // Apply one bonus record to a unit (aura slot or JASS-side max stat).
+    auto getBonus = [data = data_](int handle) -> std::shared_ptr<JassNativesData::JassStatBonus> { if (!data) return nullptr; int simId = data->GetSimHandle(handle, JassHandleInfo::STAT_BONUS); if (simId < 0) return nullptr; auto it = data->statBonuses.find(simId); return it != data->statBonuses.end() ? it->second : nullptr; };
+    auto getMod = [data = data_](int handle) -> std::shared_ptr<JassNativesData::JassStateMod> { if (!data) return nullptr; int simId = data->GetSimHandle(handle, JassHandleInfo::STATE_MOD); if (simId < 0) return nullptr; auto it = data->stateMods.find(simId); return it != data->stateMods.end() ? it->second : nullptr; };
     auto applyBonus = [this](int bonusSim, int unitSim) {
         if (!data_ || !sim_) return;
         auto bit = data_->statBonuses.find(bonusSim);
@@ -3381,11 +1714,7 @@ void JassNatives::RegisterBonusNatives() {
         const auto& bonus = bit->second;
         CAuraEffectType slot = CAuraEffectType::DAMAGE;
         bool percent = false;
-        if (StatBonusAuraSlot(bonus->type, slot, percent)) {
-            unit->AddAuraStatBonus(slot, percent, War3ID((uint32_t)bonusSim), bonus->value);
-        } else if (bonus->type >= 18 && bonus->type <= 21) {
-            RecomputeMaxStatBonus(unitSim, bonus->type);
-        }
+        if (StatBonusAuraSlot(bonus->type, slot, percent)) { unit->AddAuraStatBonus(slot, percent, War3ID((uint32_t)bonusSim), bonus->value); } else if (bonus->type >= 18 && bonus->type <= 21) { RecomputeMaxStatBonus(unitSim, bonus->type); }
     };
     auto unapplyBonus = [this](int bonusSim, int unitSim) {
         if (!data_ || !sim_) return;
@@ -3395,11 +1724,7 @@ void JassNatives::RegisterBonusNatives() {
         const auto& bonus = bit->second;
         CAuraEffectType slot = CAuraEffectType::DAMAGE;
         bool percent = false;
-        if (StatBonusAuraSlot(bonus->type, slot, percent)) {
-            unit->RemoveAuraStatBonus(slot, percent, War3ID((uint32_t)bonusSim));
-        } else if (bonus->type >= 18 && bonus->type <= 21) {
-            RecomputeMaxStatBonus(unitSim, bonus->type);
-        }
+        if (StatBonusAuraSlot(bonus->type, slot, percent)) { unit->RemoveAuraStatBonus(slot, percent, War3ID((uint32_t)bonusSim)); } else if (bonus->type >= 18 && bonus->type <= 21) { RecomputeMaxStatBonus(unitSim, bonus->type); }
     };
     vm_.RegisterNative("CreateNonStackingStatBonus", [data = data_](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 3 || !data) return JassValue::Int(0);
@@ -3439,25 +1764,12 @@ void JassNatives::RegisterBonusNatives() {
         auto it = bSim >= 0 ? data->statBonuses.find(bSim) : data->statBonuses.end();
         if (it == data->statBonuses.end()) return JassValue::Null();
         it->second->value = args[1].type == JassValue::REAL ? args[1].realVal : (float)args[1].intVal;
-        // Re-apply to every holder (aura slots dedupe by record id).
         const std::vector<int> holders(it->second->holders.begin(), it->second->holders.end());
         for (int uSim : holders) applyBonus(bSim, uSim);
         return JassValue::Null();
     });
-    vm_.RegisterNative("GetNonStackingStatBonusType", [getBonus](const std::vector<JassValue>& args) -> JassValue {
-        if (args.empty()) return JassValue::Int(0);
-        auto bonus = getBonus(args[0].intVal);
-        return JassValue::Int(bonus ? bonus->type : 0);
-    });
-    vm_.RegisterNative("CreateStateMod", [data = data_](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !data) return JassValue::Int(0);
-        auto mod = std::make_shared<JassNativesData::JassStateMod>();
-        mod->type = args[0].intVal;
-        mod->value = args[1].intVal;
-        int id = data->nextStateModId++;
-        data->stateMods[id] = std::move(mod);
-        return JassValue::Int(data->AllocHandle(JassHandleInfo::STATE_MOD, id));
-    });
+    vm_.RegisterNative("GetNonStackingStatBonusType", [getBonus](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); auto bonus = getBonus(args[0].intVal); return JassValue::Int(bonus ? bonus->type : 0); });
+    vm_.RegisterNative("CreateStateMod", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !data) return JassValue::Int(0); auto mod = std::make_shared<JassNativesData::JassStateMod>(); mod->type = args[0].intVal; mod->value = args[1].intVal; int id = data->nextStateModId++; data->stateMods[id] = std::move(mod); return JassValue::Int(data->AllocHandle(JassHandleInfo::STATE_MOD, id)); });
     vm_.RegisterNative("AddUnitStateMod", [this](const std::vector<JassValue>& args) -> JassValue {
         if (args.size() < 2 || !data_) return JassValue::Null();
         int uSim = data_->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
@@ -3490,15 +1802,5 @@ void JassNatives::RegisterBonusNatives() {
         for (int uSim : holders) RecomputeStateMod(uSim, it->second->type);
         return JassValue::Null();
     });
-    vm_.RegisterNative("RecomputeStateModsOnUnit", [this](const std::vector<JassValue>& args) -> JassValue {
-        if (args.size() < 2 || !data_) return JassValue::Null();
-        int uSim = data_->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT);
-        if (uSim < 0) return JassValue::Null();
-        RecomputeStateMod(uSim, args[1].intVal);
-        return JassValue::Null();
-    });
+    vm_.RegisterNative("RecomputeStateModsOnUnit", [this](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !data_) return JassValue::Null(); int uSim = data_->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (uSim < 0) return JassValue::Null(); RecomputeStateMod(uSim, args[1].intVal); return JassValue::Null(); });
 }
-
-// ============================================================
-// 37. Misc unit / destructable / campaign / flow natives
-// ============================================================

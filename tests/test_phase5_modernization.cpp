@@ -8833,7 +8833,7 @@ bool TestPhase29StageOOO1War3GameModuleV29AssetPathAliasesAndSoundModelRedirecti
     CSimulation sim;
     auto war3Mod = std::make_shared<war3::War3GameModule>();
     sim.SetSimulationModule(war3Mod);
-    TEST_ASSERT(war3Mod->GetModuleVersion() == 29u);
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 29u);
     const uint64_t hashBefore = war3Mod->OnComputeModuleStateHash(sim);
 
     war3Mod->RegisterAssetPathAlias(
@@ -8891,7 +8891,7 @@ bool TestPhase29StageOOO2DynamicPluginSOV29AndCloudRetailMapsEndToEndSuite() {
         {
             auto dynSimMod = loader.CreateSimulationModule(pluginKey);
             TEST_ASSERT(dynSimMod != nullptr);
-            TEST_ASSERT(dynSimMod->GetModuleVersion() == 29u);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 29u);
         }
         TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
     }
@@ -8908,7 +8908,7 @@ bool TestPhase29StageOOO2DynamicPluginSOV29AndCloudRetailMapsEndToEndSuite() {
         std::fclose(mf);
 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
-        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 29u);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 29u);
 
         MpqManager mpq;
         CSimulation mapSim;
@@ -8922,5 +8922,384 @@ bool TestPhase29StageOOO2DynamicPluginSOV29AndCloudRetailMapsEndToEndSuite() {
         session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
     }
 
+    return true;
+}
+
+// ============================================================================
+// Phase 30 (Track B): Table-Driven Spell Archetype Engine & Physical Ability Relocation
+// ============================================================================
+
+bool TestPhase30StagePPP1SpellArchetypeRuleAndTableRuleSpellEngine() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+
+    auto* caster = sim.AdoptUnit(std::make_unique<CUnit>(93010, nullptr, 0, War3ID("Hamg"), 100.0f, 100.0f, 0.0f));
+    auto* enemy  = sim.AdoptUnit(std::make_unique<CUnit>(93011, nullptr, 1, War3ID("ogru"), 220.0f, 100.0f, 0.0f));
+    TEST_ASSERT(caster != nullptr && enemy != nullptr);
+    caster->SetMaxMana(500);
+    caster->SetMana(500.0f);
+    enemy->SetMaxLife(1000.0f);
+    enemy->SetLife(sim, 1000.0f);
+    sim.Update();
+
+    // 1. Point Wave Damage via SpellArchetypeRule
+    SpellArchetypeRule waveRule;
+    waveRule.rawcode = War3ID("ATw1").value;
+    waveRule.targetType = CSpellTargetType::TARGET_POINT;
+    waveRule.effectKind = SpellArchetypeEffectKind::POINT_WAVE_DAMAGE;
+    waveRule.attackType = CAttackType::SPELLS;
+    waveRule.damageType = CDamageType::FIRE;
+    waveRule.castRange = 700.0f;
+    waveRule.cooldown = 8.0f;
+    waveRule.manaCost = 60;
+    waveRule.param0 = 3.0f;  // 3 waves
+    waveRule.param1 = 40.0f; // 40 damage per wave
+    waveRule.radius = 200.0f;
+
+    auto waveSpell = std::make_unique<CAbilityTableRuleSpell>(93001, waveRule);
+    TEST_ASSERT(waveSpell->GetTargetType() == CSpellTargetType::TARGET_POINT);
+    TEST_ASSERT(waveSpell->GetManaCost() == 60);
+    const float lifeBefore = enemy->GetLife();
+    waveSpell->DoEffect(sim, caster, 220.0f, 100.0f);
+    TEST_ASSERT(enemy->GetLife() < lifeBefore);
+
+    // 2. Self Divine Shield via SpellArchetypeRule
+    SpellArchetypeRule shieldRule;
+    shieldRule.rawcode = War3ID("ATs1").value;
+    shieldRule.targetType = CSpellTargetType::NO_TARGET;
+    shieldRule.effectKind = SpellArchetypeEffectKind::SELF_DIVINE_SHIELD;
+    shieldRule.duration = 12.0f;
+    auto shieldSpell = std::make_unique<CAbilityTableRuleSpell>(93002, shieldRule);
+    shieldSpell->DoEffect(sim, caster);
+    TEST_ASSERT(caster->GetBuff(War3ID("Bdsh")) != nullptr);
+
+    // 3. Target Hex Buff via SpellArchetypeRule
+    SpellArchetypeRule hexRule;
+    hexRule.rawcode = War3ID("ATh1").value;
+    hexRule.targetType = CSpellTargetType::TARGET_UNIT;
+    hexRule.effectKind = SpellArchetypeEffectKind::TARGET_HEX_BUFF;
+    hexRule.duration = 10.0f;
+    auto hexSpell = std::make_unique<CAbilityTableRuleSpell>(93003, hexRule);
+    hexSpell->DoEffect(sim, caster, enemy);
+    TEST_ASSERT(enemy->GetBuff(War3ID("BOhx")) != nullptr);
+
+    return true;
+}
+
+bool TestPhase30StagePPP2War3SpellsPhysicalRelocationAndCatalogParity() {
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    CSimulation sim;
+    sim.SetSimulationModule(war3Mod);
+
+    // Verify canonical hero, unit, item, and aura abilities from relocated war3_spells.h/.cpp
+    const War3ID kSampleCodes[] = {
+        War3ID("AHbz"), War3ID("AHhb"), War3ID("AHds"), War3ID("AHtc"), War3ID("AHtb"),
+        War3ID("AOws"), War3ID("AOcl"), War3ID("AOhw"), War3ID("AOhx"), War3ID("AUdc"),
+        War3ID("AUfn"), War3ID("AEmb"), War3ID("AEer"), War3ID("AHad"), War3ID("AOae"),
+        War3ID("AUau"), War3ID("AEah"), War3ID("AIat"), War3ID("AIde"), War3ID("Amil"),
+        War3ID("Abgm"), War3ID("Aent")
+    };
+    for (War3ID code : kSampleCodes) {
+        auto ab = AbilityFactory::CreateAbility(sim.AllocateHandleId(), code);
+        TEST_ASSERT(ab != nullptr);
+        TEST_ASSERT(!ab->IsGenericPlaceholder());
+    }
+    return true;
+}
+
+bool TestPhase30StageQQQ1War3GameModuleV30CustomSpellArchetypeRegistration() {
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 30u);
+
+    CSimulation sim;
+    sim.SetSimulationModule(war3Mod);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    const uint64_t hashBefore = war3Mod->OnComputeModuleStateHash(sim);
+
+    SpellArchetypeRule goldRule;
+    goldRule.rawcode = War3ID("ATg0").value;
+    goldRule.targetType = CSpellTargetType::NO_TARGET;
+    goldRule.category = CAbilityCategory::ITEM;
+    goldRule.effectKind = SpellArchetypeEffectKind::GRANT_CASTER_GOLD;
+    goldRule.param0 = 777.0f;
+
+    war3Mod->RegisterSpellArchetypeRule(goldRule);
+    TEST_ASSERT(war3Mod->HasSpellArchetypeRule(War3ID("ATg0")));
+    TEST_ASSERT(war3Mod->OnHasSpellArchetypeRule(War3ID("ATg0").value));
+    TEST_ASSERT(war3Mod->FindSpellArchetypeRule(War3ID("ATg0")) != nullptr);
+
+    const uint64_t hashAfter = war3Mod->OnComputeModuleStateHash(sim);
+    TEST_ASSERT(hashAfter != hashBefore);
+
+    auto* hero = sim.AdoptUnit(std::make_unique<CUnit>(93020, nullptr, 0, War3ID("Hpal"), 0.0f, 0.0f, 0.0f));
+    TEST_ASSERT(hero != nullptr);
+    auto created = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("ATg0"));
+    TEST_ASSERT(created != nullptr);
+    const int goldBefore = sim.GetPlayer(0)->GetGold();
+    created->DoEffect(sim, hero);
+    TEST_ASSERT(sim.GetPlayer(0)->GetGold() == goldBefore + 777);
+
+    // Verify WM30 module snapshot round-trip preserves customSpellArchetypeRules_ and factory creator
+    std::vector<uint8_t> modSnap;
+    war3Mod->OnCaptureModuleSnapshot(sim, modSnap);
+    TEST_ASSERT(war3Mod->UnregisterSpellArchetypeRule(War3ID("ATg0")));
+    TEST_ASSERT(!war3Mod->HasSpellArchetypeRule(War3ID("ATg0")));
+    TEST_ASSERT(war3Mod->OnRestoreModuleSnapshot(sim, modSnap.data(), modSnap.size()));
+    TEST_ASSERT(war3Mod->HasSpellArchetypeRule(War3ID("ATg0")));
+    TEST_ASSERT(war3Mod->OnComputeModuleStateHash(sim) == hashAfter);
+    auto createdAfterRestore = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("ATg0"));
+    TEST_ASSERT(createdAfterRestore != nullptr && !createdAfterRestore->IsGenericPlaceholder());
+
+    TEST_ASSERT(war3Mod->UnregisterSpellArchetypeRule(War3ID("ATg0")));
+    TEST_ASSERT(!war3Mod->HasSpellArchetypeRule(War3ID("ATg0")));
+    TEST_ASSERT(war3Mod->OnComputeModuleStateHash(sim) == hashBefore);
+    return true;
+}
+
+bool TestPhase30StageQQQ2DynamicPluginSOV30AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath30 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths30[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths30) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath30 = candidate;
+            break;
+        }
+    }
+    if (FILE* f = std::fopen(soPath30.c_str(), "rb")) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase30PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath30));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 30u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(2)TerenasStand.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(12)WormWar.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 30u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+    return true;
+}
+
+// ============================================================================
+// Phase 31 (Track A): Context-Aware JassContextBinder & Zero-Boilerplate JASS Natives
+// ============================================================================
+
+bool TestPhase31StageRRR1JassContextBinderTypedUnpackingAndNullShortCircuit() {
+    JassVM vm;
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    auto data = std::make_shared<JassNativesData>();
+
+    jass::JassContextBinder binder(vm, data, &sim);
+    auto callNative = [&vm](const std::string& name, const std::vector<JassValue>& args) -> JassValue {
+        const auto& reg = vm.GetRegisteredNatives();
+        auto it = reg.find(name);
+        return it != reg.end() ? it->second(args) : JassValue::Null();
+    };
+
+    // 1. Bind a strongly-typed CUnit& setter and const CUnit& getter
+    binder.Bind("TestSetUnitCustomPos", [](CUnit& u, float x, float y) {
+        u.SetPosition(x, y);
+    });
+    binder.Bind("TestGetUnitSumPos", [](const CUnit& u) -> float {
+        return u.GetX() + u.GetY();
+    });
+
+    // 2. Bind a JassLocation& mutator and JassTimer& starter
+    binder.Bind("TestOffsetLocation", [](JassLocation& loc, float dx, float dy) {
+        loc.x += dx;
+        loc.y += dy;
+    });
+
+    auto* unit = sim.AdoptUnit(std::make_unique<CUnit>(93101, nullptr, 0, War3ID("hfoo"), 10.0f, 20.0f, 0.0f));
+    TEST_ASSERT(unit != nullptr);
+    const int unitJassHandle = data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId());
+
+    // Invalid handle (999999) automatically short-circuits without crashing and returns 0.0f
+    JassValue invalidRes = callNative("TestGetUnitSumPos", {JassValue::Int(999999)});
+    TEST_ASSERT(invalidRes.type == JassValue::REAL && invalidRes.realVal == 0.0f);
+
+    // Valid handle unpacks CUnit& directly
+    callNative("TestSetUnitCustomPos", {JassValue::Int(unitJassHandle), JassValue::Real(125.0f), JassValue::Real(275.0f)});
+    TEST_ASSERT(unit->GetX() == 125.0f && unit->GetY() == 275.0f);
+
+    JassValue sumRes = callNative("TestGetUnitSumPos", {JassValue::Int(unitJassHandle)});
+    TEST_ASSERT(sumRes.type == JassValue::REAL && sumRes.realVal == 400.0f);
+
+    // JassLocation& automatic handle resolution
+    const int locId = data->nextLocId++;
+    auto loc = std::make_shared<JassLocation>();
+    loc->x = 50.0f;
+    loc->y = 60.0f;
+    data->locations[locId] = loc;
+    const int locHandle = data->AllocHandle(JassHandleInfo::LOCATION, locId);
+
+    callNative("TestOffsetLocation", {JassValue::Int(locHandle), JassValue::Real(15.0f), JassValue::Real(-10.0f)});
+    TEST_ASSERT(loc->x == 65.0f && loc->y == 50.0f);
+
+    return true;
+}
+
+bool TestPhase31StageRRR2RefactoredJassNativesMathTimerLocationRectParity() {
+    JassVM vm;
+    CSimulation sim;
+    JassNatives natives(vm, &sim);
+    natives.RegisterAll();
+    auto callNative = [&vm](const std::string& name, const std::vector<JassValue>& args) -> JassValue {
+        const auto& reg = vm.GetRegisteredNatives();
+        auto it = reg.find(name);
+        return it != reg.end() ? it->second(args) : JassValue::Null();
+    };
+
+    // 1. Math natives bound via JassContextBinder
+    JassValue sq = callNative("SquareRoot", {JassValue::Real(144.0f)});
+    TEST_ASSERT(sq.type == JassValue::REAL && std::fabs(sq.realVal - 12.0f) < 1e-4f);
+    JassValue modI = callNative("ModuloInteger", {JassValue::Int(17), JassValue::Int(5)});
+    TEST_ASSERT(modI.type == JassValue::INTEGER && modI.intVal == 2);
+    JassValue bitAnd = callNative("BlzBitAnd", {JassValue::Int(0xF0), JassValue::Int(0x3C)});
+    TEST_ASSERT(bitAnd.type == JassValue::INTEGER && bitAnd.intVal == 0x30);
+
+    // 2. Location & Rect natives bound via JassContextBinder
+    JassValue loc1 = callNative("Location", {JassValue::Real(100.0f), JassValue::Real(200.0f)});
+    JassValue loc2 = callNative("Location", {JassValue::Real(300.0f), JassValue::Real(400.0f)});
+    JassValue rect = callNative("RectFromLoc", {loc1, loc2});
+    TEST_ASSERT(rect.intVal != 0);
+    TEST_ASSERT(callNative("GetRectCenterX", {rect}).realVal == 200.0f);
+    TEST_ASSERT(callNative("GetRectCenterY", {rect}).realVal == 300.0f);
+
+    // 3. Timer & TimerDialog natives bound via JassContextBinder
+    JassValue timer = callNative("CreateTimer", {});
+    callNative("TimerStart", {timer, JassValue::Real(10.0f), JassValue::Bool(true), JassValue::Str("OnTick")});
+    TEST_ASSERT(callNative("TimerGetTimeout", {timer}).realVal == 10.0f);
+    callNative("PauseTimer", {timer});
+    callNative("ResumeTimer", {timer});
+    callNative("DestroyTimer", {timer});
+
+    return true;
+}
+
+bool TestPhase31StageSSS1War3GameModuleV31CustomScriptNatives() {
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() == 31u);
+
+    CSimulation sim;
+    sim.SetSimulationModule(war3Mod);
+    const uint64_t hashBefore = war3Mod->OnComputeModuleStateHash(sim);
+
+    war3Mod->RegisterCustomScriptNative("War3CustomComputeBounty", [](const std::vector<int>& args) -> int {
+        if (args.size() < 2) return 0;
+        return args[0] * args[1] + 50;
+    });
+    TEST_ASSERT(war3Mod->HasCustomScriptNative("War3CustomComputeBounty"));
+    TEST_ASSERT(war3Mod->OnHasCustomScriptNative("War3CustomComputeBounty"));
+    TEST_ASSERT(war3Mod->GetRegisteredCustomScriptNativeCount() == 1u);
+    TEST_ASSERT(war3Mod->InvokeCustomScriptNative("War3CustomComputeBounty", {6, 15}) == 140);
+
+    // Verify direct binding of module custom script natives into JassVM
+    JassVM vm;
+    war3Mod->BindCustomScriptNativesToVm(vm);
+    const auto& reg = vm.GetRegisteredNatives();
+    auto it = reg.find("War3CustomComputeBounty");
+    TEST_ASSERT(it != reg.end());
+    JassValue vmRes = it->second({JassValue::Int(6), JassValue::Int(15)});
+    TEST_ASSERT(vmRes.type == JassValue::INTEGER && vmRes.intVal == 140);
+
+    const uint64_t hashAfter = war3Mod->OnComputeModuleStateHash(sim);
+    TEST_ASSERT(hashAfter != hashBefore);
+
+    TEST_ASSERT(war3Mod->UnregisterCustomScriptNative("War3CustomComputeBounty"));
+    TEST_ASSERT(!war3Mod->HasCustomScriptNative("War3CustomComputeBounty"));
+    TEST_ASSERT(war3Mod->OnComputeModuleStateHash(sim) == hashBefore);
+    return true;
+}
+
+bool TestPhase31StageSSS2DynamicPluginSOV31AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath31 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths31[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths31) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath31 = candidate;
+            break;
+        }
+    }
+    if (FILE* f = std::fopen(soPath31.c_str(), "rb")) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase31PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath31));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() == 31u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(2)TerenasStand.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(12)WormWar.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 31u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
     return true;
 }

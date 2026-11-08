@@ -897,6 +897,14 @@ bool TestPhase29StageNNN1EngineProfilerO1RingBufferAndRenderGraphDynamicSortedPa
 bool TestPhase29StageNNN2ResourceServerGenericCacheKernelAndVfsPathAliases();
 bool TestPhase29StageOOO1War3GameModuleV29AssetPathAliasesAndSoundModelRedirection();
 bool TestPhase29StageOOO2DynamicPluginSOV29AndCloudRetailMapsEndToEndSuite();
+bool TestPhase30StagePPP1SpellArchetypeRuleAndTableRuleSpellEngine();
+bool TestPhase30StagePPP2War3SpellsPhysicalRelocationAndCatalogParity();
+bool TestPhase30StageQQQ1War3GameModuleV30CustomSpellArchetypeRegistration();
+bool TestPhase30StageQQQ2DynamicPluginSOV30AndCloudRetailMapsEndToEndSuite();
+bool TestPhase31StageRRR1JassContextBinderTypedUnpackingAndNullShortCircuit();
+bool TestPhase31StageRRR2RefactoredJassNativesMathTimerLocationRectParity();
+bool TestPhase31StageSSS1War3GameModuleV31CustomScriptNatives();
+bool TestPhase31StageSSS2DynamicPluginSOV31AndCloudRetailMapsEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1789,6 +1797,14 @@ int main(int argc, char** argv) {
         {"Phase29 Stage NNN2 ResourceServer generic cache kernel and VFS path aliases", TestPhase29StageNNN2ResourceServerGenericCacheKernelAndVfsPathAliases},
         {"Phase29 Stage OOO1 War3GameModule v29 asset path aliases and redirection", TestPhase29StageOOO1War3GameModuleV29AssetPathAliasesAndSoundModelRedirection},
         {"Phase29 Stage OOO2 Dynamic plugin SO v29 and cloud retail maps end-to-end suite", TestPhase29StageOOO2DynamicPluginSOV29AndCloudRetailMapsEndToEndSuite},
+        {"Phase30 Stage PPP1 SpellArchetypeRule and CAbilityTableRuleSpell engine", TestPhase30StagePPP1SpellArchetypeRuleAndTableRuleSpellEngine},
+        {"Phase30 Stage PPP2 War3 spells physical relocation and catalog parity", TestPhase30StagePPP2War3SpellsPhysicalRelocationAndCatalogParity},
+        {"Phase30 Stage QQQ1 War3GameModule v30 custom SpellArchetypeRule registration", TestPhase30StageQQQ1War3GameModuleV30CustomSpellArchetypeRegistration},
+        {"Phase30 Stage QQQ2 Dynamic plugin SO v30 and cloud retail maps end-to-end suite", TestPhase30StageQQQ2DynamicPluginSOV30AndCloudRetailMapsEndToEndSuite},
+        {"Phase31 Stage RRR1 JassContextBinder typed unpacking and null short-circuit", TestPhase31StageRRR1JassContextBinderTypedUnpackingAndNullShortCircuit},
+        {"Phase31 Stage RRR2 Refactored JASS natives math timer location rect parity", TestPhase31StageRRR2RefactoredJassNativesMathTimerLocationRectParity},
+        {"Phase31 Stage SSS1 War3GameModule v31 custom script natives", TestPhase31StageSSS1War3GameModuleV31CustomScriptNatives},
+        {"Phase31 Stage SSS2 Dynamic plugin SO v31 and cloud retail maps end-to-end suite", TestPhase31StageSSS2DynamicPluginSOV31AndCloudRetailMapsEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

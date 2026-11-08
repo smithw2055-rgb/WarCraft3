@@ -35,36 +35,7 @@
 #include "ecs/abilities/ability_spell_base.h"
 #include "ecs/abilities/ability_transport.h"
 #include "ecs/abilities/ability_upgrade.h"
-#include "ecs/abilities/auras.h"
-#include "ecs/abilities/spells.h"
-#include "ecs/abilities/spells2.h"
-#include "ecs/abilities/spells3.h"
-#include "ecs/abilities/spells4.h"
-#include "ecs/abilities/spells5.h"
-#include "ecs/abilities/spells6.h"
-#include "ecs/abilities/spells7.h"
-#include "ecs/abilities/spells8.h"
-#include "ecs/abilities/spells9.h"
-#include "ecs/abilities/spells10.h"
-#include "ecs/abilities/spells11.h"
-#include "ecs/abilities/spells12.h"
-#include "ecs/abilities/spells13.h"
-#include "ecs/abilities/spells14.h"
-#include "ecs/abilities/spells15.h"
-#include "ecs/abilities/spells16.h"
-#include "ecs/abilities/spells17.h"
-#include "ecs/abilities/spells18.h"
-#include "ecs/abilities/spells19.h"
-#include "ecs/abilities/spells20.h"
-#include "ecs/abilities/spells21.h"
-#include "ecs/abilities/spells22.h"
-#include "ecs/abilities/spells23.h"
-#include "ecs/abilities/spells24.h"
-#include "ecs/abilities/spells25.h"
-#include "ecs/abilities/spells26.h"
-#include "ecs/abilities/spells27.h"
-#include "ecs/abilities/spells28.h"
-#include "ecs/abilities/spells29.h"
+#include "game/war3/abilities/war3_spells.h"
 #include "ecs/ability.h"
 #include "ecs/orders/order.h"
 #include "ecs/ability_factory.h"
@@ -3083,7 +3054,7 @@ int War3GameModule::OnCheckCustomCellPassability(int cellX,
 namespace {
 
 struct War3ModulePodSnapshot {
-    uint32_t magic = 0x39324D57u; // "WM29"
+    uint32_t magic = 0x30334D57u; // "WM30"
     float defenseArmorFactor = 0.06f;
     float bountyMultiplier = 1.0f;
     float experienceMultiplier = 1.0f;
@@ -3100,6 +3071,7 @@ struct War3ModulePodSnapshot {
     uint32_t customUpkeepLabelCount = 0;
     uint32_t customUnitSoundCount = 0;
     uint32_t customAssetPathAliasCount = 0;
+    uint32_t customSpellRuleCount = 0;
 };
 static_assert(std::is_trivially_copyable_v<War3ModulePodSnapshot>,
               "War3ModulePodSnapshot must be trivially copyable");
@@ -3198,6 +3170,7 @@ void War3GameModule::OnCaptureModuleSnapshot(const CSimulation& /*sim*/,
     pod.customUpkeepLabelCount = static_cast<uint32_t>(customUpkeepLabels_.size());
     pod.customUnitSoundCount = static_cast<uint32_t>(customUnitSoundOverrides_.size());
     pod.customAssetPathAliasCount = static_cast<uint32_t>(customAssetPathAliases_.size());
+    pod.customSpellRuleCount = static_cast<uint32_t>(customSpellArchetypeRules_.size());
 
     outBytes.clear();
     AppendModulePod(outBytes, pod);
@@ -3288,6 +3261,14 @@ void War3GameModule::OnCaptureModuleSnapshot(const CSimulation& /*sim*/,
         AppendModuleString(outBytes, k);
         AppendModuleString(outBytes, customAssetPathAliases_.at(k));
     }
+
+    std::vector<uint32_t> spellKeys;
+    spellKeys.reserve(customSpellArchetypeRules_.size());
+    for (const auto& [raw, _] : customSpellArchetypeRules_) spellKeys.push_back(raw);
+    std::sort(spellKeys.begin(), spellKeys.end());
+    for (uint32_t raw : spellKeys) {
+        AppendModulePod(outBytes, customSpellArchetypeRules_.at(raw));
+    }
 }
 
 bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
@@ -3298,7 +3279,7 @@ bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
     size_t offset = 0;
     War3ModulePodSnapshot pod{};
     if (!ReadModulePod(data, size, offset, pod)) return false;
-    if (pod.magic != 0x39324D57u && pod.magic != 0x38324D57u &&
+    if (pod.magic != 0x30334D57u && pod.magic != 0x39324D57u && pod.magic != 0x38324D57u &&
         pod.magic != 0x36324D57u && pod.magic != 0x35324D57u) return false;
 
     const size_t expectedExtra =
@@ -3393,6 +3374,28 @@ bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
             return false;
         }
         customAssetPathAliases_[std::move(key)] = std::move(target);
+    }
+
+    for (const auto& [oldRaw, _] : customSpellArchetypeRules_) {
+        AbilityFactory::UnregisterCreator(War3ID(oldRaw));
+    }
+    customSpellArchetypeRules_.clear();
+    for (uint32_t i = 0; i < pod.customSpellRuleCount; ++i) {
+        SpellArchetypeRule rule{};
+        if (!ReadModulePod(data, size, offset, rule)) {
+            return false;
+        }
+        if (rule.rawcode != 0) {
+            customSpellArchetypeRules_[rule.rawcode] = rule;
+            AbilityFactory::RegisterModuleCreator(
+                kModuleId,
+                War3ID(rule.rawcode),
+                [rule](int handleId, War3ID code) -> std::unique_ptr<CAbility> {
+                    auto spell = std::make_unique<CAbilityTableRuleSpell>(handleId, rule);
+                    spell->SetAlias(code);
+                    return spell;
+                });
+        }
     }
 
     return true;
@@ -3609,6 +3612,50 @@ uint64_t War3GameModule::OnComputeModuleStateHash(const CSimulation& /*sim*/) co
             mixString(customAssetPathAliases_.at(k));
         }
     }
+    if (!customSpellArchetypeRules_.empty()) {
+        std::vector<uint32_t> sortedRules;
+        sortedRules.reserve(customSpellArchetypeRules_.size());
+        for (const auto& [raw, _] : customSpellArchetypeRules_) sortedRules.push_back(raw);
+        std::sort(sortedRules.begin(), sortedRules.end());
+        for (uint32_t raw : sortedRules) {
+            const auto& r = customSpellArchetypeRules_.at(raw);
+            mixU32(raw);
+            mixU32(static_cast<uint32_t>(r.targetType));
+            mixU32(static_cast<uint32_t>(r.category));
+            mixU32(static_cast<uint32_t>(r.effectKind));
+            mixU32(static_cast<uint32_t>(r.attackType));
+            mixU32(static_cast<uint32_t>(r.damageType));
+            mixU32(static_cast<uint32_t>(r.factionFilter));
+            mixFloat(r.castRange);
+            mixFloat(r.castPoint);
+            mixFloat(r.cooldown);
+            mixU32(static_cast<uint32_t>(r.manaCost));
+            mixFloat(r.param0);
+            mixFloat(r.param1);
+            mixFloat(r.param2);
+            mixFloat(r.radius);
+            mixFloat(r.duration);
+            mixU32(r.auxId0);
+            mixU32(r.auxId1);
+            const uint32_t packedSlotsAndFlags =
+                static_cast<uint8_t>(r.slotParam0) |
+                (static_cast<uint32_t>(static_cast<uint8_t>(r.slotParam1)) << 8) |
+                (static_cast<uint32_t>(static_cast<uint8_t>(r.slotParam2)) << 16) |
+                ((r.scaleRadiusFromArea ? 1u : 0u) << 24) |
+                ((r.scaleDurationFromDur ? 1u : 0u) << 25) |
+                ((r.scaleAuxId0FromUnitId ? 1u : 0u) << 26);
+            mixU32(packedSlotsAndFlags);
+        }
+    }
+    if (!customScriptNatives_.empty()) {
+        std::vector<std::string> sortedNatives;
+        sortedNatives.reserve(customScriptNatives_.size());
+        for (const auto& [name, _] : customScriptNatives_) sortedNatives.push_back(name);
+        std::sort(sortedNatives.begin(), sortedNatives.end());
+        for (const std::string& name : sortedNatives) {
+            mixString(name);
+        }
+    }
     return h;
 }
 
@@ -3775,6 +3822,72 @@ bool War3GameModule::OnResolveAssetPathAlias(const std::string& uriOrPath,
     }
     outRedirectedUriOrPath = it->second;
     return true;
+}
+
+// ============================================================================
+// Phase 30 (Track B): Pluggable Table-Driven Spell Archetype Rules
+// ============================================================================
+
+void War3GameModule::RegisterSpellArchetypeRule(const SpellArchetypeRule& rule) {
+    if (rule.rawcode == 0) return;
+    customSpellArchetypeRules_[rule.rawcode] = rule;
+    AbilityFactory::RegisterModuleCreator(
+        kModuleId,
+        War3ID(rule.rawcode),
+        [rule](int handleId, War3ID code) -> std::unique_ptr<CAbility> {
+            auto spell = std::make_unique<CAbilityTableRuleSpell>(handleId, rule);
+            spell->SetAlias(code);
+            return spell;
+        });
+    ++stats_.customSpellsRegistered;
+}
+
+bool War3GameModule::UnregisterSpellArchetypeRule(War3ID code) {
+    if (code.value == 0) return false;
+    AbilityFactory::UnregisterCreator(code);
+    return customSpellArchetypeRules_.erase(code.value) > 0;
+}
+
+bool War3GameModule::HasSpellArchetypeRule(War3ID code) const {
+    return customSpellArchetypeRules_.count(code.value) > 0;
+}
+
+const SpellArchetypeRule* War3GameModule::FindSpellArchetypeRule(War3ID code) const {
+    auto it = customSpellArchetypeRules_.find(code.value);
+    return (it != customSpellArchetypeRules_.end()) ? &it->second : nullptr;
+}
+
+bool War3GameModule::OnHasSpellArchetypeRule(uint32_t rawcode) const {
+    return customSpellArchetypeRules_.count(rawcode) > 0;
+}
+
+// ============================================================================
+// Phase 31 (Track A): Pluggable Custom Script Natives
+// ============================================================================
+
+void War3GameModule::RegisterCustomScriptNative(const std::string& nativeName,
+                                                CustomScriptNativeFn fn) {
+    if (nativeName.empty() || !fn) return;
+    customScriptNatives_[nativeName] = std::move(fn);
+}
+
+bool War3GameModule::UnregisterCustomScriptNative(const std::string& nativeName) {
+    return customScriptNatives_.erase(nativeName) > 0;
+}
+
+bool War3GameModule::HasCustomScriptNative(const std::string& nativeName) const {
+    return customScriptNatives_.count(nativeName) > 0;
+}
+
+int War3GameModule::InvokeCustomScriptNative(const std::string& nativeName,
+                                             const std::vector<int>& intArgs) const {
+    auto it = customScriptNatives_.find(nativeName);
+    if (it == customScriptNatives_.end() || !it->second) return 0;
+    return it->second(intArgs);
+}
+
+bool War3GameModule::OnHasCustomScriptNative(const std::string& nativeName) const {
+    return customScriptNatives_.count(nativeName) > 0;
 }
 
 } // namespace war3

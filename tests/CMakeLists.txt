@@ -141,6 +141,7 @@ add_executable(warsmash_tests
     ../src/engine/engine_kernel.cpp
     ../src/engine/dynamic_module_loader.cpp
     ../src/game/war3/war3_game_module.cpp
+    ../src/game/war3/abilities/war3_spells.cpp
     ../src/game/war3/war3_module_plugin_export.cpp
     ../src/core/job_system.cpp
     ../src/core/world_scene_session.cpp
@@ -275,36 +276,6 @@ add_executable(warsmash_tests
     ../src/ecs/abilities/ability_repair.cpp
     ../src/ecs/abilities/ability_transport.cpp
     ../src/ecs/abilities/ability_root.cpp
-    ../src/ecs/abilities/spells.cpp
-    ../src/ecs/abilities/spells2.cpp
-    ../src/ecs/abilities/spells3.cpp
-    ../src/ecs/abilities/spells4.cpp
-    ../src/ecs/abilities/spells5.cpp
-    ../src/ecs/abilities/spells6.cpp
-    ../src/ecs/abilities/spells7.cpp
-    ../src/ecs/abilities/spells8.cpp
-    ../src/ecs/abilities/spells9.cpp
-    ../src/ecs/abilities/spells10.cpp
-    ../src/ecs/abilities/spells11.cpp
-    ../src/ecs/abilities/spells12.cpp
-    ../src/ecs/abilities/spells13.cpp
-    ../src/ecs/abilities/spells14.cpp
-    ../src/ecs/abilities/spells15.cpp
-    ../src/ecs/abilities/spells16.cpp
-    ../src/ecs/abilities/spells17.cpp
-    ../src/ecs/abilities/spells18.cpp
-    ../src/ecs/abilities/spells19.cpp
-    ../src/ecs/abilities/spells20.cpp
-    ../src/ecs/abilities/spells21.cpp
-    ../src/ecs/abilities/spells22.cpp
-    ../src/ecs/abilities/spells23.cpp
-    ../src/ecs/abilities/spells24.cpp
-    ../src/ecs/abilities/spells25.cpp
-    ../src/ecs/abilities/spells26.cpp
-    ../src/ecs/abilities/spells27.cpp
-    ../src/ecs/abilities/spells28.cpp
-    ../src/ecs/abilities/spells29.cpp
-    ../src/ecs/abilities/auras.cpp
     ../src/ecs/abilities/ability_builder.cpp
 )
 

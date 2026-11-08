@@ -491,7 +491,7 @@ static bool ExtractRegisteredJassNatives(std::unordered_set<std::string>& out) {
         scriptingDir / "natives" / "jass_natives_environment.cpp",
         scriptingDir / "natives" / "jass_natives_ui_data.cpp",
     };
-    static const std::regex pattern(R"(RegisterNative(?:Auto)?\s*\(\s*(?:[A-Za-z0-9_]+\s*,\s*)?\"([A-Za-z_][A-Za-z0-9_]*)\")");
+    static const std::regex pattern(R"((?:RegisterNative(?:Auto)?|Bind)\s*\(\s*(?:[A-Za-z0-9_]+\s*,\s*)?\"([A-Za-z_][A-Za-z0-9_]*)\")");
     for (const fs::path& sourcePath : sourcePaths) {
         std::ifstream in(sourcePath, std::ios::binary);
         if (!in.is_open()) {

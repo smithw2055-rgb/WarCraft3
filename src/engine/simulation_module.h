@@ -572,6 +572,20 @@ public:
         return false;
     }
 
+    // ========================================================================
+    // Phase 30 (Track B): Pluggable Table-Driven Spell Archetype Rule Hook
+    // ========================================================================
+    virtual bool OnHasSpellArchetypeRule(uint32_t /*rawcode*/) const {
+        return false;
+    }
+
+    // ========================================================================
+    // Phase 31 (Track A): Pluggable Custom Script Native Hook
+    // ========================================================================
+    virtual bool OnHasCustomScriptNative(const std::string& /*nativeName*/) const {
+        return false;
+    }
+
     const SimulationModuleStats& GetModuleStats() const { return stats_; }
     void ResetModuleStats() { stats_ = {}; }
 

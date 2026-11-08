@@ -153,3 +153,114 @@ private:
     ABSpellDescriptor desc_;
     ABSpellEffectContext ctx_;
 };
+
+// ============================================================
+// Phase 30 (Track B): Compact Table-Driven Spell Archetype Rule
+// Eliminates repetitive constructor/ApplyEffectData/DoEffect boilerplate
+// across 150+ Warcraft 3 active/item spell subclasses.
+// ============================================================
+enum class SpellArchetypeEffectKind : uint8_t {
+    CUSTOM_CALLBACK = 0,
+    POINT_WAVE_DAMAGE,          // Blizzard, FlameStrike, RainOfFire, Monsoon
+    CASTER_WAVE_DAMAGE,         // FanOfKnives, LocustSwarm
+    LINE_DAMAGE_STUN,           // CarrionSwarm, Shockwave, Impale, Stampede
+    POINT_AREA_HEAL,            // HealingSpray, ItemHealGroup
+    SELF_HEAL,                  // ItemHealSelf
+    SELF_MANA,                  // ItemManaSelf
+    TARGET_HEAL,                // Heal
+    TARGET_MANA_BURN,           // ManaBurn
+    TARGET_MANA_STEAL,          // ItemManaSteal
+    SELF_DIVINE_SHIELD,         // DivineShield, ItemInvulnerable
+    SELF_STONE_FORM,            // StoneForm
+    SELF_BURROW,                // Burrow
+    SELF_DEFEND,                // Defend
+    SELF_MANA_SHIELD,           // ManaShield
+    SELF_IMMOLATION,            // Immolation
+    SELF_WHIRLWIND,             // Whirlwind
+    SELF_WIND_WALK,             // WindWalk
+    SELF_BERSERK,               // Berserk
+    SELF_AVATAR,                // Avatar
+    SELF_CHEMICAL_RAGE,         // ChemicalRage
+    SELF_CLARITY,               // ItemClarity
+    SELF_ARMOR_BUFF,            // ItemProtection
+    SELF_TRANSFORM,             // Metamorphosis, BearForm, RavenForm, RoboGoblin
+    TARGET_SLOW_BUFF,           // Slow
+    TARGET_HEX_BUFF,            // Hex
+    TARGET_POLYMORPH_BUFF,      // Polymorph
+    TARGET_CYCLONE_BUFF,        // Cyclone
+    TARGET_ENSNARE_BUFF,        // Ensnare
+    TARGET_CURSE_BUFF,          // Curse
+    TARGET_INVISIBILITY_BUFF,   // Invisibility
+    TARGET_BANISH_BUFF,         // Banish
+    TARGET_ANTIMAGIC_BUFF,      // AntiMagicShell
+    TARGET_REJUVENATION_BUFF,   // Rejuvenation
+    TARGET_INNER_FIRE_BUFF,     // InnerFire
+    TARGET_LIGHTNING_SHIELD,    // LightningShield, LightningShieldWand
+    TARGET_FROST_ARMOR,         // FrostArmor
+    TARGET_FAERIE_FIRE,         // FaerieFire
+    TARGET_LIFE_DRAIN,          // LifeDrain
+    TARGET_SIPHON_MANA,         // SiphonMana
+    TARGET_DOOM,                // Doom
+    TARGET_UNHOLY_FRENZY,       // UnholyFrenzy
+    POINT_SILENCE_AREA,         // Silence
+    POINT_REVEAL_DUST_FLARE,    // DustOfAppearance, Flare
+    CASTER_AREA_ROAR,           // Roar, BattleRoar, BeastScroll
+    CASTER_AREA_HOWL,           // HowlOfTerror
+    CASTER_AREA_VOODOO,         // BigBadVoodoo
+    SUMMON_TIMED_UNIT,          // FeralSpirit, SummonWaterElemental, Quilbeast, OwlScout, SummonHawk
+    SUMMON_TIMED_RING,          // ForceOfNature
+    TIMED_SPAWNER_FACTORY,      // PocketFactory, Factory
+    GRANT_CASTER_GOLD           // ChestOfGold
+};
+
+struct SpellArchetypeRule {
+    uint32_t rawcode = 0;
+    CSpellTargetType targetType = CSpellTargetType::NO_TARGET;
+    CAbilityCategory category = CAbilityCategory::SPELL;
+    SpellArchetypeEffectKind effectKind = SpellArchetypeEffectKind::CUSTOM_CALLBACK;
+    CAttackType attackType = CAttackType::SPELLS;
+    CDamageType damageType = CDamageType::NORMAL;
+    ABFactionFilter factionFilter = ABFactionFilter::ANY;
+    float castRange = 600.0f;
+    float castPoint = 0.3f;
+    float cooldown = 0.0f;
+    int manaCost = 0;
+    float param0 = 0.0f;   // e.g. damage / heal / bonus / waves
+    float param1 = 0.0f;   // e.g. secondary damage / slowPct / bounces / count
+    float param2 = 0.0f;   // e.g. tertiary value / width / interval
+    float radius = 0.0f;   // e.g. AoE radius / range
+    float duration = 0.0f; // e.g. buff/summon duration
+    uint32_t auxId0 = 0;   // e.g. summon unit War3ID or buff War3ID
+    uint32_t auxId1 = 0;   // e.g. secondary unit/buff War3ID
+    int8_t slotParam0 = -1; // CAbilityDefFull Data slot index for param0 (-1 = none, -2 = Int)
+    int8_t slotParam1 = -1; // CAbilityDefFull Data slot index for param1
+    int8_t slotParam2 = -1; // CAbilityDefFull Data slot index for param2
+    bool scaleRadiusFromArea = false;
+    bool scaleDurationFromDur = false;
+    bool scaleAuxId0FromUnitId = false;
+
+    void Execute(CSimulation& game, CUnit* caster, CWidget* target,
+                 bool hasPoint, float x, float y) const;
+    void ApplyDef(const CAbilityDefFull& def, int level);
+};
+
+// ============================================================
+// CAbilityTableRuleSpell - base class for table-rule-backed spells
+// Reduces each table-driven spell subclass to a 1-line constructor!
+// ============================================================
+class CAbilityTableRuleSpell : public CAbilitySpellBase {
+public:
+    CAbilityTableRuleSpell(int handleId, const SpellArchetypeRule& initialRule);
+
+    const SpellArchetypeRule& GetRule() const { return rule_; }
+    SpellArchetypeRule& MutableRule() { return rule_; }
+
+    void DoEffect(CSimulation& game, CUnit* caster, CWidget* target) override;
+    void DoEffect(CSimulation& game, CUnit* caster, float x, float y) override;
+    void DoEffect(CSimulation& game, CUnit* caster) override;
+
+protected:
+    void ApplyEffectData(const CAbilityDefFull& def, int level) override;
+
+    SpellArchetypeRule rule_;
+};

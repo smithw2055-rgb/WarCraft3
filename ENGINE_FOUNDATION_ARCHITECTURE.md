@@ -1,4 +1,4 @@
-# 现代化游戏引擎底座抽象与精简重构设计文档 (Phase 12 – Phase 29)
+# 现代化游戏引擎底座抽象与精简重构设计文档 (Phase 12 – Phase 31)
 
 本项目以 **WarCraft III (Warsmash C++)** 为实验载体，参考 **Godot 4**（`OS / MainLoop`、Server 单例架构、`GDExtension` 动态插件系统、`FileAccess / DirAccess` 虚拟归档层、`SceneTree`、`ResourceServer`）与 **Unity**（`PlayerLoop`、`SubsystemManager`、`DOTS Sparse-Set ECS`、可热插拔 `GamePlay Assembly`、数据驱动 `ScriptableObject`）的设计哲学，在已完成 Phase 1–11 现代化改造的基础上，进一步完成：
 
@@ -20,6 +20,8 @@
 * **Phase 27**：**对脚本宿主路由（`IScriptEngineHost` / `ScriptHostRouter`）、并发寻路与流场服务器（`PathfindingServer` / `PathQueryWorkspace` / `FlowFieldGrid` / `CPathfindingProcessor`）及多单位编队输入管线（`CommandBufferPipeline` / `InputActionMap`）做深度引擎底座抽象与精简：将事件订阅表与生命周期清理上提至 `IScriptEngineHost` 基类并升级 `RSH2` 快照实现跨脚本后端热切换订阅无损迁移；将 `PathQueryWorkspace` 的 `visitedGen_` 与 `closedState_` 合并为单一 32-bit 位压缩数组（每个 768×768 工作区节省 589 KB 内存），将 `FlowFieldGrid::Build` 的 `std::queue` 替换为可复用扁平 `std::vector<int>` 队列并新增 `OnGetCellTraversalCostMultiplier` 加权地形寻路；为 `CommandBufferPipeline` 新增 4 种几何阵型（`Box`/`Line`/`Circle`/`Wedge`）与 `OnGetUnitFormationRankPriority` 前后排智能编队排序，并将 `War3GameModule` 升级至 Version 27**。
 * **Phase 28**：**对渲染插值与骨骼矩阵图集（`RenderInterpolationBuffer` / `BonePaletteAtlas` / `UnitPresentationSystem`）、音频混音与事件路由服务器（`AudioServer`）及响应式 UI 数据绑定管线（`UIDataBinder`）做深度引擎底座抽象与精简：将 `RenderInterpolationBuffer::CaptureSimulationTick` 改造为零分配 `std::swap` 双缓冲交换并接入 `UnitPresentationSystem::OnUnitRemoved` 自动清理已销毁实体快照，将 `BonePaletteAtlas::ResetFrame` 优化为 `O(1)` 帧重置；在 `AudioServer` 中提炼 `RefreshActiveVoiceGains` 预计算 6 条总线增益（`O(B+V)`），并接入 `ISimulationModule::OnResolveUnitCombatSound` 实现单位级可插拔战斗音效路由；在 `UIDataBinder` 中提炼 `ApplyTextFrameUpdate` 消除 7 处重复脏更新样板、接入 `ISimulationModule::GetUpkeepDisplayLabel` 可插拔维护费文本格式化并新增 `BindCustomTextProperty` 通用自定义属性绑定，同时将 `War3GameModule` 升级至 Version 28**。
 * **Phase 29**：**对资源服务器（`ResourceServer`）、性能分析器（`EngineProfiler`）与声明式渲染图（`RenderGraph`）做深度引擎底座抽象与精简：在 `ResourceServer` 中提炼 `LoadOrInsertCached<T>` 泛型双检锁缓存模板内核，消除 6 个同步资源加载器中重复的 ~130 行加锁/查找/RID 分配代码（`src/resource/resource_server.cpp` 从 808 行精简至 710 行），并新增 `RegisterPathAlias` / `ResolvePathAlias` VFS 虚拟路径重定向能力；将 `EngineProfiler` 的 `rollingSamples` 与 `traceEvents_` 改造为带 `writeCursor` 的 `O(1)` 零移位环形覆写缓冲区（彻底消除 `rollingSamples.erase(begin())` 的每次 255 元素 `memmove`）；在 `RenderGraph` 中新增 `RegisterCustomPass`（按 `RenderGraphPassId` 自动保持升序拓扑排序）与 `RemovePass`，并将 `War3GameModule` 升级至 Version 29（新增 `RegisterAssetPathAlias`、`UnregisterAssetPathAlias` 与 `OnResolveAssetPathAlias`）**。
+* **Phase 30 (Track B)**：**新增表驱动技能原型规则引擎（`SpellArchetypeRule` / `CAbilityTableRuleSpell`，覆盖 51 类主动/物品技能效果原型），将原散布在通用 ECS 目录下的 30 个魔兽争霸3专属技能与光环编译单元（`src/ecs/abilities/spells*.cpp` 与 `auras.cpp`）物理收敛至 `src/game/war3/abilities/war3_spells.{h,cpp}`，并将 `War3GameModule` 升级至 Version 30（新增 `RegisterSpellArchetypeRule`、`UnregisterSpellArchetypeRule`、`HasSpellArchetypeRule`、`FindSpellArchetypeRule` 与 `OnHasSpellArchetypeRule`，支持 `WM30` 模块快照与状态哈希持久化）**。
+* **Phase 31 (Track A)**：**新增上下文感知强类型 JASS 领域句柄绑定器（`jass::JassContextBinder`，支持 `CUnit&`、`CWidget&`、`CItem&`、`CDestructable&`、`CPlayer&`、`JassGroup&`、`JassForce&`、`JassTimer&`、`JassTimerDialog&`、`JassTrigger&`、`JassLocation&`、`JassRect&`、`JassRegion&`、`JassSound&`、`JassTextTag&`、`JassEffect&`、`JassQuest&`、`JassQuestItem&`、`JassImage&`、`JassUbersplat&` 等 20 类领域对象的自动查表解包与无效句柄安全短路），将 5 大 JASS Native 核心文件（`JassNatives.cpp`、`jass_natives_environment.cpp`、`jass_natives_triggers.cpp`、`jass_natives_ui_data.cpp`、`jass_natives_units.cpp`）从 15,062 行深度重构精简至 7,427 行（净削减 7,635 行，降幅 50.7%），并将 `War3GameModule` 升级至 Version 31（新增可热插拔自定义脚本 Native 接口 `RegisterCustomScriptNative`、`UnregisterCustomScriptNative`、`HasCustomScriptNative`、`InvokeCustomScriptNative`、`BindCustomScriptNativesToVm` 与 `OnHasCustomScriptNative`）**。
 
 ## 1. 通用化引擎底座架构抽象（`src/engine/`）
 
@@ -76,4 +78,14 @@
   * `Stage NNN2`: 验证 `ResourceServer::LoadOrInsertCached<T>` 泛型缓存命中、`FindCached` 别名一致性与 `RegisterPathAlias` 跨协议/大小写/斜杠的 VFS 虚拟路径重定向。
   * `Stage OOO1`: 验证 `War3GameModule` Version 29 `RegisterAssetPathAlias` 将 `"Units/UnitBalance.slk"` 透明重定向至内存挂载的 `"CustomMod/UnitBalance_Custom.slk"` 并完成 SLK 表加载。
   * `Stage OOO2`: 验证动态加载 `./libwar3_module_plugin.so`（Version 29）以及云端零售与场景地图 `(2)EchoIsles.w3x`、`(2)TerenasStand.w3x`、`(12)WormWar.w3x` 端到端加载与模拟步进。
-* **总计 885 / 885 项测试全部通过（100% 通过率，零回归）**。
+* **Phase 30 (Track B) 专项测试**：
+  * `Stage PPP1`: 验证 `SpellArchetypeRule` 与 `CAbilityTableRuleSpell` 表驱动技能引擎（点区域多波伤害、自身圣盾、目标妖术变形）。
+  * `Stage PPP2`: 验证物理收敛至 `src/game/war3/abilities/war3_spells.{h,cpp}` 的魔兽英雄/单位/物品/光环与种族经济能力目录完整性。
+  * `Stage QQQ1`: 验证 `War3GameModule` Version 30 `RegisterSpellArchetypeRule` 动态注册、`WM30` 模块快照回放恢复与 `OnComputeModuleStateHash` 状态哈希。
+  * `Stage QQQ2`: 验证动态插件加载（Version 30）及云端零售地图端到端加载与模拟步进。
+* **Phase 31 (Track A) 专项测试**：
+  * `Stage RRR1`: 验证 `jass::JassContextBinder` 对 `CUnit&`、`const CUnit&`、`JassLocation&` 的强类型自动解包与无效句柄零崩溃短路返回。
+  * `Stage RRR2`: 验证基于 `JassContextBinder` 重构后的数学、点/矩形区域与计时器 JASS Native 行为一致性。
+  * `Stage SSS1`: 验证 `War3GameModule` Version 31 `RegisterCustomScriptNative`、`InvokeCustomScriptNative`、`BindCustomScriptNativesToVm` 与 `OnComputeModuleStateHash` 状态哈希。
+  * `Stage SSS2`: 验证动态插件加载（Version 31）及云端零售地图端到端加载与模拟步进。
+* **总计 893 / 893 项测试全部通过（100% 通过率，零回归）**。
