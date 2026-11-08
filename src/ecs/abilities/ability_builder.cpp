@@ -14,24 +14,76 @@
 #include <unordered_set>
 #include <utility>
 
+namespace {
+
+void ResolveCenter(CUnit* caster, CWidget* unitTarget, bool hasPoint,
+                   float x, float y, float& outX, float& outY) {
+    if (unitTarget) {
+        outX = unitTarget->GetX();
+        outY = unitTarget->GetY();
+    } else if (hasPoint || !caster) {
+        outX = x;
+        outY = y;
+    } else {
+        outX = caster->GetX();
+        outY = caster->GetY();
+    }
+}
+
+void HealUnitClamped(CSimulation& game, CUnit* unit, float amount) {
+    if (!unit || unit->IsDead() || amount <= 0.0f) return;
+    unit->SetLife(game, std::min(unit->GetMaxLife(), unit->GetLife() + amount));
+}
+
+void AddManaClamped(CUnit* unit, float amount) {
+    if (!unit || unit->IsDead() || amount <= 0.0f) return;
+    unit->SetMana(std::min(static_cast<float>(unit->GetMaxMana()), unit->GetMana() + amount));
+}
+
+CUnit* CreateUnitForCasterAndNotify(CSimulation& game, CUnit* caster,
+                                    War3ID typeId, float x, float y, float facing) {
+    if (!caster) return nullptr;
+    CUnit* created = game.CreateUnit(typeId, caster->GetPlayerIndex(), x, y, facing);
+    if (created) {
+        if (const auto& cb = game.GetUnitSummonedCallback()) {
+            cb(caster->GetHandleId(), created->GetHandleId());
+        }
+    }
+    return created;
+}
+
+bool TransferUnitOwnerToCaster(CSimulation& game, CUnit* caster, CUnit* target, bool fireEvent) {
+    if (!caster || !target || target->GetPlayerIndex() == caster->GetPlayerIndex()) return false;
+    const int prevOwner = target->GetPlayerIndex();
+    if (CPlayer* oldOwner = game.GetPlayer(prevOwner)) {
+        oldOwner->RemoveUnit(target);
+    }
+    target->SetPlayerIndex(caster->GetPlayerIndex());
+    if (CPlayer* newOwner = game.GetPlayer(caster->GetPlayerIndex())) {
+        newOwner->AddUnit(target);
+    }
+    if (fireEvent) {
+        if (const auto& cb = game.GetOwnerChangedCallback()) {
+            cb(target->GetHandleId(), prevOwner);
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 ABActionDamageArea::ABActionDamageArea(float radius, float amount,
                                        CAttackType attackType, CDamageType damageType)
     : radius_(radius), amount_(amount), attackType_(attackType), damageType_(damageType) {}
 
 void ABActionDamageArea::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                              bool hasPoint, float x, float y) {
-    float cx = x, cy = y;
-    if (unitTarget) {
-        cx = unitTarget->GetX();
-        cy = unitTarget->GetY();
-    } else if (!hasPoint && caster) {
-        cx = caster->GetX();
-        cy = caster->GetY();
-    }
+    float cx = 0.0f, cy = 0.0f;
+    ResolveCenter(caster, unitTarget, hasPoint, x, y, cx, cy);
     for (auto* unit : game.GetUnits()) {
         if (!unit || unit->IsDead() || unit == caster) continue;
-        float dx = unit->GetX() - cx;
-        float dy = unit->GetY() - cy;
+        const float dx = unit->GetX() - cx;
+        const float dy = unit->GetY() - cy;
         if (dx * dx + dy * dy <= radius_ * radius_) {
             unit->Damage(game, caster, false, false, attackType_, damageType_, "", amount_, 0);
         }
@@ -43,22 +95,14 @@ ABActionHealArea::ABActionHealArea(float radius, float amount)
 
 void ABActionHealArea::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                            bool hasPoint, float x, float y) {
-    float cx = x, cy = y;
-    if (unitTarget) {
-        cx = unitTarget->GetX();
-        cy = unitTarget->GetY();
-    } else if (!hasPoint && caster) {
-        cx = caster->GetX();
-        cy = caster->GetY();
-    }
+    float cx = 0.0f, cy = 0.0f;
+    ResolveCenter(caster, unitTarget, hasPoint, x, y, cx, cy);
     for (auto* unit : game.GetUnits()) {
         if (!unit || unit->IsDead()) continue;
-        float dx = unit->GetX() - cx;
-        float dy = unit->GetY() - cy;
+        const float dx = unit->GetX() - cx;
+        const float dy = unit->GetY() - cy;
         if (dx * dx + dy * dy <= radius_ * radius_) {
-            float newLife = unit->GetLife() + amount_;
-            if (newLife > unit->GetMaxLife()) newLife = unit->GetMaxLife();
-            unit->SetLife(game, newLife);
+            HealUnitClamped(game, unit, amount_);
         }
     }
 }
@@ -69,22 +113,14 @@ ABActionApplyBuffArea::ABActionApplyBuffArea(float radius, BuffFactory factory)
 void ABActionApplyBuffArea::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                 bool hasPoint, float x, float y) {
     if (!factory_) return;
-    float cx = x, cy = y;
-    if (unitTarget) {
-        cx = unitTarget->GetX();
-        cy = unitTarget->GetY();
-    } else if (!hasPoint && caster) {
-        cx = caster->GetX();
-        cy = caster->GetY();
-    }
+    float cx = 0.0f, cy = 0.0f;
+    ResolveCenter(caster, unitTarget, hasPoint, x, y, cx, cy);
     for (auto* unit : game.GetUnits()) {
         if (!unit || unit->IsDead() || unit == caster) continue;
-        float dx = unit->GetX() - cx;
-        float dy = unit->GetY() - cy;
+        const float dx = unit->GetX() - cx;
+        const float dy = unit->GetY() - cy;
         if (dx * dx + dy * dy <= radius_ * radius_) {
-            if (auto buff = factory_) {
-                unit->AddBuff(buff(), game);
-            }
+            unit->AddBuff(factory_(), game);
         }
     }
 }
@@ -96,16 +132,10 @@ ABActionSummon::ABActionSummon(War3ID typeId, War3ID buffAlias, int count,
 
 void ABActionSummon::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                          bool hasPoint, float x, float y) {
-    float cx = x, cy = y;
-    if (unitTarget) {
-        cx = unitTarget->GetX();
-        cy = unitTarget->GetY();
-    } else if (!hasPoint && caster) {
-        cx = caster->GetX();
-        cy = caster->GetY();
-    }
+    float cx = 0.0f, cy = 0.0f;
+    ResolveCenter(caster, unitTarget, hasPoint, x, y, cx, cy);
     for (int i = 0; i < count_; i++) {
-        float ox = (i - count_ / 2) * spread_;
+        const float ox = (i - count_ / 2) * spread_;
         SummonTimedUnit(game, caster, typeId_, buffAlias_,
                         cx + ox, cy + spread_ * 0.5f,
                         caster ? caster->GetFacing() : 0.0f, duration_);
@@ -320,14 +350,8 @@ ABSpellDescriptor ABSpellDescriptor::MakePointWaveAreaDamage(
         const int waves = std::max(1, ctx.data[0] > 0.0f ? static_cast<int>(ctx.data[0]) : defaultWaves);
         const float dmg = ctx.data[1] > 0.0f ? ctx.data[1] : defaultDamagePerWave;
         const float rad = ctx.area > 0.0f ? ctx.area : defaultRadius;
-        float cx = x, cy = y;
-        if (target) {
-            cx = target->GetX();
-            cy = target->GetY();
-        } else if (!hasPoint && caster) {
-            cx = caster->GetX();
-            cy = caster->GetY();
-        }
+        float cx = 0.0f, cy = 0.0f;
+        ResolveCenter(caster, target, hasPoint, x, y, cx, cy);
         for (int w = 0; w < waves; ++w) {
             ABEffectChain perUnit;
             perUnit.Add(std::make_unique<ABActionDamageTarget>(dmg, CAttackType::SPELLS, dmgType));
@@ -405,14 +429,8 @@ ABSpellDescriptor ABSpellDescriptor::MakeAreaHealAndDispel(
     d.onEffect = [defaultRadius, defaultHealAmount, stripNegativeBuffs](
                      const ABSpellEffectContext& ctx, CSimulation& game,
                      CUnit* caster, CWidget* target, bool hasPoint, float x, float y) {
-        float cx = x, cy = y;
-        if (target) {
-            cx = target->GetX();
-            cy = target->GetY();
-        } else if (!hasPoint && caster) {
-            cx = caster->GetX();
-            cy = caster->GetY();
-        }
+        float cx = 0.0f, cy = 0.0f;
+        ResolveCenter(caster, target, hasPoint, x, y, cx, cy);
         const float rad = ctx.area > 0.0f ? ctx.area : defaultRadius;
         const float heal = ctx.data[0] > 0.0f ? ctx.data[0] : defaultHealAmount;
         const float rSq = rad * rad;
@@ -472,21 +490,6 @@ CUnit* SummonTimedUnit(CSimulation& game, CUnit* caster, War3ID typeId,
 
 namespace {
 
-// Resolve the effect center the same way the area actions do: unit target
-// wins, then the explicit point, then the caster position.
-void ResolveCenter(CUnit* caster, CWidget* unitTarget, bool hasPoint,
-                   float x, float y, float& outX, float& outY) {
-    if (unitTarget) {
-        outX = unitTarget->GetX();
-        outY = unitTarget->GetY();
-    } else if (hasPoint || !caster) {
-        outX = x;
-        outY = y;
-    } else {
-        outX = caster->GetX();
-        outY = caster->GetY();
-    }
-}
 
 // Shared iteration filter: life, caster/exclude/faction rules.
 bool ShouldVisitUnit(CUnit* caster, CUnit* unit, bool includeCaster,
@@ -586,11 +589,7 @@ ABActionHealTarget::ABActionHealTarget(float amount) : amount_(amount) {}
 void ABActionHealTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                              bool, float, float) {
     (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
-    if (!unit || unit->IsDead()) return;
-    float healed = unit->GetLife() + amount_;
-    if (healed > unit->GetMaxLife()) healed = unit->GetMaxLife();
-    unit->SetLife(game, healed);
+    HealUnitClamped(game, dynamic_cast<CUnit*>(unitTarget), amount_);
 }
 
 ABActionAddBuffTarget::ABActionAddBuffTarget(BuffFactory factory)
@@ -637,11 +636,8 @@ void ABActionResurrectTarget::Run(CSimulation& game, CUnit* caster, CWidget* uni
 }
 
 void ABActionReviveTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
-                               bool, float, float) {
-    (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
-    if (!CanResurrectCorpse(unit)) return;
-    unit->Revive(game, unit->GetX(), unit->GetY());
+                               bool hasPoint, float x, float y) {
+    ABActionResurrectTarget{}.Run(game, caster, unitTarget, hasPoint, x, y);
 }
 
 ABActionSetLifeTarget::ABActionSetLifeTarget(float life) : life_(life) {}
@@ -817,14 +813,9 @@ void ABActionCreateUnitAtTarget::Run(CSimulation& game, CUnit* caster,
                                      bool, float, float) {
     if (!caster || !unitTarget) return;
     for (int i = 0; i < count_; i++) {
-        CUnit* created = game.CreateUnit(typeId_, caster->GetPlayerIndex(),
-                                         unitTarget->GetX() + i * stepX_,
-                                         unitTarget->GetY(), 0);
-        if (created) {
-            if (const auto& cb = game.GetUnitSummonedCallback()) {
-                cb(caster->GetHandleId(), created->GetHandleId());
-            }
-        }
+        CreateUnitForCasterAndNotify(game, caster, typeId_,
+                                     unitTarget->GetX() + i * stepX_,
+                                     unitTarget->GetY(), 0.0f);
     }
 }
 
@@ -834,14 +825,7 @@ ABActionCreateUnitAtPoint::ABActionCreateUnitAtPoint(War3ID typeId, float x, flo
 
 void ABActionCreateUnitAtPoint::Run(CSimulation& game, CUnit* caster,
                                     CWidget*, bool, float, float) {
-    if (!caster) return;
-    CUnit* created =
-        game.CreateUnit(typeId_, caster->GetPlayerIndex(), x_, y_, facing_);
-    if (created) {
-        if (const auto& cb = game.GetUnitSummonedCallback()) {
-            cb(caster->GetHandleId(), created->GetHandleId());
-        }
-    }
+    CreateUnitForCasterAndNotify(game, caster, typeId_, x_, y_, facing_);
 }
 
 ABActionSummonRing::ABActionSummonRing(War3ID typeId, War3ID buffAlias, int count,
@@ -930,8 +914,7 @@ ABActionCreateUnitWithBuff::ABActionCreateUnitWithBuff(War3ID typeId, float x, f
 void ABActionCreateUnitWithBuff::Run(CSimulation& game, CUnit* caster, CWidget*,
                                      bool, float, float) {
     if (!caster) return;
-    CUnit* created =
-        game.CreateUnit(typeId_, caster->GetPlayerIndex(), x_, y_, 0);
+    CUnit* created = game.CreateUnit(typeId_, caster->GetPlayerIndex(), x_, y_, 0);
     if (!created) return;
     for (auto& factory : factories_) {
         if (factory) created->AddBuff(factory(), game);
@@ -943,21 +926,7 @@ void ABActionCreateUnitWithBuff::Run(CSimulation& game, CUnit* caster, CWidget*,
 
 void ABActionTransferToCaster::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                    bool, float, float) {
-    auto* target = dynamic_cast<CUnit*>(unitTarget);
-    if (!caster || !target) return;
-    if (target->GetPlayerIndex() == caster->GetPlayerIndex()) return;
-    const int prevOwner = target->GetPlayerIndex();
-    if (CPlayer* oldOwner = game.GetPlayer(target->GetPlayerIndex())) {
-        oldOwner->RemoveUnit(target);
-    }
-    target->SetPlayerIndex(caster->GetPlayerIndex());
-    if (CPlayer* newOwner = game.GetPlayer(caster->GetPlayerIndex())) {
-        newOwner->AddUnit(target);
-    }
-    // Ownership conversion (ref Charm): JASS CHANGE_OWNER triggers observe it.
-    if (const auto& cb = game.GetOwnerChangedCallback()) {
-        cb(target->GetHandleId(), prevOwner);
-    }
+    TransferUnitOwnerToCaster(game, caster, dynamic_cast<CUnit*>(unitTarget), true);
 }
 
 ABActionCreateUnitWithAbility::ABActionCreateUnitWithAbility(
@@ -967,8 +936,7 @@ ABActionCreateUnitWithAbility::ABActionCreateUnitWithAbility(
 void ABActionCreateUnitWithAbility::Run(CSimulation& game, CUnit* caster, CWidget*,
                                         bool, float, float) {
     if (!caster || !factory_) return;
-    CUnit* created =
-        game.CreateUnit(typeId_, caster->GetPlayerIndex(), x_, y_, 0);
+    CUnit* created = game.CreateUnit(typeId_, caster->GetPlayerIndex(), x_, y_, 0);
     if (!created) return;
     if (auto ability = factory_(game, created)) {
         created->AddAbility(game, std::move(ability));
@@ -989,8 +957,6 @@ void ABActionSummonCopyOfTarget::Run(CSimulation& game, CUnit* caster, CWidget* 
     CUnit* copy = SummonTimedUnit(game, caster, target->GetTypeId(), buffAlias_,
                                   target->GetX() + offsetX_, target->GetY() + offsetY_,
                                   target->GetFacing(), duration_);
-    // Both producers (Mirror Image, Wand of Illusion) raise illusions (ref
-    // IsUnitIllusion reads the copy flag, not the timed-life buff).
     if (copy) copy->SetIsIllusion(true);
 }
 
@@ -1003,15 +969,7 @@ void ABActionAnimateDeadCorpse::Run(CSimulation& game, CUnit* caster, CWidget* u
     if (!caster || !target || !target->IsDead()) return;
     target->Revive(game, target->GetX(), target->GetY());
     target->SetInvulnerable(true);
-    if (target->GetPlayerIndex() != caster->GetPlayerIndex()) {
-        if (CPlayer* oldOwner = game.GetPlayer(target->GetPlayerIndex())) {
-            oldOwner->RemoveUnit(target);
-        }
-        target->SetPlayerIndex(caster->GetPlayerIndex());
-        if (CPlayer* newOwner = game.GetPlayer(caster->GetPlayerIndex())) {
-            newOwner->AddUnit(target);
-        }
-    }
+    TransferUnitOwnerToCaster(game, caster, target, false);
     target->AddBuff(std::make_unique<CBuffTimedLife>(buffAlias_, duration_), game);
     if (const auto& cb = game.GetUnitSummonedCallback()) {
         cb(caster->GetHandleId(), target->GetHandleId());
@@ -1025,15 +983,7 @@ void ABActionAncestralRevive::Run(CSimulation& game, CUnit* caster, CWidget* uni
     const War3ID typeId = target->GetTypeId();
     if (typeId != War3ID("otau") && typeId != War3ID("Otch")) return;
     target->Revive(game, target->GetX(), target->GetY());
-    if (target->GetPlayerIndex() != caster->GetPlayerIndex()) {
-        if (CPlayer* oldOwner = game.GetPlayer(target->GetPlayerIndex())) {
-            oldOwner->RemoveUnit(target);
-        }
-        target->SetPlayerIndex(caster->GetPlayerIndex());
-        if (CPlayer* newOwner = game.GetPlayer(caster->GetPlayerIndex())) {
-            newOwner->AddUnit(target);
-        }
-    }
+    TransferUnitOwnerToCaster(game, caster, target, false);
 }
 
 ABActionDevourMagic::ABActionDevourMagic(float manaPerBuff) : manaPerBuff_(manaPerBuff) {}

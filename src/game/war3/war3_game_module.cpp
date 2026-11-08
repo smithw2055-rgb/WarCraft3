@@ -64,6 +64,7 @@
 #include "ecs/abilities/spells28.h"
 #include "ecs/abilities/spells29.h"
 #include "ecs/ability.h"
+#include "ecs/orders/order.h"
 #include "ecs/ability_factory.h"
 #include "ecs/csimulation.h"
 #include "ecs/destructable.h"
@@ -191,6 +192,7 @@ void War3GameModule::RegisterWar3AbilityCatalog() {
     REG_T("Aroo", CAbilityRoot);
     REG_T("Aro1", CAbilityUproot);
     REG_T("Asei", CAbilitySellItems);
+    REG_T("Arev", CAbilityReviveHero);
 
     // Human / Orc / Undead / Night Elf / Neutral Spells (Batches 1-5)
     REG_T("AHbz", CAbilityBlizzard);
@@ -2295,6 +2297,149 @@ CUnit* War3GameModule::OnRespawnCarriedHero(CSimulation& sim,
     }
     ++stats_.heroesCarriedOver;
     return hero;
+}
+
+
+bool War3GameModule::OnDiscoverAIRacePlan(const CSimulation& sim,
+                                          int playerIndex,
+                                          AIRacePlan& outPlan) const {
+    return DiscoverRaceBuildPlan(sim, playerIndex, outPlan);
+}
+
+void War3GameModule::RegisterCustomOrder(const std::string& orderName,
+                                         int orderId,
+                                         uint32_t abilityRawcode,
+                                         int secondaryOrderId) {
+    if (!orderName.empty() && orderId != 0) {
+        RegisterCustomOrderString(orderName, orderId);
+    }
+    if (abilityRawcode != 0) {
+        RegisterAbilityOrderMapping(War3ID(abilityRawcode), orderId, secondaryOrderId);
+    }
+    ++stats_.customOrdersRegistered;
+}
+
+void War3GameModule::RegisterCustomAura(War3ID code,
+                                        float radius,
+                                        bool affectsAllies,
+                                        bool affectsSelf,
+                                        bool enemyOnly,
+                                        const std::vector<CAuraBonus>& bonuses) {
+    if (code.value == 0) return;
+    AbilityFactory::RegisterModuleCreator(
+        kModuleId,
+        code,
+        [radius, affectsAllies, affectsSelf, enemyOnly, bonuses](int handleId, War3ID abilityCode) -> std::unique_ptr<CAbility> {
+            auto aura = std::make_unique<CAbilityAura>(handleId, abilityCode);
+            aura->SetRadius(radius);
+            aura->SetAffectsAllies(affectsAllies);
+            aura->SetAffectsSelf(affectsSelf);
+            aura->SetEnemyOnly(enemyOnly);
+            for (const auto& b : bonuses) {
+                aura->AddBonus(b);
+            }
+            return aura;
+        });
+    ++stats_.customAurasRegistered;
+}
+
+bool War3GameModule::UnregisterCustomAura(War3ID code) {
+    if (code.value == 0) return false;
+    AbilityFactory::UnregisterCreator(code);
+    return true;
+}
+
+
+bool War3GameModule::RegisterCustomItemArchetype(CSimulation& sim,
+                                                 War3ID itemId,
+                                                 const std::string& name,
+                                                 int goldCost,
+                                                 int lumberCost,
+                                                 int charges,
+                                                 const std::vector<War3ID>& abilityList) {
+    CItemData* itemData = sim.GetItemData();
+    if (!itemData || itemId.value == 0) return false;
+    auto type = std::make_unique<CItemType>();
+    type->id = itemId;
+    type->name = name;
+    type->legacyName = name;
+    type->goldCost = goldCost;
+    type->lumberCost = lumberCost;
+    type->charges = charges;
+    type->perishable = (charges > 0);
+    type->droppable = true;
+    type->pawnable = true;
+    type->sellable = true;
+    type->abilityList = abilityList;
+    itemData->RegisterItemType(itemId, std::move(type));
+    ++stats_.customDataArchetypesRegistered;
+    return true;
+}
+
+bool War3GameModule::RegisterCustomUpgradeArchetype(CSimulation& sim,
+                                                    War3ID upgradeId,
+                                                    const std::string& name,
+                                                    int maxLevel,
+                                                    int goldBase,
+                                                    int goldMod,
+                                                    const std::string& effectCode,
+                                                    float effectBase,
+                                                    float effectMod) {
+    CUpgradeData* upgradeData = sim.GetUpgradeData();
+    if (!upgradeData || upgradeId.value == 0) return false;
+    auto upg = std::make_unique<CUpgradeType>();
+    upg->id = upgradeId;
+    upg->name = name;
+    upg->maxLevel = std::max(1, maxLevel);
+    upg->goldCost = goldBase;
+    for (int l = 1; l <= upg->maxLevel; ++l) {
+        upg->goldPerLevel.push_back(goldBase + goldMod * (l - 1));
+        upg->lumberPerLevel.push_back(0);
+        upg->timePerLevel.push_back(10);
+    }
+    if (!effectCode.empty()) {
+        CUpgradeEffectSpec spec;
+        spec.effectCode = effectCode;
+        spec.base = effectBase;
+        spec.mod = effectMod;
+        upg->effects.push_back(std::move(spec));
+    }
+    upgradeData->RegisterUpgrade(upgradeId, std::move(upg));
+    ++stats_.customDataArchetypesRegistered;
+    return true;
+}
+
+bool War3GameModule::RegisterCustomAbilityDef(CSimulation& sim,
+                                              War3ID abilityId,
+                                              const std::string& name,
+                                              int levels,
+                                              float cooldown,
+                                              int manaCost,
+                                              float range,
+                                              float area,
+                                              float duration) {
+    CAbilityData* abilityData = sim.GetAbilityData();
+    if (!abilityData || abilityId.value == 0) return false;
+    auto def = std::make_unique<CAbilityDefFull>();
+    def->id = abilityId;
+    def->name = name;
+    def->legacyName = name;
+    def->levels = std::max(1, levels);
+    def->cooldown = cooldown;
+    def->manaCost = manaCost;
+    def->range = range;
+    def->area = area;
+    def->duration = duration;
+    for (int l = 0; l < def->levels; ++l) {
+        def->cooldowns.push_back(cooldown);
+        def->manaCosts.push_back(manaCost);
+        def->ranges.push_back(range);
+        def->areas.push_back(area);
+        def->durations.push_back(duration);
+    }
+    abilityData->RegisterAbility(abilityId, std::move(def));
+    ++stats_.customDataArchetypesRegistered;
+    return true;
 }
 
 } // namespace war3

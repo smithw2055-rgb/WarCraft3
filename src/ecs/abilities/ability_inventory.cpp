@@ -4,7 +4,6 @@
 #include "ecs/item.h"
 #include "ecs/item_bonuses.h"
 #include "ecs/ability_factory.h"
-#include "ecs/abilities/ability_spell_base.h"
 #include "ecs/orders/order.h"
 #include "ecs/behaviors/behavior.h"
 #include <iostream>
@@ -65,9 +64,9 @@ bool CAbilityInventory::PickUpItem(CSimulation& game, CUnit* unit, CItem* item, 
         if (unit) {
             ApplyItemBonuses(game, unit, item->GetBonuses());
             for (auto& abilityId : item->GetAbilityList()) {
-                auto created = AbilityFactory::CreateAbility(game.AllocateHandleId(), abilityId);
-                auto* spell = dynamic_cast<CAbilitySpellBase*>(created.get());
-                if (spell) spell->DoEffect(game, unit);
+                if (auto created = AbilityFactory::CreateAbility(game.AllocateHandleId(), abilityId)) {
+                    if (created->IsSpellAbility()) created->DoEffect(game, unit);
+                }
             }
         }
         item->SetInInventory(false);

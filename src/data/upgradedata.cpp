@@ -8,13 +8,6 @@
 
 namespace {
 
-bool EqualsNoCase(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i])) return false;
-    }
-    return true;
-}
 
 void ApplyUpgradeModSet(TxtTable& tbl, TxtTable& skinTbl, const ObjectMetaTable& meta,
                         const ObjectModificationSet& set,
@@ -37,7 +30,7 @@ void ApplyUpgradeModSet(TxtTable& tbl, TxtTable& skinTbl, const ObjectMetaTable&
                 continue;
             }
             const std::string value = FormatObjectModValue(mod);
-            if (EqualsNoCase(table, "Profile")) {
+            if (EqualsIgnoreCase(table, "Profile")) {
                 skinTbl.SetString(newId, key, value);
             } else {
                 tbl.SetString(newId, key, value);
@@ -58,7 +51,7 @@ void ApplyUpgradeModSet(TxtTable& tbl, TxtTable& skinTbl, const ObjectMetaTable&
                 continue;
             }
             const std::string value = FormatObjectModValue(mod);
-            if (EqualsNoCase(table, "Profile")) {
+            if (EqualsIgnoreCase(table, "Profile")) {
                 skinTbl.SetString(section, key, value);
             } else {
                 tbl.SetString(section, key, value);
@@ -105,32 +98,24 @@ CUpgradeData CUpgradeData::LoadFromMpq(const MpqManager& mpq, const std::string&
     }
 
     TxtTable skinTbl;
-    {
-        const char* upgradeFiles[] = {
-            "Units\\UpgradeFunc.txt",
-            "Units\\UpgradeStrings.txt",
-            "Units\\CommonUpgradeFunc.txt",
-            "Units\\CommonUpgradeStrings.txt",
-            "Units\\HumanUpgradeFunc.txt",
-            "Units\\HumanUpgradeStrings.txt",
-            "Units\\OrcUpgradeFunc.txt",
-            "Units\\OrcUpgradeStrings.txt",
-            "Units\\NightElfUpgradeFunc.txt",
-            "Units\\NightElfUpgradeStrings.txt",
-            "Units\\UndeadUpgradeFunc.txt",
-            "Units\\UndeadUpgradeStrings.txt",
-            "Units\\NeutralUpgradeFunc.txt",
-            "Units\\NeutralUpgradeStrings.txt",
-            "Units\\CampaignUpgradeFunc.txt",
-            "Units\\CampaignUpgradeStrings.txt",
-        };
-        for (const char* f : upgradeFiles) {
-            std::vector<uint8_t> buf;
-            if (mpq.ReadFile(f, buf)) {
-                skinTbl.Load(buf.data(), buf.size());
-            }
-        }
-    }
+    LoadTxtOverlaysFromMpq(mpq, {
+        "Units\\UpgradeFunc.txt",
+        "Units\\UpgradeStrings.txt",
+        "Units\\CommonUpgradeFunc.txt",
+        "Units\\CommonUpgradeStrings.txt",
+        "Units\\HumanUpgradeFunc.txt",
+        "Units\\HumanUpgradeStrings.txt",
+        "Units\\OrcUpgradeFunc.txt",
+        "Units\\OrcUpgradeStrings.txt",
+        "Units\\NightElfUpgradeFunc.txt",
+        "Units\\NightElfUpgradeStrings.txt",
+        "Units\\UndeadUpgradeFunc.txt",
+        "Units\\UndeadUpgradeStrings.txt",
+        "Units\\NeutralUpgradeFunc.txt",
+        "Units\\NeutralUpgradeStrings.txt",
+        "Units\\CampaignUpgradeFunc.txt",
+        "Units\\CampaignUpgradeStrings.txt",
+    }, skinTbl);
 
     // Map-specific custom upgrades (war3map.w3q) before parsing.
     if (!mapPath.empty()) {

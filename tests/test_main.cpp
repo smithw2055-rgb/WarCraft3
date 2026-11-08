@@ -857,6 +857,14 @@ bool TestPhase19StageTT1GenericCAbilityQueueBuildUpgradeAndRallyContracts();
 bool TestPhase19StageTT2GenericCAbilityHeroProgressionAndShopStockContracts();
 bool TestPhase19StageUU1DecoupledJassNativesHeroInventoryShopAndCooldowns();
 bool TestPhase19StageUU2War3GameModuleV19BuildSnapObstructionAndDynamicPluginSuite();
+bool TestPhase20StageVV1DecoupledMeleeAIAndCrossAbilityVirtualContracts();
+bool TestPhase20StageVV2DeclarativeCAbilityAuraAndSetAuraBuffEngine();
+bool TestPhase20StageWW1DirectValueCOrderDispatchAndDeduplicatedAbilityBuilderActions();
+bool TestPhase20StageWW2War3GameModuleV20DynamicOrdersCustomAurasAndPluginSuite();
+bool TestPhase21StageXX1UnifiedMpqSingleArchiveReaderAndJassScriptResolver();
+bool TestPhase21StageXX2LayeredMapObjectModsAndCaseInsensitiveSlkMergeHelpers();
+bool TestPhase21StageYY1War3GameModuleV21CustomItemUpgradeAndAbilityDataArchetypes();
+bool TestPhase21StageYY2DynamicPluginSOV21AndCloudRetailMapsEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1709,6 +1717,14 @@ int main(int argc, char** argv) {
         {"Phase19 Stage TT2 Generic CAbility hero progression and shop stock contracts", TestPhase19StageTT2GenericCAbilityHeroProgressionAndShopStockContracts},
         {"Phase19 Stage UU1 Decoupled JASS natives hero inventory shop and cooldowns", TestPhase19StageUU1DecoupledJassNativesHeroInventoryShopAndCooldowns},
         {"Phase19 Stage UU2 War3GameModule v19 build snap obstruction and dynamic plugin SO", TestPhase19StageUU2War3GameModuleV19BuildSnapObstructionAndDynamicPluginSuite},
+        {"Phase20 Stage VV1 Decoupled MeleeAI and cross-ability virtual contracts", TestPhase20StageVV1DecoupledMeleeAIAndCrossAbilityVirtualContracts},
+        {"Phase20 Stage VV2 Declarative CAbilityAura and SetAuraBuff engine", TestPhase20StageVV2DeclarativeCAbilityAuraAndSetAuraBuffEngine},
+        {"Phase20 Stage WW1 Direct O(1) COrder dispatch and deduplicated AbilityBuilder", TestPhase20StageWW1DirectValueCOrderDispatchAndDeduplicatedAbilityBuilderActions},
+        {"Phase20 Stage WW2 War3GameModule v20 dynamic orders custom auras and plugin SO", TestPhase20StageWW2War3GameModuleV20DynamicOrdersCustomAurasAndPluginSuite},
+        {"Phase21 Stage XX1 Unified MpqManager archive reader and JASS script resolver", TestPhase21StageXX1UnifiedMpqSingleArchiveReaderAndJassScriptResolver},
+        {"Phase21 Stage XX2 Layered map ObjectMods loader and SlkMerge helpers", TestPhase21StageXX2LayeredMapObjectModsAndCaseInsensitiveSlkMergeHelpers},
+        {"Phase21 Stage YY1 War3GameModule v21 custom item upgrade and ability archetypes", TestPhase21StageYY1War3GameModuleV21CustomItemUpgradeAndAbilityDataArchetypes},
+        {"Phase21 Stage YY2 Dynamic plugin SO v21 and cloud retail maps end-to-end suite", TestPhase21StageYY2DynamicPluginSOV21AndCloudRetailMapsEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

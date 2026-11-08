@@ -25,7 +25,7 @@ public:
     bool DropItemAt(CSimulation& game, CUnit* unit, int slot, float x, float y) override;
     bool DropItem(CSimulation& game, CUnit* unit, CItem* item) override;
     bool DropItemAt(CSimulation& game, CUnit* unit, CItem* item, float x, float y) override;
-    bool RemoveItemAt(CSimulation& game, CUnit* unit, int slot);
+    bool RemoveItemAt(CSimulation& game, CUnit* unit, int slot) override;
     bool UseItem(CSimulation& game, CUnit* unit, int slot) override;
     bool UseItem(CSimulation& game, CUnit* unit, CItem* item) override;
     bool MoveItemToSlot(CItem* item, int slot) override;
@@ -34,7 +34,7 @@ public:
     CItem* GetItem(int slot) const override;
     int GetItemCount() const override;
     int GetItemCapacity() const override { return itemCapacity_; }
-    int FindEmptySlot() const;
+    int FindEmptySlot() const override;
     int FindEmptySlot(int slotPreference) const;
     int FindItemSlot(CItem* item) const override;
     bool HasItem(CItem* item) const override;

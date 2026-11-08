@@ -77,7 +77,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 19u; }
+    uint32_t GetModuleVersion() const override { return 21u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -215,6 +215,9 @@ public:
                                       const CUnit& candidateTarget,
                                       float baseScore) const override;
 
+    bool OnDiscoverAIRacePlan(const CSimulation& sim,
+                              int playerIndex,
+                              AIRacePlan& outPlan) const override;
     static bool DiscoverRaceBuildPlan(const CSimulation& sim,
                                       int playerIndex,
                                       AIRacePlan& outPlan);
@@ -273,6 +276,46 @@ public:
                                    float y,
                                    int playerIndex,
                                    uint32_t buildingTypeRawcode) const override;
+
+    // Phase 20: Dynamic order & declarative aura registration
+    void RegisterCustomOrder(const std::string& orderName,
+                             int orderId,
+                             uint32_t abilityRawcode = 0,
+                             int secondaryOrderId = 0) override;
+    void RegisterCustomAura(War3ID code,
+                            float radius,
+                            bool affectsAllies,
+                            bool affectsSelf,
+                            bool enemyOnly,
+                            const std::vector<CAuraBonus>& bonuses);
+    bool UnregisterCustomAura(War3ID code);
+
+    // Phase 21: In-memory custom data-table archetype registration (Items, Upgrades, Abilities)
+    bool RegisterCustomItemArchetype(CSimulation& sim,
+                                     War3ID itemId,
+                                     const std::string& name,
+                                     int goldCost,
+                                     int lumberCost,
+                                     int charges,
+                                     const std::vector<War3ID>& abilityList);
+    bool RegisterCustomUpgradeArchetype(CSimulation& sim,
+                                        War3ID upgradeId,
+                                        const std::string& name,
+                                        int maxLevel,
+                                        int goldBase,
+                                        int goldMod,
+                                        const std::string& effectCode,
+                                        float effectBase,
+                                        float effectMod);
+    bool RegisterCustomAbilityDef(CSimulation& sim,
+                                  War3ID abilityId,
+                                  const std::string& name,
+                                  int levels,
+                                  float cooldown,
+                                  int manaCost,
+                                  float range,
+                                  float area,
+                                  float duration);
 
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 

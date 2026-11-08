@@ -20,9 +20,23 @@ CUnit* FindAuraUnit(CSimulation& game, int handleId) {
 }
 
 CAbilityAura::CAbilityAura(int handleId, War3ID code)
-    : CAbility(handleId, code, CAbilityCategory::BUFF) {
+    : CAbility(handleId, code, CAbilityCategory::BUFF)
+    , affectsAllies_(true)
+    , affectsSelf_(true)
+    , enemyOnly_(false) {
     iconShowing_ = false;
     permanent_ = true;
+}
+
+CAbilityAura::CAbilityAura(int handleId, War3ID code, float radius,
+                           bool affectsAllies, bool affectsSelf, bool enemyOnly,
+                           std::initializer_list<CAuraBonus> bonuses)
+    : CAbilityAura(handleId, code) {
+    radius_ = radius;
+    affectsAllies_ = affectsAllies;
+    affectsSelf_ = affectsSelf;
+    enemyOnly_ = enemyOnly;
+    bonuses_.assign(bonuses.begin(), bonuses.end());
 }
 
 void CAbilityAura::OnAdd(CSimulation& game, CUnit* unit) {
@@ -31,7 +45,6 @@ void CAbilityAura::OnAdd(CSimulation& game, CUnit* unit) {
 }
 
 void CAbilityAura::OnRemove(CSimulation& game, CUnit* unit) {
-    (void)unit;
     // Remove aura from all affected units
     for (int handle : affectedUnitHandles_) {
         if (CUnit* target = FindAuraUnit(game, handle)) {
@@ -44,7 +57,7 @@ void CAbilityAura::OnRemove(CSimulation& game, CUnit* unit) {
 void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
     if (!unit || unit->IsDead()) return;
 
-    float radiusSq = radius_ * radius_;
+    const float radiusSq = radius_ * radius_;
     auto* ownerPlayer = game.GetPlayer(unit->GetPlayerIndex());
 
     // Find all units in radius
@@ -54,16 +67,13 @@ void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
         if (other->IsDead()) continue;
         if (other == unit && !affectsSelf_) continue;
 
-        float dx = other->GetX() - unit->GetX();
-        float dy = other->GetY() - unit->GetY();
-        float distSq = dx * dx + dy * dy;
+        const float dx = other->GetX() - unit->GetX();
+        const float dy = other->GetY() - unit->GetY();
+        if (dx * dx + dy * dy > radiusSq) continue;
 
-        if (distSq > radiusSq) continue;
-
-        // Check alliance
         auto* otherPlayer = game.GetPlayer(other->GetPlayerIndex());
-        bool isAlly = ownerPlayer && otherPlayer &&
-                      ownerPlayer->HasAlliance(*otherPlayer, CAllianceType::ALLIED);
+        const bool isAlly = ownerPlayer && otherPlayer &&
+                            ownerPlayer->HasAlliance(*otherPlayer, CAllianceType::ALLIED);
 
         bool shouldAffect = false;
         if (enemyOnly_) {
@@ -76,12 +86,11 @@ void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
 
         if (shouldAffect) {
             currentInRange.push_back(other->GetHandleId());
-
-            // Check if already affected
-            auto it = std::find(affectedUnitHandles_.begin(), affectedUnitHandles_.end(),
-                                other->GetHandleId());
-            if (it == affectedUnitHandles_.end()) {
-                // Newly in range - apply aura
+            const bool alreadyAffected =
+                std::find(affectedUnitHandles_.begin(), affectedUnitHandles_.end(),
+                          other->GetHandleId()) != affectedUnitHandles_.end();
+            // Newly in range or periodic buff aura refresh
+            if (!alreadyAffected || (auraBuffId_.value != 0 && auraBuffFactory_)) {
                 ApplyAura(game, unit, other);
             }
         }
@@ -89,9 +98,7 @@ void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
 
     // Remove aura from units that left range
     for (auto it = affectedUnitHandles_.begin(); it != affectedUnitHandles_.end();) {
-        auto inRange = std::find(currentInRange.begin(), currentInRange.end(), *it);
-        if (inRange == currentInRange.end()) {
-            // Unit left range
+        if (std::find(currentInRange.begin(), currentInRange.end(), *it) == currentInRange.end()) {
             if (CUnit* target = FindAuraUnit(game, *it)) {
                 RemoveAura(game, unit, target);
             }
@@ -103,8 +110,8 @@ void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
 
     // Add newly affected units
     for (int handle : currentInRange) {
-        auto it = std::find(affectedUnitHandles_.begin(), affectedUnitHandles_.end(), handle);
-        if (it == affectedUnitHandles_.end()) {
+        if (std::find(affectedUnitHandles_.begin(), affectedUnitHandles_.end(), handle) ==
+            affectedUnitHandles_.end()) {
             affectedUnitHandles_.push_back(handle);
         }
     }
@@ -112,24 +119,32 @@ void CAbilityAura::OnTick(CSimulation& game, CUnit* unit) {
 
 void CAbilityAura::ApplyAura(CSimulation& game, CUnit* caster, CUnit* target) {
     if (!target) return;
-    // Buff-based application (ref BuffAuraBase): one aura buff per caster
-    // carrying all bonuses, so overlapping auras take the strongest bonus
-    // per slot and dispels can strip them. The unit's non-stacking table
-    // does the math; single-aura results match the old direct-mutation
-    // path exactly.
-    std::vector<CBuffAuraStat::Bonus> bonuses;
-    for (const auto& bonus : bonuses_) {
-        bonuses.push_back({bonus.type, bonus.value, bonus.isPercent});
+    if (auraBuffId_.value != 0 && auraBuffFactory_) {
+        if (CBuff* existing = target->GetBuff(auraBuffId_)) {
+            existing->RefreshDuration();
+        } else if (auto buff = auraBuffFactory_()) {
+            target->AddBuff(std::move(buff), game);
+        }
     }
-    const int casterHandle = caster ? caster->GetHandleId() : -1;
-    target->AddBuff(std::make_unique<CBuffAuraStat>(GetCode(), std::move(bonuses), casterHandle),
-                    game);
+    if (!bonuses_.empty()) {
+        std::vector<CBuffAuraStat::Bonus> bonuses;
+        bonuses.reserve(bonuses_.size());
+        for (const auto& bonus : bonuses_) {
+            bonuses.push_back({bonus.type, bonus.value, bonus.isPercent});
+        }
+        const int casterHandle = caster ? caster->GetHandleId() : -1;
+        target->AddBuff(std::make_unique<CBuffAuraStat>(GetCode(), std::move(bonuses), casterHandle),
+                        game);
+    }
 }
 
 void CAbilityAura::RemoveAura(CSimulation& game, CUnit* caster, CUnit* target) {
     if (!target) return;
-    // Removing this caster's aura buff unregisters its bonuses and
-    // recomputes what overlapping auras still grant.
-    const int casterHandle = caster ? caster->GetHandleId() : -1;
-    target->RemoveBuffByIdAndCaster(GetCode(), casterHandle, game);
+    if (auraBuffId_.value != 0) {
+        target->RemoveBuff(auraBuffId_, game);
+    }
+    if (!bonuses_.empty()) {
+        const int casterHandle = caster ? caster->GetHandleId() : -1;
+        target->RemoveBuffByIdAndCaster(GetCode(), casterHandle, game);
+    }
 }

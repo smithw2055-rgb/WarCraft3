@@ -23,6 +23,7 @@ class CDestructable;
 class CCombatSystem;
 class CAbility;
 struct CarriedHero;
+struct AIRacePlan;
 
 namespace engine {
 
@@ -31,6 +32,9 @@ struct SimulationModuleStats {
     uint64_t abilitiesAttached = 0;
     uint64_t customSpellsRegistered = 0;
     uint64_t customAutocastRegistered = 0;
+    uint64_t customOrdersRegistered = 0;
+    uint64_t customAurasRegistered = 0;
+    uint64_t customDataArchetypesRegistered = 0;
     uint64_t itemsConfigured = 0;
     uint64_t destructablesConfigured = 0;
     uint64_t unitsCommitted = 0;
@@ -214,6 +218,11 @@ public:
     virtual void SetPlayerAIEnabled(int /*playerIndex*/, bool /*enabled*/) {}
     virtual void CommandPlayerAI(int /*playerIndex*/, int /*command*/, int /*data*/) {}
     virtual void TickPlayerAIs(CSimulation& /*sim*/, float /*dt*/) {}
+    virtual bool OnDiscoverAIRacePlan(const CSimulation& /*sim*/,
+                                      int /*playerIndex*/,
+                                      AIRacePlan& /*outPlan*/) const {
+        return false;
+    }
 
     // Evaluates tactical target priority score (adds Attack-vs-Defense counter bonus in War3GameModule).
     virtual float EvaluateTacticalTargetScore(const CSimulation& /*sim*/,
@@ -306,6 +315,12 @@ public:
                                            uint32_t /*buildingTypeRawcode*/) const {
         return false;
     }
+
+    // Phase 20: Dynamic order string & ability order mapping registration
+    virtual void RegisterCustomOrder(const std::string& /*orderName*/,
+                                     int /*orderId*/,
+                                     uint32_t /*abilityRawcode*/ = 0,
+                                     int /*secondaryOrderId*/ = 0) {}
 
     // Negative buff duration multiplier (e.g., 0.25x when Resistant Skin 'Brsk' is active).
     virtual float GetNegativeBuffDurationMultiplier(const CUnit& /*target*/) const {

@@ -147,22 +147,7 @@ bool GameController::StartPendingGlueMapLaunch(int screenW, int screenH) {
 
 void GameController::ReadMapFile(const std::string& mapPath, const std::string& fileName,
                                   std::vector<uint8_t>& out) {
-#ifndef WITHOUT_STORMLIB
-    HANDLE hMpq = nullptr;
-    if (!SFileOpenArchive(mapPath.c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) return;
-    HANDLE hFile = nullptr;
-    if (!SFileOpenFileEx(hMpq, fileName.c_str(), SFILE_OPEN_BASE_FILE, &hFile)) {
-        SFileCloseArchive(hMpq); return;
-    }
-    DWORD sz = SFileGetFileSize(hFile, nullptr);
-    out.resize(sz);
-    DWORD read = 0;
-    SFileReadFile(hFile, out.data(), sz, &read, nullptr);
-    SFileCloseFile(hFile);
-    SFileCloseArchive(hMpq);
-#else
-    (void)mapPath; (void)fileName; (void)out;
-#endif
+    MpqManager::ReadSingleArchiveFile(mapPath, fileName, out);
 }
 
 // --- State machine ---

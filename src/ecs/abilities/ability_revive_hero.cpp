@@ -1,7 +1,6 @@
 #include "ability_revive_hero.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
-#include "ecs/abilities/ability_queue.h"
 #include "ecs/player.h"
 #include <iostream>
 
@@ -27,7 +26,7 @@ CBehavior* CAbilityReviveHero::BeginNoTarget(CSimulation& game, CUnit* caster, i
     }
 
     // Find the queue ability on the building
-    auto* queueAbility = dynamic_cast<CAbilityQueue*>(caster->GetAbility(War3ID("Aque")));
+    CAbility* queueAbility = caster->GetAbility(War3ID("Aque"));
     if (queueAbility) {
         queueAbility->QueueReviveHero(game, caster, hero);
     }

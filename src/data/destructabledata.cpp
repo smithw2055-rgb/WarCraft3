@@ -15,24 +15,13 @@ CDestructableData CDestructableData::LoadFromMpq(const MpqManager& mpq,
     CDestructableData data;
 
     SlkTable slk;
-    {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Units\\DestructableData.slk", buf)) {
-            slk.Load(buf.data(), buf.size());
-        }
-    }
+    LoadSlkTableFromMpq(mpq, "Units\\DestructableData.slk", slk);
 
     TxtTable skinTbl;
-    {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Units\\DestructableSkin.txt", buf)) {
-            skinTbl.Load(buf.data(), buf.size());
-        }
-        std::vector<uint8_t> buf2;
-        if (mpq.ReadFile("Units\\DestructableFunc.txt", buf2)) {
-            skinTbl.Load(buf2.data(), buf2.size());
-        }
-    }
+    LoadTxtOverlaysFromMpq(mpq, {
+        "Units\\DestructableSkin.txt",
+        "Units\\DestructableFunc.txt",
+    }, skinTbl);
 
     ApplyMapDestructableObjectMods(mpq, mapPath, slk, skinTbl);
 

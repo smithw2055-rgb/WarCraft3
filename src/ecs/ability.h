@@ -276,10 +276,12 @@ public:
     virtual bool DropItemAt(CSimulation& /*game*/, CUnit* /*unit*/, int /*slot*/, float /*x*/, float /*y*/) { return false; }
     virtual bool DropItem(CSimulation& /*game*/, CUnit* /*unit*/, CItem* /*item*/) { return false; }
     virtual bool DropItemAt(CSimulation& /*game*/, CUnit* /*unit*/, CItem* /*item*/, float /*x*/, float /*y*/) { return false; }
+    virtual bool RemoveItemAt(CSimulation& /*game*/, CUnit* /*unit*/, int /*slot*/) { return false; }
     virtual bool UseItem(CSimulation& /*game*/, CUnit* /*unit*/, int /*slot*/) { return false; }
     virtual bool UseItem(CSimulation& /*game*/, CUnit* /*unit*/, CItem* /*item*/) { return false; }
     virtual bool MoveItemToSlot(CItem* /*item*/, int /*slot*/) { return false; }
     virtual CItem* GetItem(int /*slot*/) const { return nullptr; }
+    virtual int FindEmptySlot() const { return -1; }
     virtual int FindItemSlot(CItem* /*item*/) const { return -1; }
     virtual bool HasItem(CItem* item) const { return FindItemSlot(item) >= 0; }
     virtual int GetItemCount() const { return 0; }

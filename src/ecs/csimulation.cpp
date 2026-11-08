@@ -833,12 +833,12 @@ bool CSimulation::IssueUnitOrder(int unitHandle, std::unique_ptr<COrder> order) 
     cmd.x = 0.0f;
     cmd.y = 0.0f;
     cmd.z = 0.0f;
-    if (auto* pt = dynamic_cast<COrderTargetPoint*>(order.get())) {
-        cmd.x = pt->GetX();
-        cmd.y = pt->GetY();
-        cmd.z = pt->GetZ();
-    } else if (auto* wg = dynamic_cast<COrderTargetWidget*>(order.get())) {
-        cmd.targetHandle = wg->GetTarget() ? wg->GetTarget()->GetHandleId() : -1;
+    if (order->GetTargetKind() == COrder::TargetKind::POINT) {
+        cmd.x = order->GetX();
+        cmd.y = order->GetY();
+        cmd.z = order->GetZ();
+    } else if (order->GetTargetKind() == COrder::TargetKind::WIDGET) {
+        cmd.targetHandle = order->GetTarget() ? order->GetTarget()->GetHandleId() : -1;
     }
     commandLog_.push_back(cmd);
     const int orderId = cmd.orderId;

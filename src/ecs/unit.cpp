@@ -466,6 +466,16 @@ bool CUnit::RemoveAbility(CSimulation& game, War3ID abilityCode) {
     return GetAbility(abilityCode) == nullptr;
 }
 
+CAbility* CUnit::GetGoldMineAbility() const {
+    if (CAbility* overlay = GetAbility(War3ID("Agl2"))) {
+        if (overlay->IsResourceMine()) return overlay;
+    }
+    for (CAbility* ab : abilities_) {
+        if (ab && ab->IsResourceMine()) return ab;
+    }
+    return nullptr;
+}
+
 CAbility* CUnit::GetAbility(War3ID code) const {
     for (auto* ab : abilities_) {
         if (ab && (ab->GetCode() == code || ab->GetAlias() == code)) {
@@ -976,11 +986,11 @@ void CUnit::IssueOrder(std::unique_ptr<COrder> order, bool queue) {
     const int targetKind = (int)order->GetTargetKind();
     float x = 0.0f, y = 0.0f;
     int targetHandle = -1;
-    if (auto* pt = dynamic_cast<COrderTargetPoint*>(order.get())) {
-        x = pt->GetX();
-        y = pt->GetY();
-    } else if (auto* wg = dynamic_cast<COrderTargetWidget*>(order.get())) {
-        if (wg->GetTarget()) targetHandle = wg->GetTarget()->GetHandleId();
+    if (order->GetTargetKind() == COrder::TargetKind::POINT) {
+        x = order->GetX();
+        y = order->GetY();
+    } else if (order->GetTargetKind() == COrder::TargetKind::WIDGET) {
+        if (order->GetTarget()) targetHandle = order->GetTarget()->GetHandleId();
     }
     orderQueue_.push(std::move(order));
     if (orderIssuedHook_) {
@@ -1443,27 +1453,31 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
 
             CBehavior* newBehavior = nullptr;
 
-            if (auto* widgetOrder = dynamic_cast<COrderTargetWidget*>(order.get())) {
-                if (ab->CheckCanTarget(simulation, this, orderId, widgetOrder->GetTarget())) {
-                    if (!ab->CheckBeforeQueue(simulation, this, orderId, widgetOrder->GetTarget())) {
+            const COrder::TargetKind kind = order->GetTargetKind();
+            if (kind == COrder::TargetKind::WIDGET) {
+                CWidget* tgt = order->GetTarget();
+                if (ab->CheckCanTarget(simulation, this, orderId, tgt)) {
+                    if (!ab->CheckBeforeQueue(simulation, this, orderId, tgt)) {
                         return true;
                     }
-                    newBehavior = ab->Begin(simulation, this, orderId, widgetOrder->GetTarget());
+                    newBehavior = ab->Begin(simulation, this, orderId, tgt);
                     if (!newBehavior) {
                         return true;
                     }
                 }
-            } else if (auto* pointOrder = dynamic_cast<COrderTargetPoint*>(order.get())) {
-                if (ab->CheckCanTargetPoint(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY())) {
-                    if (!ab->CheckBeforeQueue(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY())) {
+            } else if (kind == COrder::TargetKind::POINT) {
+                const float px = order->GetX();
+                const float py = order->GetY();
+                if (ab->CheckCanTargetPoint(simulation, this, orderId, px, py)) {
+                    if (!ab->CheckBeforeQueue(simulation, this, orderId, px, py)) {
                         return true;
                     }
-                    newBehavior = ab->Begin(simulation, this, orderId, pointOrder->GetX(), pointOrder->GetY());
+                    newBehavior = ab->Begin(simulation, this, orderId, px, py);
                     if (!newBehavior) {
                         return true;
                     }
                 }
-            } else if (dynamic_cast<COrderNoTarget*>(order.get())) {
+            } else {
                 if (ab->CheckCanTargetNoTarget(simulation, this, orderId)) {
                     if (!ab->CheckBeforeQueueNoTarget(simulation, this, orderId)) {
                         return true;
@@ -1484,14 +1498,13 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
                     << " ability=" << ab->GetAlias().ToString()
                     << " abilityCat=" << AbilityCategoryName(ab->GetCategory())
                     << " behavior=" << BehaviorCategoryName(newBehavior->GetCategory());
-                if (auto* widgetOrder = dynamic_cast<COrderTargetWidget*>(order.get())) {
-                    auto* target = widgetOrder->GetTarget();
-                    if (target) {
+                if (kind == COrder::TargetKind::WIDGET) {
+                    if (auto* target = order->GetTarget()) {
                         oss << " targetWidget=" << target->GetHandleId()
                             << " targetPos=(" << target->GetX() << ", " << target->GetY() << ")";
                     }
-                } else if (auto* pointOrder = dynamic_cast<COrderTargetPoint*>(order.get())) {
-                    oss << " targetPoint=(" << pointOrder->GetX() << ", " << pointOrder->GetY() << ")";
+                } else if (kind == COrder::TargetKind::POINT) {
+                    oss << " targetPoint=(" << order->GetX() << ", " << order->GetY() << ")";
                 }
                 MoveDebugLogLine(oss.str());
                 if (currentBehavior_) {
@@ -1510,28 +1523,20 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
         return false;
     };
 
-    const bool movementLast = orderId == OrderIds::SMART;
-    if (movementLast) {
-        if (tryAbilityRange(false) || tryAbilityRange(true)) {
-            return;
-        }
-    } else if (tryAbilityRange(false) || tryAbilityRange(true)) {
+    if (tryAbilityRange(false) || tryAbilityRange(true)) {
         return;
     }
 
-    if (orderId == OrderIds::SMART) {
-        if (auto* widgetOrder = dynamic_cast<COrderTargetWidget*>(order.get())) {
-            auto* tgt = widgetOrder->GetTarget();
-            if (tgt) {
-                ConvertOrderToBehavior(simulation, std::make_unique<COrderTargetPoint>(OrderIds::SMART, tgt->GetX(), tgt->GetY()));
-                return;
-            }
+    if (orderId == OrderIds::SMART && order->GetTargetKind() == COrder::TargetKind::WIDGET) {
+        if (auto* tgt = order->GetTarget()) {
+            ConvertOrderToBehavior(simulation, std::make_unique<COrderTargetPoint>(OrderIds::SMART, tgt->GetX(), tgt->GetY()));
+            return;
         }
     }
 
     if (orderId == OrderIds::STOP || orderId == OrderIds::HOLD_POSITION ||
-        dynamic_cast<COrderTargetPoint*>(order.get()) ||
-        dynamic_cast<COrderTargetWidget*>(order.get())) {
+        order->GetTargetKind() == COrder::TargetKind::POINT ||
+        order->GetTargetKind() == COrder::TargetKind::WIDGET) {
         auto behavior = std::make_unique<CBehaviorStop>();
         behavior->SetUnit(this);
         behavior->Begin(simulation);

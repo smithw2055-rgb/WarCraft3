@@ -44,13 +44,6 @@ void SetSlkCell(SlkTable& slk, int row, const std::string& colName, const std::s
     applied++;
 }
 
-bool EqualsNoCase(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i])) return false;
-    }
-    return true;
-}
 
 // Apply one w3a/w3h modification set to SLK rows (+ skin profile table).
 void ApplyAbilityModSet(SlkTable& slk, TxtTable& skinTbl, const ObjectMetaTable& meta,
@@ -77,7 +70,7 @@ void ApplyAbilityModSet(SlkTable& slk, TxtTable& skinTbl, const ObjectMetaTable&
                 continue;
             }
             const std::string value = FormatObjectModValue(mod);
-            if (EqualsNoCase(table, "Profile")) {
+            if (EqualsIgnoreCase(table, "Profile")) {
                 skinTbl.SetString(newId, key, value);
                 applied++;
             } else {
@@ -99,7 +92,7 @@ void ApplyAbilityModSet(SlkTable& slk, TxtTable& skinTbl, const ObjectMetaTable&
                 continue;
             }
             const std::string value = FormatObjectModValue(mod);
-            if (EqualsNoCase(table, "Profile")) {
+            if (EqualsIgnoreCase(table, "Profile")) {
                 skinTbl.SetString(section, key, value);
                 applied++;
             } else {
@@ -165,46 +158,31 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq) {
 CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq, const std::string& mapPath) {
     CAbilityData data;
 
-    // Load AbilityData.slk (actual SLK spreadsheet format)
     SlkTable abilitySlk;
-    {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Units\\AbilityData.slk", buf)) {
-            abilitySlk.Load(buf.data(), buf.size());
-        }
-    }
+    LoadSlkTableFromMpq(mpq, "Units\\AbilityData.slk", abilitySlk);
 
-    // Load skin/string files for additional fields (TXT profile format)
     TxtTable skinTbl;
-    {
-        std::vector<std::string> skinFiles = {
-            "Units\\AbilitySkin.txt",
-            "Units\\AbilityFunc.txt",
-            "Units\\AbilityStrings.txt",
-            "Units\\CommonAbilityFunc.txt",
-            "Units\\CommonAbilityStrings.txt",
-            "Units\\HumanAbilityFunc.txt",
-            "Units\\HumanAbilityStrings.txt",
-            "Units\\OrcAbilityFunc.txt",
-            "Units\\OrcAbilityStrings.txt",
-            "Units\\NightElfAbilityFunc.txt",
-            "Units\\NightElfAbilityStrings.txt",
-            "Units\\UndeadAbilityFunc.txt",
-            "Units\\UndeadAbilityStrings.txt",
-            "Units\\NeutralAbilityFunc.txt",
-            "Units\\NeutralAbilityStrings.txt",
-            "Units\\CampaignAbilityFunc.txt",
-            "Units\\CampaignAbilityStrings.txt",
-            "Units\\ItemAbilityFunc.txt",
-            "Units\\ItemAbilityStrings.txt",
-        };
-        for (auto& f : skinFiles) {
-            std::vector<uint8_t> sbuf;
-            if (mpq.ReadFile(f, sbuf)) {
-                skinTbl.Load(sbuf.data(), sbuf.size());
-            }
-        }
-    }
+    LoadTxtOverlaysFromMpq(mpq, {
+        "Units\\AbilitySkin.txt",
+        "Units\\AbilityFunc.txt",
+        "Units\\AbilityStrings.txt",
+        "Units\\CommonAbilityFunc.txt",
+        "Units\\CommonAbilityStrings.txt",
+        "Units\\HumanAbilityFunc.txt",
+        "Units\\HumanAbilityStrings.txt",
+        "Units\\OrcAbilityFunc.txt",
+        "Units\\OrcAbilityStrings.txt",
+        "Units\\NightElfAbilityFunc.txt",
+        "Units\\NightElfAbilityStrings.txt",
+        "Units\\UndeadAbilityFunc.txt",
+        "Units\\UndeadAbilityStrings.txt",
+        "Units\\NeutralAbilityFunc.txt",
+        "Units\\NeutralAbilityStrings.txt",
+        "Units\\CampaignAbilityFunc.txt",
+        "Units\\CampaignAbilityStrings.txt",
+        "Units\\ItemAbilityFunc.txt",
+        "Units\\ItemAbilityStrings.txt",
+    }, skinTbl);
 
     if (abilitySlk.Rows() == 0) {
         std::cout << "CAbilityData: no rows found" << std::endl;
@@ -212,12 +190,7 @@ CAbilityData CAbilityData::LoadFromMpq(const MpqManager& mpq, const std::string&
     }
 
     SlkTable buffSlk;
-    {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Units\\AbilityBuffData.slk", buf)) {
-            buffSlk.Load(buf.data(), buf.size());
-        }
-    }
+    LoadSlkTableFromMpq(mpq, "Units\\AbilityBuffData.slk", buffSlk);
 
     // Map-specific custom abilities/buffs (war3map.w3a/.w3h) before parsing.
     ApplyMapAbilityMods(mpq, mapPath, abilitySlk, skinTbl, buffSlk);

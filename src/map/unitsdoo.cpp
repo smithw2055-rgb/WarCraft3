@@ -1,10 +1,7 @@
 #include "unitsdoo.h"
 #include <cstring>
 #include <iostream>
-#ifndef __STORMLIB_NO_STATIC_LINK__
-#define __STORMLIB_NO_STATIC_LINK__
-#endif
-#include <StormLib.h>
+#include "resource/mpq_storm.h"
 
 static uint32_t R32LE(const uint8_t* p) {
     return uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
@@ -147,17 +144,7 @@ bool UnitsDooLoad(const uint8_t* data, size_t size, UnitsDooData& out, const W3i
 #undef CHK
 
 bool UnitsDooLoadFromMpq(const std::string& mapPath, UnitsDooData& out, const W3iInfo* mapInfo) {
-    HANDLE hMpq = nullptr;
-    if (!SFileOpenArchive(mapPath.c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) return false;
-    HANDLE hFile = nullptr;
-    if (!SFileOpenFileEx(hMpq, "war3mapUnits.doo", SFILE_OPEN_BASE_FILE, &hFile)) {
-        SFileCloseArchive(hMpq); return false;
-    }
-    DWORD sz = SFileGetFileSize(hFile, nullptr);
-    std::vector<uint8_t> buf(sz);
-    DWORD rd = 0;
-    bool ok = SFileReadFile(hFile, buf.data(), sz, &rd, nullptr) && rd == sz;
-    SFileCloseFile(hFile); SFileCloseArchive(hMpq);
-    if (!ok) return false;
-    return UnitsDooLoad(buf.data(), sz, out, mapInfo);
+    std::vector<uint8_t> buf;
+    if (!MpqManager::ReadSingleArchiveFile(mapPath, "war3mapUnits.doo", buf)) return false;
+    return UnitsDooLoad(buf.data(), buf.size(), out, mapInfo);
 }

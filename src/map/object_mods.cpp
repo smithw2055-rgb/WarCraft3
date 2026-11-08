@@ -1,9 +1,6 @@
 #include "object_mods.h"
 
-#ifndef __STORMLIB_NO_STATIC_LINK__
-#define __STORMLIB_NO_STATIC_LINK__
-#endif
-#include <StormLib.h>
+#include "resource/mpq_storm.h"
 
 #include <cstring>
 #include <iostream>
@@ -29,25 +26,7 @@ War3ID ReadObjectId(const uint8_t* p) {
 
 bool ReadMapFile(const std::string& mapPath, const char* fileName,
                  std::vector<uint8_t>& out) {
-    HANDLE hMpq = nullptr;
-    if (!SFileOpenArchive(mapPath.c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) {
-        return false;
-    }
-
-    HANDLE hFile = nullptr;
-    if (!SFileOpenFileEx(hMpq, fileName, SFILE_OPEN_BASE_FILE, &hFile)) {
-        SFileCloseArchive(hMpq);
-        return false;
-    }
-
-    DWORD sz = SFileGetFileSize(hFile, nullptr);
-    out.resize(sz);
-    DWORD rd = 0;
-    bool ok = SFileReadFile(hFile, out.data(), sz, &rd, nullptr) && rd == sz;
-    SFileCloseFile(hFile);
-    SFileCloseArchive(hMpq);
-    if (!ok) out.clear();
-    return ok;
+    return fileName && MpqManager::ReadSingleArchiveFile(mapPath, fileName, out);
 }
 
 class Reader {
@@ -353,139 +332,58 @@ bool LoadWar3MapObjectMods(const std::string& mapPath,
     return true;
 }
 
-bool LoadWar3MapUnitMods(const std::string& mapPath,
-                         ObjectModificationSet& out,
-                         WtsTable* wts) {
-    if (!LoadWar3MapObjectMods(mapPath, "war3map.w3u", false, out, wts)) {
+namespace {
+
+// Unified layered map object-mod loader (war3map.<ext> -> war3mapSkin.<ext> -> war3campaign.<ext>)
+bool LoadWar3MapObjectModsWithLayeredFallbacks(const std::string& mapPath,
+                                               const char* ext,
+                                               bool extended,
+                                               ObjectModificationSet& out,
+                                               WtsTable* wts) {
+    const std::string primary = std::string("war3map.") + ext;
+    if (!LoadWar3MapObjectMods(mapPath, primary.c_str(), extended, out, wts)) {
         return false;
     }
-    // Skin/campaign overlays stack on top of map mods (ref War3MapViewer
-    // loadMapGeneric fallbacks); appended so later entries win per-field.
-    ObjectModificationSet extra;
-    if (LoadWar3MapObjectMods(mapPath, "war3mapSkin.w3u", false, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    extra = ObjectModificationSet{};
-    if (LoadWar3MapObjectMods(mapPath, "war3campaign.w3u", false, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
+    const char* kOverlayPrefixes[] = {"war3mapSkin.", "war3campaign."};
+    for (const char* prefix : kOverlayPrefixes) {
+        ObjectModificationSet extra;
+        const std::string overlayName = std::string(prefix) + ext;
+        if (LoadWar3MapObjectMods(mapPath, overlayName.c_str(), extended, extra, wts)) {
+            out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
+            out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
+        }
     }
     return true;
 }
 
-bool LoadWar3MapDestructableMods(const std::string& mapPath,
-                                  ObjectModificationSet& out,
-                                  WtsTable* wts) {
-    if (!LoadWar3MapObjectMods(mapPath, "war3map.w3b", false, out, wts)) {
-        return false;
-    }
-    ObjectModificationSet extra;
-    if (LoadWar3MapObjectMods(mapPath, "war3mapSkin.w3b", false, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    extra = ObjectModificationSet{};
-    if (LoadWar3MapObjectMods(mapPath, "war3campaign.w3b", false, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    return true;
+} // namespace
+
+bool LoadWar3MapUnitMods(const std::string& mapPath, ObjectModificationSet& out, WtsTable* wts) {
+    return LoadWar3MapObjectModsWithLayeredFallbacks(mapPath, "w3u", false, out, wts);
 }
 
-bool LoadWar3MapDoodadMods(const std::string& mapPath,
-                           ObjectModificationSet& out,
-                           WtsTable* wts) {
-    if (!LoadWar3MapObjectMods(mapPath, "war3map.w3d", false, out, wts)) {
-        return false;
-    }
-    ObjectModificationSet extra;
-    if (LoadWar3MapObjectMods(mapPath, "war3mapSkin.w3d", false, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    extra = ObjectModificationSet{};
-    if (LoadWar3MapObjectMods(mapPath, "war3campaign.w3d", false, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    return true;
+bool LoadWar3MapDestructableMods(const std::string& mapPath, ObjectModificationSet& out, WtsTable* wts) {
+    return LoadWar3MapObjectModsWithLayeredFallbacks(mapPath, "w3b", false, out, wts);
 }
 
-bool LoadWar3MapItemMods(const std::string& mapPath,
-                          ObjectModificationSet& out,
-                          WtsTable* wts) {
-    if (!LoadWar3MapObjectMods(mapPath, "war3map.w3t", false, out, wts)) {
-        return false;
-    }
-    ObjectModificationSet extra;
-    if (LoadWar3MapObjectMods(mapPath, "war3mapSkin.w3t", false, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    extra = ObjectModificationSet{};
-    if (LoadWar3MapObjectMods(mapPath, "war3campaign.w3t", false, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    return true;
+bool LoadWar3MapDoodadMods(const std::string& mapPath, ObjectModificationSet& out, WtsTable* wts) {
+    return LoadWar3MapObjectModsWithLayeredFallbacks(mapPath, "w3d", false, out, wts);
 }
 
-bool LoadWar3MapAbilityMods(const std::string& mapPath,
-                            ObjectModificationSet& out,
-                            WtsTable* wts) {
-    if (!LoadWar3MapObjectMods(mapPath, "war3map.w3a", true, out, wts)) {
-        return false;
-    }
-    ObjectModificationSet extra;
-    if (LoadWar3MapObjectMods(mapPath, "war3mapSkin.w3a", true, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    extra = ObjectModificationSet{};
-    if (LoadWar3MapObjectMods(mapPath, "war3campaign.w3a", true, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    return true;
+bool LoadWar3MapItemMods(const std::string& mapPath, ObjectModificationSet& out, WtsTable* wts) {
+    return LoadWar3MapObjectModsWithLayeredFallbacks(mapPath, "w3t", false, out, wts);
 }
 
-bool LoadWar3MapUpgradeMods(const std::string& mapPath,
-                            ObjectModificationSet& out,
-                            WtsTable* wts) {
-    if (!LoadWar3MapObjectMods(mapPath, "war3map.w3q", true, out, wts)) {
-        return false;
-    }
-    ObjectModificationSet extra;
-    if (LoadWar3MapObjectMods(mapPath, "war3mapSkin.w3q", true, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    extra = ObjectModificationSet{};
-    if (LoadWar3MapObjectMods(mapPath, "war3campaign.w3q", true, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    return true;
+bool LoadWar3MapAbilityMods(const std::string& mapPath, ObjectModificationSet& out, WtsTable* wts) {
+    return LoadWar3MapObjectModsWithLayeredFallbacks(mapPath, "w3a", true, out, wts);
 }
 
-bool LoadWar3MapBuffMods(const std::string& mapPath,
-                         ObjectModificationSet& out,
-                         WtsTable* wts) {
-    if (!LoadWar3MapObjectMods(mapPath, "war3map.w3h", true, out, wts)) {
-        return false;
-    }
-    ObjectModificationSet extra;
-    if (LoadWar3MapObjectMods(mapPath, "war3mapSkin.w3h", true, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    extra = ObjectModificationSet{};
-    if (LoadWar3MapObjectMods(mapPath, "war3campaign.w3h", true, extra, wts)) {
-        out.original.insert(out.original.end(), extra.original.begin(), extra.original.end());
-        out.custom.insert(out.custom.end(), extra.custom.begin(), extra.custom.end());
-    }
-    return true;
+bool LoadWar3MapUpgradeMods(const std::string& mapPath, ObjectModificationSet& out, WtsTable* wts) {
+    return LoadWar3MapObjectModsWithLayeredFallbacks(mapPath, "w3q", true, out, wts);
+}
+
+bool LoadWar3MapBuffMods(const std::string& mapPath, ObjectModificationSet& out, WtsTable* wts) {
+    return LoadWar3MapObjectModsWithLayeredFallbacks(mapPath, "w3h", true, out, wts);
 }
 
 bool ParseObjectModsData(const uint8_t* data, size_t size,

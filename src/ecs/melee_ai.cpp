@@ -6,14 +6,12 @@
 #include "data/unitdata.h"
 #include "destructable.h"
 #include "data/destructabledata.h"
-
-
 #include "ability.h"
 #include "data/upgradedata.h"
 #include "orders/order.h"
 #include "behaviors/behavior.h"
 #include "pathing/pathfinding.h"
-#include "game/war3/war3_game_module.h"
+#include "engine/simulation_module.h"
 #include <cmath>
 #include <algorithm>
 
@@ -28,15 +26,6 @@ bool HasAbility(const CUnitType* type, War3ID ability) {
 float Dist2(float x1, float y1, float x2, float y2) {
     const float dx = x1 - x2, dy = y1 - y2;
     return dx * dx + dy * dy;
-}
-
-CAbility* FindMineAbility(CUnit* unit) {
-    if (!unit) return nullptr;
-    if (CAbility* ov = unit->GetAbility(War3ID("Agl2"))) return ov;
-    for (CAbility* ab : unit->GetAbilities()) {
-        if (ab && ab->IsResourceMine()) return ab;
-    }
-    return nullptr;
 }
 
 } // namespace
@@ -119,7 +108,8 @@ bool MeleeAIController::IsEnemyPlayer(int index) const {
 void MeleeAIController::DiscoverPlan() {
     plan_ = AIRacePlan{};
     if (!sim_ || !sim_->GetUnitData()) return;
-    if (war3::War3GameModule::DiscoverRaceBuildPlan(*sim_, playerIndex_, plan_)) {
+    if (sim_->GetSimulationModule() &&
+        sim_->GetSimulationModule()->OnDiscoverAIRacePlan(*sim_, playerIndex_, plan_)) {
         return;
     }
     CUnitData* unitData = sim_->GetUnitData();
@@ -270,8 +260,10 @@ bool MeleeAIController::FindBuildSpot(float nearX, float nearY, const War3ID& bu
                     continue;
                 }
             }
-            if (!sim_->GetSimulationModule() ||
-                !sim_->GetSimulationModule()->IsBuildLocationObstructed(*sim_, x, y, playerIndex_, buildingType.value)) {
+            const bool obstructed = sim_->GetSimulationModule()
+                ? sim_->GetSimulationModule()->IsBuildLocationObstructed(*sim_, x, y, playerIndex_, buildingType.value)
+                : false;
+            if (!obstructed) {
                 outX = x;
                 outY = y;
                 return true;
@@ -334,7 +326,7 @@ CUnit* MeleeAIController::FindNearestGoldMine(float x, float y) const {
     float bestDist = 0.0f;
     for (CUnit* unit : sim_->GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsHidden()) continue;
-        CAbility* mine = FindMineAbility(unit);
+        CAbility* mine = unit->GetGoldMineAbility();
         if (!mine || mine->GetGold() <= 0) continue;
         const float d = Dist2(x, y, unit->GetX(), unit->GetY());
         if (!best || d < bestDist) {
@@ -430,7 +422,7 @@ CUnit* MeleeAIController::FindRichMine(float x, float y, const CUnit* exclude) c
     float bestDist = 0.0f;
     for (CUnit* unit : sim_->GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsHidden() || unit == exclude) continue;
-        CAbility* mine = FindMineAbility(unit);
+        CAbility* mine = unit->GetGoldMineAbility();
         if (!mine || mine->GetGold() <= 0) continue;
         const float d = Dist2(x, y, unit->GetX(), unit->GetY());
         if (!best || d < bestDist) {
@@ -522,11 +514,8 @@ bool MeleeAIController::TryTrainWorkers() {
     for (CUnit* hall : halls) {
         if (!hall) continue;
         bool room = true;
-        for (CAbility* ab : hall->GetAbilities()) {
-            if (ab && ab->GetCategory() == CAbilityCategory::QUEUE) {
-                if (ab->GetQueueCount() >= CAbility::MAX_QUEUE_SLOTS) room = false;
-                break;
-            }
+        if (CAbility* queue = hall->GetAbility(War3ID("Aque"))) {
+            if (queue->GetQueueCount() >= CAbility::MAX_QUEUE_SLOTS) room = false;
         }
         if (!room) continue;
         IssueAiOrder(hall, std::make_unique<COrderNoTarget>(static_cast<int>(plan_.worker.value)));
@@ -535,21 +524,24 @@ bool MeleeAIController::TryTrainWorkers() {
     return false;
 }
 
-bool MeleeAIController::TryBuildSupply() {
-    if (!sim_ || plan_.farm.value == 0) return false;
-    CPlayer* player = sim_->GetPlayer(playerIndex_);
-    if (!player) return false;
-    if (player->GetFoodUsed() < player->GetFoodCap() - 2) return false;
-    // One construction at a time: a builder is already on duty.
+bool MeleeAIController::HasActiveBuilder() const {
+    if (!sim_) return false;
     for (CUnit* unit : sim_->GetUnits()) {
         if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
         CBehavior* behavior = unit->GetCurrentBehavior();
-        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) return false;
+        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) return true;
     }
-    const CUnitType* farmType = sim_->GetUnitData()->GetUnitType(plan_.farm);
-    if (!farmType) return false;
-    if (player->GetGold() < farmType->GetGoldCost() ||
-        player->GetLumber() < farmType->GetLumberCost()) {
+    return false;
+}
+
+bool MeleeAIController::TryDispatchBuildNearHall(const War3ID& buildingTypeId, int goldReserve) {
+    if (!sim_ || buildingTypeId.value == 0 || HasActiveBuilder()) return false;
+    CPlayer* player = sim_->GetPlayer(playerIndex_);
+    if (!player || !sim_->GetUnitData()) return false;
+    const CUnitType* bldgType = sim_->GetUnitData()->GetUnitType(buildingTypeId);
+    if (!bldgType) return false;
+    if (player->GetGold() < bldgType->GetGoldCost() + goldReserve ||
+        player->GetLumber() < bldgType->GetLumberCost()) {
         return false;
     }
     CUnit* hall = FindTownHall();
@@ -557,39 +549,23 @@ bool MeleeAIController::TryBuildSupply() {
     CUnit* worker = FindWorkerForBuild();
     if (!worker) return false;
     float x = 0.0f, y = 0.0f;
-    if (!FindBuildSpot(hall->GetX(), hall->GetY(), plan_.farm, x, y)) return false;
-    // Commandeer promptly: clear any chained harvest orders first (carried
-    // resources stay on the ability and resume afterwards).
+    if (!FindBuildSpot(hall->GetX(), hall->GetY(), buildingTypeId, x, y)) return false;
     worker->ClearOrders();
     IssueAiOrder(worker,
-        std::make_unique<COrderTargetPoint>(static_cast<int>(plan_.farm.value), x, y));
+        std::make_unique<COrderTargetPoint>(static_cast<int>(buildingTypeId.value), x, y));
     return true;
+}
+
+bool MeleeAIController::TryBuildSupply() {
+    if (!sim_ || plan_.farm.value == 0) return false;
+    CPlayer* player = sim_->GetPlayer(playerIndex_);
+    if (!player || player->GetFoodUsed() < player->GetFoodCap() - 2) return false;
+    return TryDispatchBuildNearHall(plan_.farm, 0);
 }
 
 bool MeleeAIController::TryBuildBarracks() {
     if (!sim_ || plan_.barracks.value == 0 || CountBuildings(plan_.barracks) > 0) return false;
-    CPlayer* player = sim_->GetPlayer(playerIndex_);
-    if (!player) return false;
-    // One construction at a time (ref TryBuildSupply).
-    for (CUnit* unit : sim_->GetUnits()) {
-        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
-        CBehavior* behavior = unit->GetCurrentBehavior();
-        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) return false;
-    }
-    const CUnitType* barracksType = sim_->GetUnitData()->GetUnitType(plan_.barracks);
-    if (!barracksType) return false;
-    if (player->GetGold() < barracksType->GetGoldCost() + 150) return false;
-    if (player->GetLumber() < barracksType->GetLumberCost()) return false;
-    CUnit* hall = FindTownHall();
-    if (!hall) return false;
-    CUnit* worker = FindWorkerForBuild();
-    if (!worker) return false;
-    float x = 0.0f, y = 0.0f;
-    if (!FindBuildSpot(hall->GetX(), hall->GetY(), plan_.barracks, x, y)) return false;
-    worker->ClearOrders();
-    IssueAiOrder(worker,
-        std::make_unique<COrderTargetPoint>(static_cast<int>(plan_.barracks.value), x, y));
-    return true;
+    return TryDispatchBuildNearHall(plan_.barracks, 150);
 }
 
 bool MeleeAIController::TryTrainArmy() {
@@ -620,62 +596,17 @@ bool MeleeAIController::TryTrainArmy() {
 
 bool MeleeAIController::TryBuildAltar() {
     if (!sim_ || plan_.altar.value == 0 || CountBuildings(plan_.altar) > 0) return false;
-    // Altar after barracks: heroes need an army to protect them.
     if (plan_.barracks.value != 0 && CountBuildings(plan_.barracks) == 0) return false;
-    CPlayer* player = sim_->GetPlayer(playerIndex_);
-    if (!player) return false;
-    // One construction at a time (ref TryBuildSupply).
-    for (CUnit* unit : sim_->GetUnits()) {
-        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
-        CBehavior* behavior = unit->GetCurrentBehavior();
-        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) return false;
-    }
-    const CUnitType* altarType = sim_->GetUnitData()->GetUnitType(plan_.altar);
-    if (!altarType) return false;
-    if (player->GetGold() < altarType->GetGoldCost() + 100) return false;
-    if (player->GetLumber() < altarType->GetLumberCost()) return false;
-    CUnit* hall = FindTownHall();
-    if (!hall) return false;
-    CUnit* worker = FindWorkerForBuild();
-    if (!worker) return false;
-    float x = 0.0f, y = 0.0f;
-    if (!FindBuildSpot(hall->GetX(), hall->GetY(), plan_.altar, x, y)) return false;
-    worker->ClearOrders();
-    IssueAiOrder(worker,
-        std::make_unique<COrderTargetPoint>(static_cast<int>(plan_.altar.value), x, y));
-    return true;
+    return TryDispatchBuildNearHall(plan_.altar, 100);
 }
 
 bool MeleeAIController::TryBuildTowers() {
     if (!sim_ || plan_.tower.value == 0) return false;
-    // Cap scales with difficulty; towers wait until the base exists
-    // (barracks up) so defense never starves the opening.
     const int cap = difficulty_ == AIDifficulty::EASY ? 1
         : difficulty_ == AIDifficulty::INSANE ? 4 : 2;
     if (CountBuildings(plan_.tower) >= cap) return false;
     if (plan_.barracks.value != 0 && CountBuildings(plan_.barracks) == 0) return false;
-    CPlayer* player = sim_->GetPlayer(playerIndex_);
-    if (!player) return false;
-    // One construction at a time (ref TryBuildSupply).
-    for (CUnit* unit : sim_->GetUnits()) {
-        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
-        CBehavior* behavior = unit->GetCurrentBehavior();
-        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) return false;
-    }
-    const CUnitType* towerType = sim_->GetUnitData()->GetUnitType(plan_.tower);
-    if (!towerType) return false;
-    if (player->GetGold() < towerType->GetGoldCost() + 150) return false;
-    if (player->GetLumber() < towerType->GetLumberCost()) return false;
-    CUnit* hall = FindTownHall();
-    if (!hall) return false;
-    CUnit* worker = FindWorkerForBuild();
-    if (!worker) return false;
-    float x = 0.0f, y = 0.0f;
-    if (!FindBuildSpot(hall->GetX(), hall->GetY(), plan_.tower, x, y)) return false;
-    worker->ClearOrders();
-    IssueAiOrder(worker,
-        std::make_unique<COrderTargetPoint>(static_cast<int>(plan_.tower.value), x, y));
-    return true;
+    return TryDispatchBuildNearHall(plan_.tower, 150);
 }
 
 bool MeleeAIController::TryExpand() {
@@ -687,23 +618,18 @@ bool MeleeAIController::TryExpand() {
     // The main mine still has reserves: no reason to walk across the map.
     CUnit* mainMine = FindRichMine(mainHall->GetX(), mainHall->GetY(), nullptr);
     if (!mainMine) return false;
-    if (CAbility* m = FindMineAbility(mainMine); !m || m->GetGold() > 3000) return false;
+    if (CAbility* m = mainMine->GetGoldMineAbility(); m && m->GetGold() > 3000) return false;
     // Richest unowned mine: nearest with real gold that is not the main one.
     CUnit* expoMine = FindRichMine(mainHall->GetX(), mainHall->GetY(), mainMine);
-    if (!expoMine) return false;
-    if (CAbility* m = FindMineAbility(expoMine); !m || m->GetGold() < 1500) return false;
+    CAbility* expoGold = expoMine ? expoMine->GetGoldMineAbility() : nullptr;
+    if (!expoGold || expoGold->GetGold() < 1500) return false;
     CPlayer* player = sim_->GetPlayer(playerIndex_);
     if (!player) return false;
     const CUnitType* hallType = sim_->GetUnitData()->GetUnitType(plan_.townHall);
     if (!hallType) return false;
     if (player->GetGold() < hallType->GetGoldCost() + 200) return false;
     if (player->GetLumber() < hallType->GetLumberCost()) return false;
-    // One construction at a time (ref TryBuildSupply).
-    for (CUnit* unit : sim_->GetUnits()) {
-        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex_) continue;
-        CBehavior* behavior = unit->GetCurrentBehavior();
-        if (behavior && behavior->GetCategory() == CBehaviorCategory::BUILD) return false;
-    }
+    if (HasActiveBuilder()) return false;
     CUnit* worker = FindWorkerForBuild();
     if (!worker) return false;
     float x = 0.0f, y = 0.0f;
@@ -789,11 +715,9 @@ bool MeleeAIController::TryResearchUpgrades() {
     for (CUnit* unit : sim_->GetUnits()) {
         if (!unit || unit->IsDead() || unit->IsConstructing() || unit->GetPlayerIndex() != playerIndex_) continue;
         for (CAbility* ability : unit->GetAbilities()) {
-            CAbility* queue = (ability && ability->GetCategory() == CAbilityCategory::QUEUE) ? ability : nullptr;
-            // Idle production only: research shares the train FIFO, so a
-            // busy building waits for a later think instead of queueing
-            // behind units.
-            if (!queue || queue->GetQueueCount() > 0) continue;
+            if (!ability || ability->GetCategory() != CAbilityCategory::QUEUE) continue;
+            CAbility* queue = ability;
+            if (queue->GetQueueCount() > 0) continue;
             for (const War3ID& id : queue->GetResearches()) {
                 const CUpgradeType* type = upgrades->GetUpgrade(id);
                 if (!type) continue;

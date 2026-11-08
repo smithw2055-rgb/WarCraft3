@@ -3,7 +3,6 @@
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
 #include "ecs/item.h"
-#include "ecs/abilities/ability_inventory.h"
 #include "data/itemdata.h"
 #include "data/unitdata.h"
 #include "ecs/unit_type.h"
@@ -44,7 +43,7 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
         if (auto* player = game.GetPlayer(playerIndex)) {
             for (auto* unit : player->GetUnits()) {
                 if (!unit || unit->IsDead()) continue;
-                auto* inv = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")));
+                auto* inv = unit->GetAbility(War3ID("AInv"));
                 if (inv && slot >= 0 && slot < inv->GetItemCapacity() && inv->GetItem(slot)) {
                     seller = unit;
                     break;
@@ -87,7 +86,7 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
     CUnit* hero = nullptr;
     for (auto* unit : player->GetUnits()) {
         if (unit->IsHero() && !unit->IsDead()) {
-            auto* inventory = dynamic_cast<CAbilityInventory*>(unit->GetAbility(War3ID("AInv")));
+            auto* inventory = unit->GetAbility(War3ID("AInv"));
             if (inventory && inventory->FindEmptySlot() >= 0) {
                 hero = unit;
                 break;
@@ -116,7 +115,7 @@ bool CAbilitySellItems::CheckBeforeQueueNoTarget(CSimulation& game, CUnit* caste
     if (!item) return false;
 
     // Give item to hero
-    auto* inventory = dynamic_cast<CAbilityInventory*>(hero->GetAbility(War3ID("AInv")));
+    auto* inventory = hero->GetAbility(War3ID("AInv"));
     if (inventory) {
         inventory->PickUpItem(game, hero, item);
         std::cout << "Sold item " << itemTypeId.ToString() << " to hero" << std::endl;
@@ -194,7 +193,7 @@ bool CAbilitySellItems::HireUnit(CSimulation& game, CUnit* caster, int orderId) 
 
 bool CAbilitySellItems::PawnItem(CSimulation& game, CUnit* shop, CUnit* seller, int slot) {
     if (!shop || !seller) return false;
-    auto* inv = dynamic_cast<CAbilityInventory*>(seller->GetAbility(War3ID("AInv")));
+    auto* inv = seller->GetAbility(War3ID("AInv"));
     if (!inv) return false;
     CItem* item =
         (slot >= 0 && slot < inv->GetItemCapacity()) ? inv->GetItem(slot) : nullptr;

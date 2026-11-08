@@ -39,9 +39,6 @@
 #include <unordered_set>
 #include <vector>
 
-#ifndef WITHOUT_STORMLIB
-#include <StormLib.h>
-#endif
 
 namespace fs = std::filesystem;
 
@@ -114,29 +111,7 @@ inline std::string UiOnlySuggestedPlayersLabel(const std::string& value) {
 }
 
 inline bool ReadUiOnlyMapArchiveFile(const fs::path& mapPath, const char* fileName, std::vector<uint8_t>& out) {
-#ifndef WITHOUT_STORMLIB
-    HANDLE hMpq = nullptr;
-    if (!SFileOpenArchive(mapPath.string().c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) return false;
-
-    HANDLE hFile = nullptr;
-    if (!SFileOpenFileEx(hMpq, fileName, SFILE_OPEN_BASE_FILE, &hFile)) {
-        SFileCloseArchive(hMpq);
-        return false;
-    }
-
-    DWORD sz = SFileGetFileSize(hFile, nullptr);
-    out.resize(sz);
-    DWORD rd = 0;
-    const bool ok = SFileReadFile(hFile, out.data(), sz, &rd, nullptr) && rd == sz;
-    SFileCloseFile(hFile);
-    SFileCloseArchive(hMpq);
-    return ok;
-#else
-    (void)mapPath;
-    (void)fileName;
-    (void)out;
-    return false;
-#endif
+    return fileName && MpqManager::ReadSingleArchiveFile(mapPath.string(), fileName, out);
 }
 
 inline std::string ResolveUiOnlyTrigString(const WtsTable* wts, const std::string& value) {

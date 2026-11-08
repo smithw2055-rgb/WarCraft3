@@ -552,31 +552,21 @@ CUnitData CUnitData::LoadFromMpq(const MpqManager& mpq,
     TxtTable unitWeaponsTxt;
     TxtTable unitUITxt;
 
-    auto loadSlk = [&](SlkTable& tbl, const std::string& path) {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile(path, buf)) {
-            tbl.Load(buf.data(), buf.size());
-        }
-    };
-    auto loadTxt = [&](TxtTable& tbl, const std::string& path) {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile(path, buf)) {
-            tbl.Load(buf.data(), buf.size());
-        }
-    };
     auto loadOverlayEverywhere = [&](const std::string& path) {
-        loadTxt(unitDataTxt, path);
-        loadTxt(unitAbilitiesTxt, path);
-        loadTxt(unitBalanceTxt, path);
-        loadTxt(unitWeaponsTxt, path);
-        loadTxt(unitUITxt, path);
+        std::vector<uint8_t> buf;
+        if (!mpq.ReadFile(path, buf) || buf.empty()) return;
+        unitDataTxt.Load(buf.data(), buf.size());
+        unitAbilitiesTxt.Load(buf.data(), buf.size());
+        unitBalanceTxt.Load(buf.data(), buf.size());
+        unitWeaponsTxt.Load(buf.data(), buf.size());
+        unitUITxt.Load(buf.data(), buf.size());
     };
 
-    loadSlk(unitDataSlk, "Units\\UnitData.slk");
-    loadSlk(unitAbilitiesSlk, "Units\\UnitAbilities.slk");
-    loadSlk(unitBalanceSlk, "Units\\UnitBalance.slk");
-    loadSlk(unitWeaponsSlk, "Units\\UnitWeapons.slk");
-    loadSlk(unitUISlk, "Units\\UnitUI.slk");
+    LoadSlkTableFromMpq(mpq, "Units\\UnitData.slk", unitDataSlk);
+    LoadSlkTableFromMpq(mpq, "Units\\UnitAbilities.slk", unitAbilitiesSlk);
+    LoadSlkTableFromMpq(mpq, "Units\\UnitBalance.slk", unitBalanceSlk);
+    LoadSlkTableFromMpq(mpq, "Units\\UnitWeapons.slk", unitWeaponsSlk);
+    LoadSlkTableFromMpq(mpq, "Units\\UnitUI.slk", unitUISlk);
 
     const std::vector<std::string> overlayFiles = {
         "Units\\CampaignUnitFunc.txt",

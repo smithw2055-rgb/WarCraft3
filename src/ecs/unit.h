@@ -255,6 +255,7 @@ public:
     void RemoveAbility(CSimulation& game, int abilityHandleId);
     bool RemoveAbility(CSimulation& game, War3ID abilityCode);
     CAbility* GetAbility(War3ID code) const;
+    CAbility* GetGoldMineAbility() const;
     const std::vector<CAbility*>& GetAbilities() const { return abilities_; }
 
     // ===== Buff System =====

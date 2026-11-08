@@ -99,6 +99,12 @@ public:
     using BuffMap = std::unordered_map<War3ID, std::unique_ptr<CBuffDefFull>>;
     const AbilityMap& GetAll() const { return abilities_; }
     const BuffMap& GetAllBuffs() const { return buffs_; }
+    void RegisterAbility(War3ID id, std::unique_ptr<CAbilityDefFull> def) {
+        if (def) abilities_[id] = std::move(def);
+    }
+    void RegisterBuff(War3ID id, std::unique_ptr<CBuffDefFull> def) {
+        if (def) buffs_[id] = std::move(def);
+    }
 
     static CAbilityData LoadFromMpq(const class MpqManager& mpq);
     static CAbilityData LoadFromMpq(const class MpqManager& mpq, const std::string& mapPath);

@@ -1,6 +1,5 @@
 #include "spells26.h"
 #include "data/abilitydata.h"
-#include "ecs/abilities/ability_hero.h"
 #include "ecs/buffs.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
@@ -10,9 +9,8 @@
 
 namespace {
 
-CAbilityHero* FindHero(CUnit* unit) {
-    if (!unit) return nullptr;
-    return dynamic_cast<CAbilityHero*>(unit->GetAbility(War3ID("AHer")));
+CAbility* FindHero(CUnit* unit) {
+    return unit ? unit->GetAbility(War3ID("AHer")) : nullptr;
 }
 
 } // namespace
@@ -82,7 +80,7 @@ CAbilityItemPermanentStats::CAbilityItemPermanentStats(int handleId, War3ID code
 }
 
 void CAbilityItemPermanentStats::DoEffect(CSimulation& game, CUnit* caster) {
-    CAbilityHero* hero = FindHero(caster);
+    CAbility* hero = FindHero(caster);
     if (!hero) return;
     hero->SetAgilityBase(hero->GetAgility().base + agility_);
     hero->SetIntelligenceBase(hero->GetIntelligence().base + intelligence_);
@@ -119,7 +117,7 @@ CAbilityItemExperience::CAbilityItemExperience(int handleId)
 }
 
 void CAbilityItemExperience::DoEffect(CSimulation& game, CUnit* caster) {
-    if (CAbilityHero* hero = FindHero(caster)) {
+    if (CAbility* hero = FindHero(caster)) {
         hero->AddXP(game, caster, xp_);
     }
 }
@@ -134,7 +132,7 @@ CAbilityItemLevelGain::CAbilityItemLevelGain(int handleId)
 }
 
 void CAbilityItemLevelGain::DoEffect(CSimulation& game, CUnit* caster) {
-    if (CAbilityHero* hero = FindHero(caster)) {
+    if (CAbility* hero = FindHero(caster)) {
         hero->SetHeroLevel(game, caster, hero->GetHeroLevel() + levels_);
     }
 }

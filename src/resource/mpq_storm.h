@@ -47,6 +47,17 @@ public:
 
     bool FileExists(const std::string& filename) const;
     bool ReadFile(const std::string& filename, std::vector<uint8_t>& out) const;
+    // Phase 21 Stage XX: Unified single-archive file reader & JASS script resolver
+    // Encapsulates StormLib archive open/read/close so map/core/scripting layers
+    // never include <StormLib.h> or duplicate raw HANDLE lifecycle boilerplate.
+    static bool ReadSingleArchiveFile(const std::string& archivePath,
+                                      const std::string& filename,
+                                      std::vector<uint8_t>& out);
+    bool ReadFromGameArchivesOnly(const std::string& filename,
+                                  std::vector<uint8_t>& out) const;
+    bool ReadJassScriptFile(const std::string& mapPath,
+                            const std::string& fileName,
+                            std::vector<uint8_t>& out) const;
     std::vector<std::string> ListFiles(const std::string& archivePath) const;
     std::vector<std::string> ListAllFiles(const std::string& pattern = "*") const;
 

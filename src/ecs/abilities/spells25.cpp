@@ -1,6 +1,5 @@
 #include "spells25.h"
 #include "data/abilitydata.h"
-#include "ecs/abilities/ability_hero.h"
 #include "ecs/buffs.h"
 #include "ecs/csimulation.h"
 #include "ecs/destructable.h"
@@ -10,9 +9,8 @@
 
 namespace {
 
-CAbilityHero* FindHero(CUnit* unit) {
-    if (!unit) return nullptr;
-    return dynamic_cast<CAbilityHero*>(unit->GetAbility(War3ID("AHer")));
+CAbility* FindHero(CUnit* unit) {
+    return unit ? unit->GetAbility(War3ID("AHer")) : nullptr;
 }
 
 void KillUnit(CSimulation& game, CUnit* unit) {
@@ -224,7 +222,7 @@ void CAbilityItemAttributeBonus::OnAdd(CSimulation& game, CUnit* unit) {
     appliedAgi_ = agility_;
     appliedInt_ = intelligence_;
     appliedStr_ = strength_;
-    if (CAbilityHero* hero = FindHero(unit)) {
+    if (CAbility* hero = FindHero(unit)) {
         hero->AddAgilityBonus(game, unit, appliedAgi_);
         hero->AddIntelligenceBonus(game, unit, appliedInt_);
         hero->AddStrengthBonus(game, unit, appliedStr_);
@@ -233,7 +231,7 @@ void CAbilityItemAttributeBonus::OnAdd(CSimulation& game, CUnit* unit) {
 
 void CAbilityItemAttributeBonus::OnRemove(CSimulation& game, CUnit* unit) {
     if (!unit) return;
-    if (CAbilityHero* hero = FindHero(unit)) {
+    if (CAbility* hero = FindHero(unit)) {
         hero->AddAgilityBonus(game, unit, -appliedAgi_);
         hero->AddIntelligenceBonus(game, unit, -appliedInt_);
         hero->AddStrengthBonus(game, unit, -appliedStr_);

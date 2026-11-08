@@ -37,43 +37,28 @@ CItemData CItemData::LoadFromMpq(const MpqManager& mpq, const std::string& mapPa
     CItemData data;
 
     SlkTable itemSlk;
-    {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Units\\ItemData.slk", buf)) {
-            itemSlk.Load(buf.data(), buf.size());
-        }
-    }
+    LoadSlkTableFromMpq(mpq, "Units\\ItemData.slk", itemSlk);
 
     TxtTable skinTbl;
-    {
-        // Generic + per-race/campaign overlays (ref StandardObjectData item
-        // func/strings); missing files are skipped by ReadFile.
-        const char* itemFiles[] = {
-            "Units\\ItemFunc.txt",
-            "Units\\ItemStrings.txt",
-            "Units\\ItemSkin.txt",
-            "Units\\CommonItemFunc.txt",
-            "Units\\CommonItemStrings.txt",
-            "Units\\HumanItemFunc.txt",
-            "Units\\HumanItemStrings.txt",
-            "Units\\OrcItemFunc.txt",
-            "Units\\OrcItemStrings.txt",
-            "Units\\NightElfItemFunc.txt",
-            "Units\\NightElfItemStrings.txt",
-            "Units\\UndeadItemFunc.txt",
-            "Units\\UndeadItemStrings.txt",
-            "Units\\NeutralItemFunc.txt",
-            "Units\\NeutralItemStrings.txt",
-            "Units\\CampaignItemFunc.txt",
-            "Units\\CampaignItemStrings.txt",
-        };
-        for (const char* f : itemFiles) {
-            std::vector<uint8_t> buf;
-            if (mpq.ReadFile(f, buf)) {
-                skinTbl.Load(buf.data(), buf.size());
-            }
-        }
-    }
+    LoadTxtOverlaysFromMpq(mpq, {
+        "Units\\ItemFunc.txt",
+        "Units\\ItemStrings.txt",
+        "Units\\ItemSkin.txt",
+        "Units\\CommonItemFunc.txt",
+        "Units\\CommonItemStrings.txt",
+        "Units\\HumanItemFunc.txt",
+        "Units\\HumanItemStrings.txt",
+        "Units\\OrcItemFunc.txt",
+        "Units\\OrcItemStrings.txt",
+        "Units\\NightElfItemFunc.txt",
+        "Units\\NightElfItemStrings.txt",
+        "Units\\UndeadItemFunc.txt",
+        "Units\\UndeadItemStrings.txt",
+        "Units\\NeutralItemFunc.txt",
+        "Units\\NeutralItemStrings.txt",
+        "Units\\CampaignItemFunc.txt",
+        "Units\\CampaignItemStrings.txt",
+    }, skinTbl);
 
     ApplyMapItemObjectMods(mpq, mapPath, itemSlk, skinTbl);
 

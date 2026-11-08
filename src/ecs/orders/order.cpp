@@ -889,12 +889,73 @@ const CodeOrder kCodeOrders[] = {
     {"ANcl", 852600},
 };
 
-} // namespace
+const CodeOrder kSecondaryCodeOrders[] = {
+    {"AEim", 852178}, // unimmolation toggle
+    {"Acpf", 852494}, // corporeal form toggle
+    {"Aetf", 852497}, // ethereal form toggle
+    {"Aave", 852532}, // avenger form toggle
+    {"Amdf", 852479}, // magicundefense toggle
+    {"Amil", 852073}, // militiaoff toggle
+    {"Aent", 852148}, // entangleinstant
+    {"Amic", 852651}, // militiaunconvert
+    {"AUin", 852224}, // dreadlordinferno alias
+};
 
-int OrderIdFromString(const std::string& order) {
+std::unordered_map<std::string, int>& CustomOrderNameToIdMap() {
+    static std::unordered_map<std::string, int> s_map;
+    return s_map;
+}
+
+std::unordered_map<int, std::string>& CustomOrderIdToNameMap() {
+    static std::unordered_map<int, std::string> s_map;
+    return s_map;
+}
+
+std::unordered_map<uint32_t, int>& CustomCodeBaseOrderMap() {
+    static std::unordered_map<uint32_t, int> s_map;
+    return s_map;
+}
+
+std::unordered_map<uint32_t, int>& CustomCodeSecondaryOrderMap() {
+    static std::unordered_map<uint32_t, int> s_map;
+    return s_map;
+}
+
+std::string NormalizeOrderName(const std::string& order) {
     std::string lower;
     lower.reserve(order.size());
-    for (char ch : order) lower.push_back((char)std::tolower((unsigned char)ch));
+    for (char ch : order) lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    return lower;
+}
+
+} // namespace
+
+void RegisterCustomOrderString(const std::string& order, int orderId) {
+    if (order.empty() || orderId == 0) return;
+    const std::string lower = NormalizeOrderName(order);
+    CustomOrderNameToIdMap()[lower] = orderId;
+    CustomOrderIdToNameMap()[orderId] = lower;
+}
+
+void RegisterAbilityOrderMapping(War3ID code, int baseOrderId, int secondaryOrderId) {
+    if (code.value == 0) return;
+    if (baseOrderId != 0) CustomCodeBaseOrderMap()[code.value] = baseOrderId;
+    if (secondaryOrderId != 0) CustomCodeSecondaryOrderMap()[code.value] = secondaryOrderId;
+}
+
+void ClearCustomOrderMappings() {
+    CustomOrderNameToIdMap().clear();
+    CustomOrderIdToNameMap().clear();
+    CustomCodeBaseOrderMap().clear();
+    CustomCodeSecondaryOrderMap().clear();
+}
+
+int OrderIdFromString(const std::string& order) {
+    const std::string lower = NormalizeOrderName(order);
+    const auto& custom = CustomOrderNameToIdMap();
+    if (const auto cit = custom.find(lower); cit != custom.end()) {
+        return cit->second;
+    }
     static const std::unordered_map<std::string, int> table = [] {
         std::unordered_map<std::string, int> t;
         for (const auto& e : kOrderNames) t[e.name] = e.id;
@@ -905,6 +966,10 @@ int OrderIdFromString(const std::string& order) {
 }
 
 std::string OrderStringFromId(int orderId) {
+    const auto& custom = CustomOrderIdToNameMap();
+    if (const auto cit = custom.find(orderId); cit != custom.end()) {
+        return cit->second;
+    }
     static const std::unordered_map<int, std::string> table = [] {
         std::unordered_map<int, std::string> t;
         for (const auto& e : kOrderNames) t[e.id] = e.name;
@@ -915,6 +980,10 @@ std::string OrderStringFromId(int orderId) {
 }
 
 int SpellBaseOrderId(War3ID code) {
+    const auto& custom = CustomCodeBaseOrderMap();
+    if (const auto cit = custom.find(code.value); cit != custom.end()) {
+        return cit->second;
+    }
     static const std::unordered_map<uint32_t, int> table = [] {
         std::unordered_map<uint32_t, int> t;
         for (const auto& e : kCodeOrders) t[War3ID(e.code).value] = e.id;
@@ -928,21 +997,17 @@ bool SpellMatchesOrder(War3ID code, int orderId) {
     if (orderId == 0) return true;
     const int base = SpellBaseOrderId(code);
     if (base != 0 && orderId == base) return true;
-    // Immolation is a toggle with separate on/off orders (ref
-    // CAbilityImmolation answers immolation/unimmolation).
-    if (code == War3ID("AEim") && orderId == 852178) return true;
-    // Corporeal / ethereal / avenger forms are toggles with a second order.
-    if (code == War3ID("Acpf") && orderId == 852494) return true;
-    if (code == War3ID("Aetf") && orderId == 852497) return true;
-    if (code == War3ID("Aave") && orderId == 852532) return true;
-    // Magic Defense answers both the on order and magicundefense.
-    if (code == War3ID("Amdf") && orderId == 852479) return true;
-    if (code == War3ID("Amil") && orderId == 852073) return true;
-    if (code == War3ID("Aent") && orderId == 852148) return true;
-    if (code == War3ID("Amic") && orderId == 852651) return true;
-    // Inferno answers both the generic order (852232, shared with the ANin
-    // code variant) and the dreadlord order (852224); both strings exist
-    // in the retail order list for this spell family.
-    if (code == War3ID("AUin") && orderId == 852224) return true;
-    return false;
+
+    const auto& customSec = CustomCodeSecondaryOrderMap();
+    if (const auto cit = customSec.find(code.value); cit != customSec.end()) {
+        if (cit->second == orderId) return true;
+    }
+
+    static const std::unordered_map<uint32_t, int> secTable = [] {
+        std::unordered_map<uint32_t, int> t;
+        for (const auto& e : kSecondaryCodeOrders) t[War3ID(e.code).value] = e.id;
+        return t;
+    }();
+    const auto it = secTable.find(code.value);
+    return it != secTable.end() && it->second == orderId;
 }

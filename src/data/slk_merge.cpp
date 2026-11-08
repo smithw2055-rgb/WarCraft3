@@ -247,3 +247,27 @@ void CollectDestructableIds(const SlkAccessor& slk, const TxtTable& txt, std::se
         }
     }
 }
+
+bool LoadSlkTableFromMpq(const MpqManager& mpq, const std::string& path, SlkTable& outSlk) {
+    std::vector<uint8_t> buf;
+    if (!mpq.ReadFile(path, buf) || buf.empty()) {
+        return false;
+    }
+    return outSlk.Load(buf.data(), buf.size());
+}
+
+int LoadTxtOverlaysFromMpq(const MpqManager& mpq,
+                           std::initializer_list<const char*> paths,
+                           TxtTable& outTxt) {
+    int loadedCount = 0;
+    std::vector<uint8_t> buf;
+    for (const char* path : paths) {
+        if (!path) continue;
+        if (mpq.ReadFile(path, buf) && !buf.empty()) {
+            if (outTxt.Load(buf.data(), buf.size())) {
+                ++loadedCount;
+            }
+        }
+    }
+    return loadedCount;
+}

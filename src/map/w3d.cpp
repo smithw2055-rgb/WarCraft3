@@ -1,10 +1,7 @@
 #include "w3d.h"
 #include <cstring>
 #include <iostream>
-#ifndef __STORMLIB_NO_STATIC_LINK__
-#define __STORMLIB_NO_STATIC_LINK__
-#endif
-#include <StormLib.h>
+#include "resource/mpq_storm.h"
 
 static uint32_t TagBE(const uint8_t* p) {
     return (uint32_t(p[0])<<24)|(uint32_t(p[1])<<16)|(uint32_t(p[2])<<8)|p[3];
@@ -147,17 +144,7 @@ bool W3dLoad(const uint8_t* data, size_t size, W3dData& out) {
 #undef CHK
 
 bool W3dLoadFromMpq(const std::string& mapPath, W3dData& out) {
-    HANDLE hMpq = nullptr;
-    if (!SFileOpenArchive(mapPath.c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) return false;
-    HANDLE hFile = nullptr;
-    if (!SFileOpenFileEx(hMpq, "war3map.doo", SFILE_OPEN_BASE_FILE, &hFile)) {
-        SFileCloseArchive(hMpq); return false;
-    }
-    DWORD sz = SFileGetFileSize(hFile, nullptr);
-    std::vector<uint8_t> buf(sz);
-    DWORD rd = 0;
-    bool ok = SFileReadFile(hFile, buf.data(), sz, &rd, nullptr) && rd == sz;
-    SFileCloseFile(hFile); SFileCloseArchive(hMpq);
-    if (!ok) return false;
-    return W3dLoad(buf.data(), sz, out);
+    std::vector<uint8_t> buf;
+    if (!MpqManager::ReadSingleArchiveFile(mapPath, "war3map.doo", buf)) return false;
+    return W3dLoad(buf.data(), buf.size(), out);
 }

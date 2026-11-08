@@ -10,38 +10,16 @@ CDoodadData CDoodadData::LoadFromMpq(const MpqManager& mpq,
     CDoodadData data;
 
     SlkTable doodadSlk;
-    {
-        // Dedicated doodad table (ref StandardObjectData Doodads.slk).
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Doodads\\Doodads.slk", buf)) {
-            doodadSlk.Load(buf.data(), buf.size());
-        }
-    }
+    LoadSlkTableFromMpq(mpq, "Doodads\\Doodads.slk", doodadSlk);
     SlkTable destSlk;
-    {
-        // Destructable table supplements: trees/bridges live here
-        // (ATtr summer tree, ATt0 bridge), not in Doodads.slk.
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Units\\DestructableData.slk", buf)) {
-            destSlk.Load(buf.data(), buf.size());
-        }
-    }
+    LoadSlkTableFromMpq(mpq, "Units\\DestructableData.slk", destSlk);
 
     TxtTable skinTbl;
-    {
-        std::vector<uint8_t> buf;
-        if (mpq.ReadFile("Doodads\\DoodadSkins.txt", buf)) {
-            skinTbl.Load(buf.data(), buf.size());
-        }
-        std::vector<uint8_t> buf2;
-        if (mpq.ReadFile("Units\\DestructableSkin.txt", buf2)) {
-            skinTbl.Load(buf2.data(), buf2.size());
-        }
-        std::vector<uint8_t> buf3;
-        if (mpq.ReadFile("Units\\DestructableFunc.txt", buf3)) {
-            skinTbl.Load(buf3.data(), buf3.size());
-        }
-    }
+    LoadTxtOverlaysFromMpq(mpq, {
+        "Doodads\\DoodadSkins.txt",
+        "Units\\DestructableSkin.txt",
+        "Units\\DestructableFunc.txt",
+    }, skinTbl);
 
     // Doodad object changeset (war3map.w3d); destructable mods (w3b) also
     // apply since doodads share the destructable namespace in-game.

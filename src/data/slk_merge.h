@@ -48,6 +48,17 @@ inline std::string ToLowerCopy(std::string value) {
     return value;
 }
 
+inline bool EqualsIgnoreCase(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 inline void ParseWar3IdList(const std::string& str, std::vector<War3ID>& out) {
     if (str.empty()) return;
     size_t pos = 0;
@@ -72,9 +83,8 @@ inline bool TryGetTxtValueCaseInsensitive(const TxtTable& tbl,
         outValue = it->second;
         return true;
     }
-    const std::string targetKey = ToLowerCopy(key);
     for (const auto& [candidateKey, candidateValue] : values) {
-        if (ToLowerCopy(candidateKey) == targetKey) {
+        if (EqualsIgnoreCase(candidateKey, key)) {
             outValue = candidateValue;
             return true;
         }
@@ -208,6 +218,12 @@ inline float GetMergedFloat(const TxtTable& txt, const SlkAccessor& slk,
     }
     return std::strtof(value.c_str(), nullptr);
 }
+
+// ---- Shared MPQ SLK & TXT overlay loaders (Phase 21 Stage YY) ----
+bool LoadSlkTableFromMpq(const MpqManager& mpq, const std::string& path, SlkTable& outSlk);
+int LoadTxtOverlaysFromMpq(const MpqManager& mpq,
+                           std::initializer_list<const char*> paths,
+                           TxtTable& outTxt);
 
 // ---- Map object-mod overlay helpers (shared across all object-data loaders) ----
 std::string FormatObjectModificationValue(const ObjectModification& mod);

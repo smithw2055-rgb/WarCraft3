@@ -155,6 +155,8 @@ private:
     CUnit* FindDeadHero() const;
     CUnit* FindAltar() const;
     bool TryTrainWorkers();
+    bool HasActiveBuilder() const;
+    bool TryDispatchBuildNearHall(const War3ID& buildingTypeId, int goldReserve = 0);
     bool TryBuildSupply();
     bool TryBuildBarracks();
     bool TryBuildAltar();

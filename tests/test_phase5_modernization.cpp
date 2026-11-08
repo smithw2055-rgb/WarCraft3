@@ -6412,7 +6412,7 @@ bool TestPhase19StageUU2War3GameModuleV19BuildSnapObstructionAndDynamicPluginSui
     sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
 
     auto war3Mod = std::make_shared<war3::War3GameModule>();
-    TEST_ASSERT(war3Mod->GetModuleVersion() == 19u);
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 19u);
     sim.SetSimulationModule(war3Mod);
 
     // 1. Test OnSnapBuildPosition & IsBuildLocationObstructed on War3GameModule v19
@@ -6466,6 +6466,522 @@ bool TestPhase19StageUU2War3GameModuleV19BuildSnapObstructionAndDynamicPluginSui
 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
         TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 19u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+
+// ============================================================================
+// Phase 20 Modernization Tests:
+//   - Stage VV1: Decoupled MeleeAIController (OnDiscoverAIRacePlan & build
+//                dispatch) + Cross-Ability Virtual Contracts (Inventory,
+//                SellItems, ReviveHero)
+//   - Stage VV2: Declarative CAbilityAura (Bitfields, Stat Bonuses, SetAuraBuff)
+//                & War3GameModule::RegisterCustomAura
+//   - Stage WW1: Direct O(1) Value COrder Dispatch & Deduplicated AbilityBuilder
+//                Actions (DamageArea, HealArea, HealTarget, ReviveTarget,
+//                CreateUnitAtTarget, TransferToCaster)
+//   - Stage WW2: War3GameModule Version 20 Dynamic Order Registration
+//                (RegisterCustomOrder) + Dynamic Plugin SO v20 + Cloud Maps
+// ============================================================================
+
+bool TestPhase20StageVV1DecoupledMeleeAIAndCrossAbilityVirtualContracts() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    // Human Town Hall (htow), Peasant (hpea), Altar of Kings (halt), Paladin (Hpal), Gold Mine (ngol)
+    udTxt.SetString("htow", "race", "human");
+    udTxt.SetString("htow", "isbldg", "1");
+    ubTxt.SetString("htow", "HP", "1500");
+    ubTxt.SetString("htow", "fmade", "12");
+    ubTxt.SetString("htow", "trains", "hpea");
+
+    udTxt.SetString("hpea", "race", "human");
+    udTxt.SetString("hpea", "isbldg", "0");
+    ubTxt.SetString("hpea", "HP", "220");
+    ubTxt.SetString("hpea", "goldcost", "75");
+    ubTxt.SetString("hpea", "fused", "1");
+    ubTxt.SetString("hpea", "bldtm", "10");
+    ubTxt.SetString("hpea", "builds", "htow,halt");
+    uaTxt.SetString("hpea", "abilList", "Ahar,Arep");
+
+    udTxt.SetString("halt", "race", "human");
+    udTxt.SetString("halt", "isbldg", "1");
+    ubTxt.SetString("halt", "HP", "1200");
+    ubTxt.SetString("halt", "goldcost", "180");
+    ubTxt.SetString("halt", "lumbercost", "50");
+    ubTxt.SetString("halt", "trains", "Hpal");
+    uaTxt.SetString("halt", "abilList", "Arev");
+
+    udTxt.SetString("Hpal", "race", "human");
+    udTxt.SetString("Hpal", "isbldg", "0");
+    ubTxt.SetString("Hpal", "isHero", "1");
+    ubTxt.SetString("Hpal", "HP", "650");
+    ubTxt.SetString("Hpal", "STR", "22");
+    ubTxt.SetString("Hpal", "AGI", "13");
+    ubTxt.SetString("Hpal", "INT", "17");
+    ubTxt.SetString("Hpal", "primary", "STR");
+    uaTxt.SetString("Hpal", "abilList", "AInv");
+
+    udTxt.SetString("ngol", "race", "other");
+    udTxt.SetString("ngol", "isbldg", "1");
+    ubTxt.SetString("ngol", "HP", "1500");
+    uaTxt.SetString("ngol", "abilList", "Agld");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    auto p0 = std::make_unique<CPlayer>(0, "AIPlayer", CMapControl::COMPUTER);
+    p0->SetGold(1500);
+    p0->SetLumber(1000);
+    sim.AddPlayer(std::move(p0));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    sim.SetSimulationModule(war3Mod);
+
+    CUnit* hall    = sim.CreateUnit(War3ID("htow"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* peasant = sim.CreateUnit(War3ID("hpea"), 0, 128.0f, 0.0f, 0.0f);
+    CUnit* altar   = sim.CreateUnit(War3ID("halt"), 0, -256.0f, 0.0f, 0.0f);
+    CUnit* paladin = sim.CreateUnit(War3ID("Hpal"), 0, -128.0f, 128.0f, 0.0f);
+    CUnit* mine    = sim.CreateUnit(War3ID("ngol"), 12, 384.0f, 0.0f, 0.0f);
+    TEST_ASSERT(hall && peasant && altar && paladin && mine);
+    sim.Update();
+
+    // 1. Verify ISimulationModule::OnDiscoverAIRacePlan and MeleeAIController without concrete ability headers
+    AIRacePlan discovered{};
+    TEST_ASSERT(sim.GetSimulationModule()->OnDiscoverAIRacePlan(sim, 0, discovered));
+    TEST_ASSERT(discovered.valid);
+    TEST_ASSERT(discovered.townHall == War3ID("htow"));
+    TEST_ASSERT(discovered.worker == War3ID("hpea"));
+
+    TEST_ASSERT(sim.GetSimulationModule()->CreatePlayerAI(sim, 0, 1));
+    sim.GetSimulationModule()->TickPlayerAIs(sim, 1.0f);
+
+    // 2. Verify CAbilityInventory virtual FindEmptySlot and RemoveItemAt
+    CAbility* inv = paladin->GetAbility(War3ID("AInv"));
+    TEST_ASSERT(inv != nullptr);
+    TEST_ASSERT(inv->FindEmptySlot() == 0);
+    CItem* claw = sim.CreateItem(War3ID("rat9"), 0.0f, 0.0f);
+    TEST_ASSERT(claw != nullptr);
+    TEST_ASSERT(inv->PickUpItem(sim, paladin, claw));
+    TEST_ASSERT(inv->FindEmptySlot() == 1);
+    TEST_ASSERT(inv->RemoveItemAt(sim, paladin, 0));
+    TEST_ASSERT(inv->GetItemCount() == 0);
+
+    // 3. Verify decoupled CAbilityReviveHero queueing via generic CAbility*
+    paladin->SetLife(sim, 0.0f);
+    TEST_ASSERT(paladin->IsDead());
+    CAbility* revAbil = altar->GetAbility(War3ID("Arev"));
+    CAbility* altarQueue = altar->GetAbility(War3ID("Aque"));
+    TEST_ASSERT(revAbil && altarQueue);
+    revAbil->BeginNoTarget(sim, altar, paladin->GetHandleId());
+    TEST_ASSERT(altarQueue->GetQueueCount() == 1);
+    TEST_ASSERT(altarQueue->GetQueuedItemType(0) == CQueueItemType::HERO_REVIVE);
+
+    return true;
+}
+
+bool TestPhase20StageVV2DeclarativeCAbilityAuraAndSetAuraBuffEngine() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "420");
+    ubTxt.SetString("hfoo", "def", "2");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    auto p0 = std::make_unique<CPlayer>(0, "P0", CMapControl::USER);
+    auto p1 = std::make_unique<CPlayer>(1, "P1", CMapControl::USER);
+    p0->SetAlliance(1, CAllianceType::ALLIED, false);
+    p1->SetAlliance(0, CAllianceType::ALLIED, false);
+    sim.AddPlayer(std::move(p0));
+    sim.AddPlayer(std::move(p1));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    sim.SetSimulationModule(war3Mod);
+
+    // Register a custom declarative stat aura ("ACa0": +5 flat armor in 600 radius)
+    war3Mod->RegisterCustomAura(
+        War3ID("ACa0"), 600.0f, true, true, false,
+        {{CAuraEffectType::ARMOR, 5.0f, false}});
+    TEST_ASSERT(war3Mod->GetModuleStats().customAurasRegistered >= 1u);
+
+    CUnit* auraBearer = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* enemyUnit  = sim.CreateUnit(War3ID("hfoo"), 1, 100.0f, 0.0f, 0.0f);
+    TEST_ASSERT(auraBearer && enemyUnit);
+    sim.Update();
+
+    const int baseDef = auraBearer->GetTotalDefense();
+    auto customAura = AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("ACa0"));
+    TEST_ASSERT(customAura != nullptr);
+    auraBearer->AddAbility(sim, std::move(customAura));
+
+    // Attach declarative Thorns Aura (BEah) and Disease Cloud (Bapl)
+    auraBearer->AddAbility(sim, AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("AEah")));
+    auraBearer->AddAbility(sim, AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("Aapl")));
+
+    sim.Update();
+    TEST_ASSERT(auraBearer->GetTotalDefense() == baseDef + 5);
+    TEST_ASSERT(auraBearer->HasBuff(War3ID("BEah")));
+    TEST_ASSERT(!auraBearer->HasBuff(War3ID("Bapl")));
+    TEST_ASSERT(enemyUnit->HasBuff(War3ID("Bapl")));
+
+    TEST_ASSERT(war3Mod->UnregisterCustomAura(War3ID("ACa0")));
+    return true;
+}
+
+bool TestPhase20StageWW1DirectValueCOrderDispatchAndDeduplicatedAbilityBuilderActions() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("hfoo", "race", "human");
+    udTxt.SetString("hfoo", "isbldg", "0");
+    ubTxt.SetString("hfoo", "HP", "500");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::USER));
+    sim.SetSimulationModule(std::make_shared<war3::War3GameModule>());
+
+    CUnit* u0 = sim.CreateUnit(War3ID("hfoo"), 0, 0.0f, 0.0f, 0.0f);
+    CUnit* u1 = sim.CreateUnit(War3ID("hfoo"), 1, 100.0f, 0.0f, 0.0f);
+    TEST_ASSERT(u0 && u1);
+    sim.Update();
+
+    // 1. Verify O(1) COrder value accessors across all 3 target kinds
+    COrderNoTarget noTgt(OrderIds::STOP);
+    TEST_ASSERT(noTgt.GetOrderId() == OrderIds::STOP);
+    TEST_ASSERT(noTgt.GetTargetKind() == COrder::TargetKind::NONE);
+
+    COrderTargetPoint ptOrd(OrderIds::MOVE, 250.0f, -125.0f, 16.0f);
+    TEST_ASSERT(ptOrd.GetOrderId() == OrderIds::MOVE);
+    TEST_ASSERT(ptOrd.GetTargetKind() == COrder::TargetKind::POINT);
+    TEST_NEAR(ptOrd.GetX(), 250.0f, 0.01f);
+    TEST_NEAR(ptOrd.GetY(), -125.0f, 0.01f);
+    TEST_NEAR(ptOrd.GetZ(), 16.0f, 0.01f);
+
+    COrderTargetWidget wgOrd(OrderIds::ATTACK, u1);
+    TEST_ASSERT(wgOrd.GetOrderId() == OrderIds::ATTACK);
+    TEST_ASSERT(wgOrd.GetTargetKind() == COrder::TargetKind::WIDGET);
+    TEST_ASSERT(wgOrd.GetTarget() == u1);
+
+    TEST_ASSERT(sim.IssueUnitOrder(u0->GetHandleId(), std::make_unique<COrderTargetPoint>(OrderIds::MOVE, 200.0f, 0.0f)));
+    TEST_ASSERT(u0->GetLastOrderId() == OrderIds::MOVE);
+
+    // 2. Verify deduplicated AbilityBuilder actions (DamageArea, HealArea, HealTarget, TransferToCaster, ReviveTarget)
+    ABActionDamageArea dmgArea(200.0f, 150.0f);
+    dmgArea.Run(sim, u0, nullptr, false, 0.0f, 0.0f);
+    TEST_ASSERT(u1->GetLife() < 500.0f);
+
+    const float afterDmg = u1->GetLife();
+    ABActionHealTarget healTgt(50.0f);
+    healTgt.Run(sim, u0, u1, false, 0.0f, 0.0f);
+    TEST_NEAR(u1->GetLife(), afterDmg + 50.0f, 0.1f);
+
+    ABActionHealArea healArea(200.0f, 500.0f);
+    healArea.Run(sim, u0, nullptr, false, 0.0f, 0.0f);
+    TEST_NEAR(u1->GetLife(), 500.0f, 0.1f);
+
+    ABActionTransferToCaster transfer;
+    transfer.Run(sim, u0, u1, false, 0.0f, 0.0f);
+    TEST_ASSERT(u1->GetPlayerIndex() == 0);
+
+    u1->SetLife(sim, 0.0f);
+    TEST_ASSERT(u1->IsDead());
+    ABActionReviveTarget revive;
+    revive.Run(sim, u0, u1, false, 0.0f, 0.0f);
+    TEST_ASSERT(!u1->IsDead());
+
+    return true;
+}
+
+bool TestPhase20StageWW2War3GameModuleV20DynamicOrdersCustomAurasAndPluginSuite() {
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 20u);
+
+    // 1. Test dynamic custom order string & ability order mapping (including toggle secondary order)
+    ClearCustomOrderMappings();
+    war3Mod->RegisterCustomOrder("customnova", 899101, War3ID("ACn0").value, 899102);
+    TEST_ASSERT(war3Mod->GetModuleStats().customOrdersRegistered == 1u);
+    TEST_ASSERT(OrderIdFromString("CustomNova") == 899101);
+    TEST_ASSERT(OrderStringFromId(899101) == "customnova");
+    TEST_ASSERT(SpellBaseOrderId(War3ID("ACn0")) == 899101);
+    TEST_ASSERT(SpellMatchesOrder(War3ID("ACn0"), 899101));
+    TEST_ASSERT(SpellMatchesOrder(War3ID("ACn0"), 899102));
+    TEST_ASSERT(!SpellMatchesOrder(War3ID("ACn0"), 899999));
+    ClearCustomOrderMappings();
+
+    // 2. Test Dynamic Plugin SO Version 20 & Cloud Retail W3X Maps
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath20 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths20[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths20) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath20 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath20.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase20PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath20));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 20u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TurtleRock.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 20u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+// ============================================================================
+// Phase 21 Modernization Tests:
+//   - Stage XX1: Unified MpqManager::ReadSingleArchiveFile & ReadJassScriptFile
+//                (10 external files decoupled from <StormLib.h>)
+//   - Stage XX2: Layered Map ObjectMods Loader & Case-Insensitive SlkMerge
+//                Helpers (EqualsIgnoreCase, TryGetTxtValueCaseInsensitive)
+//   - Stage YY1: War3GameModule Version 21 In-Memory Custom Data Archetypes
+//                (RegisterCustomItemArchetype, RegisterCustomUpgradeArchetype,
+//                 RegisterCustomAbilityDef)
+//   - Stage YY2: Dynamic Plugin SO Version 21 & Cloud Retail Maps Suite
+// ============================================================================
+
+bool TestPhase21StageXX1UnifiedMpqSingleArchiveReaderAndJassScriptResolver() {
+    const char* mapPath = "resources/Maps/FrozenThrone/(2)EchoIsles.w3x";
+    FILE* f = std::fopen(mapPath, "rb");
+    if (f) {
+        std::fclose(f);
+        std::vector<uint8_t> w3iBytes;
+        std::vector<uint8_t> w3eBytes;
+        std::vector<uint8_t> wpmBytes;
+        std::vector<uint8_t> jassBytes;
+
+        TEST_ASSERT(MpqManager::ReadSingleArchiveFile(mapPath, "war3map.w3i", w3iBytes));
+        TEST_ASSERT(!w3iBytes.empty());
+
+        TEST_ASSERT(MpqManager::ReadSingleArchiveFile(mapPath, "war3map.w3e", w3eBytes));
+        TEST_ASSERT(!w3eBytes.empty());
+
+        TEST_ASSERT(MpqManager::ReadSingleArchiveFile(mapPath, "war3map.wpm", wpmBytes));
+        TEST_ASSERT(!wpmBytes.empty());
+
+        MpqManager mpq;
+        TEST_ASSERT(mpq.ReadJassScriptFile(mapPath, "Scripts\\war3map.j", jassBytes));
+        TEST_ASSERT(!jassBytes.empty());
+    }
+
+    // Verify graceful false return on missing archive or missing internal file
+    std::vector<uint8_t> missing{1u, 2u, 3u};
+    TEST_ASSERT(!MpqManager::ReadSingleArchiveFile("nonexistent_archive.w3x", "war3map.w3i", missing));
+    TEST_ASSERT(missing.empty());
+
+    MpqManager emptyMpq;
+    missing = {4u, 5u};
+    TEST_ASSERT(!emptyMpq.ReadFromGameArchivesOnly("Scripts\\common.j", missing));
+    TEST_ASSERT(missing.empty());
+
+    return true;
+}
+
+bool TestPhase21StageXX2LayeredMapObjectModsAndCaseInsensitiveSlkMergeHelpers() {
+    TEST_ASSERT(EqualsIgnoreCase("Buttonpos", "buttonpos"));
+    TEST_ASSERT(EqualsIgnoreCase("GoldCost", "GOLDCOST"));
+    TEST_ASSERT(!EqualsIgnoreCase("GoldCost", "LumberCost"));
+
+    TxtTable txt;
+    txt.SetString("hfoo", "Buttonpos", "2,1");
+    txt.SetString("hfoo", "GoldCost", "135");
+
+    std::string outVal;
+    TEST_ASSERT(TryGetTxtValueCaseInsensitive(txt, "hfoo", "buttonpos", outVal));
+    TEST_ASSERT(outVal == "2,1");
+    TEST_ASSERT(TryGetTxtValueCaseInsensitive(txt, "hfoo", "goldcost", outVal));
+    TEST_ASSERT(outVal == "135");
+
+    // Verify unified layered object-mod loaders on Scenario map with custom object data
+    const char* tdMap = "resources/Maps/FrozenThrone/Scenario/(6)BlizzardTD.w3x";
+    FILE* f = std::fopen(tdMap, "rb");
+    if (f) {
+        std::fclose(f);
+        ObjectModificationSet unitMods;
+        if (LoadWar3MapUnitMods(tdMap, unitMods)) {
+            TEST_ASSERT(!unitMods.original.empty() || !unitMods.custom.empty());
+        }
+    }
+
+    return true;
+}
+
+bool TestPhase21StageYY1War3GameModuleV21CustomItemUpgradeAndAbilityDataArchetypes() {
+    CGameplayConstants constants;
+    SlkTable udSlk, uaSlk, ubSlk, uwSlk, uuiSlk;
+    TxtTable udTxt, uaTxt, ubTxt, uwTxt, uuiTxt;
+
+    udTxt.SetString("Hpal", "race", "human");
+    udTxt.SetString("Hpal", "isbldg", "0");
+    ubTxt.SetString("Hpal", "isHero", "1");
+    ubTxt.SetString("Hpal", "HP", "650");
+    ubTxt.SetString("Hpal", "def", "2");
+    ubTxt.SetString("Hpal", "STR", "20");
+    ubTxt.SetString("Hpal", "AGI", "12");
+    ubTxt.SetString("Hpal", "INT", "16");
+    ubTxt.SetString("Hpal", "primary", "STR");
+    uaTxt.SetString("Hpal", "abilList", "AInv,ACs1");
+
+    CUnitData unitData(constants, udSlk, udTxt, uaSlk, uaTxt, ubSlk, ubTxt, uwSlk, uwTxt, uuiSlk, uuiTxt);
+    CItemData itemData;
+    CUpgradeData upgradeData;
+    CAbilityData abilityData;
+
+    CSimulation sim;
+    sim.SetUnitData(&unitData);
+    sim.SetItemData(&itemData);
+    sim.SetUpgradeData(&upgradeData);
+    sim.SetAbilityData(&abilityData);
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() == 21u);
+    sim.SetSimulationModule(war3Mod);
+
+    // 1. Register custom ability definition & descriptor ("ACs1")
+    war3Mod->RegisterCustomSpellDescriptor(
+        ABSpellDescriptor::MakeSelfInvulnerableBuff(War3ID("ACs1"), 8.0f, 12.0f, 35));
+    TEST_ASSERT(war3Mod->RegisterCustomAbilityDef(
+        sim, War3ID("ACs1"), "Aegis Shield", 3, 20.0f, 50, 0.0f, 0.0f, 10.0f));
+    TEST_ASSERT(abilityData.HasAbility(War3ID("ACs1")));
+
+    // 2. Register custom item archetype ("Ics1") and custom upgrade archetype ("Rcs1": +4 armor per level)
+    TEST_ASSERT(war3Mod->RegisterCustomItemArchetype(
+        sim, War3ID("Ics1"), "Blade of Valor", 350, 50, 2, {War3ID("AIat")}));
+    TEST_ASSERT(itemData.HasItem(War3ID("Ics1")));
+
+    TEST_ASSERT(war3Mod->RegisterCustomUpgradeArchetype(
+        sim, War3ID("Rcs1"), "Mithril Plating", 3, 100, 75, "rarm", 4.0f, 0.0f));
+    TEST_ASSERT(upgradeData.HasUpgrade(War3ID("Rcs1")));
+    TEST_ASSERT(war3Mod->GetModuleStats().customDataArchetypesRegistered == 3u);
+
+    // 3. Spawn hero, verify custom ability def applied, pick up custom item, and apply custom upgrade
+    CUnit* hero = sim.CreateUnit(War3ID("Hpal"), 0, 0.0f, 0.0f, 0.0f);
+    TEST_ASSERT(hero != nullptr);
+    sim.Update();
+
+    CAbility* customSpell = hero->GetAbility(War3ID("ACs1"));
+    TEST_ASSERT(customSpell != nullptr);
+    TEST_NEAR(customSpell->GetCooldown(), 20.0f, 0.01f);
+    TEST_ASSERT(customSpell->GetManaCost() == 50);
+
+    CItem* customItem = sim.CreateItem(War3ID("Ics1"), 0.0f, 0.0f);
+    TEST_ASSERT(customItem != nullptr);
+    TEST_ASSERT(customItem->GetName() == "Blade of Valor");
+    TEST_ASSERT(customItem->GetGoldValue() == 350);
+    TEST_ASSERT(customItem->GetCharges() == 2);
+
+    const int defBeforeUpgrade = hero->GetTotalDefense();
+    sim.GetPlayer(0)->SetTechLevel(sim, War3ID("Rcs1"), 2);
+    TEST_ASSERT(hero->GetTotalDefense() == defBeforeUpgrade + 8);
+
+    return true;
+}
+
+bool TestPhase21StageYY2DynamicPluginSOV21AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath21 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths21[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths21) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath21 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath21.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase21PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath21));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 21u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(8)GardenOfWar.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 21u);
 
         MpqManager mpq;
         CSimulation mapSim;

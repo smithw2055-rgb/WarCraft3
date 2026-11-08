@@ -208,19 +208,8 @@ bool MpqManager::ReadFile(const std::string& filename, std::vector<uint8_t>& out
     const MpqArchive* impArchive = nullptr;
     if (FindMapImport(filename, impFolder, &impArchive)) {
         if (!impFolder.empty() && ReadWholeFile(impFolder, out)) return true;
-        if (impArchive) {
-            const std::string key = ToArchivePath(std::string("war3mapImported\\") + ToArchivePath(filename));
-            HANDLE hFile = nullptr;
-            if (SFileOpenFileEx(impArchive->handle, key.c_str(), SFILE_OPEN_BASE_FILE, &hFile)) {
-                DWORD fileSize = SFileGetFileSize(hFile, nullptr);
-                out.resize(fileSize);
-                DWORD bytesRead = 0;
-                const bool ok =
-                    SFileReadFile(hFile, out.data(), fileSize, &bytesRead, nullptr);
-                SFileCloseFile(hFile);
-                if (ok) return true;
-                out.clear();
-            }
+        if (impArchive && ReadFromArchive(impArchive, std::string("war3mapImported\\") + filename, out)) {
+            return true;
         }
     }
     return false;
@@ -293,4 +282,63 @@ std::vector<std::string> MpqManager::ListAllFiles(const std::string& pattern) co
         for (auto& name : c.ListFiles(pattern)) result.push_back(std::move(name));
     }
     return result;
+}
+
+bool MpqManager::ReadSingleArchiveFile(const std::string& archivePath,
+                                       const std::string& filename,
+                                       std::vector<uint8_t>& out) {
+    out.clear();
+    if (archivePath.empty() || filename.empty()) return false;
+    HANDLE hMpq = nullptr;
+    if (!SFileOpenArchive(archivePath.c_str(), 0, MPQ_OPEN_READ_ONLY, &hMpq)) {
+        return false;
+    }
+    MpqArchive temp{archivePath, hMpq};
+    const bool ok = ReadFromArchive(&temp, filename, out);
+    SFileCloseArchive(hMpq);
+    return ok;
+}
+
+bool MpqManager::ReadFromGameArchivesOnly(const std::string& filename,
+                                          std::vector<uint8_t>& out) const {
+    out.clear();
+    for (const auto& a : archives_) {
+        if (!a.handle) continue;
+        HANDLE hFile = nullptr;
+        if (SFileOpenFileEx(a.handle, filename.c_str(), SFILE_OPEN_FROM_MPQ, &hFile)) {
+            DWORD sz = SFileGetFileSize(hFile, nullptr);
+            out.resize(sz);
+            DWORD read = 0;
+            const bool ok = (sz == 0) || (SFileReadFile(hFile, out.data(), sz, &read, nullptr) && read == sz);
+            SFileCloseFile(hFile);
+            if (!ok) out.clear();
+            return ok;
+        }
+    }
+    return false;
+}
+
+bool MpqManager::ReadJassScriptFile(const std::string& mapPath,
+                                    const std::string& fileName,
+                                    std::vector<uint8_t>& out) const {
+    out.clear();
+    const size_t pos = fileName.find_last_of("\\/");
+    const std::string base = (pos == std::string::npos) ? fileName : fileName.substr(pos + 1);
+    std::string lowerBase = base;
+    for (char& c : lowerBase) {
+        if (c >= 65 && c <= 90) c = static_cast<char>(c + 32);
+    }
+    const bool isMapScript = (lowerBase == "war3map.j");
+
+    if (isMapScript) {
+        if (ReadSingleArchiveFile(mapPath, base, out)) return true;
+        if (base != fileName && ReadSingleArchiveFile(mapPath, fileName, out)) return true;
+    }
+    if (ReadFromGameArchivesOnly(fileName, out)) return true;
+    if (base != fileName && ReadFromGameArchivesOnly(base, out)) return true;
+    if (!isMapScript) {
+        if (ReadSingleArchiveFile(mapPath, fileName, out)) return true;
+        if (base != fileName && ReadSingleArchiveFile(mapPath, base, out)) return true;
+    }
+    return false;
 }

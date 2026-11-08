@@ -2,8 +2,6 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/destructable.h"
-#include "ecs/abilities/ability_gold_mine.h"
-#include "ecs/abilities/ability_return_resources.h"
 #include "ecs/behaviors/behavior_harvest.h"
 #include "ecs/behaviors/behavior_return_resources.h"
 #include "ecs/player.h"
@@ -23,19 +21,8 @@ bool CanReturnToTarget(const CAbilityHarvest* harvestAbility, CUnit* worker, CUn
         return false;
     }
 
-    auto* returnAbility = dynamic_cast<CAbilityReturnResources*>(targetUnit->GetAbility(War3ID("Aret")));
-    if (!returnAbility) {
-        return false;
-    }
-
-    switch (harvestAbility->GetCarriedResourceType()) {
-        case CResourceType::GOLD:
-            return returnAbility->AcceptsGold();
-        case CResourceType::LUMBER:
-            return returnAbility->AcceptsLumber();
-        default:
-            return false;
-    }
+    CAbility* returnAbility = targetUnit->GetAbility(War3ID("Aret"));
+    return returnAbility && returnAbility->AcceptsResourceDropoff(harvestAbility->GetCarriedResourceType());
 }
 
 }
@@ -72,9 +59,8 @@ bool CAbilityHarvest::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId
     // Can target units (gold mines, town halls) or destructables (trees)
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {
-        CMineAccess mine = MineAccessOf(targetUnit);
-        if (mine.ok()) {
-            return goldCapacity_ > 0 && mine.Gold() > 0;
+        if (CAbility* mine = targetUnit->GetGoldMineAbility()) {
+            return goldCapacity_ > 0 && mine->GetGold() > 0;
         }
 
         if (CanReturnToTarget(this, unit, targetUnit)) {
@@ -110,8 +96,8 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
 
     auto* targetUnit = dynamic_cast<CUnit*>(target);
     if (targetUnit) {
-        CMineAccess mine = MineAccessOf(targetUnit);
-        if (mine.ok() && goldCapacity_ > 0 && mine.Gold() > 0) {
+        CAbility* mine = targetUnit->GetGoldMineAbility();
+        if (mine && goldCapacity_ > 0 && mine->GetGold() > 0) {
             if (carriedAmount_ > 0 && carriedType_ != CResourceType::NONE) {
                 lastTargetHandle_ = target->GetHandleId();
                 auto* behavior = new CBehaviorReturnResources();
