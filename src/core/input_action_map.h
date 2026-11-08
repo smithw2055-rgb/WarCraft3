@@ -1,7 +1,7 @@
 #pragma once
 // ============================================================================
-// Stage R: Declarative InputActionMap & Formation-Aware CommandBufferPipeline
-//          (Inspired by Godot 4 InputMap & Unity Input System + RTS Command Buffer)
+// Stage R & Phase 27: Declarative InputActionMap & Multi-Formation Role-Aware
+// CommandBufferPipeline (Box, Line, Circle, Wedge + Frontline/Backline Sorting)
 // ============================================================================
 #include <cstddef>
 #include <cstdint>
@@ -78,6 +78,13 @@ private:
     std::vector<std::string> insertionOrder_;
 };
 
+enum class FormationShape : uint8_t {
+    Box    = 0,
+    Line   = 1,
+    Circle = 2,
+    Wedge  = 3
+};
+
 struct FormationSlotOffset {
     float dx = 0.0f;
     float dy = 0.0f;
@@ -99,9 +106,16 @@ public:
         float spacing = 72.0f,
         float facingRadians = 0.0f);
 
+    // Phase 27: Compute formation offsets for Box, Line, Circle, or Wedge shapes
+    static std::vector<FormationSlotOffset> ComputeFormationOffsets(
+        size_t unitCount,
+        FormationShape shape,
+        float spacing = 72.0f,
+        float facingRadians = 0.0f);
+
     // Issue a deterministic point order (MOVE, ATTACK, PATROL, SMART) across a
-    // selection group, optionally spreading units into a box formation around
-    // (targetX, targetY) and recording every command into `replayLog`.
+    // selection group, sorting units by (ISimulationModule::OnGetUnitFormationRankPriority, handleId)
+    // so frontline tanks take the front slots and ranged/casters take the back slots.
     int IssueGroupPointOrder(CSimulation& sim,
                              int playerIndex,
                              const std::vector<int>& unitHandles,
@@ -110,7 +124,8 @@ public:
                              float targetY,
                              bool useFormation = true,
                              float spacing = 72.0f,
-                             ReplayLog* replayLog = nullptr);
+                             ReplayLog* replayLog = nullptr,
+                             FormationShape shape = FormationShape::Box);
 
     // Issue a deterministic no-target order (STOP, HOLDPOSITION) across a group
     int IssueGroupImmediateOrder(CSimulation& sim,

@@ -40,6 +40,12 @@ public:
     void SetCustomPassabilityChecker(CustomCellPassabilityFn fn) { customPassabilityChecker_ = std::move(fn); }
     const CustomCellPassabilityFn& GetCustomPassabilityChecker() const { return customPassabilityChecker_; }
 
+    // Phase 27: Pluggable cell traversal cost multiplier hook (1.0f = normal cost, >1.0f = slower terrain, <1.0f = road/blight speed boost)
+    using CustomCellCostFn = std::function<float(int cellX, int cellY, PathingGridMovementType movementType)>;
+    void SetCustomCellCostChecker(CustomCellCostFn fn) { customCellCostChecker_ = std::move(fn); }
+    const CustomCellCostFn& GetCustomCellCostChecker() const { return customCellCostChecker_; }
+    float GetCellTraversalCostMultiplier(int cellX, int cellY, PathingGridMovementType movementType) const;
+
     // Find a path on the cell grid, returns true if found
     bool FindPath(int startCellX, int startCellY, int endCellX, int endCellY,
                   std::vector<std::pair<int,int>>& outPath) const;
@@ -200,4 +206,5 @@ private:
     float worldOffsetX_ = 0.0f;
     float worldOffsetY_ = 0.0f;
     mutable FlatAStarWorkspace flatWorkspace_;
+    CustomCellCostFn customCellCostChecker_;
 };

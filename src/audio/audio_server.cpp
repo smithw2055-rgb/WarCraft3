@@ -293,12 +293,7 @@ int AudioServer::SubmitVoice(const AudioVoiceRequest& req) {
 
     // If a UnitVoice started and ducking is enabled, immediately refresh active SFX/Music gains
     if (req.bus == AudioBusId::UnitVoice && duckingEnabled_) {
-        for (auto& v : activeVoices_) {
-            if (v.bus == AudioBusId::SFX || v.bus == AudioBusId::Music) {
-                const SpatialEvalResult sp = EvaluateSpatial3D(v.spatial);
-                v.finalGain = v.baseVolume * ComputeEffectiveBusGain(v.bus) * sp.attenuationGain;
-            }
-        }
+        RefreshActiveVoiceGains(/*updateStereoPan=*/false);
     }
 
     stats_.totalAccepted++;
@@ -332,11 +327,21 @@ void AudioServer::Update(float dt) {
         }
     }
 
-    // Re-evaluate bus gains (including ducking release) and 3D spatialization for surviving voices
+    RefreshActiveVoiceGains(/*updateStereoPan=*/true);
+}
+
+void AudioServer::RefreshActiveVoiceGains(bool updateStereoPan) {
+    if (activeVoices_.empty()) return;
+    std::array<float, kBusCount> busGains{};
+    for (size_t b = 0; b < kBusCount; ++b) {
+        busGains[b] = ComputeEffectiveBusGain(static_cast<AudioBusId>(b));
+    }
     for (auto& v : activeVoices_) {
         const SpatialEvalResult sp = EvaluateSpatial3D(v.spatial);
-        v.finalGain = v.baseVolume * ComputeEffectiveBusGain(v.bus) * sp.attenuationGain;
-        v.stereoPan = sp.stereoPan;
+        v.finalGain = v.baseVolume * busGains[static_cast<size_t>(v.bus)] * sp.attenuationGain;
+        if (updateStereoPan) {
+            v.stereoPan = sp.stereoPan;
+        }
     }
 }
 
@@ -353,13 +358,19 @@ void AudioServer::BindSimulationEvents(CSimulation& sim) {
     UnbindSimulationEvents(sim);
 
     damagedSubId_ = sim.Events().onUnitDamage.Connect(
-        [this, &sim](int unitHandle, int /*sourceHandle*/, float damageAmount) {
+        [this, &sim](int unitHandle, int sourceHandle, float damageAmount) {
             if (damageAmount <= 0.0f) {
                 return;
             }
             const CUnit* target = sim.GetUnit(unitHandle);
             AudioVoiceRequest req;
-            req.clipKey = "Sound/Units/Combat/MetalMediumSlice_" + std::to_string(unitHandle);
+            std::string resolvedKey;
+            if (const auto* mod = sim.GetSimulationModule()) {
+                mod->OnResolveUnitCombatSound(sim, unitHandle, sourceHandle, /*isDeath=*/false, resolvedKey);
+            }
+            req.clipKey = !resolvedKey.empty()
+                ? resolvedKey
+                : ("Sound/Units/Combat/MetalMediumSlice_" + std::to_string(unitHandle));
             req.bus = AudioBusId::SFX;
             req.baseVolume = 0.85f;
             req.priority = 50;
@@ -377,12 +388,18 @@ void AudioServer::BindSimulationEvents(CSimulation& sim) {
         });
 
     diedSubId_ = sim.Events().onUnitDeath.Connect(
-        [this, &sim](int unitHandle, int /*killerHandle*/, int /*ownerPlayerIndex*/) {
+        [this, &sim](int unitHandle, int killerHandle, int /*ownerPlayerIndex*/) {
             const CUnit* dyingUnit = sim.GetUnit(unitHandle);
             AudioVoiceRequest req;
-            req.clipKey = "Sound/Units/Death/" +
-                          (dyingUnit ? dyingUnit->GetTypeId().ToString() : std::string("unit")) +
-                          "_" + std::to_string(unitHandle);
+            std::string resolvedKey;
+            if (const auto* mod = sim.GetSimulationModule()) {
+                mod->OnResolveUnitCombatSound(sim, unitHandle, killerHandle, /*isDeath=*/true, resolvedKey);
+            }
+            req.clipKey = !resolvedKey.empty()
+                ? resolvedKey
+                : ("Sound/Units/Death/" +
+                   (dyingUnit ? dyingUnit->GetTypeId().ToString() : std::string("unit")) +
+                   "_" + std::to_string(unitHandle));
             req.bus = AudioBusId::UnitVoice;
             req.baseVolume = 1.0f;
             req.priority = 80;

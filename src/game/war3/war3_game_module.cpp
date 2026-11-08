@@ -3082,7 +3082,7 @@ int War3GameModule::OnCheckCustomCellPassability(int cellX,
 namespace {
 
 struct War3ModulePodSnapshot {
-    uint32_t magic = 0x36324D57u; // "WM26"
+    uint32_t magic = 0x38324D57u; // "WM28"
     float defenseArmorFactor = 0.06f;
     float bountyMultiplier = 1.0f;
     float experienceMultiplier = 1.0f;
@@ -3094,6 +3094,10 @@ struct War3ModulePodSnapshot {
     uint32_t sightMultiplierCount = 0;
     uint32_t customSightSourceCount = 0;
     uint32_t customPassabilityCount = 0;
+    uint32_t customCellCostCount = 0;
+    uint32_t customFormationRankCount = 0;
+    uint32_t customUpkeepLabelCount = 0;
+    uint32_t customUnitSoundCount = 0;
 };
 static_assert(std::is_trivially_copyable_v<War3ModulePodSnapshot>,
               "War3ModulePodSnapshot must be trivially copyable");
@@ -3124,6 +3128,19 @@ struct War3PassabilityRuleEntryPod {
 };
 static_assert(std::is_trivially_copyable_v<War3PassabilityRuleEntryPod>);
 
+struct War3CellCostEntryPod {
+    int64_t key = 0;
+    float costMultiplier = 1.0f;
+    uint32_t reserved = 0;
+};
+static_assert(std::is_trivially_copyable_v<War3CellCostEntryPod>);
+
+struct War3FormationRankEntryPod {
+    uint32_t unitTypeRaw = 0;
+    int32_t rankPriority = 0;
+};
+static_assert(std::is_trivially_copyable_v<War3FormationRankEntryPod>);
+
 template <typename T>
 void AppendModulePod(std::vector<uint8_t>& buf, const T& val) {
     const uint8_t* p = reinterpret_cast<const uint8_t*>(&val);
@@ -3135,6 +3152,24 @@ bool ReadModulePod(const uint8_t* data, size_t size, size_t& offset, T& outVal) 
     if (offset + sizeof(T) > size) return false;
     std::memcpy(&outVal, data + offset, sizeof(T));
     offset += sizeof(T);
+    return true;
+}
+
+void AppendModuleString(std::vector<uint8_t>& buf, const std::string& str) {
+    const uint32_t len = static_cast<uint32_t>(str.size());
+    AppendModulePod(buf, len);
+    if (len > 0) {
+        buf.insert(buf.end(), reinterpret_cast<const uint8_t*>(str.data()),
+                   reinterpret_cast<const uint8_t*>(str.data()) + len);
+    }
+}
+
+bool ReadModuleString(const uint8_t* data, size_t size, size_t& offset, std::string& outStr) {
+    uint32_t len = 0;
+    if (!ReadModulePod(data, size, offset, len)) return false;
+    if (len > size - offset) return false;
+    outStr.assign(reinterpret_cast<const char*>(data + offset), len);
+    offset += len;
     return true;
 }
 
@@ -3156,6 +3191,10 @@ void War3GameModule::OnCaptureModuleSnapshot(const CSimulation& /*sim*/,
     pod.sightMultiplierCount = static_cast<uint32_t>(playerSightMultipliers_.size());
     pod.customSightSourceCount = static_cast<uint32_t>(customSightSources_.size());
     pod.customPassabilityCount = static_cast<uint32_t>(customCellPassabilityRules_.size());
+    pod.customCellCostCount = static_cast<uint32_t>(customCellCostMultipliers_.size());
+    pod.customFormationRankCount = static_cast<uint32_t>(customUnitFormationRanks_.size());
+    pod.customUpkeepLabelCount = static_cast<uint32_t>(customUpkeepLabels_.size());
+    pod.customUnitSoundCount = static_cast<uint32_t>(customUnitSoundOverrides_.size());
 
     outBytes.clear();
     AppendModulePod(outBytes, pod);
@@ -3198,6 +3237,45 @@ void War3GameModule::OnCaptureModuleSnapshot(const CSimulation& /*sim*/,
     std::sort(ruleEntries.begin(), ruleEntries.end(),
               [](const auto& a, const auto& b) { return a.key < b.key; });
     for (const auto& e : ruleEntries) AppendModulePod(outBytes, e);
+
+    std::vector<War3CellCostEntryPod> costEntries;
+    costEntries.reserve(customCellCostMultipliers_.size());
+    for (const auto& [k, cost] : customCellCostMultipliers_) {
+        costEntries.push_back(War3CellCostEntryPod{k, cost, 0u});
+    }
+    std::sort(costEntries.begin(), costEntries.end(),
+              [](const auto& a, const auto& b) { return a.key < b.key; });
+    for (const auto& e : costEntries) AppendModulePod(outBytes, e);
+
+    std::vector<War3FormationRankEntryPod> rankEntries;
+    rankEntries.reserve(customUnitFormationRanks_.size());
+    for (const auto& [raw, rank] : customUnitFormationRanks_) {
+        rankEntries.push_back(War3FormationRankEntryPod{raw, rank});
+    }
+    std::sort(rankEntries.begin(), rankEntries.end(),
+              [](const auto& a, const auto& b) { return a.unitTypeRaw < b.unitTypeRaw; });
+    for (const auto& e : rankEntries) AppendModulePod(outBytes, e);
+
+    std::vector<int> upkeepKeys;
+    upkeepKeys.reserve(customUpkeepLabels_.size());
+    for (const auto& [lvl, _] : customUpkeepLabels_) upkeepKeys.push_back(lvl);
+    std::sort(upkeepKeys.begin(), upkeepKeys.end());
+    for (int lvl : upkeepKeys) {
+        const int32_t levelPod = static_cast<int32_t>(lvl);
+        AppendModulePod(outBytes, levelPod);
+        AppendModuleString(outBytes, customUpkeepLabels_.at(lvl));
+    }
+
+    std::vector<uint32_t> soundKeys;
+    soundKeys.reserve(customUnitSoundOverrides_.size());
+    for (const auto& [raw, _] : customUnitSoundOverrides_) soundKeys.push_back(raw);
+    std::sort(soundKeys.begin(), soundKeys.end());
+    for (uint32_t raw : soundKeys) {
+        AppendModulePod(outBytes, raw);
+        const auto& entry = customUnitSoundOverrides_.at(raw);
+        AppendModuleString(outBytes, entry.hitClip);
+        AppendModuleString(outBytes, entry.deathClip);
+    }
 }
 
 bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
@@ -3208,12 +3286,14 @@ bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
     size_t offset = 0;
     War3ModulePodSnapshot pod{};
     if (!ReadModulePod(data, size, offset, pod)) return false;
-    if (pod.magic != 0x36324D57u && pod.magic != 0x35324D57u) return false;
+    if (pod.magic != 0x38324D57u && pod.magic != 0x36324D57u && pod.magic != 0x35324D57u) return false;
 
     const size_t expectedExtra =
         static_cast<size_t>(pod.sightMultiplierCount) * sizeof(War3SightMultiplierEntryPod) +
         static_cast<size_t>(pod.customSightSourceCount) * sizeof(War3SightSourceEntryPod) +
-        static_cast<size_t>(pod.customPassabilityCount) * sizeof(War3PassabilityRuleEntryPod);
+        static_cast<size_t>(pod.customPassabilityCount) * sizeof(War3PassabilityRuleEntryPod) +
+        static_cast<size_t>(pod.customCellCostCount) * sizeof(War3CellCostEntryPod) +
+        static_cast<size_t>(pod.customFormationRankCount) * sizeof(War3FormationRankEntryPod);
     if (offset + expectedExtra > size) return false;
 
     defenseArmorFactor_ = pod.defenseArmorFactor;
@@ -3252,6 +3332,43 @@ bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
         War3PassabilityRuleEntryPod e{};
         if (!ReadModulePod(data, size, offset, e)) return false;
         customCellPassabilityRules_[e.key] = CustomCellPassabilityRule{e.walkable != 0, e.flyable != 0};
+    }
+
+    customCellCostMultipliers_.clear();
+    for (uint32_t i = 0; i < pod.customCellCostCount; ++i) {
+        War3CellCostEntryPod e{};
+        if (!ReadModulePod(data, size, offset, e)) return false;
+        customCellCostMultipliers_[e.key] = e.costMultiplier;
+    }
+
+    customUnitFormationRanks_.clear();
+    for (uint32_t i = 0; i < pod.customFormationRankCount; ++i) {
+        War3FormationRankEntryPod e{};
+        if (!ReadModulePod(data, size, offset, e)) return false;
+        customUnitFormationRanks_[e.unitTypeRaw] = e.rankPriority;
+    }
+
+    customUpkeepLabels_.clear();
+    for (uint32_t i = 0; i < pod.customUpkeepLabelCount; ++i) {
+        int32_t lvl = 0;
+        std::string label;
+        if (!ReadModulePod(data, size, offset, lvl) ||
+            !ReadModuleString(data, size, offset, label)) {
+            return false;
+        }
+        customUpkeepLabels_[lvl] = std::move(label);
+    }
+
+    customUnitSoundOverrides_.clear();
+    for (uint32_t i = 0; i < pod.customUnitSoundCount; ++i) {
+        uint32_t raw = 0;
+        CustomUnitSoundEntry entry;
+        if (!ReadModulePod(data, size, offset, raw) ||
+            !ReadModuleString(data, size, offset, entry.hitClip) ||
+            !ReadModuleString(data, size, offset, entry.deathClip)) {
+            return false;
+        }
+        customUnitSoundOverrides_[raw] = std::move(entry);
     }
 
     return true;
@@ -3357,6 +3474,13 @@ uint64_t War3GameModule::OnComputeModuleStateHash(const CSimulation& /*sim*/) co
         std::memcpy(&bits, &v, sizeof(bits));
         mixU32(bits);
     };
+    auto mixString = [&h, &mixU32](const std::string& s) {
+        mixU32(static_cast<uint32_t>(s.size()));
+        for (unsigned char c : s) {
+            h ^= static_cast<uint64_t>(c);
+            h *= 1099511628211ull;
+        }
+    };
     mixFloat(defenseArmorFactor_);
     mixFloat(bountyMultiplier_);
     mixFloat(experienceMultiplier_);
@@ -3367,6 +3491,8 @@ uint64_t War3GameModule::OnComputeModuleStateHash(const CSimulation& /*sim*/) co
                            (requireZeroUnitsForDefeat_ ? 2u : 0u) |
                            (matchEnded_ ? 4u : 0u);
     mixU32(flags);
+    mixU32(static_cast<uint32_t>(customCellCostMultipliers_.size()));
+    mixU32(static_cast<uint32_t>(customUnitFormationRanks_.size()));
 
     if (!playerSightMultipliers_.empty()) {
         std::vector<std::pair<int, float>> sortedMults(
@@ -3406,7 +3532,175 @@ uint64_t War3GameModule::OnComputeModuleStateHash(const CSimulation& /*sim*/) co
             mixU32((r.walkable ? 1u : 0u) | (r.flyable ? 2u : 0u));
         }
     }
+    if (!customCellCostMultipliers_.empty()) {
+        std::vector<int64_t> sortedKeys;
+        sortedKeys.reserve(customCellCostMultipliers_.size());
+        for (const auto& [k, _] : customCellCostMultipliers_) sortedKeys.push_back(k);
+        std::sort(sortedKeys.begin(), sortedKeys.end());
+        for (int64_t k : sortedKeys) {
+            mixU32(static_cast<uint32_t>(k & 0xFFFFFFFFull));
+            mixU32(static_cast<uint32_t>((static_cast<uint64_t>(k) >> 32) & 0xFFFFFFFFull));
+            mixFloat(customCellCostMultipliers_.at(k));
+        }
+    }
+    if (!customUnitFormationRanks_.empty()) {
+        std::vector<uint32_t> sortedTypes;
+        sortedTypes.reserve(customUnitFormationRanks_.size());
+        for (const auto& [raw, _] : customUnitFormationRanks_) sortedTypes.push_back(raw);
+        std::sort(sortedTypes.begin(), sortedTypes.end());
+        for (uint32_t raw : sortedTypes) {
+            mixU32(raw);
+            mixU32(static_cast<uint32_t>(customUnitFormationRanks_.at(raw)));
+        }
+    }
+    if (!customUpkeepLabels_.empty()) {
+        std::vector<int> sortedLvls;
+        sortedLvls.reserve(customUpkeepLabels_.size());
+        for (const auto& [lvl, _] : customUpkeepLabels_) sortedLvls.push_back(lvl);
+        std::sort(sortedLvls.begin(), sortedLvls.end());
+        for (int lvl : sortedLvls) {
+            mixU32(static_cast<uint32_t>(lvl));
+            mixString(customUpkeepLabels_.at(lvl));
+        }
+    }
+    if (!customUnitSoundOverrides_.empty()) {
+        std::vector<uint32_t> sortedTypes;
+        sortedTypes.reserve(customUnitSoundOverrides_.size());
+        for (const auto& [raw, _] : customUnitSoundOverrides_) sortedTypes.push_back(raw);
+        std::sort(sortedTypes.begin(), sortedTypes.end());
+        for (uint32_t raw : sortedTypes) {
+            mixU32(raw);
+            const auto& entry = customUnitSoundOverrides_.at(raw);
+            mixString(entry.hitClip);
+            mixString(entry.deathClip);
+        }
+    }
     return h;
+}
+
+// ============================================================================
+// Phase 27: Pluggable Cell Traversal Cost Multiplier & Squad Formation Rank
+// ============================================================================
+
+void War3GameModule::SetCustomCellCostMultiplier(int cellX, int cellY, float costMultiplier) {
+    const int64_t key = (static_cast<int64_t>(cellX) << 32) | static_cast<uint32_t>(cellY);
+    customCellCostMultipliers_[key] = std::max(0.1f, costMultiplier);
+}
+
+float War3GameModule::GetCustomCellCostMultiplier(int cellX, int cellY) const {
+    const int64_t key = (static_cast<int64_t>(cellX) << 32) | static_cast<uint32_t>(cellY);
+    auto it = customCellCostMultipliers_.find(key);
+    return it != customCellCostMultipliers_.end() ? it->second : 1.0f;
+}
+
+bool War3GameModule::RemoveCustomCellCostMultiplier(int cellX, int cellY) {
+    const int64_t key = (static_cast<int64_t>(cellX) << 32) | static_cast<uint32_t>(cellY);
+    return customCellCostMultipliers_.erase(key) > 0;
+}
+
+float War3GameModule::OnGetCellTraversalCostMultiplier(int cellX,
+                                                       int cellY,
+                                                       int movementTypeOrd) const {
+    if (customCellCostMultipliers_.empty()) return 1.0f;
+    const auto mt = static_cast<PathingGridMovementType>(movementTypeOrd);
+    if (mt == PathingGridMovementType::FLY || mt == PathingGridMovementType::DISABLED) {
+        return 1.0f;
+    }
+    return GetCustomCellCostMultiplier(cellX, cellY);
+}
+
+void War3GameModule::SetCustomUnitFormationRank(War3ID unitTypeId, int rankPriority) {
+    if (unitTypeId.value == 0) return;
+    customUnitFormationRanks_[unitTypeId.value] = rankPriority;
+}
+
+int War3GameModule::GetCustomUnitFormationRank(War3ID unitTypeId) const {
+    auto it = customUnitFormationRanks_.find(unitTypeId.value);
+    return it != customUnitFormationRanks_.end() ? it->second : -1;
+}
+
+bool War3GameModule::RemoveCustomUnitFormationRank(War3ID unitTypeId) {
+    return customUnitFormationRanks_.erase(unitTypeId.value) > 0;
+}
+
+int War3GameModule::OnGetUnitFormationRankPriority(const CUnit& unit) const {
+    auto it = customUnitFormationRanks_.find(unit.GetTypeId().value);
+    if (it != customUnitFormationRanks_.end()) {
+        return it->second;
+    }
+    // Automatic WarCraft 3 tactical role classification:
+    //   0 = Frontline melee / tank
+    //   1 = Midline ranged combat
+    //   2 = Backline long-range siege / non-combat caster
+    if (const CUnitType* ut = unit.GetUnitType()) {
+        const auto& attacks = ut->GetAttacks();
+        if (attacks.empty()) return 2;
+        const int range = attacks[0].range;
+        if (range <= 160) return 0;
+        if (range <= 550) return 1;
+        return 2;
+    }
+    return 0;
+}
+
+// ============================================================================
+// Phase 28: Pluggable Upkeep Display Label & Unit Combat/Death Sound Routing
+// ============================================================================
+
+void War3GameModule::SetCustomUpkeepLabel(int upkeepLevel, const std::string& label) {
+    if (label.empty()) {
+        customUpkeepLabels_.erase(upkeepLevel);
+    } else {
+        customUpkeepLabels_[upkeepLevel] = label;
+    }
+}
+
+std::string War3GameModule::GetUpkeepDisplayLabel(int upkeepLevel) const {
+    auto it = customUpkeepLabels_.find(upkeepLevel);
+    if (it != customUpkeepLabels_.end()) {
+        return it->second;
+    }
+    return (upkeepLevel == 2) ? "High Upkeep"
+         : (upkeepLevel == 1) ? "Low Upkeep"
+         : "No Upkeep";
+}
+
+void War3GameModule::RegisterCustomUnitSoundOverride(War3ID unitTypeId,
+                                                     const std::string& hitClip,
+                                                     const std::string& deathClip) {
+    if (unitTypeId.value == 0) return;
+    customUnitSoundOverrides_[unitTypeId.value] = CustomUnitSoundEntry{hitClip, deathClip};
+}
+
+bool War3GameModule::UnregisterCustomUnitSoundOverride(War3ID unitTypeId) {
+    return customUnitSoundOverrides_.erase(unitTypeId.value) > 0;
+}
+
+bool War3GameModule::HasCustomUnitSoundOverride(War3ID unitTypeId) const {
+    return customUnitSoundOverrides_.count(unitTypeId.value) > 0;
+}
+
+bool War3GameModule::OnResolveUnitCombatSound(const CSimulation& sim,
+                                              int unitHandle,
+                                              int /*sourceHandle*/,
+                                              bool isDeath,
+                                              std::string& outClipKey) const {
+    const CUnit* u = sim.GetUnit(unitHandle);
+    if (!u) return false;
+    auto it = customUnitSoundOverrides_.find(u->GetTypeId().value);
+    if (it != customUnitSoundOverrides_.end()) {
+        const std::string& baseClip = isDeath ? it->second.deathClip : it->second.hitClip;
+        if (!baseClip.empty()) {
+            outClipKey = baseClip + "_" + std::to_string(unitHandle);
+            return true;
+        }
+    }
+    if (isDeath) {
+        outClipKey = "Sound/Units/Death/" + u->GetTypeId().ToString() + "_" + std::to_string(unitHandle);
+    } else {
+        outClipKey = "Sound/Units/Combat/MetalMediumSlice_" + std::to_string(unitHandle);
+    }
+    return true;
 }
 
 } // namespace war3

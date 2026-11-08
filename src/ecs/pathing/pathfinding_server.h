@@ -1,8 +1,8 @@
 #pragma once
 // ============================================================================
-// Stage M: Multi-Threaded Batch PathfindingServer, Zero-Allocation A*
-//          PathQueryWorkspace & RTS Squad FlowFieldGrid
-//          (Inspired by Unity NavMeshQuery + IJobParallelFor & Godot NavigationServer3D)
+// Stage M & Phase 27: Multi-Threaded Batch PathfindingServer, Bit-Packed
+// Zero-Allocation A* PathQueryWorkspace & Flat-Queue RTS Squad FlowFieldGrid
+// (Inspired by Unity NavMeshQuery + IJobParallelFor & Godot NavigationServer3D)
 // ============================================================================
 #include <cstddef>
 #include <cstdint>
@@ -36,10 +36,10 @@ struct PathResult {
 };
 
 // ============================================================================
-// 1. PathQueryWorkspace — Zero-Heap-Allocation Flat A* Search Context
-//    Uses generation-stamped flat arrays (`visitedGen_`) so resetting a
-//    768x768 grid between searches is O(1) (`currentGeneration_++`) with
-//    zero `std::unordered_map` / `std::unordered_set` allocations.
+// 1. PathQueryWorkspace — Bit-Packed Zero-Heap-Allocation Flat A* Search Context
+//    Phase 27: Encodes both generation and open/closed state in a single
+//    `visitedState_` array (`gen << 1` = open, `(gen << 1) | 1` = closed),
+//    eliminating the separate `closedState_` vector while keeping O(1) reset.
 // ============================================================================
 class PathQueryWorkspace {
 public:
@@ -76,8 +76,7 @@ private:
     uint64_t queriesExecuted_ = 0;
     uint64_t bufferAllocations_ = 0;
 
-    std::vector<uint32_t> visitedGen_;
-    std::vector<uint8_t> closedState_;
+    std::vector<uint32_t> visitedState_;
     std::vector<float> gScore_;
     std::vector<int32_t> parentIdx_;
     std::vector<OpenHeapNode> openHeap_;
@@ -85,8 +84,8 @@ private:
 
 // ============================================================================
 // 2. FlowFieldGrid — RTS Group Navigation Vector Field
-//    Computes a single reverse-Dijkstra integration field around a shared
-//    destination cell so N squad units can query O(1) steering vectors.
+//    Computes a reverse-integration field around a shared destination cell
+//    using a flat contiguous queue (`bfsQueue_`) with zero std::deque chunks.
 // ============================================================================
 class FlowFieldGrid {
 public:
@@ -135,6 +134,8 @@ private:
     std::vector<uint32_t> integrationCost_;
     std::vector<float> dirX_;
     std::vector<float> dirY_;
+    std::vector<int> bfsQueue_;
+    std::vector<uint8_t> inQueue_;
 };
 
 struct PathfindingServerStats {

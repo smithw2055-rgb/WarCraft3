@@ -8127,7 +8127,7 @@ bool TestPhase26StageIII1War3ModuleLockstepValidationAlliedTributeAndStateHash()
     sim.GetPlayer(1)->SetLumber(100);
 
     auto war3Mod = std::make_shared<war3::War3GameModule>();
-    TEST_ASSERT(war3Mod->GetModuleVersion() == 26u);
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 26u);
     sim.SetSimulationModule(war3Mod);
 
     auto* u0 = sim.AdoptUnit(std::make_unique<CUnit>(401, MakePhase5UnitType(War3ID("hfoo"), 420, 0, false), 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
@@ -8214,7 +8214,7 @@ bool TestPhase26StageIII2DynamicPluginSOV26AndCloudRetailMapsEndToEndSuite() {
         {
             auto dynSimMod = loader.CreateSimulationModule(pluginKey);
             TEST_ASSERT(dynSimMod != nullptr);
-            TEST_ASSERT(dynSimMod->GetModuleVersion() == 26u);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 26u);
         }
         TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
     }
@@ -8231,7 +8231,493 @@ bool TestPhase26StageIII2DynamicPluginSOV26AndCloudRetailMapsEndToEndSuite() {
         std::fclose(mf);
 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
-        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 26u);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 26u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+
+// ============================================================================
+// Phase 27 Modernization Tests: ScriptEngineHost Shared Event Bus & HotSwap
+// Subscription Migration, Bit-Packed PathQueryWorkspace & Weighted FlowField,
+// Multi-Shape Formations & Role-Aware Frontline/Backline Sorting, and Plugin v27
+// ============================================================================
+
+bool TestPhase27StageJJJ1ScriptEngineHostBaseEventBusAndHotSwapSubscriptionMigration() {
+    scripting::ScriptHostRouter router(std::make_unique<scripting::JassScriptHostAdapter>());
+    TEST_ASSERT(router.GetActiveBackendKind() == scripting::ScriptBackendKind::JassLegacy);
+
+    router.ActiveHost().SetGlobal("g_matchScore", scripting::ScriptValue::Int(42));
+    const int sub1 = router.ActiveHost().SubscribeEvent(100, "OnUnitSpawnedScript", 501);
+    const int sub2 = router.ActiveHost().SubscribeEvent(200, "OnTimerExpiredScript", -1);
+    const int sub3 = router.ActiveHost().SubscribeEvent(100, "OnTransientUnitScript", 999);
+    TEST_ASSERT(sub1 > 0 && sub2 > 0 && sub3 > 0);
+    TEST_ASSERT(router.ActiveHost().GetActiveSubscriptionCount() == 3u);
+
+    // Destroy handle 999 before hot-swapping -> only 2 active subscriptions should migrate
+    router.ActiveHost().OnHandleDestroyed(999);
+    TEST_ASSERT(router.ActiveHost().GetActiveSubscriptionCount() == 2u);
+
+    auto realScriptHost = std::make_unique<scripting::RealScriptEngineHost>();
+    int spawnCalls = 0;
+    int timerCalls = 0;
+    realScriptHost->RegisterScriptFunction("OnUnitSpawnedScript",
+        [&](scripting::RealScriptEngineHost& host, const std::vector<scripting::ScriptValue>& args) {
+            spawnCalls++;
+            const int cur = host.GetGlobal("g_matchScore").intVal;
+            host.SetGlobal("g_matchScore", scripting::ScriptValue::Int(cur + (args.empty() ? 1 : args[0].intVal)));
+            return scripting::ScriptValue::Bool(true);
+        });
+    realScriptHost->RegisterScriptFunction("OnTimerExpiredScript",
+        [&](scripting::RealScriptEngineHost& /*host*/, const std::vector<scripting::ScriptValue>& /*args*/) {
+            timerCalls++;
+            return scripting::ScriptValue::Bool(true);
+        });
+
+    // Hot-swap from JassVM to RealScript and verify both globals AND event subscriptions migrated!
+    TEST_ASSERT(router.HotSwapBackend(std::move(realScriptHost), /*migrateGlobals=*/true));
+    TEST_ASSERT(router.GetActiveBackendKind() == scripting::ScriptBackendKind::RealScript);
+    TEST_ASSERT(router.ActiveHost().GetGlobal("g_matchScore").intVal == 42);
+    TEST_ASSERT(router.ActiveHost().GetActiveSubscriptionCount() == 2u);
+
+    // Fire migrated events on the new RealScript backend
+    scripting::ScriptEventPayload evSpawn{100, 501, -1, 0, 10.0f, "spawn"};
+    TEST_ASSERT(router.ActiveHost().FireEvent(evSpawn) == 1);
+    TEST_ASSERT(spawnCalls == 1);
+    TEST_ASSERT(router.ActiveHost().GetGlobal("g_matchScore").intVal == 42 + 501);
+
+    scripting::ScriptEventPayload evTimer{200, -1, -1, 0, 1.0f, "timer"};
+    TEST_ASSERT(router.ActiveHost().FireEvent(evTimer) == 1);
+    TEST_ASSERT(timerCalls == 1);
+
+    return true;
+}
+
+bool TestPhase27StageJJJ2BitPackedPathQueryWorkspaceFlatBfsFlowFieldAndWeightedTerrainCost() {
+    CSimulation sim;
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 27u);
+    sim.SetSimulationModule(war3Mod);
+
+    WpmData wpm;
+    wpm.width = 32;
+    wpm.height = 32;
+    wpm.pathing.assign(static_cast<size_t>(wpm.width * wpm.height), 0u);
+    sim.SetPathingMap(&wpm, 0.0f, 0.0f);
+
+    auto* pf = sim.GetPathfinding();
+    TEST_ASSERT(pf != nullptr);
+
+    // 1. Solve baseline path from cell (2, 10) to cell (10, 10)
+    pathfinding::PathQueryWorkspace ws;
+    pathfinding::PathRequest req;
+    req.requestId = 1;
+    req.startWorldX = pf->CellToWorldX(2);
+    req.startWorldY = pf->CellToWorldY(10);
+    req.goalWorldX  = pf->CellToWorldX(10);
+    req.goalWorldY  = pf->CellToWorldY(10);
+    req.movementType = PathingGridMovementType::FOOT;
+
+    pathfinding::PathResult baseRes;
+    TEST_ASSERT(ws.SolveAStar(*pf, req, baseRes));
+    TEST_ASSERT(baseRes.found);
+    TEST_ASSERT(ws.GetBufferAllocationCount() == 1u);
+
+    // 2. Paint high traversal cost (marsh = 12.0x) along the direct horizontal row y=10 (x=4..8)
+    for (int x = 4; x <= 8; ++x) {
+        war3Mod->SetCustomCellCostMultiplier(x, 10, 12.0f);
+        war3Mod->SetCustomCellCostMultiplier(x, 9,  12.0f);
+    }
+    TEST_NEAR(war3Mod->GetCustomCellCostMultiplier(5, 10), 12.0f, 1e-4f);
+
+    // Solve again in the same workspace (0 new buffer allocations due to bit-packed generation stamp!)
+    pathfinding::PathResult detourRes;
+    TEST_ASSERT(ws.SolveAStar(*pf, req, detourRes));
+    TEST_ASSERT(detourRes.found);
+    TEST_ASSERT(ws.GetBufferAllocationCount() == 1u);
+
+    // Verify the weighted A* path detoured around the high-cost marsh strip (y != 10 at x=6)
+    bool detouredAroundMarsh = false;
+    for (const auto& [wx, wy] : detourRes.waypoints) {
+        (void)wx;
+        if ( pf->WorldToCellY(wy) > 10 ) {
+            detouredAroundMarsh = true;
+            break;
+        }
+    }
+    TEST_ASSERT(detouredAroundMarsh);
+
+    // 3. Verify flat-queue FlowFieldGrid reflects weighted terrain cost at cell (5, 10) vs normal cell (10, 5)
+    pathfinding::FlowFieldGrid ff;
+    TEST_ASSERT(ff.Build(*pf, pf->CellToWorldX(10), pf->CellToWorldY(10), 12, PathingGridMovementType::FOOT));
+    const uint32_t marshIntegrationCost = ff.GetIntegrationCostAtCell(5, 10);
+    const uint32_t clearIntegrationCost = ff.GetIntegrationCostAtCell(10, 5);
+    TEST_ASSERT(marshIntegrationCost > clearIntegrationCost);
+
+    // 4. Verify value-sensitive module hash and snapshot round-trip for customCellCostMultipliers_ & customUnitFormationRanks_
+    war3Mod->SetCustomUnitFormationRank(War3ID("hfoo"), 0);
+    const uint64_t hash12x = sim.HashState();
+    war3Mod->SetCustomCellCostMultiplier(5, 10, 24.0f);
+    const uint64_t hash24x = sim.HashState();
+    TEST_ASSERT(hash12x != hash24x);
+
+    const SimStateSnapshot snap = SimStateSnapshot::Capture(sim);
+    war3Mod->ClearCustomCellCostMultipliers();
+    war3Mod->RemoveCustomUnitFormationRank(War3ID("hfoo"));
+    TEST_NEAR(war3Mod->GetCustomCellCostMultiplier(5, 10), 1.0f, 1e-4f);
+    TEST_ASSERT(war3Mod->GetCustomUnitFormationRank(War3ID("hfoo")) == -1);
+    TEST_ASSERT(snap.Restore(sim));
+    TEST_NEAR(war3Mod->GetCustomCellCostMultiplier(5, 10), 24.0f, 1e-4f);
+    TEST_ASSERT(war3Mod->GetCustomUnitFormationRank(War3ID("hfoo")) == 0);
+    TEST_ASSERT(sim.HashState() == hash24x);
+
+    war3Mod->ClearCustomCellCostMultipliers();
+    war3Mod->RemoveCustomUnitFormationRank(War3ID("hfoo"));
+    return true;
+}
+
+bool TestPhase27StageKKK1MultiShapeFormationsAndRoleAwareFrontlineBacklineSorting() {
+    // 1. Verify Line, Circle, and Wedge formation geometry
+    auto lineOffsets = core::CommandBufferPipeline::ComputeFormationOffsets(
+        4, core::FormationShape::Line, 100.0f, 0.0f);
+    TEST_ASSERT(lineOffsets.size() == 4u);
+    // Facing 0 rad (+X forward): line slots spread along Y (lateral), depth dx == 0
+    for (const auto& off : lineOffsets) {
+        TEST_NEAR(off.dx, 0.0f, 1e-3f);
+    }
+    TEST_ASSERT(lineOffsets[0].dy != lineOffsets[3].dy);
+
+    auto circleOffsets = core::CommandBufferPipeline::ComputeFormationOffsets(
+        6, core::FormationShape::Circle, 80.0f, 0.0f);
+    TEST_ASSERT(circleOffsets.size() == 6u);
+    const float r0 = std::hypot(circleOffsets[0].dx, circleOffsets[0].dy);
+    const float r3 = std::hypot(circleOffsets[3].dx, circleOffsets[3].dy);
+    TEST_NEAR(r0, r3, 1e-3f);
+
+    auto wedgeOffsets = core::CommandBufferPipeline::ComputeFormationOffsets(
+        6, core::FormationShape::Wedge, 80.0f, 0.0f);
+    TEST_ASSERT(wedgeOffsets.size() == 6u);
+    // Apex leader (index 0) is at front (dx == 0), row 1 (indices 1,2) is behind (dx == -80), row 2 (indices 3,4,5) at dx == -160
+    TEST_NEAR(wedgeOffsets[0].dx, 0.0f, 1e-3f);
+    TEST_NEAR(wedgeOffsets[1].dx, -80.0f, 1e-3f);
+    TEST_NEAR(wedgeOffsets[3].dx, -160.0f, 1e-3f);
+
+    // 2. Verify role-aware frontline/backline sorting in IssueGroupPointOrder
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    sim.SetSimulationModule(war3Mod);
+
+    // Register custom formation ranks: priest (hmpr) = backline (2), archer (earc) = midline (1), footman (hfoo) = frontline (0)
+    war3Mod->SetCustomUnitFormationRank(War3ID("hmpr"), 2);
+    war3Mod->SetCustomUnitFormationRank(War3ID("earc"), 1);
+    war3Mod->SetCustomUnitFormationRank(War3ID("hfoo"), 0);
+
+    // Deliberately create Priest with LOWEST handle ID (501), Archer (502), Footman with HIGHEST handle ID (503)
+    auto* priest  = sim.AdoptUnit(std::make_unique<CUnit>(501, MakePhase5UnitType(War3ID("hmpr"), 290, 200, false), 0, War3ID("hmpr"), 0.0f, 0.0f, 0.0f));
+    auto* archer  = sim.AdoptUnit(std::make_unique<CUnit>(502, MakePhase5UnitType(War3ID("earc"), 245, 0,   false), 0, War3ID("earc"), 0.0f, 0.0f, 0.0f));
+    auto* footman = sim.AdoptUnit(std::make_unique<CUnit>(503, MakePhase5UnitType(War3ID("hfoo"), 420, 0,   false), 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+    sim.Update();
+    sim.ClearCommandLog();
+
+    core::CommandBufferPipeline pipeline;
+    ReplayLog replay;
+    replay.Begin(12345u);
+
+    // Issue Wedge formation move along +X toward (1000, 0):
+    // Footman (rank 0) should be placed at the front apex (x = 1000), while Archer (rank 1) and Priest (rank 2) take rear slots (x = 920)!
+    const int count = pipeline.IssueGroupPointOrder(
+        sim, 0,
+        {priest->GetHandleId(), archer->GetHandleId(), footman->GetHandleId()},
+        OrderIds::MOVE, 1000.0f, 0.0f,
+        /*useFormation=*/true, /*spacing=*/80.0f, &replay, core::FormationShape::Wedge);
+    TEST_ASSERT(count == 3);
+    TEST_ASSERT(replay.Commands().size() == 3u);
+    // First command in formation order is the frontline Footman (handle 503) at the wedge apex (1000, 0)
+    TEST_ASSERT(replay.Commands()[0].unit == footman->GetHandleId());
+    TEST_NEAR(replay.Commands()[0].x, 1000.0f, 1e-2f);
+    TEST_ASSERT(replay.Commands()[2].unit == priest->GetHandleId());
+    TEST_ASSERT(replay.Commands()[2].x < 1000.0f);
+
+    return true;
+}
+
+bool TestPhase27StageKKK2DynamicPluginSOV27AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath27 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths27[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths27) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath27 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath27.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase27PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath27));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 27u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(8)GardenOfWar.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(8)AzerothGrandPrix.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 27u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+
+// ============================================================================
+// Phase 28 Modernization Tests: Zero-Alloc RenderInterpolationBuffer Swap &
+// BonePaletteAtlas Fast Reset, AudioServer Precomputed Bus Gains & Pluggable
+// Combat Sound Routing, UIDataBinder Custom Reactive Properties & Plugin v28
+// ============================================================================
+
+bool TestPhase28StageLLL1ZeroAllocRenderInterpolationSwapAndBoneAtlasFastReset() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    UnitPresentationSystem presentation;
+    presentation.BindSimulationEvents(sim);
+
+    auto* u1 = sim.AdoptUnit(std::make_unique<CUnit>(601, MakePhase5UnitType(War3ID("hfoo"), 420, 0, false), 0, War3ID("hfoo"), 100.0f, 200.0f, 0.0f));
+    auto* u2 = sim.AdoptUnit(std::make_unique<CUnit>(602, MakePhase5UnitType(War3ID("ogru"), 700, 0, false), 0, War3ID("ogru"), 300.0f, 400.0f, 0.0f));
+    sim.Update();
+
+    presentation.CaptureSimulationTick(sim);
+    TEST_ASSERT(presentation.InterpolationBuffer().TrackedEntityCount() == 2u);
+    TEST_ASSERT(presentation.InterpolationBuffer().PreviousSnapshotCount() == 2u);
+
+    u1->SetPosition(200.0f, 400.0f);
+    presentation.CaptureSimulationTick(sim);
+
+    // Mid-tick interpolation alpha = 0.5f should sample (150, 0, 300)
+    presentation.SetInterpolationAlpha(0.5f);
+    render::RenderTransformSnapshot midSnap;
+    TEST_ASSERT(presentation.SampleInterpolatedUnit(u1->GetHandleId(), midSnap));
+    TEST_NEAR(midSnap.position.x, 150.0f, 1e-3f);
+    TEST_NEAR(midSnap.position.z, 300.0f, 1e-3f);
+
+    // Remove u2 -> reactive OnUnitRemoved immediately purges u2 from both currSnapshots_ and prevSnapshots_
+    const int u2Handle = u2->GetHandleId();
+    sim.RemoveUnit(u2);
+    sim.Update();
+    TEST_ASSERT(presentation.InterpolationBuffer().TrackedEntityCount() == 1u);
+    TEST_ASSERT(presentation.InterpolationBuffer().PreviousSnapshotCount() == 1u);
+    TEST_ASSERT(!presentation.SampleInterpolatedUnit(u2Handle, midSnap));
+
+    // Verify BonePaletteAtlas O(1) ResetFrame preserves Row 0 identity matrices without corrupting subsequent rows
+    render::BonePaletteAtlas atlas(16);
+    std::vector<Mat4> unitBones(4, Mat4::Translate(10.0f, 20.0f, 30.0f));
+    const int row1 = atlas.AllocateAndPackRow(unitBones);
+    TEST_ASSERT(row1 == 1);
+    TEST_ASSERT(atlas.GetActiveRowCount() == 2);
+
+    atlas.ResetFrame(16);
+    TEST_ASSERT(atlas.GetActiveRowCount() == 1);
+    const Mat4 row0Bone0 = atlas.SampleMatrix(0, 0);
+    TEST_NEAR(row0Bone0.m[0], 1.0f, 1e-5f);
+    TEST_NEAR(row0Bone0.m[12], 0.0f, 1e-5f);
+
+    return true;
+}
+
+bool TestPhase28StageLLL2AudioServerPrecomputedBusGainsAndPluggableCombatSoundRouting() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 28u);
+    war3Mod->RegisterCustomUnitSoundOverride(
+        War3ID("hfoo"),
+        "Sound/Custom/FootmanLaserHit",
+        "Sound/Custom/FootmanLaserDeath");
+    TEST_ASSERT(war3Mod->HasCustomUnitSoundOverride(War3ID("hfoo")));
+    sim.SetSimulationModule(war3Mod);
+
+    auto& audioSrv = audio::AudioServer::Instance();
+    audioSrv.Reset();
+    audioSrv.SetListenerPosition(Vec3(0.0f, 0.0f, 0.0f));
+    audioSrv.BindSimulationEvents(sim);
+
+    auto* footman = sim.AdoptUnit(std::make_unique<CUnit>(611, MakePhase5UnitType(War3ID("hfoo"), 100, 0, false), 0, War3ID("hfoo"), 64.0f, 64.0f, 0.0f));
+    sim.Update();
+
+    // Emit damage event -> verify custom hit clip routed via War3GameModule::OnResolveUnitCombatSound
+    sim.Events().onUnitDamage.Emit(footman->GetHandleId(), -1, 25.0f);
+    TEST_ASSERT(audioSrv.GetStats().simDamageSoundsTriggered == 1);
+    bool foundCustomHit = false;
+    for (const auto& v : audioSrv.GetActiveVoices()) {
+        if (v.clipKey.find("Sound/Custom/FootmanLaserHit") != std::string::npos) {
+            foundCustomHit = true;
+            break;
+        }
+    }
+    TEST_ASSERT(foundCustomHit);
+
+    // Emit death event -> verify custom death clip routed on UnitVoice bus and sidechain ducks SFX voice!
+    sim.Events().onUnitDeath.Emit(footman->GetHandleId(), -1, 0);
+    TEST_ASSERT(audioSrv.GetStats().simDeathSoundsTriggered == 1);
+    bool foundCustomDeath = false;
+    for (const auto& v : audioSrv.GetActiveVoices()) {
+        if (v.clipKey.find("Sound/Custom/FootmanLaserDeath") != std::string::npos) {
+            foundCustomDeath = true;
+            break;
+        }
+    }
+    TEST_ASSERT(foundCustomDeath);
+
+    audioSrv.UnbindSimulationEvents(sim);
+    TEST_ASSERT(war3Mod->UnregisterCustomUnitSoundOverride(War3ID("hfoo")));
+    return true;
+}
+
+bool TestPhase28StageMMM1UIDataBinderCustomReactivePropertiesAndUpkeepFormatter() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.GetPlayer(0)->SetGold(500);
+    sim.GetPlayer(0)->SetLumber(250);
+    sim.GetPlayer(0)->SetFoodUsed(55);
+    sim.GetPlayer(0)->SetFoodCap(80);
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->SetCustomUpkeepLabel(1, "30% Tax Tier");
+    sim.SetSimulationModule(war3Mod);
+
+    GameUI gui;
+    UIFrame root("RootHUD");
+    TextFrame goldTxt("GoldText");
+    TextFrame upkeepTxt("UpkeepText");
+    TextFrame waveTxt("WaveTimerText");
+
+    TextFrame* goldPtr = &goldTxt;
+    TextFrame* upkeepPtr = &upkeepTxt;
+    TextFrame* wavePtr = &waveTxt;
+
+    root.AddChild(goldPtr);
+    root.AddChild(upkeepPtr);
+    root.AddChild(wavePtr);
+    gui.rootFrame = &root;
+
+    ui::UIDataBinder binder;
+    binder.BindResourceFrames(goldPtr, nullptr, nullptr, upkeepPtr);
+
+    int waveNumber = 1;
+    binder.BindCustomTextProperty("wave_status", wavePtr,
+        [&](const CSimulation& /*s*/, int /*playerIdx*/, int /*selHandle*/) {
+            return "Wave " + std::to_string(waveNumber);
+        });
+    TEST_ASSERT(binder.GetCustomPropertyCount() == 1u);
+
+    // 1. Initial sync updates all bound fields including custom upkeep label and custom property
+    TEST_ASSERT(binder.SyncAndRelayoutIfChanged(sim, 0, -1, gui));
+    TEST_ASSERT(goldPtr->GetText() == "500");
+    TEST_ASSERT(upkeepPtr->GetText() == "30% Tax Tier");
+    TEST_ASSERT(wavePtr->GetText() == "Wave 1");
+
+    // 2. Second sync with no changes skips all updates (zero dirty updates)
+    const uint64_t dirtyBefore = binder.GetStats().dirtyFieldUpdates;
+    TEST_ASSERT(!binder.SyncAndRelayoutIfChanged(sim, 0, -1, gui));
+    TEST_ASSERT(binder.GetStats().dirtyFieldUpdates == dirtyBefore);
+
+    // 3. Mutate only custom wave property -> only wavePtr updates!
+    waveNumber = 2;
+    TEST_ASSERT(binder.SyncAndRelayoutIfChanged(sim, 0, -1, gui));
+    TEST_ASSERT(wavePtr->GetText() == "Wave 2");
+    TEST_ASSERT(binder.GetStats().dirtyFieldUpdates == dirtyBefore + 1u);
+
+    TEST_ASSERT(binder.UnbindCustomTextProperty("wave_status"));
+    return true;
+}
+
+bool TestPhase28StageMMM2DynamicPluginSOV28AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath28 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths28[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths28) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath28 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath28.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase28PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath28));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() == 28u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TwistedMeadows.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(10)ExtremeCandyWar2004.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 28u);
 
         MpqManager mpq;
         CSimulation mapSim;

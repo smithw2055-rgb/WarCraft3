@@ -80,6 +80,7 @@ public:
         unitVisualConstructionStates.erase(handleId);
         unitVisualPropertyTags.erase(handleId);
         unitAnimationPropertyTags.erase(handleId);
+        interpolationBuffer_.RemoveEntity(handleId);
         removedUnitNotificationsCount_++;
     }
 

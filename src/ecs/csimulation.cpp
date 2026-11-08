@@ -28,6 +28,9 @@ CSimulation::CSimulation() {
     pathfindingProcessor_->SetCustomPassabilityChecker([this](int cx, int cy, PathingGridMovementType mt) -> int {
         return simModule_ ? simModule_->OnCheckCustomCellPassability(cx, cy, static_cast<int>(mt)) : -1;
     });
+    pathfindingProcessor_->SetCustomCellCostChecker([this](int cx, int cy, PathingGridMovementType mt) -> float {
+        return simModule_ ? simModule_->OnGetCellTraversalCostMultiplier(cx, cy, static_cast<int>(mt)) : 1.0f;
+    });
     pathfindingServer_ = std::make_unique<pathfinding::PathfindingServer>();
     crowdSteering_ = std::make_unique<pathfinding::CrowdSteeringSystem>();
     fogSystem_.SetOcclusionChecker([this](float fromX, float fromY, float toX, float toY, bool isFlying) -> bool {

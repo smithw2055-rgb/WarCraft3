@@ -532,6 +532,38 @@ public:
         return nullptr;
     }
 
+    // ========================================================================
+    // Phase 27: Pluggable Cell Traversal Cost Multiplier & Squad Formation
+    //           Frontline/Backline Rank Priority
+    // ========================================================================
+    virtual float OnGetCellTraversalCostMultiplier(int /*cellX*/,
+                                                   int /*cellY*/,
+                                                   int /*movementTypeOrd*/) const {
+        return 1.0f;
+    }
+
+    // Returns formation rank priority (0 = frontline melee/tanks, 1 = middle ranged, 2 = backline casters/siege)
+    virtual int OnGetUnitFormationRankPriority(const CUnit& /*unit*/) const {
+        return 0;
+    }
+
+    // ========================================================================
+    // Phase 28: Pluggable Upkeep Display Label & Unit Combat/Death Sound Routing
+    // ========================================================================
+    virtual std::string GetUpkeepDisplayLabel(int upkeepLevel) const {
+        return (upkeepLevel == 2) ? "High Upkeep"
+             : (upkeepLevel == 1) ? "Low Upkeep"
+             : "No Upkeep";
+    }
+
+    virtual bool OnResolveUnitCombatSound(const CSimulation& /*sim*/,
+                                          int /*unitHandle*/,
+                                          int /*sourceHandle*/,
+                                          bool /*isDeath*/,
+                                          std::string& /*outClipKey*/) const {
+        return false;
+    }
+
     const SimulationModuleStats& GetModuleStats() const { return stats_; }
     void ResetModuleStats() { stats_ = {}; }
 

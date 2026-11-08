@@ -200,10 +200,13 @@ void RenderInterpolationBuffer::PushEntitySnapshot(int handleId,
 }
 
 void RenderInterpolationBuffer::CaptureSimulationTick(const CSimulation& sim) {
-    std::unordered_map<int, RenderTransformSnapshot> nextCurr;
-    const auto& units = sim.GetUnits();
-    nextCurr.reserve(units.size());
+    // Phase 28: Swap currSnapshots_ into prevSnapshots_ and clear currSnapshots_
+    // in place so bucket capacity is reused with zero map reallocation and dead
+    // units from 2+ ticks ago are automatically purged from prevSnapshots_.
+    std::swap(prevSnapshots_, currSnapshots_);
+    currSnapshots_.clear();
 
+    const auto& units = sim.GetUnits();
     for (const CUnit* unit : units) {
         if (!unit) continue;
         const int handleId = unit->GetHandleId();
@@ -222,18 +225,22 @@ void RenderInterpolationBuffer::CaptureSimulationTick(const CSimulation& sim) {
         );
         snap.playerIndex = unit->GetPlayerIndex();
         snap.unitTypeId = unit->GetTypeId().value;
-        snap.visible = !unit->IsHidden() && !unit->IsLoadedAboard() ;
+        snap.visible = !unit->IsHidden() && !unit->IsLoadedAboard();
 
-        auto prevIt = currSnapshots_.find(handleId);
-        if (prevIt != currSnapshots_.end()) {
-            prevSnapshots_[handleId] = prevIt->second;
-        } else {
+        if (prevSnapshots_.find(handleId) == prevSnapshots_.end()) {
             prevSnapshots_[handleId] = snap;
         }
-        nextCurr[handleId] = snap;
+        currSnapshots_[handleId] = snap;
     }
 
-    currSnapshots_ = std::move(nextCurr);
+    // Prune any units from prevSnapshots_ that no longer exist in currSnapshots_
+    for (auto it = prevSnapshots_.begin(); it != prevSnapshots_.end();) {
+        if (currSnapshots_.find(it->first) == currSnapshots_.end()) {
+            it = prevSnapshots_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 bool RenderInterpolationBuffer::SampleEntity(int handleId,
@@ -289,14 +296,21 @@ void BonePaletteAtlas::WriteMatrixAt(int row, int boneIndex, const Mat4& m) {
 }
 
 void BonePaletteAtlas::ResetFrame(int maxBonesPerRow) {
-    maxBonesPerRow_ = std::max(1, maxBonesPerRow);
-    texWidth_ = maxBonesPerRow_ * 4;
-    activeRowCount_ = 1; // Row 0 is reserved for Identity bind-pose matrices
-    const size_t rowStrideFloats = static_cast<size_t>(texWidth_) * 4u;
-    texelData_.assign(rowStrideFloats, 0.0f);
-    const Mat4 ident = Mat4::Identity();
-    for (int b = 0; b < maxBonesPerRow_; ++b) {
-        WriteMatrixAt(0, b, ident);
+    const int clampedBones = std::max(1, maxBonesPerRow);
+    const size_t rowStrideFloats = static_cast<size_t>(clampedBones * 4) * 4u;
+    if (clampedBones != maxBonesPerRow_ || texelData_.size() < rowStrideFloats) {
+        maxBonesPerRow_ = clampedBones;
+        texWidth_ = maxBonesPerRow_ * 4;
+        activeRowCount_ = 1; // Row 0 is reserved for Identity bind-pose matrices
+        texelData_.assign(rowStrideFloats, 0.0f);
+        const Mat4 ident = Mat4::Identity();
+        for (int b = 0; b < maxBonesPerRow_; ++b) {
+            WriteMatrixAt(0, b, ident);
+        }
+    } else {
+        // Phase 28: Row 0 identity palette is already initialized; O(1) reset!
+        activeRowCount_ = 1;
+        texelData_.resize(rowStrideFloats);
     }
     dirty_ = true;
 }

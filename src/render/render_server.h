@@ -182,12 +182,18 @@ public:
     bool SampleEntity(int handleId, float alpha, RenderTransformSnapshot& outSnapshot) const;
     Mat4 ComputeInterpolatedWorldMatrix(int handleId, float alpha) const;
 
+    void RemoveEntity(int handleId) {
+        prevSnapshots_.erase(handleId);
+        currSnapshots_.erase(handleId);
+    }
+
     void Clear() {
         prevSnapshots_.clear();
         currSnapshots_.clear();
     }
 
     size_t TrackedEntityCount() const { return currSnapshots_.size(); }
+    size_t PreviousSnapshotCount() const { return prevSnapshots_.size(); }
 
 private:
     std::unordered_map<int, RenderTransformSnapshot> prevSnapshots_;

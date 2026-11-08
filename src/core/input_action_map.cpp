@@ -157,6 +157,14 @@ std::vector<FormationSlotOffset> CommandBufferPipeline::ComputeBoxFormationOffse
     size_t unitCount,
     float spacing,
     float facingRadians) {
+    return ComputeFormationOffsets(unitCount, FormationShape::Box, spacing, facingRadians);
+}
+
+std::vector<FormationSlotOffset> CommandBufferPipeline::ComputeFormationOffsets(
+    size_t unitCount,
+    FormationShape shape,
+    float spacing,
+    float facingRadians) {
     std::vector<FormationSlotOffset> offsets;
     if (unitCount == 0) return offsets;
     offsets.reserve(unitCount);
@@ -165,9 +173,6 @@ std::vector<FormationSlotOffset> CommandBufferPipeline::ComputeBoxFormationOffse
         return offsets;
     }
 
-    const int cols = std::max(1, static_cast<int>(std::ceil(std::sqrt(static_cast<double>(unitCount)))));
-    const int rows = static_cast<int>((unitCount + static_cast<size_t>(cols) - 1) / static_cast<size_t>(cols));
-
     const float cosA = std::cos(facingRadians);
     const float sinA = std::sin(facingRadians);
     // Forward axis = (cosA, sinA), Right axis = (sinA, -cosA)
@@ -175,6 +180,53 @@ std::vector<FormationSlotOffset> CommandBufferPipeline::ComputeBoxFormationOffse
     const float rightY = -cosA;
     const float fwdX   =  cosA;
     const float fwdY   =  sinA;
+
+    auto localToWorld = [&](float lateralCoord, float depthCoord) -> FormationSlotOffset {
+        return FormationSlotOffset{
+            rightX * lateralCoord + fwdX * depthCoord,
+            rightY * lateralCoord + fwdY * depthCoord
+        };
+    };
+
+    if (shape == FormationShape::Line) {
+        for (size_t idx = 0; idx < unitCount; ++idx) {
+            const float lateralCoord = (static_cast<float>(idx) - 0.5f * static_cast<float>(unitCount - 1)) * spacing;
+            offsets.push_back(localToWorld(lateralCoord, 0.0f));
+        }
+        return offsets;
+    }
+
+    if (shape == FormationShape::Circle) {
+        constexpr float kTwoPi = 6.28318530717958647692f;
+        const float radius = std::max(spacing * 0.5f,
+                                      spacing * static_cast<float>(unitCount) / kTwoPi);
+        for (size_t idx = 0; idx < unitCount; ++idx) {
+            const float angle = facingRadians + (kTwoPi * static_cast<float>(idx)) / static_cast<float>(unitCount);
+            offsets.push_back({radius * std::cos(angle), radius * std::sin(angle)});
+        }
+        return offsets;
+    }
+
+    if (shape == FormationShape::Wedge) {
+        // V-shaped chevron/wedge: row r has (r + 1) slots, leader at front apex
+        size_t placed = 0;
+        int row = 0;
+        while (placed < unitCount) {
+            const size_t slotsInRow = std::min<size_t>(static_cast<size_t>(row + 1), unitCount - placed);
+            const float depthCoord = -static_cast<float>(row) * spacing;
+            for (size_t c = 0; c < slotsInRow; ++c) {
+                const float lateralCoord = (static_cast<float>(c) - 0.5f * static_cast<float>(slotsInRow - 1)) * spacing;
+                offsets.push_back(localToWorld(lateralCoord, depthCoord));
+                placed++;
+            }
+            row++;
+        }
+        return offsets;
+    }
+
+    // Default: FormationShape::Box
+    const int cols = std::max(1, static_cast<int>(std::ceil(std::sqrt(static_cast<double>(unitCount)))));
+    const int rows = static_cast<int>((unitCount + static_cast<size_t>(cols) - 1) / static_cast<size_t>(cols));
 
     for (size_t idx = 0; idx < unitCount; ++idx) {
         const int r = static_cast<int>(idx) / cols;
@@ -185,11 +237,7 @@ std::vector<FormationSlotOffset> CommandBufferPipeline::ComputeBoxFormationOffse
 
         const float lateralCoord = (static_cast<float>(c) - 0.5f * static_cast<float>(colsInThisRow - 1)) * spacing;
         const float depthCoord   = (0.5f * static_cast<float>(rows - 1) - static_cast<float>(r)) * spacing;
-
-        FormationSlotOffset off;
-        off.dx = rightX * lateralCoord + fwdX * depthCoord;
-        off.dy = rightY * lateralCoord + fwdY * depthCoord;
-        offsets.push_back(off);
+        offsets.push_back(localToWorld(lateralCoord, depthCoord));
     }
     return offsets;
 }
@@ -202,7 +250,9 @@ int CommandBufferPipeline::IssueGroupPointOrder(CSimulation& sim,
                                                 float targetY,
                                                 bool useFormation,
                                                 float spacing,
-                                                ReplayLog* replayLog) {
+                                                ReplayLog* replayLog,
+                                                FormationShape shape) {
+    (void)playerIndex;
     std::vector<CUnit*> validUnits;
     validUnits.reserve(unitHandles.size());
     for (int h : unitHandles) {
@@ -213,12 +263,17 @@ int CommandBufferPipeline::IssueGroupPointOrder(CSimulation& sim,
     }
     if (validUnits.empty()) return 0;
 
-    // Sort by handle ID for 100% lockstep determinism
-    std::sort(validUnits.begin(), validUnits.end(), [](const CUnit* a, const CUnit* b) {
+    // Phase 27: Sort by (formationRankPriority, handleId) for 100% lockstep determinism
+    // while placing frontline units (rank 0) ahead of backline ranged/caster units (rank 1..2).
+    const auto* mod = sim.GetSimulationModule();
+    std::sort(validUnits.begin(), validUnits.end(), [&](const CUnit* a, const CUnit* b) {
+        const int rankA = mod ? mod->OnGetUnitFormationRankPriority(*a) : 0;
+        const int rankB = mod ? mod->OnGetUnitFormationRankPriority(*b) : 0;
+        if (rankA != rankB) return rankA < rankB;
         return a->GetHandleId() < b->GetHandleId();
     });
 
-    // Compute group centroid to orient the box formation along travel vector
+    // Compute group centroid to orient the formation along travel vector
     float cx = 0.0f, cy = 0.0f;
     for (const CUnit* u : validUnits) {
         cx += u->GetX();
@@ -230,7 +285,7 @@ int CommandBufferPipeline::IssueGroupPointOrder(CSimulation& sim,
     const float facingRad = std::atan2(targetY - cy, targetX - cx);
     std::vector<FormationSlotOffset> offsets;
     if (useFormation && validUnits.size() > 1) {
-        offsets = ComputeBoxFormationOffsets(validUnits.size(), spacing, facingRad);
+        offsets = ComputeFormationOffsets(validUnits.size(), shape, spacing, facingRad);
         stats_.formationOrdersComputed++;
     } else {
         offsets.assign(validUnits.size(), FormationSlotOffset{0.0f, 0.0f});
@@ -250,18 +305,8 @@ int CommandBufferPipeline::IssueGroupPointOrder(CSimulation& sim,
             }
             dispatched++;
             stats_.totalUnitCommandsDispatched++;
-            if (replayLog) {
-                SimCommand cmd;
-                cmd.turn = sim.GetGameTurnTick();
-                cmd.player = playerIndex;
-                cmd.unit = uHandle;
-                cmd.orderId = orderId;
-                cmd.targetKind = static_cast<int32_t>(COrder::TargetKind::POINT);
-                cmd.targetHandle = -1;
-                cmd.x = destX;
-                cmd.y = destY;
-                cmd.z = 0.0f;
-                replayLog->Record(cmd);
+            if (replayLog && !sim.LoggedCommands().empty()) {
+                replayLog->Record(sim.LoggedCommands().back());
             }
         }
     }
@@ -276,6 +321,7 @@ int CommandBufferPipeline::IssueGroupImmediateOrder(CSimulation& sim,
                                                     const std::vector<int>& unitHandles,
                                                     int orderId,
                                                     ReplayLog* replayLog) {
+    (void)playerIndex;
     std::vector<int> sortedHandles = unitHandles;
     std::sort(sortedHandles.begin(), sortedHandles.end());
 
@@ -284,15 +330,8 @@ int CommandBufferPipeline::IssueGroupImmediateOrder(CSimulation& sim,
         if (sim.IssueUnitOrder(h, std::make_unique<COrderNoTarget>(orderId))) {
             dispatched++;
             stats_.totalUnitCommandsDispatched++;
-            if (replayLog) {
-                SimCommand cmd;
-                cmd.turn = sim.GetGameTurnTick();
-                cmd.player = playerIndex;
-                cmd.unit = h;
-                cmd.orderId = orderId;
-                cmd.targetKind = static_cast<int32_t>(COrder::TargetKind::NONE);
-                cmd.targetHandle = -1;
-                replayLog->Record(cmd);
+            if (replayLog && !sim.LoggedCommands().empty()) {
+                replayLog->Record(sim.LoggedCommands().back());
             }
         }
     }

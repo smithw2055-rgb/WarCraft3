@@ -63,6 +63,16 @@ bool CPathfindingProcessor::IsCellWalkable(int cellX, int cellY, bool allowFlyin
                                          : PathingGridMovementType::FOOT);
 }
 
+float CPathfindingProcessor::GetCellTraversalCostMultiplier(int cellX,
+                                                            int cellY,
+                                                            PathingGridMovementType movementType) const {
+    if (customCellCostChecker_) {
+        const float mult = customCellCostChecker_(cellX, cellY, movementType);
+        if (mult > 0.0f) return std::max(0.1f, mult);
+    }
+    return 1.0f;
+}
+
 bool CPathfindingProcessor::IsCellPathableFor(int cellX, int cellY,
                                               PathingGridMovementType movementType) const {
     if (customPassabilityChecker_) {

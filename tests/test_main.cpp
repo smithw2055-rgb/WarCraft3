@@ -885,6 +885,14 @@ bool TestPhase26StageHHH1ReplayMemoryStreamAndPlayerCommandExecution();
 bool TestPhase26StageHHH2TurnManagerHistoryCapLockstepHostFastKeyframeResyncAndLobbySkirmish();
 bool TestPhase26StageIII1War3ModuleLockstepValidationAlliedTributeAndStateHash();
 bool TestPhase26StageIII2DynamicPluginSOV26AndCloudRetailMapsEndToEndSuite();
+bool TestPhase27StageJJJ1ScriptEngineHostBaseEventBusAndHotSwapSubscriptionMigration();
+bool TestPhase27StageJJJ2BitPackedPathQueryWorkspaceFlatBfsFlowFieldAndWeightedTerrainCost();
+bool TestPhase27StageKKK1MultiShapeFormationsAndRoleAwareFrontlineBacklineSorting();
+bool TestPhase27StageKKK2DynamicPluginSOV27AndCloudRetailMapsEndToEndSuite();
+bool TestPhase28StageLLL1ZeroAllocRenderInterpolationSwapAndBoneAtlasFastReset();
+bool TestPhase28StageLLL2AudioServerPrecomputedBusGainsAndPluggableCombatSoundRouting();
+bool TestPhase28StageMMM1UIDataBinderCustomReactivePropertiesAndUpkeepFormatter();
+bool TestPhase28StageMMM2DynamicPluginSOV28AndCloudRetailMapsEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1765,6 +1773,14 @@ int main(int argc, char** argv) {
         {"Phase26 Stage HHH2 TurnManager history cap LockstepHost fast keyframe resync and Lobby skirmish", TestPhase26StageHHH2TurnManagerHistoryCapLockstepHostFastKeyframeResyncAndLobbySkirmish},
         {"Phase26 Stage III1 War3GameModule v26 lockstep validation allied tribute and state hash", TestPhase26StageIII1War3ModuleLockstepValidationAlliedTributeAndStateHash},
         {"Phase26 Stage III2 Dynamic plugin SO v26 and cloud retail maps end-to-end suite", TestPhase26StageIII2DynamicPluginSOV26AndCloudRetailMapsEndToEndSuite},
+        {"Phase27 Stage JJJ1 ScriptEngineHost base event bus and hot-swap subscription migration", TestPhase27StageJJJ1ScriptEngineHostBaseEventBusAndHotSwapSubscriptionMigration},
+        {"Phase27 Stage JJJ2 Bit-packed PathQueryWorkspace flat BFS FlowField and weighted terrain cost", TestPhase27StageJJJ2BitPackedPathQueryWorkspaceFlatBfsFlowFieldAndWeightedTerrainCost},
+        {"Phase27 Stage KKK1 Multi-shape formations and role-aware frontline/backline sorting", TestPhase27StageKKK1MultiShapeFormationsAndRoleAwareFrontlineBacklineSorting},
+        {"Phase27 Stage KKK2 Dynamic plugin SO v27 and cloud retail maps end-to-end suite", TestPhase27StageKKK2DynamicPluginSOV27AndCloudRetailMapsEndToEndSuite},
+        {"Phase28 Stage LLL1 Zero-alloc RenderInterpolationBuffer swap and BonePaletteAtlas fast reset", TestPhase28StageLLL1ZeroAllocRenderInterpolationSwapAndBoneAtlasFastReset},
+        {"Phase28 Stage LLL2 AudioServer precomputed bus gains and pluggable combat sound routing", TestPhase28StageLLL2AudioServerPrecomputedBusGainsAndPluggableCombatSoundRouting},
+        {"Phase28 Stage MMM1 UIDataBinder custom reactive properties and upkeep formatter", TestPhase28StageMMM1UIDataBinderCustomReactivePropertiesAndUpkeepFormatter},
+        {"Phase28 Stage MMM2 Dynamic plugin SO v28 and cloud retail maps end-to-end suite", TestPhase28StageMMM2DynamicPluginSOV28AndCloudRetailMapsEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

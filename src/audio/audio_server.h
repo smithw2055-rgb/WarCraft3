@@ -179,8 +179,8 @@ public:
     size_t GetActiveVoiceCount() const { return activeVoices_.size(); }
     int GetActiveVoiceCountOnBus(AudioBusId bus) const;
 
-    // Event-driven bridge: subscribes to CSimulation::GetEventBus() (onUnitDamaged & onUnitDied)
-    // to automatically emit spatialized 3D combat hit & unit death voices
+    // Event-driven bridge: subscribes to CSimulation::Events() (onUnitDamage & onUnitDeath)
+    // and queries ISimulationModule::OnResolveUnitCombatSound before emitting 3D spatial voices
     void BindSimulationEvents(CSimulation& sim);
     void UnbindSimulationEvents(CSimulation& sim);
 
@@ -189,6 +189,9 @@ public:
 
 private:
     static constexpr size_t kBusCount = static_cast<size_t>(AudioBusId::Count);
+
+    // Phase 28: Precomputes all 6 bus gains once in O(B) and refreshes active voices in O(V)
+    void RefreshActiveVoiceGains(bool updateStereoPan);
 
     std::array<AudioBusState, kBusCount> buses_;
     AudioListener3D listener_;

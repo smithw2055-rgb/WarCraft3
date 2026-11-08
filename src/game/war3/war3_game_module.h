@@ -79,7 +79,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 26u; }
+    uint32_t GetModuleVersion() const override { return 28u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -505,6 +505,42 @@ public:
 
     uint64_t OnComputeModuleStateHash(const CSimulation& sim) const override;
 
+    // Phase 27: Pluggable Cell Traversal Cost Multiplier & Squad Formation Rank Priority
+    void SetCustomCellCostMultiplier(int cellX, int cellY, float costMultiplier);
+    float GetCustomCellCostMultiplier(int cellX, int cellY) const;
+    bool RemoveCustomCellCostMultiplier(int cellX, int cellY);
+    void ClearCustomCellCostMultipliers() { customCellCostMultipliers_.clear(); }
+
+    float OnGetCellTraversalCostMultiplier(int cellX,
+                                           int cellY,
+                                           int movementTypeOrd) const override;
+
+    void SetCustomUnitFormationRank(War3ID unitTypeId, int rankPriority);
+    int GetCustomUnitFormationRank(War3ID unitTypeId) const;
+    bool RemoveCustomUnitFormationRank(War3ID unitTypeId);
+
+    int OnGetUnitFormationRankPriority(const CUnit& unit) const override;
+
+    // Phase 28: Pluggable Upkeep Display Label & Unit Combat/Death Sound Routing
+    void SetCustomUpkeepLabel(int upkeepLevel, const std::string& label);
+    std::string GetUpkeepDisplayLabel(int upkeepLevel) const override;
+
+    struct CustomUnitSoundEntry {
+        std::string hitClip;
+        std::string deathClip;
+    };
+    void RegisterCustomUnitSoundOverride(War3ID unitTypeId,
+                                         const std::string& hitClip,
+                                         const std::string& deathClip);
+    bool UnregisterCustomUnitSoundOverride(War3ID unitTypeId);
+    bool HasCustomUnitSoundOverride(War3ID unitTypeId) const;
+
+    bool OnResolveUnitCombatSound(const CSimulation& sim,
+                                  int unitHandle,
+                                  int sourceHandle,
+                                  bool isDeath,
+                                  std::string& outClipKey) const override;
+
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 
     bool OnCheckSpellEffectReaction(CSimulation& sim,
@@ -568,6 +604,10 @@ private:
     std::unordered_map<int, float> playerSightMultipliers_;
     std::unordered_map<int, CFogSightSource> customSightSources_;
     std::unordered_map<int64_t, CustomCellPassabilityRule> customCellPassabilityRules_;
+    std::unordered_map<int64_t, float> customCellCostMultipliers_;
+    std::unordered_map<uint32_t, int> customUnitFormationRanks_;
+    std::unordered_map<int, std::string> customUpkeepLabels_;
+    std::unordered_map<uint32_t, CustomUnitSoundEntry> customUnitSoundOverrides_;
     std::unordered_map<int32_t, CustomGlobalCommandFn> customGlobalCommands_;
     uint32_t mutedPlayerMask_ = 0;
     uint32_t tributeCommandsExecuted_ = 0;

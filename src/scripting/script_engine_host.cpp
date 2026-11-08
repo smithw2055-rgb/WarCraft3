@@ -1,4 +1,5 @@
 #include "scripting/script_engine_host.h"
+#include "ecs/lockstep.h"
 #include <cstring>
 #include <sstream>
 
@@ -7,21 +8,14 @@ namespace scripting {
 namespace {
 
 void WriteU32(std::vector<uint8_t>& buf, uint32_t v) {
-    uint8_t bytes[4] = {
-        static_cast<uint8_t>(v & 0xFFu),
-        static_cast<uint8_t>((v >> 8) & 0xFFu),
-        static_cast<uint8_t>((v >> 16) & 0xFFu),
-        static_cast<uint8_t>((v >> 24) & 0xFFu)
-    };
+    uint8_t bytes[4];
+    SimWireWriteLE32(bytes, v);
     buf.insert(buf.end(), bytes, bytes + 4);
 }
 
 bool ReadU32(const std::vector<uint8_t>& buf, size_t& offset, uint32_t& out) {
     if (offset + 4 > buf.size()) return false;
-    out = static_cast<uint32_t>(buf[offset]) |
-          (static_cast<uint32_t>(buf[offset + 1]) << 8) |
-          (static_cast<uint32_t>(buf[offset + 2]) << 16) |
-          (static_cast<uint32_t>(buf[offset + 3]) << 24);
+    out = SimWireReadLE32(buf.data() + offset);
     offset += 4;
     return true;
 }
@@ -40,10 +34,61 @@ bool ReadString(const std::vector<uint8_t>& buf, size_t& offset, std::string& ou
     return true;
 }
 
-std::vector<uint8_t> SerializeGlobalsMap(const std::unordered_map<std::string, ScriptValue>& globals) {
+constexpr uint32_t kHotReloadMagicV1 = 0x53485352u; // 'RSHS'
+constexpr uint32_t kHotReloadMagicV2 = 0x32485352u; // 'RSH2' (globals + active event subscriptions)
+
+} // namespace
+
+// ============================================================================
+// 0. IScriptEngineHost Shared Base Implementation
+// ============================================================================
+
+int IScriptEngineHost::SubscribeEvent(int eventId, const std::string& handlerFuncName, int filterHandle) {
+    const int subId = nextSubId_++;
+    eventBuckets_[eventId].push_back({subId, eventId, filterHandle, handlerFuncName, true});
+    return subId;
+}
+
+bool IScriptEngineHost::UnsubscribeEvent(int subscriptionId) {
+    for (auto& [evId, vec] : eventBuckets_) {
+        (void)evId;
+        for (auto& sub : vec) {
+            if (sub.id == subscriptionId && sub.active) {
+                sub.active = false;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void IScriptEngineHost::OnHandleDestroyed(int handleId) {
+    if (handleId < 0) return;
+    for (auto& [evId, vec] : eventBuckets_) {
+        (void)evId;
+        for (auto& sub : vec) {
+            if (sub.filterHandle == handleId) {
+                sub.active = false;
+            }
+        }
+    }
+}
+
+size_t IScriptEngineHost::GetActiveSubscriptionCount() const {
+    size_t activeCount = 0;
+    for (const auto& [evId, vec] : eventBuckets_) {
+        (void)evId;
+        for (const auto& sub : vec) {
+            if (sub.active) ++activeCount;
+        }
+    }
+    return activeCount;
+}
+
+std::vector<uint8_t> IScriptEngineHost::ExportHotReloadState() const {
+    const auto globals = SnapshotGlobals();
     std::vector<uint8_t> buf;
-    // Magic 'RSHS' (RealScript HotReload State)
-    WriteU32(buf, 0x53485352u);
+    WriteU32(buf, kHotReloadMagicV2);
     WriteU32(buf, static_cast<uint32_t>(globals.size()));
     for (const auto& [name, val] : globals) {
         WriteString(buf, name);
@@ -55,30 +100,49 @@ std::vector<uint8_t> SerializeGlobalsMap(const std::unordered_map<std::string, S
         buf.push_back(val.boolVal ? 1u : 0u);
         WriteString(buf, val.strVal);
     }
+
+    // Collect active event subscriptions for cross-backend migration
+    std::vector<const ScriptEventSubscription*> activeSubs;
+    for (const auto& [evId, vec] : eventBuckets_) {
+        (void)evId;
+        for (const auto& sub : vec) {
+            if (sub.active) {
+                activeSubs.push_back(&sub);
+            }
+        }
+    }
+    WriteU32(buf, static_cast<uint32_t>(activeSubs.size()));
+    for (const ScriptEventSubscription* sub : activeSubs) {
+        WriteU32(buf, static_cast<uint32_t>(sub->id));
+        WriteU32(buf, static_cast<uint32_t>(sub->eventId));
+        WriteU32(buf, static_cast<uint32_t>(sub->filterHandle));
+        WriteString(buf, sub->handlerFunc);
+    }
+    WriteU32(buf, static_cast<uint32_t>(nextSubId_));
     return buf;
 }
 
-bool DeserializeGlobalsMap(const std::vector<uint8_t>& buf,
-                           std::unordered_map<std::string, ScriptValue>& outGlobals) {
+bool IScriptEngineHost::ImportHotReloadState(const std::vector<uint8_t>& stateBytes) {
     size_t offset = 0;
     uint32_t magic = 0;
     uint32_t count = 0;
-    if (!ReadU32(buf, offset, magic) || magic != 0x53485352u) return false;
-    if (!ReadU32(buf, offset, count)) return false;
+    if (!ReadU32(stateBytes, offset, magic)) return false;
+    if (magic != kHotReloadMagicV1 && magic != kHotReloadMagicV2) return false;
+    if (!ReadU32(stateBytes, offset, count)) return false;
 
     for (uint32_t i = 0; i < count; ++i) {
         std::string name;
-        if (!ReadString(buf, offset, name)) return false;
-        if (offset >= buf.size()) return false;
-        const auto valType = static_cast<JassValue::Type>(buf[offset++]);
+        if (!ReadString(stateBytes, offset, name)) return false;
+        if (offset >= stateBytes.size()) return false;
+        const auto valType = static_cast<JassValue::Type>(stateBytes[offset++]);
         uint32_t intBits = 0;
         uint32_t floatBits = 0;
-        if (!ReadU32(buf, offset, intBits)) return false;
-        if (!ReadU32(buf, offset, floatBits)) return false;
-        if (offset >= buf.size()) return false;
-        const bool bVal = (buf[offset++] != 0);
+        if (!ReadU32(stateBytes, offset, intBits)) return false;
+        if (!ReadU32(stateBytes, offset, floatBits)) return false;
+        if (offset >= stateBytes.size()) return false;
+        const bool bVal = (stateBytes[offset++] != 0);
         std::string sVal;
-        if (!ReadString(buf, offset, sVal)) return false;
+        if (!ReadString(stateBytes, offset, sVal)) return false;
 
         ScriptValue v;
         v.type = valType;
@@ -86,12 +150,43 @@ bool DeserializeGlobalsMap(const std::vector<uint8_t>& buf,
         std::memcpy(&v.realVal, &floatBits, sizeof(float));
         v.boolVal = bVal;
         v.strVal = std::move(sVal);
-        outGlobals[name] = std::move(v);
+        SetGlobal(name, v);
+    }
+
+    if (magic == kHotReloadMagicV2 && offset < stateBytes.size()) {
+        uint32_t subCount = 0;
+        if (!ReadU32(stateBytes, offset, subCount)) return false;
+        eventBuckets_.clear();
+        int maxLoadedSubId = 0;
+        for (uint32_t i = 0; i < subCount; ++i) {
+            uint32_t id = 0, evId = 0, filterH = 0;
+            std::string handler;
+            if (!ReadU32(stateBytes, offset, id) ||
+                !ReadU32(stateBytes, offset, evId) ||
+                !ReadU32(stateBytes, offset, filterH) ||
+                !ReadString(stateBytes, offset, handler)) {
+                eventBuckets_.clear();
+                return false;
+            }
+            const int signedId = static_cast<int>(id);
+            const int signedEvId = static_cast<int>(evId);
+            if (signedId > maxLoadedSubId) maxLoadedSubId = signedId;
+            eventBuckets_[signedEvId].push_back({
+                signedId,
+                signedEvId,
+                static_cast<int>(filterH),
+                std::move(handler),
+                true
+            });
+        }
+        uint32_t savedNextSubId = 1;
+        if (ReadU32(stateBytes, offset, savedNextSubId)) {
+            nextSubId_ = std::max(nextSubId_, static_cast<int>(savedNextSubId));
+        }
+        nextSubId_ = std::max(nextSubId_, std::max(1, maxLoadedSubId + 1));
     }
     return true;
 }
-
-} // namespace
 
 // ============================================================================
 // 1. JassScriptHostAdapter Implementation
@@ -171,25 +266,6 @@ std::unordered_map<std::string, ScriptValue> JassScriptHostAdapter::SnapshotGlob
     return trackedGlobals_;
 }
 
-int JassScriptHostAdapter::SubscribeEvent(int eventId, const std::string& handlerFuncName, int filterHandle) {
-    const int subId = nextSubId_++;
-    eventBuckets_[eventId].push_back({subId, eventId, filterHandle, handlerFuncName, true});
-    return subId;
-}
-
-bool JassScriptHostAdapter::UnsubscribeEvent(int subscriptionId) {
-    for (auto& [evId, vec] : eventBuckets_) {
-        (void)evId;
-        for (auto& sub : vec) {
-            if (sub.id == subscriptionId && sub.active) {
-                sub.active = false;
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 int JassScriptHostAdapter::FireEvent(const ScriptEventPayload& payload) {
     lastEventPayload_ = payload;
     auto it = eventBuckets_.find(payload.eventId);
@@ -202,31 +278,6 @@ int JassScriptHostAdapter::FireEvent(const ScriptEventPayload& payload) {
         ++fired;
     }
     return fired;
-}
-
-void JassScriptHostAdapter::OnHandleDestroyed(int handleId) {
-    if (handleId < 0) return;
-    for (auto& [evId, vec] : eventBuckets_) {
-        (void)evId;
-        for (auto& sub : vec) {
-            if (sub.filterHandle == handleId) {
-                sub.active = false;
-            }
-        }
-    }
-}
-
-std::vector<uint8_t> JassScriptHostAdapter::ExportHotReloadState() const {
-    return SerializeGlobalsMap(SnapshotGlobals());
-}
-
-bool JassScriptHostAdapter::ImportHotReloadState(const std::vector<uint8_t>& stateBytes) {
-    std::unordered_map<std::string, ScriptValue> imported;
-    if (!DeserializeGlobalsMap(stateBytes, imported)) return false;
-    for (const auto& [k, v] : imported) {
-        SetGlobal(k, v);
-    }
-    return true;
 }
 
 // ============================================================================
@@ -323,25 +374,6 @@ std::unordered_map<std::string, ScriptValue> RealScriptEngineHost::SnapshotGloba
     return globals_;
 }
 
-int RealScriptEngineHost::SubscribeEvent(int eventId, const std::string& handlerFuncName, int filterHandle) {
-    const int subId = nextSubId_++;
-    eventBuckets_[eventId].push_back({subId, eventId, filterHandle, handlerFuncName, true});
-    return subId;
-}
-
-bool RealScriptEngineHost::UnsubscribeEvent(int subscriptionId) {
-    for (auto& [evId, vec] : eventBuckets_) {
-        (void)evId;
-        for (auto& sub : vec) {
-            if (sub.id == subscriptionId && sub.active) {
-                sub.active = false;
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 int RealScriptEngineHost::FireEvent(const ScriptEventPayload& payload) {
     lastEventPayload_ = payload;
     auto it = eventBuckets_.find(payload.eventId);
@@ -367,42 +399,6 @@ int RealScriptEngineHost::FireEvent(const ScriptEventPayload& payload) {
         ++fired;
     }
     return fired;
-}
-
-void RealScriptEngineHost::OnHandleDestroyed(int handleId) {
-    if (handleId < 0) return;
-    for (auto& [evId, vec] : eventBuckets_) {
-        (void)evId;
-        for (auto& sub : vec) {
-            if (sub.filterHandle == handleId) {
-                sub.active = false;
-            }
-        }
-    }
-}
-
-size_t RealScriptEngineHost::GetActiveSubscriptionCount() const {
-    size_t activeCount = 0;
-    for (const auto& [evId, vec] : eventBuckets_) {
-        (void)evId;
-        for (const auto& sub : vec) {
-            if (sub.active) ++activeCount;
-        }
-    }
-    return activeCount;
-}
-
-std::vector<uint8_t> RealScriptEngineHost::ExportHotReloadState() const {
-    return SerializeGlobalsMap(globals_);
-}
-
-bool RealScriptEngineHost::ImportHotReloadState(const std::vector<uint8_t>& stateBytes) {
-    std::unordered_map<std::string, ScriptValue> imported;
-    if (!DeserializeGlobalsMap(stateBytes, imported)) return false;
-    for (const auto& [k, v] : imported) {
-        globals_[k] = v;
-    }
-    return true;
 }
 
 // ============================================================================

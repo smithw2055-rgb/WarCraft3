@@ -3,17 +3,15 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <queue>
 
 namespace pathfinding {
 
 void PathQueryWorkspace::EnsureCapacity(int width, int height) {
     const size_t total = static_cast<size_t>(std::max(1, width)) * static_cast<size_t>(std::max(1, height));
-    if (width_ != width || height_ != height || visitedGen_.size() < total) {
+    if (width_ != width || height_ != height || visitedState_.size() < total) {
         width_ = std::max(1, width);
         height_ = std::max(1, height);
-        visitedGen_.assign(total, 0u);
-        closedState_.assign(total, 0u);
+        visitedState_.assign(total, 0u);
         gScore_.assign(total, 0.0f);
         parentIdx_.assign(total, -1);
         currentGen_ = 1u;
@@ -24,8 +22,8 @@ void PathQueryWorkspace::EnsureCapacity(int width, int height) {
 void PathQueryWorkspace::BeginQuery(int width, int height) {
     EnsureCapacity(width, height);
     currentGen_++;
-    if (currentGen_ == 0u) {
-        std::fill(visitedGen_.begin(), visitedGen_.end(), 0u);
+    if (currentGen_ >= 0x7FFFFFFFu) {
+        std::fill(visitedState_.begin(), visitedState_.end(), 0u);
         currentGen_ = 1u;
     }
     openHeap_.clear();
@@ -57,7 +55,7 @@ bool PathQueryWorkspace::SolveAStar(const CPathfindingProcessor& processor,
     int goalX  = std::clamp(processor.WorldToCellX(req.goalWorldX),  0, gridW - 1);
     int goalY  = std::clamp(processor.WorldToCellY(req.goalWorldY),  0, gridH - 1);
 
-    // If goal cell is blocked, spiral-search up to radius 8 for nearest walkable cell
+    // If goal cell is blocked, perimeter-search up to radius 8 for nearest walkable cell
     if (!processor.IsCellPathableFor(goalX, goalY, req.movementType)) {
         bool foundAlt = false;
         for (int r = 1; r <= 8 && !foundAlt; ++r) {
@@ -92,9 +90,10 @@ bool PathQueryWorkspace::SolveAStar(const CPathfindingProcessor& processor,
 
     const int startIdx = startY * gridW + startX;
     const int goalIdx  = goalY * gridW + goalX;
+    const uint32_t openStamp   = (currentGen_ << 1);
+    const uint32_t closedStamp = openStamp | 1u;
 
-    visitedGen_[startIdx] = currentGen_;
-    closedState_[startIdx] = 0u;
+    visitedState_[startIdx] = openStamp;
     gScore_[startIdx] = 0.0f;
     parentIdx_[startIdx] = -1;
 
@@ -121,10 +120,10 @@ bool PathQueryWorkspace::SolveAStar(const CPathfindingProcessor& processor,
         openHeap_.pop_back();
 
         const int curIdx = current.cellIdx;
-        if (visitedGen_[curIdx] == currentGen_ && closedState_[curIdx] != 0u) {
+        if (visitedState_[curIdx] == closedStamp) {
             continue;
         }
-        closedState_[curIdx] = 1u;
+        visitedState_[curIdx] = closedStamp;
         expanded++;
 
         if (curIdx == goalIdx) {
@@ -151,14 +150,14 @@ bool PathQueryWorkspace::SolveAStar(const CPathfindingProcessor& processor,
             }
 
             const int nIdx = ny * gridW + nx;
-            if (visitedGen_[nIdx] == currentGen_ && closedState_[nIdx] != 0u) {
+            if (visitedState_[nIdx] == closedStamp) {
                 continue;
             }
 
-            const float tentativeG = curG + kStepCosts[d];
-            if (visitedGen_[nIdx] != currentGen_ || tentativeG < gScore_[nIdx]) {
-                visitedGen_[nIdx] = currentGen_;
-                closedState_[nIdx] = 0u;
+            const float cellCostMult = processor.GetCellTraversalCostMultiplier(nx, ny, req.movementType);
+            const float tentativeG = curG + kStepCosts[d] * cellCostMult;
+            if ((visitedState_[nIdx] >> 1) != currentGen_ || tentativeG < gScore_[nIdx]) {
+                visitedState_[nIdx] = openStamp;
                 gScore_[nIdx] = tentativeG;
                 parentIdx_[nIdx] = curIdx;
 
@@ -224,33 +223,47 @@ bool FlowFieldGrid::Build(const CPathfindingProcessor& processor,
     integrationCost_.assign(total, kUnreachableCost);
     dirX_.assign(total, 0.0f);
     dirY_.assign(total, 0.0f);
+    inQueue_.assign(total, 0u);
     reachableCells_ = 0;
 
     const int goalLocal = LocalIndex(goalCellX_, goalCellY_);
     if (goalLocal < 0) return false;
 
-    std::queue<std::pair<int, int>> bfs;
+    bfsQueue_.clear();
+    bfsQueue_.reserve(total);
     integrationCost_[goalLocal] = 0u;
-    bfs.push({goalCellX_, goalCellY_});
+    bfsQueue_.push_back(goalLocal);
+    inQueue_[goalLocal] = 1u;
     reachableCells_ = 1;
 
     static const int kDirs4[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-    while (!bfs.empty()) {
-        const auto [cx, cy] = bfs.front();
-        bfs.pop();
-        const uint32_t nextCost = integrationCost_[LocalIndex(cx, cy)] + 1u;
+    for (size_t qHead = 0; qHead < bfsQueue_.size(); ++qHead) {
+        const int curLocal = bfsQueue_[qHead];
+        inQueue_[curLocal] = 0u;
+        const int cx = minCellX_ + (curLocal % winWidth_);
+        const int cy = minCellY_ + (curLocal / winWidth_);
+        const uint32_t curCost = integrationCost_[curLocal];
 
         for (int d = 0; d < 4; ++d) {
             const int nx = cx + kDirs4[d][0];
             const int ny = cy + kDirs4[d][1];
             const int nLocal = LocalIndex(nx, ny);
             if (nLocal < 0) continue;
-            if (integrationCost_[nLocal] != kUnreachableCost) continue;
             if (!processor.IsCellPathableFor(nx, ny, movementType)) continue;
 
-            integrationCost_[nLocal] = nextCost;
-            reachableCells_++;
-            bfs.push({nx, ny});
+            const float costMult = processor.GetCellTraversalCostMultiplier(nx, ny, movementType);
+            const uint32_t stepCost = (costMult > 1.001f) ? static_cast<uint32_t>(std::ceil(costMult)) : 1u;
+            const uint32_t nextCost = curCost + stepCost;
+            if (nextCost < integrationCost_[nLocal]) {
+                if (integrationCost_[nLocal] == kUnreachableCost) {
+                    reachableCells_++;
+                }
+                integrationCost_[nLocal] = nextCost;
+                if (!inQueue_[nLocal]) {
+                    inQueue_[nLocal] = 1u;
+                    bfsQueue_.push_back(nLocal);
+                }
+            }
         }
     }
 
