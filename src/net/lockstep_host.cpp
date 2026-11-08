@@ -70,6 +70,11 @@ bool LockstepHost::SendResyncToWatcher(int watcher, const ResyncPackage& pkg) {
     return SendResync(watchers_[(size_t)watcher], pkg);
 }
 
+bool LockstepHost::SendFastKeyframeResyncToWatcher(int watcher, const net::FastResyncKeyframePackage& pkg) {
+    if (watcher < 0 || watcher >= (int)watchers_.size()) return false;
+    return SendFastKeyframeResync(watchers_[(size_t)watcher], pkg);
+}
+
 int LockstepHost::PromoteWatcher(int watcher, int seat) {
     if (watcher < 0 || watcher >= (int)watchers_.size()) return -1;
     const int fd = watchers_[(size_t)watcher];
@@ -90,7 +95,8 @@ int LockstepHost::PromoteWatcher(int watcher, int seat) {
     return seat;
 }
 
-int LockstepHost::AcceptClaim(int timeoutMs) {    if (listenFd_ < 0) return -1;
+int LockstepHost::AcceptClaim(int timeoutMs) {
+    if (listenFd_ < 0) return -1;
     const int fd = TcpTransport::Accept(listenFd_, timeoutMs);
     if (fd == TcpTransport::kInvalidFd) return -1;
     int player = -1;
@@ -110,6 +116,34 @@ int LockstepHost::AcceptClaim(int timeoutMs) {    if (listenFd_ < 0) return -1;
         return -1;
     }
     return player;
+}
+
+int LockstepHost::BroadcastWireToAll(const std::vector<uint8_t>& wire, bool reapWatchers) {
+    int reached = 0;
+    for (int fd : peerFds_) {
+        if (fd == TcpTransport::kInvalidFd) continue;
+        if (TcpTransport::SendMessage(fd, wire.data(), wire.size())) {
+            reached++;
+        }
+    }
+    if (reapWatchers) {
+        for (auto it = watchers_.begin(); it != watchers_.end();) {
+            if (TcpTransport::IsPeerGone(*it) ||
+                !TcpTransport::SendMessage(*it, wire.data(), wire.size())) {
+                TcpTransport::Close(*it);
+                it = watchers_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    } else {
+        for (int fd : watchers_) {
+            if (fd != TcpTransport::kInvalidFd) {
+                TcpTransport::SendMessage(fd, wire.data(), wire.size());
+            }
+        }
+    }
+    return reached;
 }
 
 TurnBatch LockstepHost::RunTurn(std::vector<SimCommand> hostCommands, int timeoutMs,
@@ -152,23 +186,7 @@ TurnBatch LockstepHost::RunTurn(std::vector<SimCommand> hostCommands, int timeou
     }
     TurnBatch merged = manager_.TakeBatch();
     merged.stateHash = stateHash;
-    auto out = merged.Serialize();
-    for (int fd : peerFds_) {
-        if (fd == TcpTransport::kInvalidFd) continue;
-        TcpTransport::SendMessage(fd, out.data(), out.size());
-    }
-    // Spectators get the same broadcast best-effort. Drop watchers that
-    // are gone (receive-side probe: sends to a vanished peer may still
-    // succeed) or whose send fails, so stale watchers never accumulate.
-    for (auto it = watchers_.begin(); it != watchers_.end();) {
-        if (TcpTransport::IsPeerGone(*it) ||
-            !TcpTransport::SendMessage(*it, out.data(), out.size())) {
-            TcpTransport::Close(*it);
-            it = watchers_.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    BroadcastWireToAll(merged.Serialize(), /*reapWatchers=*/true);
     return merged;
 }
 
@@ -192,6 +210,13 @@ bool LockstepHost::SendResyncToSeat(int seat, const ResyncPackage& pkg) {
     return SendResync(fd, pkg);
 }
 
+bool LockstepHost::SendFastKeyframeResyncToSeat(int seat, const net::FastResyncKeyframePackage& pkg) {
+    if (seat < 1 || seat > (int)peerFds_.size()) return false;
+    const int fd = peerFds_[(size_t)(seat - 1)];
+    if (fd == TcpTransport::kInvalidFd) return false;
+    return SendFastKeyframeResync(fd, pkg);
+}
+
 bool SubmitTurnAndReceive(int fd, const TurnBatch& myTurn, int timeoutMs,
                           TurnBatch& mergedOut) {
     auto out = myTurn.Serialize();
@@ -203,19 +228,14 @@ bool SubmitTurnAndReceive(int fd, const TurnBatch& myTurn, int timeoutMs,
 
 bool SendSeatClaim(int fd, int player) {
     uint8_t wire[4];
-    wire[0] = (uint8_t)(player & 0xFF);
-    wire[1] = (uint8_t)((player >> 8) & 0xFF);
-    wire[2] = (uint8_t)((player >> 16) & 0xFF);
-    wire[3] = (uint8_t)((player >> 24) & 0xFF);
+    SimWireWriteLE32(wire, static_cast<uint32_t>(player));
     return TcpTransport::SendMessage(fd, wire, sizeof(wire));
 }
 
 bool RecvSeatClaim(int fd, int& playerOut, int timeoutMs) {
     std::vector<uint8_t> wire;
-    if (!TcpTransport::RecvMessage(fd, wire, timeoutMs)) return false;
-    if (wire.size() != 4) return false;
-    playerOut = (int)((uint32_t)wire[0] | ((uint32_t)wire[1] << 8) |
-                      ((uint32_t)wire[2] << 16) | ((uint32_t)wire[3] << 24));
+    if (!TcpTransport::RecvMessage(fd, wire, timeoutMs) || wire.size() != 4) return false;
+    playerOut = static_cast<int>(SimWireReadLE32(wire.data()));
     return true;
 }
 
@@ -230,19 +250,19 @@ bool RecvResync(int fd, ResyncPackage& pkgOut, int timeoutMs) {
     return ResyncPackage::Deserialize(wire.data(), wire.size(), pkgOut);
 }
 
+bool SendFastKeyframeResync(int fd, const net::FastResyncKeyframePackage& pkg) {
+    auto out = pkg.SerializeWire();
+    return TcpTransport::SendMessage(fd, out.data(), out.size());
+}
+
+bool RecvFastKeyframeResync(int fd, net::FastResyncKeyframePackage& pkgOut, int timeoutMs) {
+    std::vector<uint8_t> wire;
+    if (!TcpTransport::RecvMessage(fd, wire, timeoutMs)) return false;
+    return net::FastResyncKeyframePackage::DeserializeWire(wire.data(), wire.size(), pkgOut);
+}
+
 int LockstepHost::BroadcastStartGame(const StartGamePackage& pkg) {
-    auto out = pkg.Serialize();
-    int reached = 0;
-    for (int fd : peerFds_) {
-        if (fd == TcpTransport::kInvalidFd) continue;
-        if (TcpTransport::SendMessage(fd, out.data(), out.size())) reached++;
-    }
-    for (int fd : watchers_) {
-        if (fd != TcpTransport::kInvalidFd) {
-            TcpTransport::SendMessage(fd, out.data(), out.size());
-        }
-    }
-    return reached;
+    return BroadcastWireToAll(pkg.Serialize(), /*reapWatchers=*/false);
 }
 
 bool SendStartGame(int fd, const StartGamePackage& pkg) {

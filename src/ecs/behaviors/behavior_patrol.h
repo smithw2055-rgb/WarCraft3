@@ -9,8 +9,9 @@ public:
     CBehaviorPatrol();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::PATROL; }
 
-    void SetPoints(float x1, float y1, float x2, float y2);
-    bool IsPropelling() const { return propelling_; }
+    void SetPoints(float x1, float y1, float x2, float y2) override;
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

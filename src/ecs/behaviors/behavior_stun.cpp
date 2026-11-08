@@ -27,3 +27,10 @@ bool CBehaviorStun::Update(CSimulation& simulation) {
     // Stunned unit does nothing
     return false;
 }
+
+std::unique_ptr<CBehavior> CBehavior::CreateStun(float duration) {
+    auto b = std::make_unique<CBehaviorStun>();
+    b->SetDuration(duration);
+    b->SetRemaining(duration);
+    return b;
+}

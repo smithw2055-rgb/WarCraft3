@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "ecs/lockstep.h"
+#include "net/snapshot_resync.h"
 #include "net/turn_batch.h"
 #include "net/turn_manager.h"
 
@@ -41,6 +42,8 @@ public:
     int AcceptClaim(int timeoutMs);
     int PeerCount() const;
     int Turn() const { return manager_.Turn(); }
+    TurnManager& GetTurnManager() { return manager_; }
+    const TurnManager& GetTurnManager() const { return manager_; }
 
     // Spectators (observers, ref uberserver observers): receive-only seats.
     // They never submit, never gate completion, and take no player number.
@@ -50,6 +53,8 @@ public:
     int WatcherCount() const;
     // Catch a (possibly late) spectator up with the full game package.
     bool SendResyncToWatcher(int watcher, const ResyncPackage& pkg);
+    // Phase 26: Catch a spectator up in O(1) via compressed keyframe + tail batches.
+    bool SendFastKeyframeResyncToWatcher(int watcher, const net::FastResyncKeyframePackage& pkg);
 
     // Promote a spectator to a player seat (observer -> player): the seat
     // must be free, or dropped (reclaim via claim). Stale broadcasts
@@ -86,11 +91,15 @@ public:
     // Send a resync package to a live seat (after AcceptClaim). False when
     // the seat has no socket or the send fails.
     bool SendResyncToSeat(int seat, const ResyncPackage& pkg);
+    // Phase 26: Send a compressed keyframe + tail resync package to a live seat.
+    bool SendFastKeyframeResyncToSeat(int seat, const net::FastResyncKeyframePackage& pkg);
 
 private:
+    int BroadcastWireToAll(const std::vector<uint8_t>& wire, bool reapWatchers);
+
     TurnManager manager_;
     int listenFd_ = -1;
-    std::vector<int> peerFds_;   // seat i+1, or kInvalidFd when free/dropped
+    std::vector<int> peerFds_;    // seat i+1, or kInvalidFd when free/dropped
     std::vector<int> peerMisses_; // consecutive receive failures per seat
     std::vector<int> watchers_;   // spectator fds (receive-only, no seats)
 };
@@ -110,6 +119,10 @@ bool RecvSeatClaim(int fd, int& playerOut, int timeoutMs);
 // the rejoiner replays it to the live turn, then normal turns resume.
 bool SendResync(int fd, const ResyncPackage& pkg);
 bool RecvResync(int fd, ResyncPackage& pkgOut, int timeoutMs);
+
+// Phase 26: Fast keyframe + tail resync transfer over TCP socket.
+bool SendFastKeyframeResync(int fd, const net::FastResyncKeyframePackage& pkg);
+bool RecvFastKeyframeResync(int fd, net::FastResyncKeyframePackage& pkgOut, int timeoutMs);
 
 // Game-start handshake after the lobby fills (before turn 0): the host
 // broadcasts seed + map checksum; peers block on RecvStartGame, verify

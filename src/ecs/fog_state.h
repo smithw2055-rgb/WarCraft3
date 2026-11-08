@@ -49,6 +49,15 @@ struct CFogSightSource {
     int player = -1;
     float x = 0, y = 0, radius = 0;
     bool isFlying = false;
+    // Phase 25: 32-bit player bitmask allowing a single sight source to serve
+    // the owner + all shared-vision allies without duplicating CFogSightSource structs.
+    uint32_t playerMask = 0;
+
+    bool MatchesPlayer(int p) const {
+        if (p < 0 || p >= 32) return false;
+        if (playerMask != 0) return (playerMask & (1u << p)) != 0;
+        return player == p;
+    }
 };
 
 // ============================================================

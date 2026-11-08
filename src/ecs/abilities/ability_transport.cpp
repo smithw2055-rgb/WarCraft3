@@ -1,7 +1,6 @@
 #include "ability_transport.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
-#include "ecs/behaviors/behavior_board_transport.h"
 #include "data/abilitydata.h"
 #include <cmath>
 #include <iostream>
@@ -49,9 +48,7 @@ CBehavior* CAbilityLoad::Begin(CSimulation& game, CUnit* caster, int orderId, CW
 
     // Out of range (or full): walk into load range first. The behavior
     // re-checks capacity on arrival.
-    auto* board = new CBehaviorBoardTransport(loadRange_, cargoCapacity_);
-    board->SetTarget(target);
-    return board;
+    return CBehavior::CreateBoardTransport(loadRange_, cargoCapacity_, target);
 }
 
 // ===== CAbilityUnload =====
@@ -79,5 +76,5 @@ CBehavior* CAbilityUnload::Begin(CSimulation& game, CUnit* caster, int orderId, 
             if (duration <= 0) duration = 0.5f;
         }
     }
-    return new CBehaviorDrop(x, y, duration);
+    return CBehavior::CreateDropCargo(x, y, duration);
 }

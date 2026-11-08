@@ -3,7 +3,6 @@
 #include "ecs/player.h"
 #include "ecs/csimulation.h"
 #include "ecs/buffs.h"
-#include "ecs/behaviors/behavior_spell.h"
 #include "ecs/orders/order.h"
 #include "data/abilitydata.h"
 #include <iostream>
@@ -72,46 +71,20 @@ bool CAbilitySpellBase::CheckCanTargetNoTarget(CSimulation& game, CUnit* unit, i
 CBehavior* CAbilitySpellBase::Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) {
     (void)game; (void)orderId;
     if (!target) return nullptr;
-
-    auto* behavior = new CBehaviorSpell();
-    behavior->SetUnit(caster);
-    behavior->SetSpellAbility(this);
-    behavior->SetTarget(target);
-    behavior->SetCastRange(castRange_);
-    behavior->SetCastPoint(castPoint_);
-    if (auto* unitType = caster->GetUnitType()) {
-        behavior->SetBackswingDuration(std::max(0.0f, unitType->GetCastBackswingPoint()));
-    }
-    return behavior;
+    const float backswing = (caster && caster->GetUnitType()) ? std::max(0.0f, caster->GetUnitType()->GetCastBackswingPoint()) : 0.5f;
+    return CBehavior::CreateSpellCast(caster, this, target, false, 0.0f, 0.0f, castRange_, castPoint_, backswing);
 }
 
 CBehavior* CAbilitySpellBase::Begin(CSimulation& game, CUnit* caster, int orderId, float x, float y) {
     (void)game; (void)orderId;
-
-    auto* behavior = new CBehaviorSpell();
-    behavior->SetUnit(caster);
-    behavior->SetSpellAbility(this);
-    behavior->SetTargetPoint(x, y);
-    behavior->SetCastRange(castRange_);
-    behavior->SetCastPoint(castPoint_);
-    if (auto* unitType = caster->GetUnitType()) {
-        behavior->SetBackswingDuration(std::max(0.0f, unitType->GetCastBackswingPoint()));
-    }
-    return behavior;
+    const float backswing = (caster && caster->GetUnitType()) ? std::max(0.0f, caster->GetUnitType()->GetCastBackswingPoint()) : 0.5f;
+    return CBehavior::CreateSpellCast(caster, this, nullptr, true, x, y, castRange_, castPoint_, backswing);
 }
 
 CBehavior* CAbilitySpellBase::BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) {
     (void)game; (void)orderId;
-
-    auto* behavior = new CBehaviorSpell();
-    behavior->SetUnit(caster);
-    behavior->SetSpellAbility(this);
-    behavior->SetCastRange(0);
-    behavior->SetCastPoint(castPoint_);
-    if (auto* unitType = caster->GetUnitType()) {
-        behavior->SetBackswingDuration(std::max(0.0f, unitType->GetCastBackswingPoint()));
-    }
-    return behavior;
+    const float backswing = (caster && caster->GetUnitType()) ? std::max(0.0f, caster->GetUnitType()->GetCastBackswingPoint()) : 0.5f;
+    return CBehavior::CreateSpellCast(caster, this, nullptr, false, 0.0f, 0.0f, 0.0f, castPoint_, backswing);
 }
 
 void CAbilitySpellBase::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {

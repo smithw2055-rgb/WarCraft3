@@ -1,6 +1,6 @@
 #include "ecs/abilities/ability_builder.h"
 #include "ecs/ability.h"
-#include "ecs/behaviors/behavior_channel.h"
+#include "ecs/behaviors/behavior.h"
 #include "ecs/combat/projectile.h"
 #include "ecs/csimulation.h"
 #include "ecs/fog_state.h"
@@ -1035,7 +1035,7 @@ void ABActionBeginChannel::Run(CSimulation& game, CUnit* caster, CWidget* unitTa
     if (spent_ || !caster || caster->IsDead() || durationTicks_ < 0) return;
     spent_ = true;
     const int targetHandle = unitTarget ? unitTarget->GetHandleId() : -1;
-    auto behavior = std::make_unique<CBehaviorChannel>(
+    auto behavior = CreateChannelBehavior(
         std::move(tick_), std::move(finish_), durationTicks_,
         targetHandle, hasPoint, x, y);
     caster->SetCurrentBehavior(std::move(behavior));

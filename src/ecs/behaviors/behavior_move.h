@@ -9,15 +9,17 @@ public:
     CBehaviorMove();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::MOVE; }
 
-    void SetTarget(float x, float y);
-    void SetTargetWidget(CWidget* target);
-    bool IsPropelling() const { return propelling_; }
+    void SetTarget(float x, float y) override;
+    void SetTarget(CWidget* target) override { SetTargetWidget(target); }
+    void SetTargetWidget(CWidget* target) override;
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
 
     // Phase B2: Optional FlowField + RVO Crowd Steering mode for squad navigation
-    void SetUseFlowFieldSteering(bool enabled) { useFlowFieldSteering_ = enabled; }
-    bool IsUsingFlowFieldSteering() const { return useFlowFieldSteering_; }
-    uint64_t GetFlowFieldSteeringSteps() const { return flowFieldSteeringSteps_; }
-    uint64_t GetRvoSidestepAdjustments() const { return rvoSidestepAdjustments_; }
+    void SetUseFlowFieldSteering(bool enabled) override { useFlowFieldSteering_ = enabled; }
+    bool IsUsingFlowFieldSteering() const override { return useFlowFieldSteering_; }
+    uint64_t GetFlowFieldSteeringSteps() const override { return flowFieldSteeringSteps_; }
+    uint64_t GetRvoSidestepAdjustments() const override { return rvoSidestepAdjustments_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

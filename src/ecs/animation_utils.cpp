@@ -258,8 +258,8 @@ bool PlaySpellVisualForUnit(CUnit* unit,
     if (!unit || !viewer) {
         return false;
     }
-    const auto* spellBehavior = GetSpellBehavior(unit);
-    if (!spellBehavior) {
+    const CBehavior* spellBehavior = unit->GetCurrentBehavior();
+    if (!spellBehavior || spellBehavior->GetCategory() != CBehaviorCategory::SPELL) {
         return false;
     }
     const float duration = spellBehavior->GetSpellAnimationDuration();
@@ -292,35 +292,10 @@ bool ComputeUnitVisualIsMoving(CUnit* unit,
     if (!unit) {
         return false;
     }
-    if (const auto* moveBehavior = GetMoveBehavior(unit)) {
-        return moveBehavior->IsPropelling();
-    }
-    if (const auto* followBehavior = GetFollowBehavior(unit)) {
-        return followBehavior->IsPropelling();
-    }
-    if (const auto* patrolBehavior = GetPatrolBehavior(unit)) {
-        return patrolBehavior->IsPropelling();
-    }
-    if (const auto* attackMoveBehavior = GetAttackMoveBehavior(unit)) {
-        return attackMoveBehavior->IsPropelling();
-    }
-    if (const auto* harvestBehavior = GetHarvestBehavior(unit)) {
-        return harvestBehavior->IsPropelling();
-    }
-    if (const auto* returnBehavior = GetReturnResourcesBehavior(unit)) {
-        return returnBehavior->IsPropelling();
-    }
-    if (const auto* buildBehavior = GetBuildBehavior(unit)) {
-        return buildBehavior->IsPropelling();
-    }
-    if (const auto* repairBehavior = GetRepairBehavior(unit)) {
-        return repairBehavior->IsPropelling();
-    }
-    if (const auto* spellBehavior = GetSpellBehavior(unit)) {
-        return spellBehavior->IsPropelling();
-    }
-    if (const auto* attackBehavior = GetAttackBehavior(unit)) {
-        return attackBehavior->IsPropelling();
+    if (const CBehavior* beh = unit->GetCurrentBehavior()) {
+        if (beh->TracksPropellingState()) {
+            return beh->IsPropelling();
+        }
     }
 
     const int handleId = unit->GetHandleId();

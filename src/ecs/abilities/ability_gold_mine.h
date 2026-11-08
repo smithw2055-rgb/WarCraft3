@@ -2,7 +2,7 @@
 #include "ecs/ability.h"
 #include <vector>
 
-class CBehaviorHarvest;
+class CBehavior;
 
 // CAbilityGoldMine - gold mine ability
 // Tracks gold amount and active miners
@@ -25,8 +25,8 @@ public:
     int GetActiveMinerCount() const { return static_cast<int>(activeMiners_.size()); }
     bool IsActivelyWorking() const override { return GetActiveMinerCount() > 0; }
     bool CanAddMiner() const override { return GetActiveMinerCount() < miningCapacity_; }
-    void AddMiner(CBehaviorHarvest* miner) override;
-    void RemoveMiner(CBehaviorHarvest* miner) override;
+    void AddMiner(CBehavior* miner) override;
+    void RemoveMiner(CBehavior* miner) override;
 
     // Mining duration (seconds)
     float GetMiningDuration() const override { return miningDuration_; }
@@ -41,7 +41,7 @@ private:
     int miningCapacity_ = 5;
     float miningDuration_ = 5.0f; // seconds per mining trip
     int goldPerTrip_ = 10;
-    std::vector<CBehaviorHarvest*> activeMiners_;
+    std::vector<CBehavior*> activeMiners_;
 };
 
 // Overlayed gold mine (Agl2). Gold and depletion live on the hidden parent
@@ -65,8 +65,8 @@ public:
     int GetActiveMinerCount() const { return static_cast<int>(activeMiners_.size()); }
     bool IsActivelyWorking() const override { return GetActiveMinerCount() > 0; }
     bool CanAddMiner() const override { return GetActiveMinerCount() < miningCapacity_; }
-    void AddMiner(CBehaviorHarvest* miner) override;
-    void RemoveMiner(CBehaviorHarvest* miner) override;
+    void AddMiner(CBehavior* miner) override;
+    void RemoveMiner(CBehavior* miner) override;
     float GetMiningDuration() const override { return miningDuration_; }
     void SetMiningDuration(float v) { miningDuration_ = v; }
 
@@ -76,7 +76,7 @@ private:
     CAbilityGoldMine* parent_ = nullptr;
     int miningCapacity_ = 5;
     float miningDuration_ = 5.0f;
-    std::vector<CBehaviorHarvest*> activeMiners_;
+    std::vector<CBehavior*> activeMiners_;
 };
 
 // Harvest face of a mine: the overlay when present, otherwise the base mine.
@@ -85,8 +85,8 @@ struct CMineAccess {
     bool ok() const { return mine != nullptr; }
     int Gold() const;
     bool CanAdd() const;
-    void Add(CBehaviorHarvest* miner);
-    void Remove(CBehaviorHarvest* miner);
+    void Add(CBehavior* miner);
+    void Remove(CBehavior* miner);
     float Duration() const;
 };
 

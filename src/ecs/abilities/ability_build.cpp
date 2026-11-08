@@ -1,7 +1,6 @@
 #include "ability_build.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
-#include "ecs/behaviors/behavior_build.h"
 #include "ecs/player.h"
 #include "data/unitdata.h"
 #include "map/wpm.h"
@@ -89,10 +88,7 @@ CBehavior* CAbilityBuild::Begin(CSimulation& game, CUnit* caster, int orderId, f
     }
 
     // Create build behavior
-    auto* behavior = new CBehaviorBuild();
-    behavior->SetUnit(caster);
-    behavior->SetBuildTarget(x, y, buildingTypeId, race_);
-    return behavior;
+    return CBehavior::CreateBuild(caster, x, y, buildingTypeId, static_cast<int>(race_));
 }
 
 CBehavior* CAbilityBuild::BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) {

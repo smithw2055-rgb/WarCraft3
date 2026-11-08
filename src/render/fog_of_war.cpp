@@ -7,31 +7,33 @@
 FogOfWar::FogOfWar() = default;
 
 FogOfWar::~FogOfWar() {
-    delete[] data_;
-    delete[] targetData_;
+    ReleaseGpuResources();
+}
+
+void FogOfWar::ReleaseGpuResources() {
     if (!Renderer::IsActive()) return;
-    if (texture_.id && sg_query_image_state(texture_) == SG_RESOURCESTATE_VALID)
+    if (texture_.id && sg_query_image_state(texture_) == SG_RESOURCESTATE_VALID) {
         sg_destroy_image(texture_);
-    if (sampler_.id && sg_query_sampler_state(sampler_) == SG_RESOURCESTATE_VALID)
+    }
+    if (sampler_.id && sg_query_sampler_state(sampler_) == SG_RESOURCESTATE_VALID) {
         sg_destroy_sampler(sampler_);
+    }
+    texture_ = {0};
+    sampler_ = {0};
 }
 
 void FogOfWar::Init(int width, int height) {
-    delete[] data_;
-    delete[] targetData_;
     width_ = std::max(1, width);
     height_ = std::max(1, height);
     tilesX_ = (width_ + kTileSize - 1) / kTileSize;
     tilesY_ = (height_ + kTileSize - 1) / kTileSize;
-    data_ = new unsigned char[(size_t)width_ * height_]();
-    targetData_ = new unsigned char[(size_t)width_ * height_]();
-    dirtyTiles_.assign((size_t)tilesX_ * tilesY_, 1);
+    const size_t total = static_cast<size_t>(width_) * height_;
+    data_.assign(total, 0);
+    targetData_.assign(total, 0);
+    dirtyTiles_.assign(static_cast<size_t>(tilesX_) * tilesY_, 1);
 
     if (!Renderer::IsActive()) return;
-    if (texture_.id && sg_query_image_state(texture_) == SG_RESOURCESTATE_VALID)
-        sg_destroy_image(texture_);
-    if (sampler_.id && sg_query_sampler_state(sampler_) == SG_RESOURCESTATE_VALID)
-        sg_destroy_sampler(sampler_);
+    ReleaseGpuResources();
 
     sg_image_desc imgDesc = {};
     imgDesc.type = SG_IMAGETYPE_2D;
@@ -54,20 +56,20 @@ void FogOfWar::Init(int width, int height) {
 }
 
 void FogOfWar::SetData(const unsigned char* data) {
-    if (!data || !data_ || !targetData_) return;
-    const size_t total = (size_t)width_ * height_;
-    std::memcpy(data_, data, total);
-    std::memcpy(targetData_, data, total);
+    if (!data || data_.empty() || targetData_.empty()) return;
+    const size_t total = static_cast<size_t>(width_) * height_;
+    std::memcpy(data_.data(), data, total);
+    std::memcpy(targetData_.data(), data, total);
     std::fill(dirtyTiles_.begin(), dirtyTiles_.end(), 1);
 }
 
 void FogOfWar::SetTargetData(const unsigned char* targetData) {
-    if (!targetData || !targetData_) return;
-    std::memcpy(targetData_, targetData, (size_t)width_ * height_);
+    if (!targetData || targetData_.empty()) return;
+    std::memcpy(targetData_.data(), targetData, static_cast<size_t>(width_) * height_);
 }
 
 int FogOfWar::StepSmoothTransition(float dt, float speedPerSec) {
-    if (!data_ || !targetData_ || dt <= 0.0f || speedPerSec <= 0.0f) return 0;
+    if (data_.empty() || targetData_.empty() || dt <= 0.0f || speedPerSec <= 0.0f) return 0;
     const int maxStep = std::max(1, (int)std::lround(dt * speedPerSec));
     int modifiedTexels = 0;
 
@@ -80,13 +82,9 @@ int FogOfWar::StepSmoothTransition(float dt, float speedPerSec) {
             const int tgt = (int)targetData_[idx];
             if (cur == tgt) continue;
 
-            int nextVal = cur;
-            if (cur < tgt) {
-                nextVal = std::min(tgt, cur + maxStep);
-            } else {
-                nextVal = std::max(tgt, cur - maxStep);
-            }
-            data_[idx] = static_cast<unsigned char>(nextVal);
+            const int nextVal = (cur < tgt) ? std::min(tgt, cur + maxStep)
+                                            : std::max(tgt, cur - maxStep);
+            data_[idx] = static_cast<uint8_t>(nextVal);
             dirtyTiles_[(size_t)ty * tilesX_ + (col / kTileSize)] = 1;
             ++modifiedTexels;
         }
@@ -107,10 +105,10 @@ void FogOfWar::ClearDirtyTiles() {
 }
 
 void FogOfWar::ReloadToGPU() {
-    if (!Renderer::IsActive() || !texture_.id || !data_) return;
+    if (!Renderer::IsActive() || !texture_.id || data_.empty()) return;
     sg_image_data imgData = {};
-    imgData.mip_levels[0].ptr = data_;
-    imgData.mip_levels[0].size = (size_t)(width_ * height_);
+    imgData.mip_levels[0].ptr = data_.data();
+    imgData.mip_levels[0].size = static_cast<size_t>(width_) * height_;
     sg_update_image(texture_, &imgData);
     ClearDirtyTiles();
 }

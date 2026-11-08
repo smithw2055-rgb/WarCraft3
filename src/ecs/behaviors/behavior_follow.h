@@ -8,8 +8,11 @@ public:
     CBehaviorFollow();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::FOLLOW; }
 
-    void SetTarget(CWidget* target, float followRange = 128.0f);
-    bool IsPropelling() const { return propelling_; }
+    void SetTarget(CWidget* target) override { SetTarget(target, 128.0f); }
+    void SetTarget(CWidget* target, float followRange) override;
+    CWidget* GetTarget() const override { return target_; }
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

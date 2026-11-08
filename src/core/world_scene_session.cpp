@@ -5,6 +5,21 @@
 
 namespace core {
 
+namespace {
+
+bool ReadMountedOrSingleArchiveFile(MpqManager& mpq,
+                                    const std::string& mapPath,
+                                    const char* internalFilename,
+                                    std::vector<uint8_t>& outBytes) {
+    outBytes.clear();
+    if (mpq.ReadFile(internalFilename, outBytes) && !outBytes.empty()) {
+        return true;
+    }
+    return MpqManager::ReadSingleArchiveFile(mapPath, internalFilename, outBytes) && !outBytes.empty();
+}
+
+} // namespace
+
 void WorldSceneSession::TeardownCurrentSession(MpqManager& mpq,
                                                CSimulation& sim,
                                                SceneManager& scene,
@@ -49,10 +64,11 @@ bool WorldSceneSession::LoadMap(MpqManager& mpq,
     stats_.sessionGeneration++;
     stats_.mapsLoaded++;
 
-    // 1. Load W3E terrain & build TerrainChunkGrid
-    std::vector<uint8_t> w3eBytes;
-    if (mpq.ReadFile("war3map.w3e", w3eBytes) && !w3eBytes.empty()) {
-        if (W3ELoad(w3eBytes.data(), w3eBytes.size(), w3e_)) {
+    std::vector<uint8_t> fileBuf;
+
+    // 1. Load W3E terrain & build TerrainChunkGrid from the already-mounted MPQ
+    if (ReadMountedOrSingleArchiveFile(mpq, mapPath, "war3map.w3e", fileBuf)) {
+        if (W3ELoad(fileBuf.data(), fileBuf.size(), w3e_)) {
             terrainChunks_.BuildFromW3E(w3e_);
             stats_.terrainChunksBuilt = terrainChunks_.GetChunkCount();
             sim.SetTerrainMap(&w3e_);
@@ -60,8 +76,10 @@ bool WorldSceneSession::LoadMap(MpqManager& mpq,
         }
     }
 
-    // 2. Load W3I map info & ensure players exist
-    if (W3ILoadFromMpq(mapPath, w3i_)) {
+    // 2. Load W3I map info & ensure players exist without re-opening the MPQ archive
+    const bool hasW3i = ReadMountedOrSingleArchiveFile(mpq, mapPath, "war3map.w3i", fileBuf) &&
+                        W3ILoad(fileBuf.data(), fileBuf.size(), w3i_);
+    if (hasW3i) {
         if (sim.GetPlayerCount() == 0) {
             for (int i = 0; i < 12; ++i) {
                 sim.AddPlayer(std::make_unique<CPlayer>(i, "Player" + std::to_string(i), CMapControl::USER));
@@ -70,18 +88,21 @@ bool WorldSceneSession::LoadMap(MpqManager& mpq,
         ApplyW3iTechtreeAvailability(sim, w3i_);
     }
 
-    // 3. Load WPM pathing grid
-    if (WpmLoadFromMpq(mapPath, wpm_)) {
+    // 3. Load WPM pathing grid without re-opening the MPQ archive
+    if (ReadMountedOrSingleArchiveFile(mpq, mapPath, "war3map.wpm", fileBuf) &&
+        WpmLoad(fileBuf.data(), fileBuf.size(), wpm_)) {
         sim.SetPathingMap(&wpm_, w3e_.offsetX, w3e_.offsetY);
     }
 
     // 4. Load UnitsDoo & DoodadsDoo and populate SceneManager StaticSpatialChunkGrid
-    if (UnitsDooLoadFromMpq(mapPath, unitsDoo_, nullptr)) {
+    if (ReadMountedOrSingleArchiveFile(mpq, mapPath, "war3mapUnits.doo", fileBuf) &&
+        UnitsDooLoad(fileBuf.data(), fileBuf.size(), unitsDoo_, hasW3i ? &w3i_ : nullptr)) {
         stats_.placedUnitsRead = unitsDoo_.units.size();
     }
 
     stats_.placedDoodadsRegistered = 0;
-    if (W3dLoadFromMpq(mapPath, doodadsDoo_)) {
+    if (ReadMountedOrSingleArchiveFile(mpq, mapPath, "war3map.doo", fileBuf) &&
+        W3dLoad(fileBuf.data(), fileBuf.size(), doodadsDoo_)) {
         for (const DoodadData& d : doodadsDoo_.doodads) {
             const float pos[3] = {d.pos[0], d.pos[2], d.pos[1]};
             const float scale[3] = {d.scale[0], d.scale[1], d.scale[2]};

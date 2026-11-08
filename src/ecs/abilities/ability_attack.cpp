@@ -2,9 +2,6 @@
 #include "ecs/destructable.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
-#include "ecs/behaviors/behavior_attack.h"
-#include "ecs/behaviors/behavior_attack_move.h"
-#include "ecs/behaviors/behavior_move.h"
 #include <cmath>
 
 CAbilityAttack::CAbilityAttack(int handleId)
@@ -16,11 +13,11 @@ CAbilityAttack::CAbilityAttack(int handleId)
 void CAbilityAttack::OnAdd(CSimulation& game, CUnit* unit) {
     (void)game;
     // Create attack behaviors and store on unit
-    auto attackBehavior = std::make_unique<CBehaviorAttack>();
+    auto attackBehavior = CBehavior::CreateAttack();
     attackBehavior->SetUnit(unit);
     unit->SetAttackBehavior(std::move(attackBehavior));
 
-    auto attackMoveBehavior = std::make_unique<CBehaviorAttackMove>();
+    auto attackMoveBehavior = CBehavior::CreateAttackMove();
     attackMoveBehavior->SetUnit(unit);
     unit->SetAttackMoveBehavior(std::move(attackMoveBehavior));
 }

@@ -143,6 +143,14 @@ public:
     // logged with the current turn, then forwarded. Returns false when
     // the unit handle does not resolve.
     bool IssueUnitOrder(int unitHandle, std::unique_ptr<COrder> order);
+    bool IssuePlayerCommand(int playerIndex,
+                            int commandId,
+                            int targetKind = 0,
+                            int targetHandle = -1,
+                            float x = 0.0f,
+                            float y = 0.0f,
+                            float z = 0.0f);
+    bool ExecuteSimCommand(const SimCommand& cmd);
     const std::vector<SimCommand>& LoggedCommands() const { return commandLog_; }
     void ClearCommandLog() { commandLog_.clear(); }
 

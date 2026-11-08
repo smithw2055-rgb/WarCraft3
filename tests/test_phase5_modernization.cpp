@@ -1,3 +1,6 @@
+#include "net/lockstep_host.h"
+#include "net/lobby_state.h"
+#include "net/tcp_transport.h"
 #include "engine/dynamic_module_loader.h"
 #include "game/war3/war3_game_module.h"
 #include "engine/engine_kernel.h"
@@ -7157,7 +7160,7 @@ bool TestPhase22StageAAA1War3GameModuleV22DynamicBuffFactoryAndJassBuffAttachmen
     sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
 
     auto war3Mod = std::make_shared<war3::War3GameModule>();
-    TEST_ASSERT(war3Mod->GetModuleVersion() == 22u);
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 22u);
     sim.SetSimulationModule(war3Mod);
 
     // 1. Register a declarative DataDrivenBuffSpec ("BCs1": +6 armor, +20 flat damage for 15s)
@@ -7260,7 +7263,7 @@ bool TestPhase22StageAAA2DynamicPluginSOV22AndCloudRetailMapsEndToEndSuite() {
         {
             auto dynSimMod = loader.CreateSimulationModule(pluginKey);
             TEST_ASSERT(dynSimMod != nullptr);
-            TEST_ASSERT(dynSimMod->GetModuleVersion() == 22u);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 22u);
         }
         TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
     }
@@ -7277,7 +7280,958 @@ bool TestPhase22StageAAA2DynamicPluginSOV22AndCloudRetailMapsEndToEndSuite() {
         std::fclose(mf);
 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
-        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 22u);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 22u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+// ============================================================================
+#include "ecs/behaviors/behavior_move.h"
+#include "ecs/behaviors/behavior_root.h"
+// Phase 23 Modernization Tests: Engine-Level Pluggable CProjectile & CUnitBehavior
+// ============================================================================
+
+bool TestPhase23StageBBB1CompactCProjectileLayoutMakeAttackProjectileAndModuleHooks() {
+    // 1. Verify compact CProjectile layout (1-byte bitfield state flags save 16 bytes vs 6 bools on 64-bit targets)
+    TEST_ASSERT(sizeof(CProjectile) <= sizeof(std::string) + sizeof(std::function<void(CSimulation&, CUnit*, CWidget*)>) + 104);
+
+    CProjectile p;
+    TEST_ASSERT(p.isAttack && p.isRanged && !p.groundTarget && !p.checkEffectReaction && !p.pierceReflected && !p.customImpactOnly);
+    TEST_ASSERT(p.projectileTypeId.value == 0);
+
+    // 2. Verify CProjectile::MakeAttackProjectile unified factory for homing, bounce, splash, line, and artillery
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+
+    auto* shooter = sim.AdoptUnit(std::make_unique<CUnit>(101, MakePhase5UnitType(War3ID("hrif"), 500, 0, false), 0, War3ID("hrif"), 0.0f, 0.0f, 0.0f));
+    auto* target1 = sim.AdoptUnit(std::make_unique<CUnit>(102, MakePhase5UnitType(War3ID("ogru"), 800, 0, false), 1, War3ID("ogru"), 200.0f, 0.0f, 0.0f));
+    auto* target2 = sim.AdoptUnit(std::make_unique<CUnit>(103, MakePhase5UnitType(War3ID("ogru"), 800, 0, false), 1, War3ID("ogru"), 320.0f, 0.0f, 0.0f));
+    sim.Update();
+
+    CUnitAttack atk;
+    atk.weaponType = CWeaponType::MISSILE_BOUNCE;
+    atk.attackType = CAttackType::PIERCE;
+    atk.projectileSpeed = 1000.0f;
+    atk.areaHalf = 300.0f;
+    atk.targetCount = 1;
+    atk.damageLossFactor = 0.5f;
+
+    CProjectile bounceShot = CProjectile::MakeAttackProjectile(shooter, atk, 40.0f, "Rifle", target1, 200.0f, 0.0f, false);
+    TEST_ASSERT(!bounceShot.groundTarget);
+    TEST_ASSERT(bounceShot.targetHandleId == target1->GetHandleId());
+    TEST_ASSERT(bounceShot.bouncesLeft == 1);
+    TEST_NEAR(bounceShot.bounceLossFactor, 0.5f, 1e-4f);
+
+    // 3. Verify Dragon Scale (BIdd) pierce projectile reflection via ISimulationModule::OnProjectilePreImpact
+    target1->AddBuff(std::make_unique<CBuffDamageMod>(War3ID("BIdd"), 1.0f, 1.0f, 0.5f, 0.0f), sim);
+    CProjectile reflectShot = CProjectile::MakeAttackProjectile(shooter, atk, 40.0f, "", target1, 200.0f, 0.0f, false);
+    reflectShot.bouncesLeft = 0;
+    sim.SpawnProjectile(std::move(reflectShot));
+
+    const float shooterLifeBefore = shooter->GetLife();
+    const float target1LifeBefore = target1->GetLife();
+    for (int i = 0; i < 40 && !sim.GetProjectiles().empty(); ++i) {
+        sim.Update();
+    }
+    TEST_ASSERT(sim.GetProjectiles().empty());
+    // Target1 reflected the pierce shot back to shooter!
+    TEST_NEAR(target1->GetLife(), target1LifeBefore, 1e-3f);
+    TEST_ASSERT(shooter->GetLife() < shooterLifeBefore);
+
+    return true;
+}
+
+bool TestPhase23StageBBB2CompleteCBehaviorPolymorphicContractAndZeroDynamicCast() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    auto* worker = sim.AdoptUnit(std::make_unique<CUnit>(201, MakePhase5UnitType(War3ID("hpea"), 250, 0, false), 0, War3ID("hpea"), 0.0f, 0.0f, 0.0f));
+    sim.Update();
+
+    // 1. Verify polymorphic CBehavior slot attachment and FlowField steering queries via CBehavior*
+    auto moveBeh = std::make_unique<CBehaviorMove>();
+    moveBeh->SetUseFlowFieldSteering(true);
+    worker->SetMoveBehavior(std::move(moveBeh));
+    TEST_ASSERT(worker->GetMoveBehavior() != nullptr);
+    TEST_ASSERT(worker->GetMoveBehavior()->IsUsingFlowFieldSteering());
+    TEST_ASSERT(worker->GetMoveBehavior()->TracksPropellingState());
+
+    // 2. Verify CBehaviorUproot inherits CBehaviorRoot and supports virtual duration/remaining
+    auto uprootBeh = std::make_unique<CBehaviorUproot>(0.4f);
+    TEST_ASSERT(uprootBeh->GetCategory() == CBehaviorCategory::ROOT);
+    TEST_NEAR(uprootBeh->GetRemaining(), 0.4f, 1e-4f);
+    uprootBeh->SetRemaining(0.2f);
+    TEST_NEAR(uprootBeh->GetRemaining(), 0.2f, 1e-4f);
+
+    // 3. Verify CBehaviorStun refresh through CBuffStun::OnRefresh without dynamic_cast
+    worker->AddBuff(std::make_unique<CBuffStun>(1.5f), sim);
+    TEST_ASSERT(worker->GetCurrentBehavior() != nullptr);
+    TEST_ASSERT(worker->GetCurrentBehavior()->GetCategory() == CBehaviorCategory::STUN);
+    TEST_NEAR(worker->GetCurrentBehavior()->GetRemaining(), 1.5f, 1e-4f);
+    worker->AddBuff(std::make_unique<CBuffStun>(3.0f), sim);
+    TEST_NEAR(worker->GetCurrentBehavior()->GetRemaining(), 3.0f, 1e-4f);
+
+    return true;
+}
+
+bool TestPhase23StageCCC1War3GameModuleV23CustomProjectilesAndCustomBehaviors() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 23u);
+    sim.SetSimulationModule(war3Mod);
+
+    auto* caster = sim.AdoptUnit(std::make_unique<CUnit>(301, MakePhase5UnitType(War3ID("Hamg"), 700, 300, false), 0, War3ID("Hamg"), 0.0f, 0.0f, 0.0f));
+    auto* enemy1 = sim.AdoptUnit(std::make_unique<CUnit>(302, MakePhase5UnitType(War3ID("ogru"), 600, 0, false), 1, War3ID("ogru"), 180.0f, 0.0f, 0.0f));
+    auto* enemy2 = sim.AdoptUnit(std::make_unique<CUnit>(303, MakePhase5UnitType(War3ID("ogru"), 600, 0, false), 1, War3ID("ogru"), 300.0f, 0.0f, 0.0f));
+    sim.Update();
+
+    // 1. Register a custom buff to be applied on projectile impact
+    DataDrivenBuffSpec impactBuff;
+    impactBuff.id = War3ID("BCsP");
+    impactBuff.duration = 5.0f;
+    impactBuff.isPositive = false;
+    impactBuff.armorDelta = -5.0f;
+    war3Mod->RegisterCustomBuffSpec(impactBuff);
+
+    // 2. Register a declarative CustomProjectileSpec with bounce + impact buff + callback
+    int impactCallbacks = 0;
+    war3::War3GameModule::CustomProjectileSpec projSpec;
+    projSpec.code = War3ID("PCs1");
+    projSpec.speed = 1200.0f;
+    projSpec.damage = 60.0f;
+    projSpec.attackType = CAttackType::SPELLS;
+    projSpec.damageType = CDamageType::MAGIC;
+    projSpec.bounces = 1;
+    projSpec.bounceRange = 350.0f;
+    projSpec.bounceLossFactor = 0.5f;
+    projSpec.impactBuffCode = War3ID("BCsP");
+    projSpec.impactBuffDuration = 5.0f;
+    projSpec.onImpact = [&](CSimulation&, CUnit*, CWidget*, float, float) {
+        ++impactCallbacks;
+    };
+    war3Mod->RegisterCustomProjectileSpec(projSpec);
+    TEST_ASSERT(war3Mod->HasCustomProjectile(War3ID("PCs1")));
+
+    const float e1LifeBefore = enemy1->GetLife();
+    const float e2LifeBefore = enemy2->GetLife();
+    TEST_ASSERT(war3Mod->SpawnCustomProjectile(sim, War3ID("PCs1").value, caster, enemy1));
+    TEST_ASSERT(war3Mod->GetModuleStats().customProjectilesSpawned == 1u);
+
+    for (int i = 0; i < 30 && !sim.GetProjectiles().empty(); ++i) {
+        sim.Update();
+    }
+    TEST_ASSERT(sim.GetProjectiles().empty());
+    TEST_ASSERT(impactCallbacks == 2); // hit enemy1 and bounced to enemy2!
+    TEST_ASSERT(enemy1->GetLife() < e1LifeBefore);
+    TEST_ASSERT(enemy2->GetLife() < e2LifeBefore);
+    TEST_ASSERT(enemy1->HasBuff(War3ID("BCsP")));
+    TEST_ASSERT(enemy2->HasBuff(War3ID("BCsP")));
+
+    // 3. Register a declarative CustomBehaviorSpec and dispatch via CUnit::IssueOrder
+    constexpr int kCustomSurveyOrderId = 852991;
+    int beginCount = 0;
+    int tickCount = 0;
+    int endCount = 0;
+
+    war3::War3GameModule::CustomBehaviorSpec behSpec;
+    behSpec.code = War3ID("BhSv");
+    behSpec.orderId = kCustomSurveyOrderId;
+    behSpec.category = CBehaviorCategory::BUILD;
+    behSpec.range = 80.0f;
+    behSpec.duration = 0.5f;
+    behSpec.tickInterval = 0.15f;
+    behSpec.onBegin = [&](CSimulation&, CUnit*, CWidget*, float, float) { ++beginCount; };
+    behSpec.onTick = [&](CSimulation&, CUnit*, CWidget*, float, float, float) -> bool {
+        ++tickCount;
+        return false;
+    };
+    behSpec.onEnd = [&](CSimulation&, CUnit*) { ++endCount; };
+    war3Mod->RegisterCustomBehaviorSpec(behSpec);
+    TEST_ASSERT(war3Mod->HasCustomBehavior(kCustomSurveyOrderId));
+
+    caster->IssueOrder(std::make_unique<COrderTargetPoint>(kCustomSurveyOrderId, 160.0f, 0.0f));
+    sim.Update();
+    TEST_ASSERT(caster->GetCurrentBehavior() != nullptr);
+    TEST_ASSERT(caster->GetCurrentBehavior()->GetCustomBehaviorCode() == War3ID("BhSv"));
+    TEST_ASSERT(caster->GetCurrentBehavior()->IsMovingToWorkSite());
+
+    // Step until caster walks to (160, 0), executes onBegin + ticks, and finishes
+    for (int i = 0; i < 60 && caster->GetCurrentBehavior() != nullptr; ++i) {
+        sim.Update();
+    }
+    TEST_ASSERT(beginCount == 1);
+    TEST_ASSERT(tickCount >= 2);
+    TEST_ASSERT(endCount == 1);
+    TEST_ASSERT(war3Mod->GetModuleStats().customBehaviorsDispatched == 1u);
+
+    TEST_ASSERT(war3Mod->UnregisterCustomProjectile(War3ID("PCs1")));
+    TEST_ASSERT(war3Mod->UnregisterCustomBehavior(kCustomSurveyOrderId));
+    TEST_ASSERT(war3Mod->UnregisterCustomBuff(War3ID("BCsP")));
+    return true;
+}
+
+bool TestPhase23StageCCC2DynamicPluginSOV23AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath23 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths23[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths23) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath23 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath23.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase23PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath23));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 23u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(8)GardenOfWar.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(8)AzerothGrandPrix.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 23u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+// ============================================================================
+// Phase 24 Modernization Tests: Engine-Level Behavior Factories, Compact
+// CItem/CDestructable Bitfields, and War3GameModule v24 Resource Dropoff Rules
+// ============================================================================
+
+bool TestPhase24StageDDD1EngineBehaviorStaticFactoriesAndZeroAbilityBehaviorIncludes() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    auto* unit = sim.AdoptUnit(std::make_unique<CUnit>(401, MakePhase5UnitType(War3ID("hpea"), 250, 100, false), 0, War3ID("hpea"), 0.0f, 0.0f, 0.0f));
+    auto* target = sim.AdoptUnit(std::make_unique<CUnit>(402, MakePhase5UnitType(War3ID("hfoo"), 420, 0, true), 0, War3ID("hfoo"), 64.0f, 0.0f, 0.0f));
+    sim.Update();
+
+    // 1. Verify CBehavior::Create* static factories construct valid polymorphic CBehavior instances
+    auto mBeh = CBehavior::CreateMove();
+    auto fBeh = CBehavior::CreateFollow();
+    auto pBeh = CBehavior::CreatePatrol();
+    auto hBeh = CBehavior::CreateHoldPosition();
+    auto sBeh = CBehavior::CreateStop();
+    auto aBeh = CBehavior::CreateAttack();
+    auto amBeh = CBehavior::CreateAttackMove();
+    auto stBeh = CBehavior::CreateStun(2.25f);
+
+    TEST_ASSERT(mBeh && mBeh->GetCategory() == CBehaviorCategory::MOVE);
+    TEST_ASSERT(fBeh && fBeh->GetCategory() == CBehaviorCategory::FOLLOW);
+    TEST_ASSERT(pBeh && pBeh->GetCategory() == CBehaviorCategory::PATROL);
+    TEST_ASSERT(hBeh && hBeh->GetCategory() == CBehaviorCategory::HOLD_POSITION);
+    TEST_ASSERT(sBeh && sBeh->GetCategory() == CBehaviorCategory::STOP);
+    TEST_ASSERT(aBeh && aBeh->GetCategory() == CBehaviorCategory::ATTACK);
+    TEST_ASSERT(amBeh && amBeh->GetCategory() == CBehaviorCategory::ATTACK_MOVE);
+    TEST_ASSERT(stBeh && stBeh->GetCategory() == CBehaviorCategory::STUN);
+    TEST_NEAR(stBeh->GetRemaining(), 2.25f, 1e-4f);
+
+    // 2. Verify order-specific raw behavior factories (RootMorph, LoadPassenger, BoardTransport, DropCargo, Repair)
+    std::unique_ptr<CBehavior> rootBeh(CBehavior::CreateRootMorph(0.6f, false));
+    std::unique_ptr<CBehavior> uprootBeh(CBehavior::CreateRootMorph(0.8f, true));
+    std::unique_ptr<CBehavior> loadBeh(CBehavior::CreateLoadPassenger(256.0f, target));
+    std::unique_ptr<CBehavior> boardBeh(CBehavior::CreateBoardTransport(256.0f, 8, target));
+    std::unique_ptr<CBehavior> dropBeh(CBehavior::CreateDropCargo(128.0f, 128.0f, 0.5f));
+    std::unique_ptr<CBehavior> repBeh(CBehavior::CreateRepair(unit, nullptr, target));
+
+    TEST_ASSERT(rootBeh && rootBeh->GetCategory() == CBehaviorCategory::ROOT && std::fabs(rootBeh->GetRemaining() - 0.6f) < 1e-4f);
+    TEST_ASSERT(uprootBeh && uprootBeh->GetCategory() == CBehaviorCategory::ROOT && std::fabs(uprootBeh->GetRemaining() - 0.8f) < 1e-4f);
+    TEST_ASSERT(loadBeh && loadBeh->GetCategory() == CBehaviorCategory::BOARD_TRANSPORT);
+    TEST_ASSERT(boardBeh && boardBeh->GetCategory() == CBehaviorCategory::BOARD_TRANSPORT && boardBeh->GetTarget() == target);
+    TEST_ASSERT(dropBeh && dropBeh->GetCategory() == CBehaviorCategory::SPELL);
+    TEST_ASSERT(repBeh && repBeh->GetCategory() == CBehaviorCategory::BUILD && repBeh->GetTarget() == target);
+
+    return true;
+}
+
+bool TestPhase24StageDDD2CompactCItemCDestructableBitfieldsAndWorkerNavigation() {
+    // 1. Verify CItem 16-bit bitfield state flags & int8_t inventorySlot_
+    CItem item(501, War3ID("rat9"), 100.0f, 200.0f);
+    TEST_ASSERT(!item.IsPowerup() && !item.IsPermanent() && !item.IsCharged() && !item.IsPerishable());
+    TEST_ASSERT(!item.IsUseAutomatically() && !item.IsHidden() && !item.IsInvulnerable());
+    TEST_ASSERT(item.IsDroppable() && item.IsPawnable() && item.IsDroppedOnDeath() && !item.IsInInventory());
+    TEST_ASSERT(item.GetInventorySlot() == -1);
+
+    item.SetPowerup(true);
+    item.SetCharged(true);
+    item.SetPerishable(true);
+    item.SetInInventory(true);
+    item.SetInventorySlot(4);
+    item.SetInvulnerable(true);
+    TEST_ASSERT(item.IsPowerup() && item.IsCharged() && item.IsPerishable() && item.IsInInventory() && item.IsInvulnerable());
+    TEST_ASSERT(item.GetInventorySlot() == 4);
+
+    // 2. Verify CDestructable 8-bit bitfield state flags (invulnerable, hidden, blighted)
+    CDestructable dest(502, War3ID("LTlt"), 300.0f, 400.0f, 50.0f);
+    TEST_ASSERT(!dest.IsInvulnerable() && !dest.IsHidden() && !dest.IsBlighted());
+    dest.SetInvulnerable(true);
+    dest.SetHidden(true);
+    dest.SetBlighted(true);
+    TEST_ASSERT(dest.IsInvulnerable() && dest.IsHidden() && dest.IsBlighted());
+
+    return true;
+}
+
+bool TestPhase24StageEEE1War3GameModuleV24CustomDropoffsAndBehaviorCategoryOverrides() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 24u);
+    sim.SetSimulationModule(war3Mod);
+
+    // 1. Register a custom dropoff unit type ("hcdp": custom mobile dropoff wagon without Aret ability)
+    war3Mod->RegisterCustomDropoffUnitType(War3ID("hcdp"), true, false);
+    TEST_ASSERT(war3Mod->HasCustomDropoffUnitType(War3ID("hcdp")));
+
+    auto* worker = sim.AdoptUnit(std::make_unique<CUnit>(601, MakePhase5UnitType(War3ID("hpea"), 250, 0, false), 0, War3ID("hpea"), 0.0f, 0.0f, 0.0f));
+    auto* customDropoff = sim.AdoptUnit(std::make_unique<CUnit>(602, MakePhase5UnitType(War3ID("hcdp"), 600, 0, false), 0, War3ID("hcdp"), 96.0f, 0.0f, 0.0f));
+    sim.Update();
+
+    worker->AddAbility(sim, AbilityFactory::CreateAbility(sim.AllocateHandleId(), War3ID("Ahar")));
+    CAbility* harv = worker->GetAbility(War3ID("Ahar"));
+    TEST_ASSERT(harv != nullptr);
+    harv->SetCarried(CResourceType::GOLD, 10);
+
+    // Verify CanUnitAcceptResourceDropoff and OnFindNearestResourceDropoff recognize customDropoff for GOLD (but not LUMBER)
+    TEST_ASSERT(war3Mod->CanUnitAcceptResourceDropoff(*customDropoff, static_cast<int>(CResourceType::GOLD)));
+    TEST_ASSERT(!war3Mod->CanUnitAcceptResourceDropoff(*customDropoff, static_cast<int>(CResourceType::LUMBER)));
+    TEST_ASSERT(war3Mod->OnFindNearestResourceDropoff(sim, *worker, static_cast<int>(CResourceType::GOLD)) == customDropoff);
+
+    // Issue RETURN_RESOURCES order to worker and verify it deposits 10 gold at customDropoff
+    const int goldBefore = sim.GetPlayer(0)->GetGold();
+    worker->IssueOrder(std::make_unique<COrderNoTarget>(OrderIds::RETURN_RESOURCES));
+    for (int i = 0; i < 15 && harv->IsCarryingResources(); ++i) {
+        sim.Update();
+    }
+    TEST_ASSERT(!harv->IsCarryingResources());
+    TEST_ASSERT(sim.GetPlayer(0)->GetGold() == goldBefore + 10);
+
+    // 2. Verify RegisterCategoryBehaviorOverride on STOP category
+    int customStopTriggered = 0;
+    war3Mod->RegisterCategoryBehaviorOverride(CBehaviorCategory::STOP, [&]() -> CBehavior* {
+        class CCustomStopBehavior final : public CBehavior {
+        public:
+            explicit CCustomStopBehavior(int& counter) : counter_(counter) {}
+            CBehaviorCategory GetCategory() const override { return CBehaviorCategory::STOP; }
+            void Begin(CSimulation&) override { ++counter_; if (unit_) unit_->ClearOrders(); }
+            bool Update(CSimulation&) override { return true; }
+        private:
+            int& counter_;
+        };
+        return new CCustomStopBehavior(customStopTriggered);
+    });
+    TEST_ASSERT(war3Mod->HasCategoryBehaviorOverride(CBehaviorCategory::STOP));
+
+    worker->IssueOrder(std::make_unique<COrderNoTarget>(OrderIds::STOP));
+    sim.Update();
+    TEST_ASSERT(customStopTriggered == 1);
+
+    TEST_ASSERT(war3Mod->UnregisterCategoryBehaviorOverride(CBehaviorCategory::STOP));
+    TEST_ASSERT(war3Mod->UnregisterCustomDropoffUnitType(War3ID("hcdp")));
+    return true;
+}
+
+bool TestPhase24StageEEE2DynamicPluginSOV24AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath24 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths24[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths24) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath24 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath24.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase24PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath24));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 24u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TurtleRock.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(10)ExtremeCandyWar2004.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 24u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+// ============================================================================
+// Phase 25 Modernization Tests: CFogSystem Bitmask Sight & RAII FogOfWar,
+// CWorldCollision/CPathfindingProcessor Pluggable Passability, and
+// SimStateSnapshot POD Projectile & Module State Serialization
+// ============================================================================
+
+bool TestPhase25StageFFF1BitmaskSharedVisionSightAndModuleVisionHooks() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+    sim.AddPlayer(std::make_unique<CPlayer>(2, "P2", CMapControl::COMPUTER));
+    sim.GetPlayer(0)->SetAlliance(1, CAllianceType::SHARED_VISION, true);
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 25u);
+    sim.SetSimulationModule(war3Mod);
+
+    // 1. Verify CFogSightSource 32-bit playerMask serves multiple players from a single struct
+    CFogSightSource multiSrc;
+    multiSrc.player = 0;
+    multiSrc.playerMask = (1u << 0) | (1u << 1) | (1u << 2);
+    multiSrc.x = 512.0f;
+    multiSrc.y = 512.0f;
+    multiSrc.radius = 600.0f;
+    multiSrc.isFlying = true;
+    sim.GetFogSystem()->UpdateSight(&multiSrc, 1);
+
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(0, 512.0f, 512.0f));
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(1, 512.0f, 512.0f));
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(2, 512.0f, 512.0f));
+    TEST_ASSERT(!sim.GetFogSystem()->IsVisibleTo(3, 512.0f, 512.0f));
+
+    // 2. Verify War3GameModule sight multiplier & custom radar sight source injection
+    war3Mod->SetPlayerSightMultiplier(0, 2.0f);
+    TEST_NEAR(war3Mod->GetPlayerSightMultiplier(0), 2.0f, 1e-4f);
+    war3Mod->RegisterCustomSightSource(777, 0, -1024.0f, -1024.0f, 500.0f, true);
+    TEST_ASSERT(war3Mod->HasCustomSightSource(777));
+
+    auto* scout = sim.AdoptUnit(std::make_unique<CUnit>(701, MakePhase5UnitType(War3ID("hfoo"), 420, 0, false), 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+    scout->SetSharesVisionWith(2, true);
+    for (int i = 0; i < 12; ++i) sim.Update();
+
+    // Player 0, allied Player 1 (SHARED_VISION), and Player 2 (UnitShareVision) all see scout at (0,0)
+    // and Player 0 + allied Player 1 also see custom radar sight source at (-1024, -1024)!
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(0, 0.0f, 0.0f));
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(1, 0.0f, 0.0f));
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(2, 0.0f, 0.0f));
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(0, -1024.0f, -1024.0f));
+    TEST_ASSERT(sim.GetFogSystem()->IsVisibleTo(1, -1024.0f, -1024.0f));
+
+    TEST_ASSERT(war3Mod->UnregisterCustomSightSource(777));
+    return true;
+}
+
+bool TestPhase25StageFFF2WorldCollisionProximityAndPluggableCellPassability() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    sim.SetSimulationModule(war3Mod);
+
+    auto* u1 = sim.AdoptUnit(std::make_unique<CUnit>(801, MakePhase5UnitType(War3ID("hfoo"), 420, 0, false), 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+    auto* u2 = sim.AdoptUnit(std::make_unique<CUnit>(802, MakePhase5UnitType(War3ID("ogru"), 700, 0, false), 1, War3ID("ogru"), 180.0f, 0.0f, 0.0f));
+    auto* u3 = sim.AdoptUnit(std::make_unique<CUnit>(803, MakePhase5UnitType(War3ID("ogru"), 700, 0, false), 1, War3ID("ogru"), 420.0f, 0.0f, 0.0f));
+    sim.Update();
+
+    // 1. Verify CWorldCollision SpatialGrid binding, FindNearestUnit, and CountUnitsInRange
+    auto* wc = sim.GetWorldCollision();
+    TEST_ASSERT(wc != nullptr);
+    TEST_ASSERT(wc->GetSpatialGrid() == &sim.SpatialGrid());
+    wc->ResetTelemetry();
+
+    TEST_ASSERT(wc->CountUnitsInRange(0.0f, 0.0f, 250.0f) == 2u);
+    CUnit* nearestEnemy = wc->FindNearestUnit(0.0f, 0.0f, 500.0f, [&](const CUnit* cand) {
+        return cand != u1 && cand->GetPlayerIndex() == 1;
+    });
+    TEST_ASSERT(nearestEnemy == u2);
+    TEST_ASSERT(wc->GetRangeQueriesPerformed() >= 2u);
+
+    // 2. Verify pluggable custom cell passability rules on War3GameModule -> CPathfindingProcessor
+    auto* pf = sim.GetPathfinding();
+    TEST_ASSERT(pf != nullptr);
+    TEST_ASSERT(pf->IsCellPathableFor(10, 10, PathingGridMovementType::FOOT));
+
+    // Block ground movement on cell (10, 10) while keeping air flyable
+    war3Mod->SetCustomCellPassabilityRule(10, 10, false, true);
+    TEST_ASSERT(!pf->IsCellPathableFor(10, 10, PathingGridMovementType::FOOT));
+    TEST_ASSERT(pf->IsCellPathableFor(10, 10, PathingGridMovementType::FLY));
+
+    TEST_ASSERT(war3Mod->RemoveCustomCellPassabilityRule(10, 10));
+    TEST_ASSERT(pf->IsCellPathableFor(10, 10, PathingGridMovementType::FOOT));
+    return true;
+}
+
+bool TestPhase25StageGGG1SafePodProjectileSnapshotAndModuleStateRoundTrip() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    war3Mod->SetBountyMultiplier(2.5f);
+    war3Mod->SetExperienceMultiplier(3.0f);
+    war3Mod->SetDefenseArmorFactor(0.08f);
+    war3Mod->SetMeleeVictoryRulesEnabled(true);
+    war3Mod->SetPlayerSightMultiplier(0, 1.75f);
+    war3Mod->RegisterCustomSightSource(888, 0, 256.0f, 256.0f, 400.0f, true);
+    war3Mod->SetCustomCellPassabilityRule(12, 14, false, true);
+    sim.SetSimulationModule(war3Mod);
+
+    auto* archer = sim.AdoptUnit(std::make_unique<CUnit>(901, MakePhase5UnitType(War3ID("earc"), 245, 0, false), 0, War3ID("earc"), 0.0f, 0.0f, 0.0f));
+    auto*target = sim.AdoptUnit(std::make_unique<CUnit>(902, MakePhase5UnitType(War3ID("ogru"), 700, 0, false), 1, War3ID("ogru"), 600.0f, 0.0f, 0.0f));
+    sim.Update();
+
+    // Spawn an in-flight projectile with non-empty weaponSound and custom projectileTypeId
+    CProjectile shot;
+    shot.attackerHandleId = archer->GetHandleId();
+    shot.targetHandleId = target->GetHandleId();
+    shot.x = 120.0f;
+    shot.y = 40.0f;
+    shot.speed = 900.0f;
+    shot.damage = 35.0f;
+    shot.projectileTypeId = War3ID("PCs9");
+    shot.attackType = CAttackType::PIERCE;
+    shot.damageType = CDamageType::NORMAL;
+    shot.weaponSound = "MetalMediumSlice";
+    shot.bouncesLeft = 2;
+    shot.bounceRange = 400.0f;
+    shot.maxTravel = 1200.0f;
+    sim.SpawnProjectile(std::move(shot));
+
+    // Capture full snapshot, serialize to binary wire format, and deserialize
+    SimStateSnapshot snap = SimStateSnapshot::Capture(sim);
+    TEST_ASSERT(snap.projectiles.size() == 1u);
+    TEST_ASSERT(!snap.moduleStateBytes.empty());
+
+    std::vector<uint8_t> bytes = snap.SerializeBinary();
+    SimStateSnapshot decoded;
+    TEST_ASSERT(SimStateSnapshot::DeserializeBinary(bytes.data(), bytes.size(), decoded));
+    TEST_ASSERT(decoded.projectiles.size() == 1u);
+    TEST_ASSERT(decoded.projectiles[0].projectileTypeId == War3ID("PCs9"));
+    TEST_ASSERT(decoded.projectiles[0].weaponSound == "MetalMediumSlice");
+    TEST_ASSERT(decoded.projectiles[0].bouncesLeft == 2);
+    TEST_NEAR(decoded.projectiles[0].damage, 35.0f, 1e-4f);
+
+    // Mutate live simulation and module settings, then restore from decoded binary snapshot
+    war3Mod->SetBountyMultiplier(1.0f);
+    war3Mod->SetExperienceMultiplier(1.0f);
+    war3Mod->SetDefenseArmorFactor(0.06f);
+    war3Mod->SetMeleeVictoryRulesEnabled(false);
+    war3Mod->SetPlayerSightMultiplier(0, 1.0f);
+    war3Mod->UnregisterCustomSightSource(888);
+    war3Mod->RemoveCustomCellPassabilityRule(12, 14);
+    sim.Update();
+    sim.Update();
+
+    TEST_ASSERT(decoded.Restore(sim));
+    TEST_NEAR(war3Mod->GetBountyMultiplier(), 2.5f, 1e-4f);
+    TEST_NEAR(war3Mod->GetExperienceMultiplier(), 3.0f, 1e-4f);
+    TEST_NEAR(war3Mod->GetDefenseArmorFactor(), 0.08f, 1e-4f);
+    TEST_ASSERT(war3Mod->IsMeleeVictoryRulesEnabled());
+    TEST_NEAR(war3Mod->GetPlayerSightMultiplier(0), 1.75f, 1e-4f);
+    TEST_ASSERT(war3Mod->HasCustomSightSource(888));
+    TEST_ASSERT(war3Mod->OnCheckCustomCellPassability(12, 14, static_cast<int>(PathingGridMovementType::FOOT)) == 0);
+    TEST_ASSERT(war3Mod->OnCheckCustomCellPassability(12, 14, static_cast<int>(PathingGridMovementType::FLY)) == 1);
+    TEST_ASSERT(sim.GetProjectiles().size() == 1u);
+    TEST_ASSERT(sim.GetProjectiles()[0].weaponSound == "MetalMediumSlice");
+
+    return true;
+}
+
+bool TestPhase25StageGGG2DynamicPluginSOV25AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath25 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths25[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths25) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath25 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath25.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase25PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath25));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 25u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(8)TwilightRuins.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(12)WormWar.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 25u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+
+    return true;
+}
+
+
+// ============================================================================
+// Phase 26 Modernization Tests: Lockstep Command Bus & Memory Replay Stream,
+// TurnManager Seat Bitfield & History Cap, LockstepHost Fast Keyframe Resync,
+// LobbyState Skirmish Generalization, and War3GameModule Version 26
+// ============================================================================
+
+bool TestPhase26StageHHH1ReplayMemoryStreamAndPlayerCommandExecution() {
+    // 1. Verify shared LE wire helpers & ReplayLog zero-disk-IO memory serialization
+    ReplayLog log;
+    log.Begin(0xCAFEBABEu);
+    SimCommand c1{1, 0, 101, 851971, 1, -1, 256.0f, 512.0f, 0.0f};
+    SimCommand c2{2, 0, -1, war3::War3GameModule::kOrderTributeGold, 0, 1, 150.0f, 0.0f, 0.0f};
+    TEST_ASSERT(!c1.IsGlobalPlayerCommand());
+    TEST_ASSERT(c2.IsGlobalPlayerCommand());
+    log.Record(c1);
+    log.Record(c2);
+
+    std::vector<uint8_t> memWire = log.SerializeMemory();
+    TEST_ASSERT(memWire.size() == 16 + 2 * SimCommand::kWireSize);
+
+    ReplayLog decodedLog;
+    TEST_ASSERT(decodedLog.DeserializeMemory(memWire.data(), memWire.size()));
+    TEST_ASSERT(decodedLog.Seed() == 0xCAFEBABEu);
+    TEST_ASSERT(decodedLog.Commands().size() == 2u);
+    TEST_ASSERT(decodedLog.Commands()[0] == c1);
+    TEST_ASSERT(decodedLog.Commands()[1] == c2);
+
+    // Trailing byte must be rejected
+    std::vector<uint8_t> corrupted = memWire;
+    corrupted.push_back(0xFFu);
+    ReplayLog badLog;
+    TEST_ASSERT(!badLog.DeserializeMemory(corrupted.data(), corrupted.size()));
+
+    // 2. Verify ApplyBatch & ExecuteSimCommand dispatch both unit orders and global player commands
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::USER));
+    sim.GetPlayer(0)->SetGold(500);
+    sim.GetPlayer(1)->SetGold(200);
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 26u);
+    sim.SetSimulationModule(war3Mod);
+
+    auto* footman = sim.AdoptUnit(std::make_unique<CUnit>(101, MakePhase5UnitType(War3ID("hfoo"), 420, 0, false), 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+    (void)footman;
+    sim.Update();
+    sim.ClearCommandLog();
+
+    TurnBatch batch;
+    batch.turn = sim.GetGameTurnTick();
+    batch.commands.push_back(c1);
+    batch.commands.push_back(c2);
+
+    const int applied = ApplyBatch(sim, batch);
+    TEST_ASSERT(applied == 2);
+    TEST_ASSERT(sim.GetPlayer(0)->GetGold() == 350);
+    TEST_ASSERT(sim.GetPlayer(1)->GetGold() == 350);
+    TEST_ASSERT(sim.LoggedCommands().size() == 2u);
+    return true;
+}
+
+bool TestPhase26StageHHH2TurnManagerHistoryCapLockstepHostFastKeyframeResyncAndLobbySkirmish() {
+    // 1. Verify TurnManager compact seatFlags_ & bounded history ring cap
+    TurnManager tm(2);
+    tm.SetMaxHistoryTurns(4);
+    TEST_ASSERT(tm.GetMaxHistoryTurns() == 4u);
+
+    for (int t = 0; t < 10; ++t) {
+        SimCommand cmd{t, 0, 101, 851971, 1, -1, float(t * 10), 0.0f, 0.0f};
+        TEST_ASSERT(tm.SubmitPlayerCommands(0, {cmd}));
+        TEST_ASSERT(tm.SubmitPlayerCommands(1, {}));
+        TEST_ASSERT(tm.IsComplete());
+        TurnBatch merged = tm.TakeBatch();
+        TEST_ASSERT(merged.turn == t);
+    }
+    TEST_ASSERT(tm.History().size() == 4u);
+    TEST_ASSERT(tm.GetPrunedTurnCount() == 6u);
+    TEST_ASSERT(tm.History().front().turn == 6);
+    TEST_ASSERT(tm.History().back().turn == 9);
+
+    // 2. Verify LobbyState configurable maxRaceId and CanStartSkirmish (1 Human + 1 AI)
+    LobbyState lobby;
+    TEST_ASSERT(lobby.GetMaxRaceId() == 4);
+    LobbySlot customFactionSlot;
+    customFactionSlot.name = "CustomSciFiPlayer";
+    customFactionSlot.race = 6;
+    customFactionSlot.controller = LobbySlotController::USER;
+    customFactionSlot.ready = true;
+    TEST_ASSERT(!lobby.SetSlot(0, customFactionSlot)); // rejected under default maxRaceId=4
+    lobby.SetMaxRaceId(8);
+    TEST_ASSERT(lobby.SetSlot(0, customFactionSlot));  // accepted under maxRaceId=8
+    TEST_ASSERT(!lobby.IsReadyToStart());              // < 2 humans
+    TEST_ASSERT(!lobby.CanStartSkirmish());            // no opponent yet
+
+    LobbySlot aiOpponent;
+    aiOpponent.name = "Bot";
+    aiOpponent.race = 2;
+    aiOpponent.controller = LobbySlotController::COMPUTER;
+    TEST_ASSERT(lobby.SetSlot(1, aiOpponent));
+    TEST_ASSERT(lobby.CanStartSkirmish());             // 1 ready human + 1 AI opponent can start skirmish!
+
+    // 3. Verify LockstepHost TCP FastKeyframeResync transfer to a spectator / peer
+    CSimulation hostSim;
+    hostSim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    hostSim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+    hostSim.AdoptUnit(std::make_unique<CUnit>(301, MakePhase5UnitType(War3ID("hfoo"), 420, 0, false), 0, War3ID("hfoo"), 128.0f, 256.0f, 0.0f));
+    for (int i = 0; i < 5; ++i) hostSim.Update();
+
+    SimStateSnapshot keyframe = SimStateSnapshot::Capture(hostSim);
+    std::vector<TurnBatch> fullHistory;
+    for (int i = 0; i < 3; ++i) {
+        TurnBatch tb;
+        tb.turn = hostSim.GetGameTurnTick();
+        fullHistory.push_back(tb);
+        hostSim.Update();
+    }
+    net::FastResyncKeyframePackage fastPkg;
+    TEST_ASSERT(net::FastResyncKeyframePackage::Build(
+        keyframe, fullHistory, hostSim.GetGameTurnTick(), hostSim.HashState(), fastPkg));
+
+    TcpTransport::GlobalInit();
+    LockstepHost host(2);
+    TEST_ASSERT(host.Listen(0, true));
+    const uint16_t port = host.Port();
+    TEST_ASSERT(port > 0);
+
+    const int clientFd = TcpTransport::Connect("127.0.0.1", port, 1000);
+    TEST_ASSERT(clientFd != TcpTransport::kInvalidFd);
+    const int watcherIdx = host.AcceptSpectator(1000);
+    TEST_ASSERT(watcherIdx == 0);
+
+    TEST_ASSERT(host.SendFastKeyframeResyncToWatcher(watcherIdx, fastPkg));
+    net::FastResyncKeyframePackage recvPkg;
+    TEST_ASSERT(RecvFastKeyframeResync(clientFd, recvPkg, 1000));
+    TcpTransport::Close(clientFd);
+    host.Close();
+    TcpTransport::GlobalShutdown();
+
+    CSimulation watcherSim;
+    watcherSim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    watcherSim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::COMPUTER));
+    TEST_ASSERT(recvPkg.ApplyToSimulation(watcherSim));
+    TEST_ASSERT(watcherSim.GetGameTurnTick() == hostSim.GetGameTurnTick());
+    TEST_ASSERT(watcherSim.HashState() == hostSim.HashState());
+    return true;
+}
+
+bool TestPhase26StageIII1War3ModuleLockstepValidationAlliedTributeAndStateHash() {
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.AddPlayer(std::make_unique<CPlayer>(1, "P1", CMapControl::USER));
+    sim.GetPlayer(0)->SetGold(1000);
+    sim.GetPlayer(0)->SetLumber(500);
+    sim.GetPlayer(1)->SetGold(100);
+    sim.GetPlayer(1)->SetLumber(100);
+
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() == 26u);
+    sim.SetSimulationModule(war3Mod);
+
+    auto* u0 = sim.AdoptUnit(std::make_unique<CUnit>(401, MakePhase5UnitType(War3ID("hfoo"), 420, 0, false), 0, War3ID("hfoo"), 0.0f, 0.0f, 0.0f));
+    sim.Update();
+
+    // 1. Verify player command muting blocks both unit orders and global player commands
+    war3Mod->SetPlayerCommandMuted(0, true);
+    TEST_ASSERT(war3Mod->IsPlayerCommandMuted(0));
+    TEST_ASSERT(!sim.IssueUnitOrder(u0->GetHandleId(), std::make_unique<COrderTargetPoint>(851971, 300.0f, 300.0f, 0.0f)));
+    TEST_ASSERT(!sim.IssuePlayerCommand(0, war3::War3GameModule::kOrderTributeGold, 0, 1, 200.0f));
+    TEST_ASSERT(sim.GetPlayer(0)->GetGold() == 1000);
+
+    war3Mod->SetPlayerCommandMuted(0, false);
+    TEST_ASSERT(!war3Mod->IsPlayerCommandMuted(0));
+
+    // 2. Verify built-in allied gold & lumber tribute commands and custom global command registration
+    const uint64_t hashBeforeTribute = sim.HashState();
+    TEST_ASSERT(sim.IssuePlayerCommand(0, war3::War3GameModule::kOrderTributeGold, 0, 1, 250.0f));
+    TEST_ASSERT(sim.IssuePlayerCommand(0, war3::War3GameModule::kOrderTributeLumber, 0, 1, 120.0f));
+    TEST_ASSERT(sim.GetPlayer(0)->GetGold() == 750);
+    TEST_ASSERT(sim.GetPlayer(1)->GetGold() == 350);
+    TEST_ASSERT(sim.GetPlayer(0)->GetLumber() == 380);
+    TEST_ASSERT(sim.GetPlayer(1)->GetLumber() == 220);
+    TEST_ASSERT(war3Mod->GetTributeCommandsExecuted() == 2u);
+
+    const uint64_t hashAfterTribute = sim.HashState();
+    TEST_ASSERT(hashAfterTribute != hashBeforeTribute);
+
+    // 3. Verify custom global command registration & module state hash sensitivity
+    constexpr int32_t kCustomPingCmd = 0x50494E47; // "PING"
+    float lastPingX = 0.0f;
+    float lastPingY = 0.0f;
+    war3Mod->RegisterCustomGlobalCommand(kCustomPingCmd, [&](CSimulation& /*s*/, const SimCommand& cmd) {
+        lastPingX = cmd.x;
+        lastPingY = cmd.y;
+        return true;
+    });
+    TEST_ASSERT(war3Mod->HasCustomGlobalCommand(kCustomPingCmd));
+    TEST_ASSERT(sim.IssuePlayerCommand(1, kCustomPingCmd, 1, -1, 768.0f, -512.0f));
+    TEST_NEAR(lastPingX, 768.0f, 1e-4f);
+    TEST_NEAR(lastPingY, -512.0f, 1e-4f);
+
+    const uint64_t hashBeforeModChange = sim.HashState();
+    war3Mod->SetBountyMultiplier(4.0f);
+    const uint64_t hashAfterModChange = sim.HashState();
+    TEST_ASSERT(hashAfterModChange != hashBeforeModChange);
+
+    // 4. Verify HashState sensitivity to Phase 25 sight multipliers & passability rules,
+    //    and reject cross-player spoofed unit SimCommand & non-finite tribute amounts
+    war3Mod->SetPlayerSightMultiplier(0, 1.75f);
+    const uint64_t hashAfterSightMult = sim.HashState();
+    TEST_ASSERT(hashAfterSightMult != hashAfterModChange);
+
+    SimCommand spoofedUnitCmd{sim.GetGameTurnTick(), 1, u0->GetHandleId(), 851971, 1, -1, 100.0f, 100.0f, 0.0f};
+    TEST_ASSERT(!sim.ExecuteSimCommand(spoofedUnitCmd));
+    TEST_ASSERT(!sim.IssuePlayerCommand(0, war3::War3GameModule::kOrderTributeGold, 0, 1, std::numeric_limits<float>::quiet_NaN()));
+    TEST_ASSERT(!sim.IssuePlayerCommand(0, war3::War3GameModule::kOrderTributeGold, 0, 1, 1e20f));
+
+    TEST_ASSERT(war3Mod->UnregisterCustomGlobalCommand(kCustomPingCmd));
+    return true;
+}
+
+bool TestPhase26StageIII2DynamicPluginSOV26AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath26 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths26[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths26) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath26 = candidate;
+            break;
+        }
+    }
+    FILE* f = std::fopen(soPath26.c_str(), "rb");
+    if (f) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase26PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath26));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() == 26u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(4)TurtleRock.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(6)BlizzardTD.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 26u);
 
         MpqManager mpq;
         CSimulation mapSim;

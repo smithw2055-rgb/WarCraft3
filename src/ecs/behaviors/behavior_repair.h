@@ -11,10 +11,14 @@ public:
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::BUILD; }
 
     void SetRepairAbility(const CAbility* ability) { repairAbility_ = ability; }
-    void SetTarget(CWidget* target);
+    void SetTarget(CWidget* target) override;
+    CWidget* GetTarget() const override { return target_; }
     bool IsMovingToTarget() const { return movingToTarget_; }
+    bool IsMovingToWorkSite() const override { return movingToTarget_; }
     bool IsRepairing() const { return repairing_; }
-    bool IsPropelling() const { return propelling_; }
+    bool IsActivelyWorking() const override { return repairing_; }
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

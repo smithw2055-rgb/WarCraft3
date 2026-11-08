@@ -9,8 +9,9 @@ public:
     CBehaviorAttackMove();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::ATTACK_MOVE; }
 
-    void SetDestination(float x, float y);
-    bool IsPropelling() const { return propelling_; }
+    void SetDestination(float x, float y) override;
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

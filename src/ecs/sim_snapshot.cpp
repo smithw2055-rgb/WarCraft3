@@ -1,3 +1,6 @@
+#include "data/unitdata.h"
+#include "ecs/unit_type.h"
+#include "engine/simulation_module.h"
 #include "ecs/sim_snapshot.h"
 
 #include <algorithm>
@@ -238,10 +241,16 @@ SimStateSnapshot SimStateSnapshot::Capture(const CSimulation& sim) {
         ds.occluderHeight = d->GetOccluderHeight();
         ds.dead = d->IsDead();
         ds.invulnerable = d->IsInvulnerable();
+        ds.hidden = d->IsHidden();
+        ds.blighted = d->IsBlighted();
         snap.destructables.push_back(ds);
     }
 
     snap.projectiles = sim.projectiles_;
+    snap.moduleStateBytes.clear();
+    if (const auto* mod = sim.GetSimulationModule()) {
+        mod->OnCaptureModuleSnapshot(sim, snap.moduleStateBytes);
+    }
     snap.stateHash = sim.HashState();
     return snap;
 }
@@ -320,7 +329,10 @@ bool SimStateSnapshot::Restore(CSimulation& sim) const {
             auto kt = knownTypes.find(us.typeId);
             if (kt != knownTypes.end()) {
                 uType = kt->second;
+            } else if (sim.GetUnitData()) {
+                uType = const_cast<CUnitType*>(sim.GetUnitData()->GetUnitType(War3ID(us.typeId)));
             }
+
             auto newUnit = std::make_unique<CUnit>(
                 us.handleId, uType, us.playerIndex, War3ID(us.typeId), us.x, us.y, us.facingDeg);
             newUnit->BindRegistry(&sim.ecsRegistry_);
@@ -337,6 +349,7 @@ bool SimStateSnapshot::Restore(CSimulation& sim) const {
         u->SetFacing(us.facingDeg);
         u->SetFlyingHeight(us.flyHeight);
         u->Attributes().SetBaseMaxLife(us.baseMaxLife);
+        u->Attributes().AddBonusMaxLife(us.bonusMaxLife - u->GetBonusMaxLife());
         u->Attributes().SetBaseSpeed(us.baseSpeed);
         u->SetDefense(us.defense);
         u->SetMaxMana(us.maxMana);
@@ -370,7 +383,40 @@ bool SimStateSnapshot::Restore(CSimulation& sim) const {
         sim.units_.push_back(u);
     }
 
+    // 5. Restore items & destructables state flags and vitals
+    for (const SimItemSnapshot& is : items) {
+        auto it = sim.itemMap_.find(is.handleId);
+        if (it != sim.itemMap_.end() && it->second) {
+            CItem* item = it->second.get();
+            item->SetPosition(is.x, is.y);
+            item->SetMaxLife(is.maxLife);
+            item->CWidget::SetLife(sim, is.life);
+            item->SetCharges(is.charges);
+            item->SetHidden(is.hidden != 0);
+            item->SetInvulnerable(is.invulnerable != 0);
+        }
+    }
+
+    for (const SimDestructableSnapshot& ds : destructables) {
+        auto it = sim.destructableMap_.find(ds.handleId);
+        if (it != sim.destructableMap_.end() && it->second) {
+            CDestructable* d = it->second.get();
+            d->SetPosition(ds.x, ds.y);
+            d->SetMaxLife(ds.maxLife);
+            d->CWidget::SetLife(sim, ds.life);
+            d->SetOccluderHeight(ds.occluderHeight);
+            d->SetInvulnerable(ds.invulnerable != 0);
+            d->SetHidden(ds.hidden != 0);
+            d->SetBlighted(ds.blighted != 0);
+        }
+    }
+
     sim.projectiles_ = projectiles;
+    if (!moduleStateBytes.empty()) {
+        if (auto* mod = sim.GetSimulationModule()) {
+            mod->OnRestoreModuleSnapshot(sim, moduleStateBytes.data(), moduleStateBytes.size());
+        }
+    }
     sim.spatialGrid_.Rebuild(sim.units_);
     SimHotComponentSystem::SyncUnitsToHotPools(sim);
 
@@ -430,7 +476,16 @@ std::vector<uint8_t> SimStateSnapshot::SerializeBinary() const {
 
     const uint32_t projCount = static_cast<uint32_t>(projectiles.size());
     AppendPod(out, projCount);
-    for (const auto& pr : projectiles) AppendPod(out, pr);
+    for (const auto& pr : projectiles) {
+        const SimProjectileSnapshot wireProj = SimProjectileSnapshot::FromProjectile(pr);
+        AppendPod(out, wireProj);
+    }
+
+    const uint32_t modStateSize = static_cast<uint32_t>(moduleStateBytes.size());
+    AppendPod(out, modStateSize);
+    if (modStateSize > 0) {
+        out.insert(out.end(), moduleStateBytes.begin(), moduleStateBytes.end());
+    }
 
     return out;
 }
@@ -486,8 +541,16 @@ bool SimStateSnapshot::DeserializeBinary(const uint8_t* data, size_t size, SimSt
     if (!ReadPod(data, size, offset, projCount)) return false;
     out.projectiles.resize(projCount);
     for (uint32_t i = 0; i < projCount; ++i) {
-        if (!ReadPod(data, size, offset, out.projectiles[i])) return false;
+        SimProjectileSnapshot wireProj{};
+        if (!ReadPod(data, size, offset, wireProj)) return false;
+        out.projectiles[i] = wireProj.ToProjectile();
     }
+
+    uint32_t modStateSize = 0;
+    if (!ReadPod(data, size, offset, modStateSize)) return false;
+    if (offset + modStateSize > size) return false;
+    out.moduleStateBytes.assign(data + offset, data + offset + modStateSize);
+    offset += modStateSize;
 
     return offset == size;
 }

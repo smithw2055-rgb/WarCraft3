@@ -1,3 +1,4 @@
+class CBehavior;
 #pragma once
 // Data-driven spell authoring (C++ port of warsmash_ref abilitybuilder).
 //
@@ -850,3 +851,5 @@ public:
 private:
     CUnit* foe_ = nullptr;
 };
+
+std::unique_ptr<CBehavior> CreateChannelBehavior(ABEffectChain tick, ABEffectChain finish, int ticks, int targetHandle, bool hasPoint, float x, float y);

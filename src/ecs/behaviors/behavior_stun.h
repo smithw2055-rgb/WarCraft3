@@ -10,9 +10,9 @@ public:
     // (ref CBehaviorStun.interruptable false).
     bool IsInterruptable() const override { return false; }
 
-    void SetDuration(float duration) { duration_ = duration; }
-    void SetRemaining(float remaining) { remaining_ = remaining; }
-    float GetRemaining() const { return remaining_; }
+    void SetDuration(float duration) override { duration_ = duration; }
+    void SetRemaining(float remaining) override { remaining_ = remaining; }
+    float GetRemaining() const override { return remaining_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

@@ -5,13 +5,6 @@
 #include "ecs/ability.h"
 #include "ecs/buff.h"
 #include "ecs/behaviors/behavior.h"
-#include "ecs/behaviors/behavior_stop.h"
-#include "ecs/behaviors/behavior_move.h"
-#include "ecs/behaviors/behavior_follow.h"
-#include "ecs/behaviors/behavior_patrol.h"
-#include "ecs/behaviors/behavior_hold_position.h"
-#include "ecs/behaviors/behavior_attack.h"
-#include "ecs/behaviors/behavior_attack_move.h"
 #include "ecs/orders/order.h"
 #include "data/combat_types.h"
 #include "ecs/attribute_aggregator.h"
@@ -355,21 +348,27 @@ public:
     using UnitLoadedHook = std::function<void(int)>;
     void SetUnitLoadedHook(UnitLoadedHook hook) { unitLoadedHook_ = std::move(hook); }
 
-    // Behavior storage (set by abilities on Add)
-    CBehaviorMove* GetMoveBehavior() const { return moveBehavior_.get(); }
-    CBehaviorFollow* GetFollowBehavior() const { return followBehavior_.get(); }
-    CBehaviorPatrol* GetPatrolBehavior() const { return patrolBehavior_.get(); }
-    CBehaviorHoldPosition* GetHoldPositionBehavior() const { return holdPositionBehavior_.get(); }
-    CBehaviorAttack* GetAttackBehavior() const { return attackBehavior_.get(); }
-    CBehaviorAttackMove* GetAttackMoveBehavior() const { return attackMoveBehavior_.get(); }
+    // Behavior storage (set by abilities or plugins on Add; polymorphic CBehavior slots)
+    CBehavior* GetMoveBehavior() const { return moveBehavior_.get(); }
+    CBehavior* GetFollowBehavior() const { return followBehavior_.get(); }
+    CBehavior* GetPatrolBehavior() const { return patrolBehavior_.get(); }
+    CBehavior* GetHoldPositionBehavior() const { return holdPositionBehavior_.get(); }
+    CBehavior* GetAttackBehavior() const { return attackBehavior_.get(); }
+    CBehavior* GetAttackMoveBehavior() const { return attackMoveBehavior_.get(); }
     CBehavior* GetDefaultBehavior() const { return defaultBehavior_.get(); }
+    bool IsPersistentSlotBehavior(const CBehavior* b) const {
+        return b && (b == moveBehavior_.get() || b == followBehavior_.get() ||
+                     b == patrolBehavior_.get() || b == holdPositionBehavior_.get() ||
+                     b == attackBehavior_.get() || b == attackMoveBehavior_.get() ||
+                     b == defaultBehavior_.get());
+    }
 
-    void SetMoveBehavior(std::unique_ptr<CBehaviorMove> b);
-    void SetFollowBehavior(std::unique_ptr<CBehaviorFollow> b);
-    void SetPatrolBehavior(std::unique_ptr<CBehaviorPatrol> b);
-    void SetHoldPositionBehavior(std::unique_ptr<CBehaviorHoldPosition> b);
-    void SetAttackBehavior(std::unique_ptr<CBehaviorAttack> b);
-    void SetAttackMoveBehavior(std::unique_ptr<CBehaviorAttackMove> b);
+    void SetMoveBehavior(std::unique_ptr<CBehavior> b);
+    void SetFollowBehavior(std::unique_ptr<CBehavior> b);
+    void SetPatrolBehavior(std::unique_ptr<CBehavior> b);
+    void SetHoldPositionBehavior(std::unique_ptr<CBehavior> b);
+    void SetAttackBehavior(std::unique_ptr<CBehavior> b);
+    void SetAttackMoveBehavior(std::unique_ptr<CBehavior> b);
     void SetDefaultBehavior(std::unique_ptr<CBehavior> b);
 
     // Poll next order from queue, returns behavior or nullptr
@@ -642,13 +641,13 @@ private:
     uint64_t zeroAllocBuffAppliedCount_ = 0;
     void SyncDataDrivenBuffModifiers(DataDrivenBuffRecord& rec, bool apply);
 
-    // Behavior storage (owned by unit, created by abilities)
-    std::unique_ptr<CBehaviorMove> moveBehavior_;
-    std::unique_ptr<CBehaviorFollow> followBehavior_;
-    std::unique_ptr<CBehaviorPatrol> patrolBehavior_;
-    std::unique_ptr<CBehaviorHoldPosition> holdPositionBehavior_;
-    std::unique_ptr<CBehaviorAttack> attackBehavior_;
-    std::unique_ptr<CBehaviorAttackMove> attackMoveBehavior_;
+    // Behavior storage (owned by unit, created by abilities or plugins)
+    std::unique_ptr<CBehavior> moveBehavior_;
+    std::unique_ptr<CBehavior> followBehavior_;
+    std::unique_ptr<CBehavior> patrolBehavior_;
+    std::unique_ptr<CBehavior> holdPositionBehavior_;
+    std::unique_ptr<CBehavior> attackBehavior_;
+    std::unique_ptr<CBehavior> attackMoveBehavior_;
     std::unique_ptr<CBehavior> defaultBehavior_;
 
     // Current behavior and order queue

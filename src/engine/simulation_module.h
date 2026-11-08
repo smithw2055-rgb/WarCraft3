@@ -23,7 +23,14 @@ class CDestructable;
 class CCombatSystem;
 class CAbility;
 class CBuff;
+class CBehavior;
+class CWidget;
+class COrder;
+struct CProjectile;
+struct CFogSightSource;
+struct SimCommand;
 struct DataDrivenBuffSpec;
+enum class CBehaviorCategory : uint8_t;
 struct CarriedHero;
 struct AIRacePlan;
 
@@ -39,6 +46,21 @@ struct SimulationModuleStats {
     uint64_t customDataArchetypesRegistered = 0;
     uint64_t customBuffsRegistered = 0;
     uint64_t customBuffsApplied = 0;
+    uint64_t customProjectilesRegistered = 0;
+    uint64_t customProjectilesSpawned = 0;
+    uint64_t projectilePreImpactsEvaluated = 0;
+    uint64_t customBehaviorsRegistered = 0;
+    uint64_t customBehaviorsDispatched = 0;
+    uint64_t customDropoffsRegistered = 0;
+    uint64_t resourceDropoffQueries = 0;
+    uint64_t sightRadiusEvaluations = 0;
+    uint64_t customSightSourcesRegistered = 0;
+    uint64_t customPassabilityRulesRegistered = 0;
+    uint64_t moduleSnapshotsCaptured = 0;
+    uint64_t moduleSnapshotsRestored = 0;
+    uint64_t lockstepCommandsValidated = 0;
+    uint64_t customSimCommandsExecuted = 0;
+    uint64_t moduleHashesComputed = 0;
     uint64_t itemsConfigured = 0;
     uint64_t destructablesConfigured = 0;
     uint64_t unitsCommitted = 0;
@@ -344,6 +366,134 @@ public:
                                           float /*durationOverride*/ = 0.0f,
                                           int /*casterHandleId*/ = -1) {
         return false;
+    }
+
+    // ========================================================================
+    // Phase 23: Engine-Level Pluggable Projectile & Unit Behavior State Machine
+    // ========================================================================
+    virtual bool OnProjectilePreImpact(CSimulation& /*sim*/,
+                                       CProjectile& /*proj*/,
+                                       CUnit* /*source*/,
+                                       CWidget* /*target*/,
+                                       bool& outTerminate) {
+        outTerminate = true;
+        ++stats_.projectilePreImpactsEvaluated;
+        return false;
+    }
+
+    virtual bool OnProjectileCustomImpact(CSimulation& /*sim*/,
+                                          CProjectile& /*proj*/,
+                                          CUnit* /*source*/,
+                                          CWidget* /*target*/,
+                                          float /*impactX*/,
+                                          float /*impactY*/) {
+        return false;
+    }
+
+    virtual CUnit* OnFindProjectileBounceTarget(CSimulation& /*sim*/,
+                                                const CProjectile& /*proj*/,
+                                                CUnit* /*source*/,
+                                                CWidget* /*currentTarget*/) {
+        return nullptr;
+    }
+
+    virtual bool SpawnCustomProjectile(CSimulation& /*sim*/,
+                                       uint32_t /*projRawcode*/,
+                                       CUnit* /*source*/,
+                                       CWidget* /*target*/,
+                                       float /*targetX*/ = 0.0f,
+                                       float /*targetY*/ = 0.0f) {
+        return false;
+    }
+
+    virtual CBehavior* CreateUnitBehavior(CBehaviorCategory /*category*/) const {
+        return nullptr;
+    }
+
+    virtual CBehavior* CreateStunBehavior(float /*duration*/) const {
+        return nullptr;
+    }
+
+    virtual CBehavior* TryCreateCustomOrderBehavior(CSimulation& /*sim*/,
+                                                    CUnit* /*unit*/,
+                                                    const COrder& /*order*/) {
+        return nullptr;
+    }
+
+    // ========================================================================
+    // Phase 24: Pluggable Resource Dropoff & Harvest Target Discovery Rules
+    // ========================================================================
+    virtual bool CanUnitAcceptResourceDropoff(const CUnit& /*dropoffUnit*/,
+                                              int /*resourceTypeOrd*/) const {
+        return false;
+    }
+
+    virtual CUnit* OnFindNearestResourceDropoff(CSimulation& /*sim*/,
+                                                const CUnit& /*worker*/,
+                                                int /*resourceTypeOrd*/) {
+        ++stats_.resourceDropoffQueries;
+        return nullptr;
+    }
+
+    virtual CWidget* OnFindNearestHarvestTarget(CSimulation& /*sim*/,
+                                                const CUnit& /*worker*/,
+                                                int /*resourceTypeOrd*/,
+                                                float /*refX*/,
+                                                float /*refY*/) {
+        return nullptr;
+    }
+
+    // ========================================================================
+    // Phase 25: Vision/Fog Hooks, Custom Cell Passability & Module Snapshot
+    // ========================================================================
+    virtual float OnComputeUnitSightRadius(const CSimulation& /*sim*/,
+                                           const CUnit& /*unit*/,
+                                           float baseSightRadius,
+                                           bool /*isNight*/) const {
+        ++stats_.sightRadiusEvaluations;
+        return baseSightRadius;
+    }
+
+    virtual void OnCollectExtraSightSources(const CSimulation& /*sim*/,
+                                            std::vector<CFogSightSource>& /*outSources*/) const {}
+
+    // Returns -1 to use default WPM cell check, 0 = force blocked, 1 = force pathable
+    virtual int OnCheckCustomCellPassability(int /*cellX*/,
+                                             int /*cellY*/,
+                                             int /*movementTypeOrd*/) const {
+        return -1;
+    }
+
+    virtual void OnCaptureModuleSnapshot(const CSimulation& /*sim*/,
+                                         std::vector<uint8_t>& /*outBytes*/) const {
+        ++stats_.moduleSnapshotsCaptured;
+    }
+
+    virtual bool OnRestoreModuleSnapshot(CSimulation& /*sim*/,
+                                         const uint8_t* /*data*/,
+                                         size_t /*size*/) {
+        ++stats_.moduleSnapshotsRestored;
+        return true;
+    }
+
+    // ========================================================================
+    // Phase 26: Pluggable Lockstep Command Validation, Global SimCommand
+    //           Execution & Deterministic Module State Hashing
+    // ========================================================================
+    virtual bool OnValidateLockstepCommand(const CSimulation& /*sim*/,
+                                           const SimCommand& /*cmd*/) const {
+        ++stats_.lockstepCommandsValidated;
+        return true;
+    }
+
+    virtual bool OnExecuteCustomSimCommand(CSimulation& /*sim*/,
+                                           const SimCommand& /*cmd*/) {
+        return false;
+    }
+
+    virtual uint64_t OnComputeModuleStateHash(const CSimulation& /*sim*/) const {
+        ++stats_.moduleHashesComputed;
+        return 0;
     }
 
     // Negative buff duration multiplier (e.g., 0.25x when Resistant Skin 'Brsk' is active).

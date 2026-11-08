@@ -5,6 +5,7 @@
 #include <sstream>
 
 #include "ecs/unit.h"
+#include "ecs/behaviors/behavior_move.h"
 
 namespace core {
 
@@ -243,7 +244,7 @@ int CommandBufferPipeline::IssueGroupPointOrder(CSimulation& sim,
 
         if (sim.IssueUnitOrder(uHandle, std::make_unique<COrderTargetPoint>(orderId, destX, destY))) {
             if (useFormation && validUnits.size() > 1) {
-                if (CBehaviorMove* mb = validUnits[i]->GetMoveBehavior()) {
+                if (CBehaviorMove* mb = static_cast<CBehaviorMove*>(validUnits[i]->GetMoveBehavior())) {
                     mb->SetUseFlowFieldSteering(true);
                 }
             }

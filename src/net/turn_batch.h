@@ -29,7 +29,8 @@ struct TurnBatch {
 std::unique_ptr<COrder> OrderFromCommand(CSimulation& sim, const SimCommand& cmd);
 
 // Apply every reconstructible command of a batch through
-// CSimulation::IssueUnitOrder. Returns the number applied.
+// CSimulation::ExecuteSimCommand (supporting both unit orders and module-level
+// global player commands). Returns the number applied.
 int ApplyBatch(CSimulation& sim, const TurnBatch& batch);
 
 // Game-start handshake (the missing seed distribution that made every MP
@@ -48,8 +49,7 @@ struct StartGamePackage {
 // Peer-side desync detection for stamped TurnBatch.stateHash values.
 // Feed every received batch AFTER applying it: Check(turn, batch.stateHash,
 // sim.HashState()). A 0/0 pair (unstamped practice games) passes; any other
-// mismatch latches the first occurrence for the UI pause dialog. Resync
-// itself needs a full sim snapshot (not yet implemented); this only detects.
+// mismatch latches the first occurrence for the UI pause dialog.
 struct DesyncTracker {
     bool desynced = false;
     int32_t firstTurn = -1;

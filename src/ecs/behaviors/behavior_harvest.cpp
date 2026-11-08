@@ -1,16 +1,14 @@
 #include "behavior_harvest.h"
+#include "behavior_move_into_range.h"
 #include "ecs/csimulation.h"
 #include "ecs/destructable.h"
 #include "ecs/unit.h"
 #include "ecs/player.h"
 #include "ecs/orders/order.h"
-#include "ecs/pathing/pathfinding.h"
-#include "ecs/pathing/world_collision.h"
-#include "data/destructabledata.h"
+#include "engine/simulation_module.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
-#include <limits>
 
 namespace {
 
@@ -35,8 +33,19 @@ CAbility* ResolveMineAbility(CUnit* unit) {
 
 CBehaviorHarvest::CBehaviorHarvest() {}
 
+CBehavior* CBehavior::CreateHarvest(CUnit* caster, CWidget* target,
+                                    int resourceTypeOrd, int capacity) {
+    auto* behavior = new CBehaviorHarvest();
+    behavior->SetUnit(caster);
+    behavior->SetTarget(target);
+    behavior->SetResourceType(static_cast<CResourceType>(resourceTypeOrd));
+    behavior->SetCapacity(capacity);
+    return behavior;
+}
+
 void CBehaviorHarvest::SetTarget(CWidget* target) {
     target_ = target;
+    targetHandle_ = target ? target->GetHandleId() : -1;
     waypoints_.clear();
     if (target_ && unit_) {
         if (CAbility* harvestAbility = unit_->GetAbility(War3ID("Ahar"))) {
@@ -61,7 +70,7 @@ void CBehaviorHarvest::Begin(CSimulation& simulation) {
 
 void CBehaviorHarvest::End(CSimulation& simulation) {
     if (resourceType_ == CResourceType::GOLD && inMine_) {
-        if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+        if (auto* targetUnit = (targetHandle_ >= 0 && simulation.GetUnit(targetHandle_)) ? simulation.GetUnit(targetHandle_) : dynamic_cast<CUnit*>(target_)) {
             if (CAbility* mine = ResolveMineAbility(targetUnit)) {
                 mine->RemoveMiner(this);
             }
@@ -108,16 +117,12 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             }
         }
 
-        float dx = target_->GetX() - unit_->GetX();
-        float dy = target_->GetY() - unit_->GetY();
-        float dist = std::sqrt(dx * dx + dy * dy);
+        const float dist = MoveIntoRange::Distance2D(unit_->GetX(), unit_->GetY(), target_->GetX(), target_->GetY());
 
-        // Footprint-aware arrival (ref CBehaviorReturnResources): start
-        // gathering at the target's edge instead of orbiting big footprints.
         float arrival = 128.0f;
         if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
             arrival = std::max(220.0f, targetUnit->GetCollisionSize() + 96.0f);
-            if (resourceType_ == CResourceType::GOLD || targetUnit->GetAbility(War3ID("Agld")) || targetUnit->GetTypeId() == War3ID("ngol")) {
+            if (resourceType_ == CResourceType::GOLD || ResolveMineAbility(targetUnit) || targetUnit->GetTypeId() == War3ID("ngol")) {
                 arrival = 256.0f;
             }
         }
@@ -126,7 +131,6 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             propelling_ = false;
             unit_->TurnTowardPoint(target_->GetX(), target_->GetY());
 
-            // For gold mines, enter immediately if capacity allows (ref CBehaviorHarvest.java accept(CUnit))
             if (resourceType_ == CResourceType::GOLD) {
                 if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
                     if (CAbility* goldMine = ResolveMineAbility(targetUnit)) {
@@ -152,86 +156,10 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             return false;
         }
 
-        pathRecalcCooldown_--;
-        auto* pathfinding = simulation.GetPathfinding();
-        if (waypoints_.empty() || pathRecalcCooldown_ <= 0) {
-            waypoints_.clear();
-            if (pathfinding) {
-                std::vector<std::pair<float,float>> worldPath;
-                if (pathfinding->FindPathWorld(unit_->GetX(), unit_->GetY(),
-                                                target_->GetX(), target_->GetY(),
-                                                std::max(0.0f, unit_->GetCollisionSize()),
-                                                unit_->GetMovementType(), unit_, worldPath)) {
-                    const float stepReach = std::max(1.0f,
-                        unit_->GetSpeed() * simulation.GetSimStepTime()) * 2.0f;
-                    for (size_t i = 1; i < worldPath.size(); i++) {
-                        const float rdx = worldPath[i].first - unit_->GetX();
-                        const float rdy = worldPath[i].second - unit_->GetY();
-                        if (rdx * rdx + rdy * rdy > stepReach * stepReach)
-                            waypoints_.push_back(worldPath[i]);
-                    }
-                }
-            }
-            pathRecalcCooldown_ = 8;
-        }
-
-        if (!waypoints_.empty()) {
-            auto& wp = waypoints_.front();
-            float wdx = wp.first - unit_->GetX();
-            float wdy = wp.second - unit_->GetY();
-            float wdist = std::sqrt(wdx * wdx + wdy * wdy);
-            const float speed = unit_->GetSpeed() * simulation.GetSimStepTime();
-            if (wdist <= std::max(1.0f, speed)) {
-                waypoints_.pop_front();
-                propelling_ = true;
-            } else {
-                if (!unit_->TurnTowardPoint(wp.first, wp.second)) {
-                    propelling_ = false;
-                    return false;
-                }
-                float step = std::min(speed, wdist);
-                const float nx = unit_->GetX() + (wdx / wdist) * step;
-                const float ny = unit_->GetY() + (wdy / wdist) * step;
-                const float collisionRadius = std::max(0.0f, unit_->GetCollisionSize());
-                if (pathfinding && !pathfinding->IsWorldPointPathableForUnit(nx, ny, collisionRadius,
-                                                                             unit_->GetMovementType(), unit_)) {
-                    propelling_ = false;
-                    waypoints_.clear();
-                    pathRecalcCooldown_ = 0;
-                    return false;
-                }
-                if (resourceType_ != CResourceType::GOLD) {
-                    if (auto* collision = simulation.GetWorldCollision()) {
-                        const float dynamicCollisionRadius = std::max(collisionRadius, 16.0f);
-                        if (collision->CheckCollision(nx, ny, dynamicCollisionRadius, unit_)) {
-                            propelling_ = false;
-                            waypoints_.clear();
-                            pathRecalcCooldown_ = 0;
-                            return false;
-                        }
-                    }
-                }
-                unit_->SetPosition(nx, ny);
-                propelling_ = true;
-            }
-        } else {
-            if (!unit_->TurnTowardPoint(target_->GetX(), target_->GetY())) {
-                propelling_ = false;
-                return false;
-            }
-            float speed = unit_->GetSpeed() * simulation.GetSimStepTime();
-            float step = std::min(speed, dist);
-            const float nx = unit_->GetX() + (dx / dist) * step;
-            const float ny = unit_->GetY() + (dy / dist) * step;
-            const float collisionRadius = std::max(0.0f, unit_->GetCollisionSize());
-            if (pathfinding && !pathfinding->IsWorldPointPathableForUnit(nx, ny, collisionRadius,
-                                                                         unit_->GetMovementType(), unit_)) {
-                propelling_ = false;
-                return false;
-            }
-            unit_->SetPosition(nx, ny);
-            propelling_ = true;
-        }
+        MoveIntoRange::StepWorkerTowardTarget(
+            simulation, unit_, target_->GetX(), target_->GetY(), dist,
+            waypoints_, pathRecalcCooldown_, propelling_,
+            resourceType_ != CResourceType::GOLD, false, true);
         return false;
     }
 
@@ -240,8 +168,7 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
         if (target_) {
             unit_->TurnTowardPoint(target_->GetX(), target_->GetY());
         }
-        float dt = simulation.GetSimStepTime();
-        gatherTimer_ += dt;
+        gatherTimer_ += simulation.GetSimStepTime();
 
         if (gatherTimer_ >= gatherDuration_) {
             gatherTimer_ = 0;
@@ -250,10 +177,8 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                 if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
                     if (CAbility* goldMine = ResolveMineAbility(targetUnit)) {
                         if (goldMine->GetGold() <= 0) {
-                            std::cout << "Gold mine depleted!" << std::endl;
                             return true;
                         }
-
                         if (goldMine->CanAddMiner()) {
                             goldMine->AddMiner(this);
                             unit_->SetHidden(true);
@@ -262,15 +187,11 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                             gathering_ = false;
                             popoutFromMineTurnTick_ = simulation.GetGameTurnTick() + std::max(1, static_cast<int>(
                                 std::ceil(goldMine->GetMiningDuration() / simulation.GetSimStepTime())));
-                            std::cout << "Worker entered mine, waiting until tick " << popoutFromMineTurnTick_ << std::endl;
-                        } else {
-                            std::cout << "Mine full, waiting..." << std::endl;
                         }
                     }
                 }
             } else if (resourceType_ == CResourceType::LUMBER) {
-                // Lumber chopping
-                int chopAmount = 2;
+                constexpr int chopAmount = 2;
                 gatheredAmount_ = std::min(gatheredAmount_ + chopAmount, capacity_);
                 if (auto* tree = dynamic_cast<CDestructable*>(target_)) {
                     tree->Damage(simulation, unit_, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", (float)chopAmount);
@@ -293,7 +214,6 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
                         return true;
                     }
                 }
-                std::cout << "Chopped lumber: " << gatheredAmount_ << "/" << capacity_ << std::endl;
             }
 
             if (gatheredAmount_ >= capacity_) {
@@ -331,31 +251,15 @@ void CBehaviorHarvest::FindNearestTree(CSimulation& simulation) {
         searchY = target_->GetY();
     }
 
-    CDestructable* nearest = nullptr;
-    float bestDistSq = std::numeric_limits<float>::max();
-    const auto* destData = simulation.GetDestructableData();
-    if (!destData) {
-        target_ = nullptr;
-        return;
-    }
-    for (auto* d : simulation.GetDestructables()) {
-        if (!d || d->IsDead()) continue;
-        const auto* dt = destData->GetDestructable(d->GetTypeId());
-        if (!dt || !dt->isTree) continue;
-        const float dx = d->GetX() - searchX;
-        const float dy = d->GetY() - searchY;
-        const float distSq = dx * dx + dy * dy;
-        if (distSq < bestDistSq) {
-            bestDistSq = distSq;
-            nearest = d;
+    if (unit_ && !simulation.IsPureEngineMode()) {
+        if (auto* mod = simulation.GetSimulationModule()) {
+            if (CWidget* customTree = mod->OnFindNearestHarvestTarget(
+                    simulation, *unit_, static_cast<int>(CResourceType::LUMBER), searchX, searchY)) {
+                SetTarget(customTree);
+                return;
+            }
         }
     }
 
-    target_ = nearest;
-    waypoints_.clear();
-    if (target_ && unit_) {
-        if (CAbility* harvestAbility = unit_->GetAbility(War3ID("Ahar"))) {
-            harvestAbility->SetLastTargetHandle(target_->GetHandleId());
-        }
-    }
+    SetTarget(MoveIntoRange::FindNearestLivingTree(simulation, searchX, searchY));
 }

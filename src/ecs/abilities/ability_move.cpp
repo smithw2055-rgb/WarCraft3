@@ -1,12 +1,6 @@
 #include "ability_move.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
-#include "ecs/behaviors/behavior_move.h"
-#include "ecs/behaviors/behavior_follow.h"
-#include "ecs/behaviors/behavior_patrol.h"
-#include "ecs/behaviors/behavior_hold_position.h"
-#include "ecs/behaviors/behavior_stop.h"
-#include "ecs/behaviors/behavior_board_transport.h"
 
 CAbilityMove::CAbilityMove(int handleId)
     : CAbility(handleId, War3ID("Amov"), CAbilityCategory::MOVEMENT) {
@@ -16,24 +10,24 @@ CAbilityMove::CAbilityMove(int handleId)
 void CAbilityMove::OnAdd(CSimulation& game, CUnit* unit) {
     (void)game;
     // Create movement-related behaviors and store on unit
-    auto moveBehavior = std::make_unique<CBehaviorMove>();
+    auto moveBehavior = CBehavior::CreateMove();
     moveBehavior->SetUnit(unit);
     unit->SetMoveBehavior(std::move(moveBehavior));
 
-    auto followBehavior = std::make_unique<CBehaviorFollow>();
+    auto followBehavior = CBehavior::CreateFollow();
     followBehavior->SetUnit(unit);
     unit->SetFollowBehavior(std::move(followBehavior));
 
-    auto patrolBehavior = std::make_unique<CBehaviorPatrol>();
+    auto patrolBehavior = CBehavior::CreatePatrol();
     patrolBehavior->SetUnit(unit);
     unit->SetPatrolBehavior(std::move(patrolBehavior));
 
-    auto holdBehavior = std::make_unique<CBehaviorHoldPosition>();
+    auto holdBehavior = CBehavior::CreateHoldPosition();
     holdBehavior->SetUnit(unit);
     unit->SetHoldPositionBehavior(std::move(holdBehavior));
 
     // Set stop as default behavior
-    auto stopBehavior = std::make_unique<CBehaviorStop>();
+    auto stopBehavior = CBehavior::CreateStop();
     stopBehavior->SetUnit(unit);
     unit->SetDefaultBehavior(std::move(stopBehavior));
 }
@@ -83,9 +77,7 @@ CBehavior* CAbilityMove::Begin(CSimulation& game, CUnit* caster, int orderId, CW
                 transport->GetPlayerIndex() == caster->GetPlayerIndex() &&
                 (transport->GetAbility(War3ID("Aloa")) || transport->GetAbility(War3ID("Acar")) ||
                  transport->GetAbility(War3ID("Abun")) || transport->GetAbility(War3ID("Aenc")))) {
-                auto* load = new CBehaviorLoad(256.0f);
-                load->SetTarget(transport);
-                return load;
+                return CBehavior::CreateLoadPassenger(256.0f, transport);
             }
         }
     }

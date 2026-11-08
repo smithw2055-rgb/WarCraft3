@@ -21,11 +21,21 @@ public:
 
     void SetBuildTarget(float x, float y, War3ID buildingTypeId, CBuildRace race);
     bool IsMovingToSite() const { return movingToSite_; }
+    bool IsMovingToWorkSite() const override { return movingToSite_; }
     bool IsActivelyBuilding() const { return building_ && !completed_; }
-    bool IsPropelling() const { return propelling_; }
+    bool IsActivelyWorking() const override { return IsActivelyBuilding(); }
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
     // ESC-cancel (ref construction cancel): full refund, foundation removed,
     // worker released; no-op once completed.
     void CancelConstruction(CSimulation& simulation);
+    bool TryCancelConstruction(CSimulation& simulation) override {
+        if (IsActivelyBuilding() || IsMovingToSite()) {
+            CancelConstruction(simulation);
+            return true;
+        }
+        return false;
+    }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

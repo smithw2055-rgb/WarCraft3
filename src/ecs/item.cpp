@@ -1,7 +1,20 @@
 #include "item.h"
 
 CItem::CItem(int handleId, War3ID typeId, float x, float y)
-    : CWidget(handleId, x, y, 50.0f), typeId_(typeId) {}
+    : CWidget(handleId, x, y, 50.0f)
+    , typeId_(typeId)
+    , isPowerup_(0)
+    , isPermanent_(0)
+    , isCharged_(0)
+    , isPerishable_(0)
+    , useAutomatically_(0)
+    , hidden_(0)
+    , invulnerable_(0)
+    , droppable_(1)
+    , pawnable_(1)
+    , dropOnDeath_(1)
+    , inInventory_(0)
+    , reservedFlags_(0) {}
 
 bool CItem::CanBeTargetedBy(CSimulation& simulation, CUnit* source,
                              const std::vector<CTargetType>& targetsAllowed) const {

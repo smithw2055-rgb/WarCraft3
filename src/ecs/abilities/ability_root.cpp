@@ -1,7 +1,6 @@
 #include "ability_root.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
-#include "ecs/behaviors/behavior_root.h"
 
 // ===== CAbilityRoot =====
 CAbilityRoot::CAbilityRoot(int handleId)
@@ -33,7 +32,7 @@ CBehavior* CAbilityRoot::BeginNoTarget(CSimulation& game, CUnit* caster, int ord
     // Hold the order queue for the morph window (ref CBehaviorRoot
     // AcceptingOrders=false gap); state itself is already flipped above so
     // callers observing IsRooted() see the new value immediately.
-    return new CBehaviorRoot(0.5f);
+    return CBehavior::CreateRootMorph(0.5f, false);
 }
 
 // ===== CAbilityUproot =====
@@ -63,5 +62,5 @@ CBehavior* CAbilityUproot::BeginNoTarget(CSimulation& game, CUnit* caster, int o
         root->SetDisabled(false, CAbilityDisableType::TRANSFORMATION);
     }
     SetDisabled(true, CAbilityDisableType::TRANSFORMATION);
-    return new CBehaviorUproot(0.5f);
+    return CBehavior::CreateRootMorph(0.5f, true);
 }

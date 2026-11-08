@@ -10,7 +10,7 @@ bool LobbyState::SetSlot(int index, const LobbySlot& slot) {
     if (index < 0 || index >= kMaxSlots) return false;
     if (slot.team < 0) return false;
     if (slot.color < -1 || slot.color >= kMaxColors) return false;
-    if (slot.race < 0 || slot.race > 4) return false;
+    if (slot.race < 0 || slot.race > maxRaceId_) return false;
     LobbySlot copy = slot;
     if (copy.controller == LobbySlotController::OPEN ||
         copy.controller == LobbySlotController::CLOSED) {
@@ -48,6 +48,11 @@ bool LobbyState::AllUsersReady() const {
 
 bool LobbyState::IsReadyToStart() const {
     return CountUsers() >= 2 && AllUsersReady();
+}
+
+bool LobbyState::CanStartSkirmish() const {
+    const int users = CountUsers();
+    return users >= 1 && (users + CountComputers()) >= 2 && AllUsersReady();
 }
 
 void LobbyState::ResetReady() {

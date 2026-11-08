@@ -131,3 +131,17 @@ bool CBehaviorDrop::Update(CSimulation& simulation) {
     if (unit_->GetCargoUnits().empty()) return true;
     return false;
 }
+
+CBehavior* CBehavior::CreateLoadPassenger(float loadRange, CWidget* transport) {
+    auto* load = new CBehaviorLoad(loadRange);
+    load->SetTarget(transport);
+    return load;
+}
+CBehavior* CBehavior::CreateBoardTransport(float loadRange, int cargoCapacity, CWidget* target) {
+    auto* board = new CBehaviorBoardTransport(loadRange, cargoCapacity);
+    board->SetTarget(target);
+    return board;
+}
+CBehavior* CBehavior::CreateDropCargo(float x, float y, float durationSec) {
+    return new CBehaviorDrop(x, y, durationSec);
+}

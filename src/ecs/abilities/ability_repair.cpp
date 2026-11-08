@@ -2,7 +2,6 @@
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"
-#include "ecs/behaviors/behavior_repair.h"
 
 CAbilityRepair::CAbilityRepair(int handleId)
     : CAbility(handleId, War3ID("Arep"), CAbilityCategory::BUILD) {
@@ -39,9 +38,5 @@ CBehavior* CAbilityRepair::Begin(CSimulation& game, CUnit* caster, int orderId, 
     (void)orderId;
     if (!target) return nullptr;
 
-    auto* behavior = new CBehaviorRepair();
-    behavior->SetUnit(caster);
-    behavior->SetRepairAbility(this);
-    behavior->SetTarget(target);
-    return behavior;
+    return CBehavior::CreateRepair(caster, this, target);
 }

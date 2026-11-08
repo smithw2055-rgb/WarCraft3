@@ -208,7 +208,7 @@ void CFogSystem::UpdateSightForPlayer(int player, const CFogSightSource* sources
 
         for (int i = 0; i < count; i++) {
             const CFogSightSource& src = sources[i];
-            if (src.player != player || src.radius <= 0.0f) continue;
+            if (!src.MatchesPlayer(player) || src.radius <= 0.0f) continue;
 
             const int minRow = std::max(0, (int)((src.y - src.radius - gridMinY_) / cellY));
             const int maxRow = std::min(gridH_ - 1, (int)((src.y + src.radius - gridMinY_) / cellY));

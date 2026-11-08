@@ -17,7 +17,7 @@ public:
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::INVENTORY; }
 
     void SetTarget(CItem* item) { item_ = item; }
-    CItem* GetTarget() const { return item_; }
+    CItem* GetItemTarget() const { return item_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;
@@ -54,7 +54,7 @@ public:
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::INVENTORY; }
 
     void SetTarget(CUnit* target) { target_ = target; }
-    CUnit* GetTarget() const { return target_; }
+    CUnit* GetUnitTarget() const { return target_; }
     int GetSlot() const { return slot_; }
 
     bool Update(CSimulation& simulation) override;

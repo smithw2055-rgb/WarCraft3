@@ -6,7 +6,7 @@
 #include "resource/slk.h"
 
 class CBehavior;
-class CBehaviorHarvest;
+class CBehavior;
 class CItem;
 class COrder;
 class COrderTargetPoint;
@@ -262,8 +262,8 @@ public:
     virtual int GetGold() const { return 0; }
     virtual void SetGold(int /*v*/) {}
     virtual bool CanAddMiner() const { return false; }
-    virtual void AddMiner(CBehaviorHarvest* /*miner*/) {}
-    virtual void RemoveMiner(CBehaviorHarvest* /*miner*/) {}
+    virtual void AddMiner(CBehavior* /*miner*/) {}
+    virtual void RemoveMiner(CBehavior* /*miner*/) {}
     virtual float GetMiningDuration() const { return 5.0f; }
 
     // 4. Repair & Working Animation State Interface (overridden by CAbilityRepair, CAbilityQueue, CAbilityGoldMine)

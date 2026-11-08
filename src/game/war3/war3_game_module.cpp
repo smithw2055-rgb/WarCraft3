@@ -10,6 +10,8 @@
 #include "data/destructabledata.h"
 #include "ecs/buffs.h"
 #include "ecs/hero_carry.h"
+#include "ecs/combat/projectile.h"
+#include "ecs/behaviors/behavior_move_into_range.h"
 #include "ecs/item_bonuses.h"
 #include "data/itemdata.h"
 #include "data/unitdata.h"
@@ -2504,6 +2506,907 @@ bool War3GameModule::TryApplyCustomBuffByCode(CSimulation& sim,
         return true;
     }
     return false;
+}
+
+
+// ============================================================================
+// Phase 23: Engine-Level Pluggable Projectile & Unit Behavior State Machine
+// ============================================================================
+
+void War3GameModule::RegisterCustomProjectileSpec(const CustomProjectileSpec& spec) {
+    if (spec.code.value == 0) return;
+    customProjectileSpecs_[spec.code.value] = spec;
+    ++stats_.customProjectilesRegistered;
+}
+
+void War3GameModule::RegisterCustomProjectileImpact(War3ID projCode, ProjectileImpactFn fn) {
+    if (projCode.value == 0 || !fn) return;
+    customProjectileImpacts_[projCode.value] = std::move(fn);
+    ++stats_.customProjectilesRegistered;
+}
+
+bool War3GameModule::UnregisterCustomProjectile(War3ID projCode) {
+    if (projCode.value == 0) return false;
+    const size_t c1 = customProjectileSpecs_.erase(projCode.value);
+    const size_t c2 = customProjectileImpacts_.erase(projCode.value);
+    return (c1 + c2) > 0;
+}
+
+bool War3GameModule::HasCustomProjectile(War3ID projCode) const {
+    return customProjectileSpecs_.count(projCode.value) > 0 ||
+           customProjectileImpacts_.count(projCode.value) > 0;
+}
+
+bool War3GameModule::OnProjectilePreImpact(CSimulation& sim,
+                                           CProjectile& proj,
+                                           CUnit* source,
+                                           CWidget* target,
+                                           bool& outTerminate) {
+    ++stats_.projectilePreImpactsEvaluated;
+    outTerminate = true;
+    auto* victim = dynamic_cast<CUnit*>(target);
+    if (!victim) return false;
+
+    if (proj.checkEffectReaction) {
+        if (!victim->CheckSpellEffectReaction(sim, source)) {
+            outTerminate = true;
+            return true;
+        }
+    }
+
+    // WarCraft 3 Dragon Scale (`BIdd`) pierce projectile reflection:
+    // reflects a pierce projectile once back at the attacker.
+    if (!proj.pierceReflected && proj.attackType == CAttackType::PIERCE) {
+        if (victim->HasBuff(War3ID("BIdd")) && source &&
+            source->GetHandleId() != victim->GetHandleId()) {
+            proj.pierceReflected = true;
+            proj.targetHandleId = source->GetHandleId();
+            proj.attackerHandleId = victim->GetHandleId();
+            proj.traveled = 0.0f;
+            proj.fx = proj.x;
+            proj.fy = proj.y;
+            outTerminate = false;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool War3GameModule::OnProjectileCustomImpact(CSimulation& sim,
+                                              CProjectile& proj,
+                                              CUnit* source,
+                                              CWidget* target,
+                                              float impactX,
+                                              float impactY) {
+    bool handled = false;
+    auto fnIt = customProjectileImpacts_.find(proj.projectileTypeId.value);
+    if (fnIt != customProjectileImpacts_.end() && fnIt->second) {
+        fnIt->second(sim, proj, source, target, impactX, impactY);
+        handled = true;
+    }
+
+    auto specIt = customProjectileSpecs_.find(proj.projectileTypeId.value);
+    if (specIt != customProjectileSpecs_.end()) {
+        const CustomProjectileSpec& spec = specIt->second;
+        if (spec.impactBuffCode.value != 0) {
+            if (auto* victim = dynamic_cast<CUnit*>(target)) {
+                TryApplyCustomBuffByCode(sim, *victim, spec.impactBuffCode.value,
+                                         spec.impactBuffDuration,
+                                         source ? source->GetHandleId() : -1);
+            }
+        }
+        if (spec.onImpact) {
+            spec.onImpact(sim, source, target, impactX, impactY);
+        }
+        handled = true;
+    }
+    return handled;
+}
+
+CUnit* War3GameModule::OnFindProjectileBounceTarget(CSimulation& sim,
+                                                    const CProjectile& proj,
+                                                    CUnit* source,
+                                                    CWidget* currentTarget) {
+    if (!source) return nullptr;
+    CPlayer* ownerPlayer = sim.GetPlayer(source->GetPlayerIndex());
+    const int currentHandle = currentTarget ? currentTarget->GetHandleId() : proj.targetHandleId;
+    CUnit* best = nullptr;
+    float bestDistSq = proj.bounceRange * proj.bounceRange;
+
+    for (CUnit* other : sim.GetUnits()) {
+        if (!other || other->IsDead() || other == source) continue;
+        if (other->GetHandleId() == currentHandle) continue;
+
+        bool isEnemy = (other->GetPlayerIndex() != source->GetPlayerIndex());
+        if (ownerPlayer) {
+            if (CPlayer* otherPlayer = sim.GetPlayer(other->GetPlayerIndex())) {
+                isEnemy = !ownerPlayer->HasAlliance(*otherPlayer, CAllianceType::ALLIED);
+            } else {
+                isEnemy = false;
+            }
+        }
+        if (!isEnemy) continue;
+
+        const float ox = other->GetX() - proj.x;
+        const float oy = other->GetY() - proj.y;
+        const float dSq = ox * ox + oy * oy;
+        if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            best = other;
+        }
+    }
+    return best;
+}
+
+bool War3GameModule::SpawnCustomProjectile(CSimulation& sim,
+                                           uint32_t projRawcode,
+                                           CUnit* source,
+                                           CWidget* target,
+                                           float targetX,
+                                           float targetY) {
+    auto it = customProjectileSpecs_.find(projRawcode);
+    if (it == customProjectileSpecs_.end()) return false;
+    const CustomProjectileSpec& spec = it->second;
+
+    CProjectile shot;
+    shot.projectileTypeId = spec.code;
+    shot.attackerHandleId = source ? source->GetHandleId() : -1;
+    shot.x = source ? source->GetX() : 0.0f;
+    shot.y = source ? source->GetY() : 0.0f;
+    shot.fx = shot.x;
+    shot.fy = shot.y;
+    shot.speed = spec.speed;
+    shot.damage = spec.damage;
+    shot.attackType = spec.attackType;
+    shot.damageType = spec.damageType;
+    shot.isAttack = spec.isAttack;
+    shot.isRanged = spec.isRanged;
+    shot.checkEffectReaction = spec.checkEffectReaction;
+    shot.customImpactOnly = spec.customImpactOnly;
+    shot.splashFull = spec.splashFull;
+    shot.splashHalf = spec.splashHalf;
+    shot.splashQuarter = spec.splashQuarter;
+    shot.splashFactorHalf = spec.splashFactorHalf;
+    shot.splashFactorQuarter = spec.splashFactorQuarter;
+    shot.bouncesLeft = spec.bounces;
+    shot.bounceRange = spec.bounceRange;
+    shot.bounceLossFactor = spec.bounceLossFactor;
+    shot.spillDistance = spec.spillDistance;
+    shot.spillRadius = spec.spillRadius;
+
+    const float aimX = (!spec.groundTarget && target) ? target->GetX() : targetX;
+    const float aimY = (!spec.groundTarget && target) ? target->GetY() : targetY;
+    if (spec.groundTarget || !target) {
+        shot.groundTarget = true;
+        shot.targetHandleId = -1;
+        shot.tx = aimX;
+        shot.ty = aimY;
+    } else {
+        shot.groundTarget = false;
+        shot.targetHandleId = target->GetHandleId();
+    }
+
+    const float dx = aimX - shot.x;
+    const float dy = aimY - shot.y;
+    shot.maxTravel = std::sqrt(dx * dx + dy * dy) + 512.0f;
+    sim.SpawnProjectile(std::move(shot));
+    ++stats_.customProjectilesSpawned;
+    return true;
+}
+
+void War3GameModule::RegisterCustomBehaviorCreator(int orderId, BehaviorCreatorFn fn) {
+    if (orderId == 0 || !fn) return;
+    customBehaviorCreators_[orderId] = std::move(fn);
+    ++stats_.customBehaviorsRegistered;
+}
+
+void War3GameModule::RegisterCustomBehaviorSpec(const CustomBehaviorSpec& spec) {
+    if (spec.orderId == 0) return;
+    customBehaviorSpecs_[spec.orderId] = spec;
+    ++stats_.customBehaviorsRegistered;
+}
+
+bool War3GameModule::UnregisterCustomBehavior(int orderId) {
+    if (orderId == 0) return false;
+    const size_t c1 = customBehaviorCreators_.erase(orderId);
+    const size_t c2 = customBehaviorSpecs_.erase(orderId);
+    return (c1 + c2) > 0;
+}
+
+bool War3GameModule::HasCustomBehavior(int orderId) const {
+    return customBehaviorCreators_.count(orderId) > 0 ||
+           customBehaviorSpecs_.count(orderId) > 0;
+}
+
+CBehavior* War3GameModule::CreateUnitBehavior(CBehaviorCategory category) const {
+    auto ovIt = customCategoryBehaviorOverrides_.find(static_cast<uint8_t>(category));
+    if (ovIt != customCategoryBehaviorOverrides_.end() && ovIt->second) {
+        return ovIt->second();
+    }
+    class CBehaviorModuleStop final : public CBehavior {
+    public:
+        CBehaviorCategory GetCategory() const override { return CBehaviorCategory::STOP; }
+        void Begin(CSimulation&) override { if (unit_) unit_->ClearOrders(); }
+        bool Update(CSimulation&) override { return true; }
+    };
+    class CBehaviorModuleHold final : public CBehavior {
+    public:
+        CBehaviorCategory GetCategory() const override { return CBehaviorCategory::HOLD_POSITION; }
+        bool Update(CSimulation&) override { return false; }
+    };
+    if (category == CBehaviorCategory::STOP) return new CBehaviorModuleStop();
+    if (category == CBehaviorCategory::HOLD_POSITION) return new CBehaviorModuleHold();
+    if (category == CBehaviorCategory::STUN) return CreateStunBehavior(0.0f);
+    return nullptr;
+}
+
+void War3GameModule::RegisterCategoryBehaviorOverride(CBehaviorCategory category, CategoryBehaviorFactoryFn fn) {
+    if (!fn) return;
+    customCategoryBehaviorOverrides_[static_cast<uint8_t>(category)] = std::move(fn);
+    ++stats_.customBehaviorsRegistered;
+}
+
+bool War3GameModule::UnregisterCategoryBehaviorOverride(CBehaviorCategory category) {
+    return customCategoryBehaviorOverrides_.erase(static_cast<uint8_t>(category)) > 0;
+}
+
+bool War3GameModule::HasCategoryBehaviorOverride(CBehaviorCategory category) const {
+    return customCategoryBehaviorOverrides_.count(static_cast<uint8_t>(category)) > 0;
+}
+
+void War3GameModule::RegisterCustomDropoffUnitType(War3ID unitTypeId, bool acceptsGold, bool acceptsLumber) {
+    if (unitTypeId.value == 0) return;
+    customDropoffTypes_[unitTypeId.value] = CustomDropoffRule{acceptsGold, acceptsLumber};
+    ++stats_.customDropoffsRegistered;
+}
+
+bool War3GameModule::UnregisterCustomDropoffUnitType(War3ID unitTypeId) {
+    return customDropoffTypes_.erase(unitTypeId.value) > 0;
+}
+
+bool War3GameModule::HasCustomDropoffUnitType(War3ID unitTypeId) const {
+    return customDropoffTypes_.count(unitTypeId.value) > 0;
+}
+
+bool War3GameModule::CanUnitAcceptResourceDropoff(const CUnit& dropoffUnit,
+                                                  int resourceTypeOrd) const {
+    const auto resType = static_cast<CResourceType>(resourceTypeOrd);
+    if (resType == CResourceType::NONE) return false;
+    auto it = customDropoffTypes_.find(dropoffUnit.GetTypeId().value);
+    if (it != customDropoffTypes_.end()) {
+        if (resType == CResourceType::GOLD && it->second.acceptsGold) return true;
+        if (resType == CResourceType::LUMBER && it->second.acceptsLumber) return true;
+    }
+    if (const CAbility* ret = dropoffUnit.GetAbility(War3ID("Aret"))) {
+        if (ret->AcceptsResourceDropoff(resType)) return true;
+    }
+    for (const CAbility* ab : dropoffUnit.GetAbilities()) {
+        if (ab && ab->AcceptsResourceDropoff(resType)) return true;
+    }
+    return false;
+}
+
+CUnit* War3GameModule::OnFindNearestResourceDropoff(CSimulation& sim,
+                                                    const CUnit& worker,
+                                                    int resourceTypeOrd) {
+    ++stats_.resourceDropoffQueries;
+    CUnit* nearest = nullptr;
+    float bestDistSq = std::numeric_limits<float>::max();
+    for (CUnit* other : sim.GetUnits()) {
+        if (!other || other->IsDead() || other == &worker) continue;
+        if (other->GetPlayerIndex() != worker.GetPlayerIndex()) continue;
+        if (other->IsConstructing()) continue;
+        if (!CanUnitAcceptResourceDropoff(*other, resourceTypeOrd)) continue;
+        const float dx = other->GetX() - worker.GetX();
+        const float dy = other->GetY() - worker.GetY();
+        const float dSq = dx * dx + dy * dy;
+        if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            nearest = other;
+        }
+    }
+    return nearest;
+}
+
+CWidget* War3GameModule::OnFindNearestHarvestTarget(CSimulation& sim,
+                                                    const CUnit& worker,
+                                                    int resourceTypeOrd,
+                                                    float refX,
+                                                    float refY) {
+    const auto resType = static_cast<CResourceType>(resourceTypeOrd);
+    if (resType == CResourceType::LUMBER) {
+        return MoveIntoRange::FindNearestLivingTree(sim, refX, refY);
+    }
+    if (resType == CResourceType::GOLD) {
+        CUnit* nearest = nullptr;
+        float bestDistSq = std::numeric_limits<float>::max();
+        for (CUnit* other : sim.GetUnits()) {
+            if (!other || other->IsDead() || other == &worker) continue;
+            const CAbility* mine = other->GetGoldMineAbility();
+            if (!mine || mine->GetGold() <= 0) continue;
+            const float dx = other->GetX() - refX;
+            const float dy = other->GetY() - refY;
+            const float dSq = dx * dx + dy * dy;
+            if (dSq < bestDistSq) {
+                bestDistSq = dSq;
+                nearest = other;
+            }
+        }
+        return nearest;
+    }
+    return nullptr;
+}
+
+CBehavior* War3GameModule::CreateStunBehavior(float duration) const {
+    class CBehaviorModuleStun final : public CBehavior {
+    public:
+        explicit CBehaviorModuleStun(float d) : duration_(d), remaining_(d) {}
+        CBehaviorCategory GetCategory() const override { return CBehaviorCategory::STUN; }
+        bool IsInterruptable() const override { return false; }
+        void Begin(CSimulation&) override { remaining_ = duration_; }
+        void End(CSimulation&) override { remaining_ = 0.0f; }
+        bool Update(CSimulation& sim) override {
+            remaining_ -= sim.GetSimStepTime();
+            return remaining_ <= 0.0f;
+        }
+        void SetDuration(float d) override { duration_ = d; }
+        float GetRemaining() const override { return remaining_; }
+        void SetRemaining(float r) override { remaining_ = r; }
+    private:
+        float duration_ = 0.0f;
+        float remaining_ = 0.0f;
+    };
+    return new CBehaviorModuleStun(duration);
+}
+
+CBehavior* War3GameModule::TryCreateCustomOrderBehavior(CSimulation& sim,
+                                                        CUnit* unit,
+                                                        const COrder& order) {
+    const int orderId = order.GetOrderId();
+    auto creatorIt = customBehaviorCreators_.find(orderId);
+    if (creatorIt != customBehaviorCreators_.end() && creatorIt->second) {
+        ++stats_.customBehaviorsDispatched;
+        return creatorIt->second(sim, unit, order);
+    }
+
+    auto specIt = customBehaviorSpecs_.find(orderId);
+    if (specIt == customBehaviorSpecs_.end()) return nullptr;
+
+    class CBehaviorDataDriven final : public CBehavior {
+    public:
+        CBehaviorDataDriven(const CustomBehaviorSpec& spec, const COrder& ord)
+            : spec_(spec)
+            , targetKind_(ord.GetTargetKind())
+            , target_(ord.GetTarget())
+            , targetHandle_(ord.GetTarget() ? ord.GetTarget()->GetHandleId() : -1)
+            , tx_(ord.GetX())
+            , ty_(ord.GetY()) {}
+
+        CBehaviorCategory GetCategory() const override { return spec_.category; }
+        War3ID GetCustomBehaviorCode() const override { return spec_.code; }
+        bool IsInterruptable() const override { return spec_.interruptable; }
+        bool TracksPropellingState() const override { return true; }
+        bool IsPropelling() const override { return propelling_; }
+        bool IsMovingToWorkSite() const override { return movingToRange_ && spec_.category == CBehaviorCategory::BUILD; }
+        bool IsActivelyWorking() const override { return !movingToRange_ && (spec_.category == CBehaviorCategory::BUILD || spec_.category == CBehaviorCategory::HARVEST); }
+        CWidget* GetTarget() const override { return target_; }
+        void SetTarget(CWidget* t) override { target_ = t; targetHandle_ = t ? t->GetHandleId() : -1; }
+        void SetTarget(float x, float y) override { tx_ = x; ty_ = y; }
+        float GetRemaining() const override { return std::max(0.0f, spec_.duration - elapsed_); }
+        void SetRemaining(float r) override { elapsed_ = std::max(0.0f, spec_.duration - r); }
+
+        void Begin(CSimulation&) override {
+            elapsed_ = 0.0f;
+            tickAccum_ = 0.0f;
+            beganAction_ = false;
+            propelling_ = false;
+            waypoints_.clear();
+            pathRecalcCooldown_ = 0;
+            movingToRange_ = (targetKind_ != COrder::TargetKind::NONE && spec_.range > 0.0f);
+        }
+
+        void End(CSimulation& s) override {
+            propelling_ = false;
+            waypoints_.clear();
+            if (beganAction_ && spec_.onEnd && unit_) {
+                spec_.onEnd(s, unit_);
+            }
+        }
+
+        bool Update(CSimulation& s) override {
+            if (!unit_ || unit_->IsDead()) return true;
+            CWidget* resolvedTarget = (targetHandle_ >= 0) ? s.GetWidget(targetHandle_) : target_;
+            if (targetKind_ == COrder::TargetKind::WIDGET && (!resolvedTarget || resolvedTarget->IsDead())) {
+                propelling_ = false;
+                return true;
+            }
+            const float aimX = (targetKind_ == COrder::TargetKind::WIDGET && resolvedTarget) ? resolvedTarget->GetX() : tx_;
+            const float aimY = (targetKind_ == COrder::TargetKind::WIDGET && resolvedTarget) ? resolvedTarget->GetY() : ty_;
+
+            if (movingToRange_) {
+                const float dist = MoveIntoRange::Distance2D(unit_->GetX(), unit_->GetY(), aimX, aimY);
+                if (dist <= spec_.range) {
+                    movingToRange_ = false;
+                    propelling_ = false;
+                    unit_->TurnTowardPoint(aimX, aimY);
+                } else {
+                    if (unit_->IsRooted()) { propelling_ = false; return true; }
+                    MoveIntoRange::RefreshWaypointsIfNeeded(s, unit_, aimX, aimY, waypoints_, pathRecalcCooldown_, true, true);
+                    if (!waypoints_.empty()) {
+                        MoveIntoRange::StepFrontWaypoint(s, unit_, waypoints_, pathRecalcCooldown_, propelling_, true);
+                        return false;
+                    }
+                    MoveIntoRange::StepDirectValidated(s, unit_, aimX, aimY, dist - spec_.range + 8.0f, propelling_);
+                    return false;
+                }
+            }
+
+            propelling_ = false;
+            if (!beganAction_) {
+                beganAction_ = true;
+                if (spec_.onBegin) {
+                    spec_.onBegin(s, unit_, resolvedTarget, aimX, aimY);
+                }
+            }
+
+            const float dt = s.GetSimStepTime();
+            elapsed_ += dt;
+            tickAccum_ += dt;
+            const float interval = std::max(0.0f, spec_.tickInterval);
+            if (spec_.onTick && (interval <= 0.0f || tickAccum_ >= interval)) {
+                if (interval > 0.0f) tickAccum_ -= interval;
+                if (spec_.onTick(s, unit_, resolvedTarget, aimX, aimY, elapsed_)) {
+                    return true;
+                }
+            }
+
+            if (spec_.duration > 0.0f && elapsed_ >= spec_.duration) {
+                return true;
+            }
+            return (spec_.duration <= 0.0f && !spec_.onTick);
+        }
+
+    private:
+        CustomBehaviorSpec spec_;
+        COrder::TargetKind targetKind_ = COrder::TargetKind::NONE;
+        CWidget* target_ = nullptr;
+        int targetHandle_ = -1;
+        float tx_ = 0.0f;
+        float ty_ = 0.0f;
+        float elapsed_ = 0.0f;
+        float tickAccum_ = 0.0f;
+        bool movingToRange_ = false;
+        bool beganAction_ = false;
+        bool propelling_ = false;
+        std::deque<std::pair<float, float>> waypoints_;
+        int pathRecalcCooldown_ = 0;
+    };
+
+    ++stats_.customBehaviorsDispatched;
+    return new CBehaviorDataDriven(specIt->second, order);
+}
+
+
+// ============================================================================
+// Phase 25: Vision/Fog Multipliers & Extra Sight Sources, Custom Passability,
+//           and Module State Snapshot Serialization
+// ============================================================================
+
+void War3GameModule::SetPlayerSightMultiplier(int playerIndex, float multiplier) {
+    if (playerIndex < 0) return;
+    playerSightMultipliers_[playerIndex] = std::max(0.0f, multiplier);
+}
+
+float War3GameModule::GetPlayerSightMultiplier(int playerIndex) const {
+    auto it = playerSightMultipliers_.find(playerIndex);
+    return it != playerSightMultipliers_.end() ? it->second : 1.0f;
+}
+
+void War3GameModule::RegisterCustomSightSource(int sourceId, int playerIndex,
+                                               float x, float y, float radius,
+                                               bool isFlying) {
+    if (sourceId == 0 || radius <= 0.0f) return;
+    CFogSightSource src;
+    src.player = playerIndex;
+    src.playerMask = (playerIndex >= 0 && playerIndex < CFogSystem::kMaxPlayers && playerIndex < 32) ? (1u << playerIndex) : 0u;
+    src.x = x;
+    src.y = y;
+    src.radius = radius;
+    src.isFlying = isFlying;
+    customSightSources_[sourceId] = src;
+    ++stats_.customSightSourcesRegistered;
+}
+
+bool War3GameModule::UnregisterCustomSightSource(int sourceId) {
+    return customSightSources_.erase(sourceId) > 0;
+}
+
+bool War3GameModule::HasCustomSightSource(int sourceId) const {
+    return customSightSources_.count(sourceId) > 0;
+}
+
+float War3GameModule::OnComputeUnitSightRadius(const CSimulation& /*sim*/,
+                                               const CUnit& unit,
+                                               float baseSightRadius,
+                                               bool /*isNight*/) const {
+    ++stats_.sightRadiusEvaluations;
+    const float mult = GetPlayerSightMultiplier(unit.GetPlayerIndex());
+    return baseSightRadius * mult;
+}
+
+void War3GameModule::OnCollectExtraSightSources(const CSimulation& sim,
+                                                std::vector<CFogSightSource>& outSources) const {
+    for (const auto& [id, src] : customSightSources_) {
+        (void)id;
+        CFogSightSource expanded = src;
+        if (const CPlayer* owner = sim.GetPlayer(src.player)) {
+            for (int otherIdx = 0; otherIdx < CFogSystem::kMaxPlayers && otherIdx < 32; ++otherIdx) {
+                if (otherIdx == src.player) continue;
+                const CPlayer* otherPlayer = sim.GetPlayer(otherIdx);
+                if (!otherPlayer) continue;
+                if (owner->HasAlliance(*otherPlayer, CAllianceType::SHARED_VISION) ||
+                    owner->HasAlliance(*otherPlayer, CAllianceType::VISION)) {
+                    expanded.playerMask |= (1u << otherIdx);
+                }
+            }
+        }
+        outSources.push_back(expanded);
+    }
+}
+
+void War3GameModule::SetCustomCellPassabilityRule(int cellX, int cellY, bool walkable, bool flyable) {
+    const int64_t key = (static_cast<int64_t>(cellX) << 32) | static_cast<uint32_t>(cellY);
+    customCellPassabilityRules_[key] = CustomCellPassabilityRule{walkable, flyable};
+    ++stats_.customPassabilityRulesRegistered;
+}
+
+bool War3GameModule::RemoveCustomCellPassabilityRule(int cellX, int cellY) {
+    const int64_t key = (static_cast<int64_t>(cellX) << 32) | static_cast<uint32_t>(cellY);
+    return customCellPassabilityRules_.erase(key) > 0;
+}
+
+int War3GameModule::OnCheckCustomCellPassability(int cellX,
+                                                 int cellY,
+                                                 int movementTypeOrd) const {
+    if (customCellPassabilityRules_.empty()) return -1;
+    const int64_t key = (static_cast<int64_t>(cellX) << 32) | static_cast<uint32_t>(cellY);
+    auto it = customCellPassabilityRules_.find(key);
+    if (it == customCellPassabilityRules_.end()) return -1;
+    const auto mt = static_cast<PathingGridMovementType>(movementTypeOrd);
+    if (mt == PathingGridMovementType::DISABLED) return 1;
+    if (mt == PathingGridMovementType::FLY) return it->second.flyable ? 1 : 0;
+    return it->second.walkable ? 1 : 0;
+}
+
+namespace {
+
+struct War3ModulePodSnapshot {
+    uint32_t magic = 0x36324D57u; // "WM26"
+    float defenseArmorFactor = 0.06f;
+    float bountyMultiplier = 1.0f;
+    float experienceMultiplier = 1.0f;
+    int32_t winningPlayerIndex = -1;
+    uint32_t mutedPlayerMask = 0;
+    uint32_t tributeCommandsExecuted = 0;
+    uint8_t flags = 0; // bit 0: meleeVictoryRulesEnabled, bit 1: requireZeroUnitsForDefeat, bit 2: matchEnded
+    uint8_t reserved[3]{};
+    uint32_t sightMultiplierCount = 0;
+    uint32_t customSightSourceCount = 0;
+    uint32_t customPassabilityCount = 0;
+};
+static_assert(std::is_trivially_copyable_v<War3ModulePodSnapshot>,
+              "War3ModulePodSnapshot must be trivially copyable");
+
+struct War3SightMultiplierEntryPod {
+    int32_t playerIndex = 0;
+    float multiplier = 1.0f;
+};
+static_assert(std::is_trivially_copyable_v<War3SightMultiplierEntryPod>);
+
+struct War3SightSourceEntryPod {
+    int32_t sourceId = 0;
+    int32_t player = -1;
+    uint32_t playerMask = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float radius = 0.0f;
+    uint8_t isFlying = 0;
+    uint8_t reserved[3]{};
+};
+static_assert(std::is_trivially_copyable_v<War3SightSourceEntryPod>);
+
+struct War3PassabilityRuleEntryPod {
+    int64_t key = 0;
+    uint8_t walkable = 1;
+    uint8_t flyable = 1;
+    uint8_t reserved[6]{};
+};
+static_assert(std::is_trivially_copyable_v<War3PassabilityRuleEntryPod>);
+
+template <typename T>
+void AppendModulePod(std::vector<uint8_t>& buf, const T& val) {
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(&val);
+    buf.insert(buf.end(), p, p + sizeof(T));
+}
+
+template <typename T>
+bool ReadModulePod(const uint8_t* data, size_t size, size_t& offset, T& outVal) {
+    if (offset + sizeof(T) > size) return false;
+    std::memcpy(&outVal, data + offset, sizeof(T));
+    offset += sizeof(T);
+    return true;
+}
+
+} // namespace
+
+void War3GameModule::OnCaptureModuleSnapshot(const CSimulation& /*sim*/,
+                                             std::vector<uint8_t>& outBytes) const {
+    ++stats_.moduleSnapshotsCaptured;
+    War3ModulePodSnapshot pod;
+    pod.defenseArmorFactor = defenseArmorFactor_;
+    pod.bountyMultiplier = bountyMultiplier_;
+    pod.experienceMultiplier = experienceMultiplier_;
+    pod.winningPlayerIndex = winningPlayerIndex_;
+    pod.mutedPlayerMask = mutedPlayerMask_;
+    pod.tributeCommandsExecuted = tributeCommandsExecuted_;
+    pod.flags = (meleeVictoryRulesEnabled_ ? 1u : 0u) |
+                (requireZeroUnitsForDefeat_ ? 2u : 0u) |
+                (matchEnded_ ? 4u : 0u);
+    pod.sightMultiplierCount = static_cast<uint32_t>(playerSightMultipliers_.size());
+    pod.customSightSourceCount = static_cast<uint32_t>(customSightSources_.size());
+    pod.customPassabilityCount = static_cast<uint32_t>(customCellPassabilityRules_.size());
+
+    outBytes.clear();
+    AppendModulePod(outBytes, pod);
+
+    std::vector<War3SightMultiplierEntryPod> multEntries;
+    multEntries.reserve(playerSightMultipliers_.size());
+    for (const auto& [pIdx, mult] : playerSightMultipliers_) {
+        multEntries.push_back(War3SightMultiplierEntryPod{pIdx, mult});
+    }
+    std::sort(multEntries.begin(), multEntries.end(),
+              [](const auto& a, const auto& b) { return a.playerIndex < b.playerIndex; });
+    for (const auto& e : multEntries) AppendModulePod(outBytes, e);
+
+    std::vector<War3SightSourceEntryPod> srcEntries;
+    srcEntries.reserve(customSightSources_.size());
+    for (const auto& [sid, src] : customSightSources_) {
+        War3SightSourceEntryPod e;
+        e.sourceId = sid;
+        e.player = src.player;
+        e.playerMask = src.playerMask;
+        e.x = src.x;
+        e.y = src.y;
+        e.radius = src.radius;
+        e.isFlying = src.isFlying ? 1u : 0u;
+        srcEntries.push_back(e);
+    }
+    std::sort(srcEntries.begin(), srcEntries.end(),
+              [](const auto& a, const auto& b) { return a.sourceId < b.sourceId; });
+    for (const auto& e : srcEntries) AppendModulePod(outBytes, e);
+
+    std::vector<War3PassabilityRuleEntryPod> ruleEntries;
+    ruleEntries.reserve(customCellPassabilityRules_.size());
+    for (const auto& [k, rule] : customCellPassabilityRules_) {
+        War3PassabilityRuleEntryPod e;
+        e.key = k;
+        e.walkable = rule.walkable ? 1u : 0u;
+        e.flyable = rule.flyable ? 1u : 0u;
+        ruleEntries.push_back(e);
+    }
+    std::sort(ruleEntries.begin(), ruleEntries.end(),
+              [](const auto& a, const auto& b) { return a.key < b.key; });
+    for (const auto& e : ruleEntries) AppendModulePod(outBytes, e);
+}
+
+bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
+                                             const uint8_t* data,
+                                             size_t size) {
+    ++stats_.moduleSnapshotsRestored;
+    if (!data || size < sizeof(War3ModulePodSnapshot)) return false;
+    size_t offset = 0;
+    War3ModulePodSnapshot pod{};
+    if (!ReadModulePod(data, size, offset, pod)) return false;
+    if (pod.magic != 0x36324D57u && pod.magic != 0x35324D57u) return false;
+
+    const size_t expectedExtra =
+        static_cast<size_t>(pod.sightMultiplierCount) * sizeof(War3SightMultiplierEntryPod) +
+        static_cast<size_t>(pod.customSightSourceCount) * sizeof(War3SightSourceEntryPod) +
+        static_cast<size_t>(pod.customPassabilityCount) * sizeof(War3PassabilityRuleEntryPod);
+    if (offset + expectedExtra > size) return false;
+
+    defenseArmorFactor_ = pod.defenseArmorFactor;
+    bountyMultiplier_ = pod.bountyMultiplier;
+    experienceMultiplier_ = pod.experienceMultiplier;
+    winningPlayerIndex_ = pod.winningPlayerIndex;
+    mutedPlayerMask_ = pod.mutedPlayerMask;
+    tributeCommandsExecuted_ = pod.tributeCommandsExecuted;
+    meleeVictoryRulesEnabled_ = (pod.flags & 1u) != 0;
+    requireZeroUnitsForDefeat_ = (pod.flags & 2u) != 0;
+    matchEnded_ = (pod.flags & 4u) != 0;
+
+    playerSightMultipliers_.clear();
+    for (uint32_t i = 0; i < pod.sightMultiplierCount; ++i) {
+        War3SightMultiplierEntryPod e{};
+        if (!ReadModulePod(data, size, offset, e)) return false;
+        playerSightMultipliers_[e.playerIndex] = e.multiplier;
+    }
+
+    customSightSources_.clear();
+    for (uint32_t i = 0; i < pod.customSightSourceCount; ++i) {
+        War3SightSourceEntryPod e{};
+        if (!ReadModulePod(data, size, offset, e)) return false;
+        CFogSightSource src;
+        src.player = e.player;
+        src.playerMask = e.playerMask;
+        src.x = e.x;
+        src.y = e.y;
+        src.radius = e.radius;
+        src.isFlying = (e.isFlying != 0);
+        customSightSources_[e.sourceId] = src;
+    }
+
+    customCellPassabilityRules_.clear();
+    for (uint32_t i = 0; i < pod.customPassabilityCount; ++i) {
+        War3PassabilityRuleEntryPod e{};
+        if (!ReadModulePod(data, size, offset, e)) return false;
+        customCellPassabilityRules_[e.key] = CustomCellPassabilityRule{e.walkable != 0, e.flyable != 0};
+    }
+
+    return true;
+}
+
+// ============================================================================
+// Phase 26: Lockstep Command Validation, Global Allied Tribute & Custom
+//           SimCommands, and Deterministic Module State Hashing
+// ============================================================================
+
+void War3GameModule::SetPlayerCommandMuted(int playerIndex, bool muted) {
+    if (playerIndex < 0 || playerIndex >= 32) return;
+    if (muted) {
+        mutedPlayerMask_ |= (1u << playerIndex);
+    } else {
+        mutedPlayerMask_ &= ~(1u << playerIndex);
+    }
+}
+
+bool War3GameModule::IsPlayerCommandMuted(int playerIndex) const {
+    if (playerIndex < 0 || playerIndex >= 32) return false;
+    return (mutedPlayerMask_ & (1u << playerIndex)) != 0u;
+}
+
+void War3GameModule::RegisterCustomGlobalCommand(int32_t orderId, CustomGlobalCommandFn fn) {
+    if (orderId == 0 || !fn) return;
+    customGlobalCommands_[orderId] = std::move(fn);
+}
+
+bool War3GameModule::UnregisterCustomGlobalCommand(int32_t orderId) {
+    return customGlobalCommands_.erase(orderId) > 0;
+}
+
+bool War3GameModule::HasCustomGlobalCommand(int32_t orderId) const {
+    return customGlobalCommands_.count(orderId) > 0;
+}
+
+bool War3GameModule::OnValidateLockstepCommand(const CSimulation& sim,
+                                               const SimCommand& cmd) const {
+    ++stats_.lockstepCommandsValidated;
+    if (IsPlayerCommandMuted(cmd.player)) {
+        return false;
+    }
+    if (const CPlayer* p = sim.GetPlayer(cmd.player)) {
+        if (p->GetGameResult() == CPlayerGameResult::DEFEAT) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool War3GameModule::OnExecuteCustomSimCommand(CSimulation& sim,
+                                               const SimCommand& cmd) {
+    auto it = customGlobalCommands_.find(cmd.orderId);
+    if (it != customGlobalCommands_.end() && it->second) {
+        if (it->second(sim, cmd)) {
+            ++stats_.customSimCommandsExecuted;
+            return true;
+        }
+        return false;
+    }
+
+    // Built-in WarCraft 3 Allied Resource Tribute commands (TRGD / TRLM):
+    // cmd.player = sender player, cmd.targetHandle = recipient player index, cmd.x = amount
+    if (cmd.orderId == kOrderTributeGold || cmd.orderId == kOrderTributeLumber) {
+        if (!std::isfinite(cmd.x) || cmd.x <= 0.0f || cmd.x > 100000000.0f) {
+            return false;
+        }
+        CPlayer* sender = sim.GetPlayer(cmd.player);
+        CPlayer* recipient = sim.GetPlayer(cmd.targetHandle);
+        const int amount = static_cast<int>(cmd.x);
+        if (!sender || !recipient || sender == recipient || amount <= 0) {
+            return false;
+        }
+        if (cmd.orderId == kOrderTributeGold) {
+            if (sender->GetGold() < amount) return false;
+            sender->SetGold(sender->GetGold() - amount);
+            recipient->SetGold(recipient->GetGold() + amount);
+        } else {
+            if (sender->GetLumber() < amount) return false;
+            sender->SetLumber(sender->GetLumber() - amount);
+            recipient->SetLumber(recipient->GetLumber() + amount);
+        }
+        ++tributeCommandsExecuted_;
+        ++stats_.customSimCommandsExecuted;
+        return true;
+    }
+
+    return false;
+}
+
+uint64_t War3GameModule::OnComputeModuleStateHash(const CSimulation& /*sim*/) const {
+    ++stats_.moduleHashesComputed;
+    uint64_t h = 1469598103934665603ull;
+    auto mixU32 = [&h](uint32_t v) {
+        for (int i = 0; i < 4; ++i) {
+            h ^= static_cast<uint64_t>((v >> (i * 8)) & 0xFFu);
+            h *= 1099511628211ull;
+        }
+    };
+    auto mixFloat = [&mixU32](float v) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &v, sizeof(bits));
+        mixU32(bits);
+    };
+    mixFloat(defenseArmorFactor_);
+    mixFloat(bountyMultiplier_);
+    mixFloat(experienceMultiplier_);
+    mixU32(mutedPlayerMask_);
+    mixU32(tributeCommandsExecuted_);
+    mixU32(static_cast<uint32_t>(winningPlayerIndex_));
+    const uint32_t flags = (meleeVictoryRulesEnabled_ ? 1u : 0u) |
+                           (requireZeroUnitsForDefeat_ ? 2u : 0u) |
+                           (matchEnded_ ? 4u : 0u);
+    mixU32(flags);
+
+    if (!playerSightMultipliers_.empty()) {
+        std::vector<std::pair<int, float>> sortedMults(
+            playerSightMultipliers_.begin(), playerSightMultipliers_.end());
+        std::sort(sortedMults.begin(), sortedMults.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+        for (const auto& [pIdx, mult] : sortedMults) {
+            mixU32(static_cast<uint32_t>(pIdx));
+            mixFloat(mult);
+        }
+    }
+    if (!customSightSources_.empty()) {
+        std::vector<int> sortedIds;
+        sortedIds.reserve(customSightSources_.size());
+        for (const auto& [sid, _] : customSightSources_) sortedIds.push_back(sid);
+        std::sort(sortedIds.begin(), sortedIds.end());
+        for (int sid : sortedIds) {
+            const auto& src = customSightSources_.at(sid);
+            mixU32(static_cast<uint32_t>(sid));
+            mixU32(static_cast<uint32_t>(src.player));
+            mixU32(src.playerMask);
+            mixFloat(src.x);
+            mixFloat(src.y);
+            mixFloat(src.radius);
+            mixU32(src.isFlying ? 1u : 0u);
+        }
+    }
+    if (!customCellPassabilityRules_.empty()) {
+        std::vector<int64_t> sortedKeys;
+        sortedKeys.reserve(customCellPassabilityRules_.size());
+        for (const auto& [k, _] : customCellPassabilityRules_) sortedKeys.push_back(k);
+        std::sort(sortedKeys.begin(), sortedKeys.end());
+        for (int64_t k : sortedKeys) {
+            const auto& r = customCellPassabilityRules_.at(k);
+            mixU32(static_cast<uint32_t>(k & 0xFFFFFFFFull));
+            mixU32(static_cast<uint32_t>((static_cast<uint64_t>(k) >> 32) & 0xFFFFFFFFull));
+            mixU32((r.walkable ? 1u : 0u) | (r.flyable ? 2u : 0u));
+        }
+    }
+    return h;
 }
 
 } // namespace war3

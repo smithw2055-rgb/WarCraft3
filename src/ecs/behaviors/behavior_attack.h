@@ -8,18 +8,19 @@ public:
     CBehaviorAttack();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::ATTACK; }
 
-    void SetTarget(CWidget* target);
-    CWidget* GetTarget() const { return target_; }
+    void SetTarget(CWidget* target) override;
+    CWidget* GetTarget() const override { return target_; }
     // Ground-point target (attack-ground for shelling weapons, ref
     // ARTILLERY/ALINE point orders). Mutually exclusive with SetTarget.
-    void SetTargetPoint(float x, float y);
+    void SetTargetPoint(float x, float y) override;
     bool HasPointTarget() const { return pointTarget_; }
     float GetPointX() const { return pointX_; }
     float GetPointY() const { return pointY_; }
-    bool IsPropelling() const { return propelling_; }
-    bool IsAttackAnimationActive(int currentTick) const;
-    int GetAttackAnimationStartTick() const { return attackAnimationStartTick_; }
-    float GetAttackAnimationDuration() const { return attackAnimationDuration_; }
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
+    bool IsAttackAnimationActive(int currentTick) const override;
+    int GetAttackAnimationStartTick() const override { return attackAnimationStartTick_; }
+    float GetAttackAnimationDuration() const override { return attackAnimationDuration_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

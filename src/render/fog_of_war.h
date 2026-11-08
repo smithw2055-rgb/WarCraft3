@@ -3,6 +3,13 @@
 #include <cstdint>
 #include <vector>
 
+// ============================================================================
+// FogOfWar - GPU Terrain Fog Texture & Smooth Temporal Transition (Phase 25)
+//
+// - Uses RAII std::vector<uint8_t> buffers (`data_`, `targetData_`) instead of
+//   manual `new unsigned char[]` / `delete[]`.
+// - Centralizes Sokol GPU resource cleanup in `ReleaseGpuResources()`.
+// ============================================================================
 class FogOfWar {
 public:
     static constexpr int kTileSize = 16;
@@ -24,17 +31,19 @@ public:
     sg_sampler GetSampler() const { return sampler_; }
     int GetWidth() const { return width_; }
     int GetHeight() const { return height_; }
-    const unsigned char* GetData() const { return data_; }
-    const unsigned char* GetTargetData() const { return targetData_; }
+    const unsigned char* GetData() const { return data_.empty() ? nullptr : data_.data(); }
+    const unsigned char* GetTargetData() const { return targetData_.empty() ? nullptr : targetData_.data(); }
     int GetDirtyTileCount() const;
     void ClearDirtyTiles();
 
 private:
+    void ReleaseGpuResources();
+
     sg_image texture_ = {0};
     sg_sampler sampler_ = {0};
     int width_ = 0, height_ = 0;
     int tilesX_ = 0, tilesY_ = 0;
-    unsigned char* data_ = nullptr;
-    unsigned char* targetData_ = nullptr;
+    std::vector<uint8_t> data_;
+    std::vector<uint8_t> targetData_;
     std::vector<uint8_t> dirtyTiles_;
 };

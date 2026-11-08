@@ -4,6 +4,8 @@
 // batch is complete once all seats reported. Merged output is sorted by
 // (player, unit, orderId) so all peers execute in one deterministic order
 // regardless of arrival sequence.
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "ecs/lockstep.h"
@@ -12,6 +14,9 @@ struct TurnBatch;
 
 class TurnManager {
 public:
+    static constexpr uint8_t kSeatSubmitted = 1u << 0;
+    static constexpr uint8_t kSeatDropped   = 1u << 1;
+
     explicit TurnManager(int numPlayers);
 
     int NumPlayers() const { return numPlayers_; }
@@ -37,9 +42,15 @@ public:
     // Taken batches append to History() for resync packages.
     TurnBatch TakeBatch();
 
-    // Every merged batch so far, in turn order (unbounded; short games in
-    // scope, a ring cap is a follow-up).
+    // Every retained merged batch so far, in turn order.
     const std::vector<TurnBatch>& History() const { return history_; }
+
+    // Phase 26: Optional history ring cap (0 = unbounded default). When > 0,
+    // oldest batches beyond maxTurns are pruned so long matches stay bounded
+    // when paired with RollingSnapshotRingBuffer keyframes.
+    void SetMaxHistoryTurns(size_t maxTurns);
+    size_t GetMaxHistoryTurns() const { return maxHistoryTurns_; }
+    size_t GetPrunedTurnCount() const { return prunedTurnCount_; }
 
     // Seed a fresh manager from another host's history (host migration):
     // turn counter continues, past batches are kept for resync packages.
@@ -47,10 +58,13 @@ public:
     void SeedFromHistory(std::vector<TurnBatch> history);
 
 private:
+    void EnforceHistoryCap();
+
     int numPlayers_;
     int turn_ = 0;
+    size_t maxHistoryTurns_ = 0;
+    size_t prunedTurnCount_ = 0;
     std::vector<std::vector<SimCommand>> pending_;
-    std::vector<bool> submitted_;
-    std::vector<bool> dropped_;
+    std::vector<uint8_t> seatFlags_;
     std::vector<TurnBatch> history_;
 };

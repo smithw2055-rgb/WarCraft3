@@ -869,6 +869,22 @@ bool TestPhase22StageZZ1CompactCBuff8BitStateFlagsAndVirtualCombatModifierContra
 bool TestPhase22StageZZ2CompleteCAbilityVirtualContractZeroCrossAbilityCasts();
 bool TestPhase22StageAAA1War3GameModuleV22DynamicBuffFactoryAndJassBuffAttachment();
 bool TestPhase22StageAAA2DynamicPluginSOV22AndCloudRetailMapsEndToEndSuite();
+bool TestPhase23StageBBB1CompactCProjectileLayoutMakeAttackProjectileAndModuleHooks();
+bool TestPhase23StageBBB2CompleteCBehaviorPolymorphicContractAndZeroDynamicCast();
+bool TestPhase23StageCCC1War3GameModuleV23CustomProjectilesAndCustomBehaviors();
+bool TestPhase23StageCCC2DynamicPluginSOV23AndCloudRetailMapsEndToEndSuite();
+bool TestPhase24StageDDD1EngineBehaviorStaticFactoriesAndZeroAbilityBehaviorIncludes();
+bool TestPhase24StageDDD2CompactCItemCDestructableBitfieldsAndWorkerNavigation();
+bool TestPhase24StageEEE1War3GameModuleV24CustomDropoffsAndBehaviorCategoryOverrides();
+bool TestPhase24StageEEE2DynamicPluginSOV24AndCloudRetailMapsEndToEndSuite();
+bool TestPhase25StageFFF1BitmaskSharedVisionSightAndModuleVisionHooks();
+bool TestPhase25StageFFF2WorldCollisionProximityAndPluggableCellPassability();
+bool TestPhase25StageGGG1SafePodProjectileSnapshotAndModuleStateRoundTrip();
+bool TestPhase25StageGGG2DynamicPluginSOV25AndCloudRetailMapsEndToEndSuite();
+bool TestPhase26StageHHH1ReplayMemoryStreamAndPlayerCommandExecution();
+bool TestPhase26StageHHH2TurnManagerHistoryCapLockstepHostFastKeyframeResyncAndLobbySkirmish();
+bool TestPhase26StageIII1War3ModuleLockstepValidationAlliedTributeAndStateHash();
+bool TestPhase26StageIII2DynamicPluginSOV26AndCloudRetailMapsEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1733,6 +1749,22 @@ int main(int argc, char** argv) {
         {"Phase22 Stage ZZ2 Complete CAbility virtual contract zero cross-ability casts", TestPhase22StageZZ2CompleteCAbilityVirtualContractZeroCrossAbilityCasts},
         {"Phase22 Stage AAA1 War3GameModule v22 dynamic buff factory and JASS buff attach", TestPhase22StageAAA1War3GameModuleV22DynamicBuffFactoryAndJassBuffAttachment},
         {"Phase22 Stage AAA2 Dynamic plugin SO v22 and cloud retail maps end-to-end suite", TestPhase22StageAAA2DynamicPluginSOV22AndCloudRetailMapsEndToEndSuite},
+        {"Phase23 Stage BBB1 Compact CProjectile layout MakeAttackProjectile and module hooks", TestPhase23StageBBB1CompactCProjectileLayoutMakeAttackProjectileAndModuleHooks},
+        {"Phase23 Stage BBB2 Complete CBehavior polymorphic contract and zero dynamic_cast", TestPhase23StageBBB2CompleteCBehaviorPolymorphicContractAndZeroDynamicCast},
+        {"Phase23 Stage CCC1 War3GameModule v23 custom projectiles and custom behaviors", TestPhase23StageCCC1War3GameModuleV23CustomProjectilesAndCustomBehaviors},
+        {"Phase23 Stage CCC2 Dynamic plugin SO v23 and cloud retail maps end-to-end suite", TestPhase23StageCCC2DynamicPluginSOV23AndCloudRetailMapsEndToEndSuite},
+        {"Phase24 Stage DDD1 Engine behavior static factories and zero ability behavior includes", TestPhase24StageDDD1EngineBehaviorStaticFactoriesAndZeroAbilityBehaviorIncludes},
+        {"Phase24 Stage DDD2 Compact CItem CDestructable bitfields and worker navigation", TestPhase24StageDDD2CompactCItemCDestructableBitfieldsAndWorkerNavigation},
+        {"Phase24 Stage EEE1 War3GameModule v24 custom dropoffs and behavior category overrides", TestPhase24StageEEE1War3GameModuleV24CustomDropoffsAndBehaviorCategoryOverrides},
+        {"Phase24 Stage EEE2 Dynamic plugin SO v24 and cloud retail maps end-to-end suite", TestPhase24StageEEE2DynamicPluginSOV24AndCloudRetailMapsEndToEndSuite},
+        {"Phase25 Stage FFF1 Bitmask shared-vision sight and module vision hooks", TestPhase25StageFFF1BitmaskSharedVisionSightAndModuleVisionHooks},
+        {"Phase25 Stage FFF2 WorldCollision proximity and pluggable cell passability", TestPhase25StageFFF2WorldCollisionProximityAndPluggableCellPassability},
+        {"Phase25 Stage GGG1 Safe POD projectile snapshot and module state round-trip", TestPhase25StageGGG1SafePodProjectileSnapshotAndModuleStateRoundTrip},
+        {"Phase25 Stage GGG2 Dynamic plugin SO v25 and cloud retail maps end-to-end suite", TestPhase25StageGGG2DynamicPluginSOV25AndCloudRetailMapsEndToEndSuite},
+        {"Phase26 Stage HHH1 Replay memory stream and player command execution", TestPhase26StageHHH1ReplayMemoryStreamAndPlayerCommandExecution},
+        {"Phase26 Stage HHH2 TurnManager history cap LockstepHost fast keyframe resync and Lobby skirmish", TestPhase26StageHHH2TurnManagerHistoryCapLockstepHostFastKeyframeResyncAndLobbySkirmish},
+        {"Phase26 Stage III1 War3GameModule v26 lockstep validation allied tribute and state hash", TestPhase26StageIII1War3ModuleLockstepValidationAlliedTributeAndStateHash},
+        {"Phase26 Stage III2 Dynamic plugin SO v26 and cloud retail maps end-to-end suite", TestPhase26StageIII2DynamicPluginSOV26AndCloudRetailMapsEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

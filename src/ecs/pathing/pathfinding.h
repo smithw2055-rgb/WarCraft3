@@ -35,6 +35,11 @@ public:
     }
     void SetWorldCollision(CWorldCollision* worldCollision) { worldCollision_ = worldCollision; }
 
+    // Phase 25: Pluggable cell passability override hook (returns -1 to use default WPM check, 0 = blocked, 1 = pathable)
+    using CustomCellPassabilityFn = std::function<int(int cellX, int cellY, PathingGridMovementType movementType)>;
+    void SetCustomPassabilityChecker(CustomCellPassabilityFn fn) { customPassabilityChecker_ = std::move(fn); }
+    const CustomCellPassabilityFn& GetCustomPassabilityChecker() const { return customPassabilityChecker_; }
+
     // Find a path on the cell grid, returns true if found
     bool FindPath(int startCellX, int startCellY, int endCellX, int endCellY,
                   std::vector<std::pair<int,int>>& outPath) const;
@@ -180,7 +185,17 @@ private:
     int WorldToMappedX(float worldX, GridMapping mapping) const;
     int WorldToMappedY(float worldY, GridMapping mapping) const;
 
+    bool FindPathMappedPreResolved(int resolvedStartX, int resolvedStartY,
+                                   int resolvedEndX, int resolvedEndY,
+                                   float exactStartWorldX, float exactStartWorldY,
+                                   float exactEndWorldX, float exactEndWorldY,
+                                   GridMapping mapping, float collisionSize,
+                                   PathingGridMovementType movementType,
+                                   CUnit* ignoreUnit,
+                                   std::vector<std::pair<int,int>>& outPath) const;
+
     WpmData* pathingMap_ = nullptr;
+    CustomCellPassabilityFn customPassabilityChecker_;
     CWorldCollision* worldCollision_ = nullptr;
     float worldOffsetX_ = 0.0f;
     float worldOffsetY_ = 0.0f;

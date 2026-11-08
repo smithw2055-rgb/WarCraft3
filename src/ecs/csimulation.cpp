@@ -22,8 +22,12 @@
 
 CSimulation::CSimulation() {
     worldCollision_ = std::make_unique<CWorldCollision>();
+    worldCollision_->BindSpatialGrid(&spatialGrid_);
     pathfindingProcessor_ = std::make_unique<CPathfindingProcessor>();
     pathfindingProcessor_->SetWorldCollision(worldCollision_.get());
+    pathfindingProcessor_->SetCustomPassabilityChecker([this](int cx, int cy, PathingGridMovementType mt) -> int {
+        return simModule_ ? simModule_->OnCheckCustomCellPassability(cx, cy, static_cast<int>(mt)) : -1;
+    });
     pathfindingServer_ = std::make_unique<pathfinding::PathfindingServer>();
     crowdSteering_ = std::make_unique<pathfinding::CrowdSteeringSystem>();
     fogSystem_.SetOcclusionChecker([this](float fromX, float fromY, float toX, float toY, bool isFlying) -> bool {
@@ -157,37 +161,43 @@ void CSimulation::UpdateFogSight() {
         if (!unit || unit->IsDead()) continue;
         const CUnitType* type = unit->GetUnitType();
         if (!type) continue;
-        const int radius = night ? type->GetSightRadiusNight() : type->GetSightRadiusDay();
-        if (radius <= 0) continue;
-        CFogSightSource src;
-        src.player = unit->GetPlayerIndex();
-        src.x = unit->GetX();
-        src.y = unit->GetY();
-        src.radius = (float)radius;
-        src.isFlying = unit->IsFlying();
-        sightScratch_.push_back(src);
+        const float baseRadius = static_cast<float>(night ? type->GetSightRadiusNight() : type->GetSightRadiusDay());
+        const float radius = simModule_
+            ? simModule_->OnComputeUnitSightRadius(*this, *unit, baseRadius, night)
+            : baseRadius;
+        if (radius <= 0.0f) continue;
+
+        const int ownerIdx = unit->GetPlayerIndex();
+        uint32_t mask = (ownerIdx >= 0 && ownerIdx < CFogSystem::kMaxPlayers) ? (1u << ownerIdx) : 0u;
         for (int other : unit->SharedVisionPlayers()) {
-            if (other == src.player || other < 0 || other >= CFogSystem::kMaxPlayers) continue;
-            CFogSightSource shared = src;
-            shared.player = other;
-            sightScratch_.push_back(shared);
+            if (other >= 0 && other < CFogSystem::kMaxPlayers) {
+                mask |= (1u << other);
+            }
         }
-        if (const CPlayer* owner = GetPlayer(src.player)) {
+        if (const CPlayer* owner = GetPlayer(ownerIdx)) {
             for (size_t otherIdx = 0; otherIdx < players_.size() && otherIdx < (size_t)CFogSystem::kMaxPlayers; ++otherIdx) {
-                if ((int)otherIdx == src.player) continue;
+                if ((int)otherIdx == ownerIdx) continue;
                 const auto& otherPlayer = players_[otherIdx];
                 if (!otherPlayer) continue;
                 if (owner->HasAlliance(*otherPlayer, CAllianceType::SHARED_VISION) ||
                     owner->HasAlliance(*otherPlayer, CAllianceType::VISION)) {
-                    const auto& sv = unit->SharedVisionPlayers();
-                    if (std::find(sv.begin(), sv.end(), (int)otherIdx) == sv.end()) {
-                        CFogSightSource shared = src;
-                        shared.player = (int)otherIdx;
-                        sightScratch_.push_back(shared);
-                    }
+                    mask |= (1u << otherIdx);
                 }
             }
         }
+        if (mask == 0u) continue;
+
+        CFogSightSource src;
+        src.player = ownerIdx;
+        src.playerMask = mask;
+        src.x = unit->GetX();
+        src.y = unit->GetY();
+        src.radius = radius;
+        src.isFlying = unit->IsFlying();
+        sightScratch_.push_back(src);
+    }
+    if (simModule_) {
+        simModule_->OnCollectExtraSightSources(*this, sightScratch_);
     }
     fogSystem_.UpdateSight(sightScratch_.data(), (int)sightScratch_.size());
 }
@@ -840,14 +850,63 @@ bool CSimulation::IssueUnitOrder(int unitHandle, std::unique_ptr<COrder> order) 
     } else if (order->GetTargetKind() == COrder::TargetKind::WIDGET) {
         cmd.targetHandle = order->GetTarget() ? order->GetTarget()->GetHandleId() : -1;
     }
+    if (simModule_ && !simModule_->OnValidateLockstepCommand(*this, cmd)) {
+        return false;
+    }
     commandLog_.push_back(cmd);
-    const int orderId = cmd.orderId;
     unit->IssueOrder(std::move(order));
-    // NOTE: no direct unitOrderCallback_ call here; CUnit::IssueOrder
-    // invokes the AdoptUnit-installed hook above, which fires it exactly
-    // once for every order path (sim, JASS, UI, AI, net).
-    (void)orderId;
     return true;
+}
+
+bool CSimulation::IssuePlayerCommand(int playerIndex,
+                                     int commandId,
+                                     int targetKind,
+                                     int targetHandle,
+                                     float x,
+                                     float y,
+                                     float z) {
+    if (!GetPlayer(playerIndex)) return false;
+    SimCommand cmd;
+    cmd.turn = gameTurnTick_;
+    cmd.player = playerIndex;
+    cmd.unit = -1;
+    cmd.orderId = commandId;
+    cmd.targetKind = targetKind;
+    cmd.targetHandle = targetHandle;
+    cmd.x = x;
+    cmd.y = y;
+    cmd.z = z;
+    if (simModule_ && !simModule_->OnValidateLockstepCommand(*this, cmd)) {
+        return false;
+    }
+    if (!simModule_ || !simModule_->OnExecuteCustomSimCommand(*this, cmd)) {
+        return false;
+    }
+    commandLog_.push_back(cmd);
+    return true;
+}
+
+bool CSimulation::ExecuteSimCommand(const SimCommand& cmd) {
+    if (cmd.IsGlobalPlayerCommand()) {
+        return IssuePlayerCommand(cmd.player, cmd.orderId, cmd.targetKind,
+                                  cmd.targetHandle, cmd.x, cmd.y, cmd.z);
+    }
+    CUnit* unit = GetUnit(cmd.unit);
+    if (!unit) return false;
+    if (cmd.player >= 0 && unit->GetPlayerIndex() != cmd.player) {
+        return false;
+    }
+    std::unique_ptr<COrder> order;
+    if (cmd.targetKind == 1) {
+        order = std::make_unique<COrderTargetPoint>(cmd.orderId, cmd.x, cmd.y, cmd.z);
+    } else if (cmd.targetKind == 2) {
+        CWidget* target = GetWidget(cmd.targetHandle);
+        if (!target) return false;
+        order = std::make_unique<COrderTargetWidget>(cmd.orderId, target);
+    } else {
+        order = std::make_unique<COrderNoTarget>(cmd.orderId);
+    }
+    return IssueUnitOrder(cmd.unit, std::move(order));
 }
 
 uint64_t CSimulation::HashState() const {
@@ -855,6 +914,13 @@ uint64_t CSimulation::HashState() const {
     h = HashU32(h, (uint32_t)gameTurnTick_);
     h = HashU32(h, simRandState_);
     h = HashU32(h, combatSystem_.GetRandState());
+    for (const auto& p : players_) {
+        if (!p) continue;
+        h = HashU32(h, (uint32_t)p->GetId());
+        h = HashU32(h, (uint32_t)p->GetGold());
+        h = HashU32(h, (uint32_t)p->GetLumber());
+        h = HashU32(h, (uint32_t)p->GetFoodUsed());
+    }
     std::vector<const CUnit*> sorted(units_.begin(), units_.end());
     std::sort(sorted.begin(), sorted.end(),
               [](const CUnit* a, const CUnit* b) {
@@ -879,6 +945,13 @@ uint64_t CSimulation::HashState() const {
     for (const auto& hz : hazards_) {
         h = HashFloat(h, hz.x);
         h = HashFloat(h, hz.y);
+    }
+    if (simModule_) {
+        const uint64_t modHash = simModule_->OnComputeModuleStateHash(*this);
+        if (modHash != 0) {
+            h = HashU32(h, static_cast<uint32_t>(modHash & 0xFFFFFFFFu));
+            h = HashU32(h, static_cast<uint32_t>(modHash >> 32));
+        }
     }
     return h;
 }

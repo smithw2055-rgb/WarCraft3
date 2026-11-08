@@ -1,16 +1,6 @@
 #pragma once
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
-#include "ecs/behaviors/behavior_attack.h"
-#include "ecs/behaviors/behavior_attack_move.h"
-#include "ecs/behaviors/behavior_build.h"
-#include "ecs/behaviors/behavior_follow.h"
-#include "ecs/behaviors/behavior_harvest.h"
-#include "ecs/behaviors/behavior_move.h"
-#include "ecs/behaviors/behavior_patrol.h"
-#include "ecs/behaviors/behavior_repair.h"
-#include "ecs/behaviors/behavior_return_resources.h"
-#include "ecs/behaviors/behavior_spell.h"
 #include "render/splat_metadata.h"
 #include "render/mdx_viewer.h"
 #include <string>
@@ -85,19 +75,8 @@ std::vector<std::string> BuildContextualAnimationTags(
     CResourceType carriedType,
     std::initializer_list<const char*> extraTags = {});
 
-// Behavior getters
-const CBehaviorHarvest* GetHarvestBehavior(const CUnit* unit);
-const CBehaviorAttack* GetAttackBehavior(const CUnit* unit);
-const CBehaviorMove* GetMoveBehavior(const CUnit* unit);
-const CBehaviorFollow* GetFollowBehavior(const CUnit* unit);
-const CBehaviorPatrol* GetPatrolBehavior(const CUnit* unit);
-const CBehaviorAttackMove* GetAttackMoveBehavior(const CUnit* unit);
-const CBehaviorReturnResources* GetReturnResourcesBehavior(const CUnit* unit);
-const CBehaviorBuild* GetBuildBehavior(const CUnit* unit);
-const CBehaviorRepair* GetRepairBehavior(const CUnit* unit);
-const CBehaviorSpell* GetSpellBehavior(const CUnit* unit);
-
 // Resolve the animation mode from live unit/behavior/carry state.
+// Phase 23: Queries CBehavior virtual contract directly (zero concrete behavior_*.h includes, zero dynamic_cast).
 UnitVisualAnimationMode ResolveUnitVisualAnimationMode(
     const CUnit* unit,
     bool isMoving,

@@ -6,6 +6,7 @@
 #include "../render/picking.h"
 #include "../render/unit_selection_geom.h"
 #include "../ecs/animation_utils.h"
+#include "../ecs/behaviors/behavior.h"
 #include "../ecs/ability_factory.h"
 #include "../ecs/unit_text_utils.h"
 #include "../ecs/orders/order.h"
@@ -982,7 +983,7 @@ inline void PlayResolvedUnitAnimation(CUnit* unit,
             return;
         case animation_utils::UnitVisualAnimationMode::ATTACK: {
             const int currentTick = g->GetSimulation().GetGameTurnTick();
-            const auto* attackBehavior = animation_utils::GetAttackBehavior(unit);
+            const CBehavior* attackBehavior = unit ? unit->GetCurrentBehavior() : nullptr;
             const int behaviorAttackStartTick =
                 attackBehavior ? attackBehavior->GetAttackAnimationStartTick() : -1;
             const float behaviorAttackDuration =

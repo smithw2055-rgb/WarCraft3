@@ -9,11 +9,13 @@ public:
     CBehaviorReturnResources();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::RETURN_RESOURCES; }
 
-    void SetTarget(CWidget* target);
+    void SetTarget(CWidget* target) override;
+    CWidget* GetTarget() const override { return target_; }
     void SetHarvestAbility(const CAbility* ability) { harvestAbility_ = ability; }
-    bool IsMovingToDropoff() const { return movingToDropoff_; }
-    bool IsDepositing() const { return depositing_; }
-    bool IsPropelling() const { return propelling_; }
+    bool IsMovingToDropoff() const override { return movingToDropoff_; }
+    bool IsDepositing() const override { return depositing_; }
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
 
     // Find nearest dropoff point (town hall)
     void FindNearestDropoff(CSimulation& simulation);

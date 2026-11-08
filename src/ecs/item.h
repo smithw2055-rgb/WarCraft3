@@ -56,8 +56,8 @@ public:
     // Inventory state
     bool IsInInventory() const { return inInventory_; }
     void SetInInventory(bool v) { inInventory_ = v; }
-    int GetInventorySlot() const { return inventorySlot_; }
-    void SetInventorySlot(int v) { inventorySlot_ = v; }
+    int GetInventorySlot() const { return static_cast<int>(inventorySlot_); }
+    void SetInventorySlot(int v) { inventorySlot_ = static_cast<int8_t>(v); }
 
     // Abilities granted by this item
     const std::vector<War3ID>& GetAbilityList() const { return abilityList_; }
@@ -105,25 +105,26 @@ private:
     War3ID typeId_;
     War3ID dropId_;
     CItemClass itemClass_ = CItemClass::UNKNOWN;
+    int8_t inventorySlot_ = -1;
+    // Phase 24 Compact 16-bit ItemStateFlag bitfield: packs 11 boolean flags into 2 bytes
+    // beside itemClass_ (1B) + inventorySlot_ (1B), saving 24 bytes per CItem instance.
+    uint16_t isPowerup_ : 1;
+    uint16_t isPermanent_ : 1;
+    uint16_t isCharged_ : 1;
+    uint16_t isPerishable_ : 1;
+    uint16_t useAutomatically_ : 1;
+    uint16_t hidden_ : 1;
+    uint16_t invulnerable_ : 1;
+    uint16_t droppable_ : 1;
+    uint16_t pawnable_ : 1;
+    uint16_t dropOnDeath_ : 1;
+    uint16_t inInventory_ : 1;
+    uint16_t reservedFlags_ : 5;
+
     int goldValue_ = 0;
     int lumberValue_ = 0;
-
-    bool isPowerup_ = false;
-    bool isPermanent_ = false;
-    bool isCharged_ = false;
-    bool isPerishable_ = false;
-    bool useAutomatically_ = false;
-    bool hidden_ = false;
-    bool invulnerable_ = false;
-    bool droppable_ = true;
-    bool pawnable_ = true;
-    bool dropOnDeath_ = true;
-
     int charges_ = 0;
-
-    // Inventory state
-    bool inInventory_ = false;
-    int inventorySlot_ = -1;
+    int userData_ = 0;
     CUnit* owner_ = nullptr;
 
     // Abilities granted
@@ -135,5 +136,4 @@ private:
     std::string description_;
     std::string icon_;
     std::string tooltip_;
-    int userData_ = 0;
 };

@@ -13,19 +13,21 @@ public:
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::SPELL; }
 
     void SetSpellAbility(CAbility* ability) { spellAbility_ = ability; }
-    void SetTarget(CWidget* target);
-    void SetTargetPoint(float x, float y);
+    void SetTarget(CWidget* target) override;
+    CWidget* GetTarget() const override { return target_; }
+    void SetTargetPoint(float x, float y) override;
     void SetCastRange(float v) { castRange_ = v; }
     void SetCastPoint(float v) { castPoint_ = v; }
     void SetBackswingDuration(float v) { backswingDuration_ = v; }
-    bool IsPropelling() const { return propelling_; }
-    bool IsMovingToRange() const { return state_ == CastState::MOVING_TO_RANGE; }
-    bool IsFacingTarget() const { return state_ == CastState::FACING_TARGET; }
-    bool IsCasting() const { return state_ == CastState::CASTING; }
-    bool IsBackswing() const { return state_ == CastState::BACKSWING; }
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
+    bool IsMovingToRange() const override { return state_ == CastState::MOVING_TO_RANGE; }
+    bool IsFacingTarget() const override { return state_ == CastState::FACING_TARGET; }
+    bool IsCasting() const override { return state_ == CastState::CASTING; }
+    bool IsBackswing() const override { return state_ == CastState::BACKSWING; }
     bool IsSpellAnimationActive() const { return state_ == CastState::CASTING || state_ == CastState::BACKSWING; }
     int GetSpellAnimationStartTick() const { return spellAnimationStartTick_; }
-    float GetSpellAnimationDuration() const { return spellAnimationDuration_; }
+    float GetSpellAnimationDuration() const override { return spellAnimationDuration_; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;

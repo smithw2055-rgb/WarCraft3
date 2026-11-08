@@ -65,6 +65,10 @@ bool CPathfindingProcessor::IsCellWalkable(int cellX, int cellY, bool allowFlyin
 
 bool CPathfindingProcessor::IsCellPathableFor(int cellX, int cellY,
                                               PathingGridMovementType movementType) const {
+    if (customPassabilityChecker_) {
+        const int overrideRes = customPassabilityChecker_(cellX, cellY, movementType);
+        if (overrideRes >= 0) return overrideRes != 0;
+    }
     if (!pathingMap_) return true;
     if (pathingMap_->IsBoundary(cellX, cellY)) return false;
     switch (movementType) {
@@ -215,25 +219,29 @@ bool CPathfindingProcessor::FindNearestPathableNode(int startNodeX, int startNod
         int bestY = startNodeY;
         float bestDistSq = std::numeric_limits<float>::max();
 
-        for (int y = minY; y <= maxY; ++y) {
-            for (int x = minX; x <= maxX; ++x) {
-                const bool borderCell = (x == minX) || (x == maxX) || (y == minY) || (y == maxY);
-                if (!borderCell) {
-                    continue;
-                }
-                if (IsMappedNodeInBounds(x, y, mapping)
-                    && IsMappedNodePathable(x, y, mapping, collisionSize, movementType, ignoreUnit)) {
-                    const float dx = static_cast<float>(x - startNodeX);
-                    const float dy = static_cast<float>(y - startNodeY);
-                    const float distSq = dx * dx + dy * dy;
-                    if (!foundCandidate || (distSq < bestDistSq)) {
-                        foundCandidate = true;
-                        bestDistSq = distSq;
-                        bestX = x;
-                        bestY = y;
-                    }
+        auto testCandidate = [&](int x, int y) {
+            if (IsMappedNodeInBounds(x, y, mapping)
+                && IsMappedNodePathable(x, y, mapping, collisionSize, movementType, ignoreUnit)) {
+                const float dx = static_cast<float>(x - startNodeX);
+                const float dy = static_cast<float>(y - startNodeY);
+                const float distSq = dx * dx + dy * dy;
+                if (!foundCandidate || (distSq < bestDistSq)) {
+                    foundCandidate = true;
+                    bestDistSq = distSq;
+                    bestX = x;
+                    bestY = y;
                 }
             }
+        };
+        // Top and bottom edges of the perimeter ring: O(R) instead of O(R^2)
+        for (int x = minX; x <= maxX; ++x) {
+            testCandidate(x, minY);
+            testCandidate(x, maxY);
+        }
+        // Left and right interior vertical edges of the perimeter ring
+        for (int y = minY + 1; y < maxY; ++y) {
+            testCandidate(minX, y);
+            testCandidate(maxX, y);
         }
         if (foundCandidate) {
             outX = bestX;
@@ -280,6 +288,25 @@ bool CPathfindingProcessor::FindPathMapped(int startNodeX, int startNodeY,
                                      resolvedEndX, resolvedEndY)) {
             return false;
         }
+    }
+    return FindPathMappedPreResolved(resolvedStartX, resolvedStartY, resolvedEndX, resolvedEndY,
+                                     exactStartWorldX, exactStartWorldY, exactEndWorldX, exactEndWorldY,
+                                     mapping, collisionSize, movementType, ignoreUnit, outPath);
+}
+
+bool CPathfindingProcessor::FindPathMappedPreResolved(int resolvedStartX, int resolvedStartY,
+                                                      int resolvedEndX, int resolvedEndY,
+                                                      float exactStartWorldX, float exactStartWorldY,
+                                                      float exactEndWorldX, float exactEndWorldY,
+                                                      GridMapping mapping, float collisionSize,
+                                                      PathingGridMovementType movementType,
+                                                      CUnit* ignoreUnit,
+                                                      std::vector<std::pair<int,int>>& outPath) const {
+    outPath.clear();
+    if (!pathingMap_) {
+        outPath.push_back({resolvedStartX, resolvedStartY});
+        outPath.push_back({resolvedEndX, resolvedEndY});
+        return true;
     }
 
     // If cells are adjacent or same, direct path
@@ -563,7 +590,7 @@ bool CPathfindingProcessor::FindPathWorld(float startX, float startY,
         }
     }
 
-    if (!FindPathMapped(resolvedStartX, resolvedStartY, resolvedEndX, resolvedEndY,
+    if (!FindPathMappedPreResolved(resolvedStartX, resolvedStartY, resolvedEndX, resolvedEndY,
                         startX, startY, endX, endY,
                         mapping, collisionSize, movementType, ignoreUnit, cellPath)) {
         LogPathDebug(ignoreUnit, "search_failed", startX, startY, endX, endY,

@@ -386,3 +386,11 @@ void CBehaviorBuild::CancelConstruction(CSimulation& simulation) {
         std::cout << "Building cancelled: " << buildingTypeId_.ToString() << std::endl;
     }
 }
+
+CBehavior* CBehavior::CreateBuild(CUnit* caster, float x, float y,
+                                  War3ID buildingTypeId, int buildRaceOrd) {
+    auto* behavior = new CBehaviorBuild();
+    behavior->SetUnit(caster);
+    behavior->SetBuildTarget(x, y, buildingTypeId, static_cast<CBuildRace>(buildRaceOrd));
+    return behavior;
+}

@@ -1,28 +1,33 @@
+#include "engine/simulation_module.h"
 #include "ability_harvest.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include "ecs/destructable.h"
-#include "ecs/behaviors/behavior_harvest.h"
-#include "ecs/behaviors/behavior_return_resources.h"
 #include "ecs/player.h"
 #include "data/destructabledata.h"
 #include <iostream>
 
 namespace {
 
-bool CanReturnToTarget(const CAbilityHarvest* harvestAbility, CUnit* worker, CUnit* targetUnit) {
+bool CanReturnToTarget(CSimulation& game, const CAbilityHarvest* harvestAbility, CUnit* worker, CUnit* targetUnit) {
     if (!harvestAbility || !worker || !targetUnit) {
         return false;
     }
-    if (harvestAbility->GetCarriedAmount() <= 0 || harvestAbility->GetCarriedResourceType() == CResourceType::NONE) {
+    const CResourceType carriedType = harvestAbility->GetCarriedResourceType();
+    if (harvestAbility->GetCarriedAmount() <= 0 || carriedType == CResourceType::NONE) {
         return false;
     }
     if (targetUnit->GetPlayerIndex() != worker->GetPlayerIndex()) {
         return false;
     }
 
-    CAbility* returnAbility = targetUnit->GetAbility(War3ID("Aret"));
-    return returnAbility && returnAbility->AcceptsResourceDropoff(harvestAbility->GetCarriedResourceType());
+    if (CAbility* returnAbility = targetUnit->GetAbility(War3ID("Aret"))) {
+        if (returnAbility->AcceptsResourceDropoff(carriedType)) return true;
+    }
+    if (auto* mod = game.GetSimulationModule()) {
+        if (mod->CanUnitAcceptResourceDropoff(*targetUnit, static_cast<int>(carriedType))) return true;
+    }
+    return false;
 }
 
 }
@@ -63,7 +68,7 @@ bool CAbilityHarvest::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId
             return goldCapacity_ > 0 && mine->GetGold() > 0;
         }
 
-        if (CanReturnToTarget(this, unit, targetUnit)) {
+        if (CanReturnToTarget(game, this, unit, targetUnit)) {
             return true;
         }
     }
@@ -100,28 +105,15 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
         if (mine && goldCapacity_ > 0 && mine->GetGold() > 0) {
             if (carriedAmount_ > 0 && carriedType_ != CResourceType::NONE) {
                 lastTargetHandle_ = target->GetHandleId();
-                auto* behavior = new CBehaviorReturnResources();
-                behavior->SetUnit(caster);
-                behavior->SetHarvestAbility(this);
-                behavior->FindNearestDropoff(game);
-                return behavior;
+                return CBehavior::CreateReturnResources(game, caster, this);
             }
 
-            auto* behavior = new CBehaviorHarvest();
-            behavior->SetUnit(caster);
-            behavior->SetTarget(target);
-            behavior->SetResourceType(CResourceType::GOLD);
-            behavior->SetCapacity(goldCapacity_);
             lastTargetHandle_ = target->GetHandleId();
-            return behavior;
+            return CBehavior::CreateHarvest(caster, target, static_cast<int>(CResourceType::GOLD), goldCapacity_);
         }
 
-        if (CanReturnToTarget(this, caster, targetUnit)) {
-            auto* behavior = new CBehaviorReturnResources();
-            behavior->SetUnit(caster);
-            behavior->SetTarget(target);
-            behavior->SetHarvestAbility(this);
-            return behavior;
+        if (CanReturnToTarget(game, this, caster, targetUnit)) {
+            return CBehavior::CreateReturnResources(game, caster, this, target);
         }
     }
 
@@ -133,20 +125,11 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
             if (destructableType && destructableType->isTree && lumberCapacity_ > 0) {
                 if (carriedAmount_ > 0 && carriedType_ != CResourceType::NONE) {
                     lastTargetHandle_ = target->GetHandleId();
-                    auto* behavior = new CBehaviorReturnResources();
-                    behavior->SetUnit(caster);
-                    behavior->SetHarvestAbility(this);
-                    behavior->FindNearestDropoff(game);
-                    return behavior;
+                    return CBehavior::CreateReturnResources(game, caster, this);
                 }
 
-                auto* behavior = new CBehaviorHarvest();
-                behavior->SetUnit(caster);
-                behavior->SetTarget(target);
-                behavior->SetResourceType(CResourceType::LUMBER);
-                behavior->SetCapacity(lumberCapacity_);
                 lastTargetHandle_ = target->GetHandleId();
-                return behavior;
+                return CBehavior::CreateHarvest(caster, target, static_cast<int>(CResourceType::LUMBER), lumberCapacity_);
             }
         }
     }
@@ -157,12 +140,7 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
 CBehavior* CAbilityHarvest::BeginNoTarget(CSimulation& game, CUnit* caster, int orderId) {
     (void)game;
     if (orderId == OrderIds::RETURN_RESOURCES && carriedAmount_ > 0) {
-        // Find nearest town hall
-        auto* behavior = new CBehaviorReturnResources();
-        behavior->SetUnit(caster);
-        behavior->SetHarvestAbility(this);
-        behavior->FindNearestDropoff(game);
-        return behavior;
+        return CBehavior::CreateReturnResources(game, caster, this);
     }
     return nullptr;
 }

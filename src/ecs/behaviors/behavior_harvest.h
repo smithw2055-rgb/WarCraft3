@@ -9,15 +9,19 @@ public:
     CBehaviorHarvest();
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::HARVEST; }
 
-    void SetTarget(CWidget* target);
+    void SetTarget(CWidget* target) override;
+    CWidget* GetTarget() const override { return target_; }
     void SetResourceType(CResourceType type) { resourceType_ = type; }
     void SetCapacity(int cap) { capacity_ = cap; }
     bool IsMovingToResource() const { return movingToResource_; }
+    bool IsMovingToWorkSite() const override { return movingToResource_; }
     bool IsGathering() const { return gathering_; }
-    bool IsPropelling() const { return propelling_; }
-    int GetGoldCapacity() const { return resourceType_ == CResourceType::GOLD ? capacity_ : 0; }
-    int GetPopoutFromMineTurnTick() const { return popoutFromMineTurnTick_; }
-    void PopoutFromMine(int goldMined);
+    bool IsActivelyWorking() const override { return gathering_; }
+    bool TracksPropellingState() const override { return true; }
+    bool IsPropelling() const override { return propelling_; }
+    int GetGoldCapacity() const override { return resourceType_ == CResourceType::GOLD ? capacity_ : 0; }
+    int GetPopoutFromMineTurnTick() const override { return popoutFromMineTurnTick_; }
+    void PopoutFromMine(int goldMined) override;
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;
@@ -27,6 +31,7 @@ private:
     void FindNearestTree(CSimulation& simulation);
 
     CWidget* target_ = nullptr;
+    int targetHandle_ = -1;
     CResourceType resourceType_ = CResourceType::GOLD;
     int capacity_ = 10;
 

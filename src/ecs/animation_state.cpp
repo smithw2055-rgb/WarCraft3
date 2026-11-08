@@ -4,6 +4,32 @@
 
 namespace animation_utils {
 
+namespace {
+
+UnitVisualAnimationMode ReadyModeForCarry(CResourceType carriedType) {
+    switch (carriedType) {
+        case CResourceType::GOLD:
+            return UnitVisualAnimationMode::READY_GOLD;
+        case CResourceType::LUMBER:
+            return UnitVisualAnimationMode::READY_LUMBER;
+        default:
+            return UnitVisualAnimationMode::READY;
+    }
+}
+
+UnitVisualAnimationMode WalkModeForCarry(CResourceType carriedType) {
+    switch (carriedType) {
+        case CResourceType::GOLD:
+            return UnitVisualAnimationMode::WALK_GOLD;
+        case CResourceType::LUMBER:
+            return UnitVisualAnimationMode::WALK_LUMBER;
+        default:
+            return UnitVisualAnimationMode::WALK;
+    }
+}
+
+} // namespace
+
 void AppendUniqueAnimationTag(std::vector<std::string>& tags, std::string tag) {
     if (tag.empty()) {
         return;
@@ -25,18 +51,8 @@ bool IsUnitWorkingFromPassiveState(const CUnit* unit) {
             return true;
         }
     }
-    if (const auto* harvestBehavior = GetHarvestBehavior(unit)) {
-        if (harvestBehavior->IsGathering()) {
-            return true;
-        }
-    }
-    if (const auto* buildBehavior = GetBuildBehavior(unit)) {
-        if (buildBehavior->IsActivelyBuilding()) {
-            return true;
-        }
-    }
-    if (const auto* repairBehavior = GetRepairBehavior(unit)) {
-        if (repairBehavior->IsRepairing()) {
+    if (const CBehavior* beh = unit->GetCurrentBehavior()) {
+        if (beh->IsActivelyWorking()) {
             return true;
         }
     }
@@ -97,37 +113,6 @@ std::vector<std::string> BuildContextualAnimationTags(
     return tags;
 }
 
-const CBehaviorHarvest* GetHarvestBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorHarvest*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorAttack* GetAttackBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorAttack*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorMove* GetMoveBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorMove*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorFollow* GetFollowBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorFollow*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorPatrol* GetPatrolBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorPatrol*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorAttackMove* GetAttackMoveBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorAttackMove*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorReturnResources* GetReturnResourcesBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorReturnResources*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorBuild* GetBuildBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorBuild*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorRepair* GetRepairBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorRepair*>(unit->GetCurrentBehavior()) : nullptr;
-}
-const CBehaviorSpell* GetSpellBehavior(const CUnit* unit) {
-    return unit ? dynamic_cast<const CBehaviorSpell*>(unit->GetCurrentBehavior()) : nullptr;
-}
-
 UnitVisualAnimationMode ResolveUnitVisualAnimationMode(
     const CUnit* unit,
     bool isMoving,
@@ -156,134 +141,60 @@ UnitVisualAnimationMode ResolveUnitVisualAnimationMode(
         return UnitVisualAnimationMode::READY;
     }
 
-    if (const auto* moveBehavior = GetMoveBehavior(unit)) {
-        if (!moveBehavior->IsPropelling()) {
-            switch (carriedType) {
-                case CResourceType::GOLD:
-                    return UnitVisualAnimationMode::READY_GOLD;
-                case CResourceType::LUMBER:
-                    return UnitVisualAnimationMode::READY_LUMBER;
-                default:
-                    return UnitVisualAnimationMode::READY;
+    if (const CBehavior* beh = unit->GetCurrentBehavior()) {
+        const CBehaviorCategory cat = beh->GetCategory();
+        if (cat == CBehaviorCategory::MOVE && !beh->IsPropelling()) {
+            return ReadyModeForCarry(carriedType);
+        }
+        if (beh->IsMovingToWorkSite()) {
+            return beh->IsPropelling()
+                ? UnitVisualAnimationMode::WALK_WORK
+                : UnitVisualAnimationMode::READY;
+        }
+        if (beh->IsActivelyWorking()) {
+            return UnitVisualAnimationMode::WORK;
+        }
+        if (beh->IsMovingToDropoff()) {
+            return beh->IsPropelling()
+                ? WalkModeForCarry(carriedType)
+                : ReadyModeForCarry(carriedType);
+        }
+        if (beh->IsDepositing()) {
+            return ReadyModeForCarry(carriedType);
+        }
+        if (cat == CBehaviorCategory::SPELL) {
+            if (beh->IsMovingToRange()) {
+                return beh->IsPropelling()
+                    ? UnitVisualAnimationMode::WALK
+                    : UnitVisualAnimationMode::READY;
+            }
+            if (beh->IsFacingTarget()) {
+                return UnitVisualAnimationMode::READY;
+            }
+            if (beh->IsCasting() || beh->IsBackswing()) {
+                return UnitVisualAnimationMode::SPELL;
             }
         }
-    }
-
-    if (const auto* buildBehavior = GetBuildBehavior(unit)) {
-        if (buildBehavior->IsMovingToSite()) {
-            return buildBehavior->IsPropelling()
-                ? UnitVisualAnimationMode::WALK_WORK
-                : UnitVisualAnimationMode::READY;
-        }
-        if (buildBehavior->IsActivelyBuilding()) {
-            return UnitVisualAnimationMode::WORK;
-        }
-    }
-
-    if (const auto* repairBehavior = GetRepairBehavior(unit)) {
-        if (repairBehavior->IsMovingToTarget()) {
-            return repairBehavior->IsPropelling()
-                ? UnitVisualAnimationMode::WALK_WORK
-                : UnitVisualAnimationMode::READY;
-        }
-        if (repairBehavior->IsRepairing()) {
-            return UnitVisualAnimationMode::WORK;
-        }
-    }
-
-    if (const auto* harvestBehavior = GetHarvestBehavior(unit)) {
-        if (harvestBehavior->IsMovingToResource()) {
-            return harvestBehavior->IsPropelling()
-                ? UnitVisualAnimationMode::WALK_WORK
-                : UnitVisualAnimationMode::READY;
-        }
-        if (harvestBehavior->IsGathering()) {
-            return UnitVisualAnimationMode::WORK;
-        }
-    }
-
-    if (const auto* returnBehavior = GetReturnResourcesBehavior(unit)) {
-        if (returnBehavior->IsMovingToDropoff()) {
-            if (returnBehavior->IsPropelling()) {
-                if (carriedType == CResourceType::GOLD) {
-                    return UnitVisualAnimationMode::WALK_GOLD;
-                }
-                if (carriedType == CResourceType::LUMBER) {
-                    return UnitVisualAnimationMode::WALK_LUMBER;
-                }
+        if (cat == CBehaviorCategory::ATTACK) {
+            if (beh->IsPropelling()) {
                 return UnitVisualAnimationMode::WALK;
             }
-            if (carriedType == CResourceType::GOLD) {
-                return UnitVisualAnimationMode::READY_GOLD;
-            }
-            if (carriedType == CResourceType::LUMBER) {
-                return UnitVisualAnimationMode::READY_LUMBER;
+            if (beh->IsAttackAnimationActive(gameTurnTick)) {
+                return UnitVisualAnimationMode::ATTACK;
             }
             return UnitVisualAnimationMode::READY;
         }
-        if (returnBehavior->IsDepositing()) {
-            if (carriedType == CResourceType::GOLD) {
-                return UnitVisualAnimationMode::READY_GOLD;
-            }
-            if (carriedType == CResourceType::LUMBER) {
-                return UnitVisualAnimationMode::READY_LUMBER;
-            }
-            return UnitVisualAnimationMode::READY;
-        }
-    }
-
-    if (const auto* spellBehavior = GetSpellBehavior(unit)) {
-        if (spellBehavior->IsMovingToRange()) {
-            return spellBehavior->IsPropelling()
-                ? UnitVisualAnimationMode::WALK
-                : UnitVisualAnimationMode::READY;
-        }
-        if (spellBehavior->IsFacingTarget()) {
-            return UnitVisualAnimationMode::READY;
-        }
-        if (spellBehavior->IsCasting() || spellBehavior->IsBackswing()) {
-            return UnitVisualAnimationMode::SPELL;
-        }
-    }
-
-    if (const auto* attackBehavior = GetAttackBehavior(unit)) {
-        if (attackBehavior->IsPropelling()) {
-            return UnitVisualAnimationMode::WALK;
-        }
-        if (attackBehavior->IsAttackAnimationActive(gameTurnTick)) {
-            return UnitVisualAnimationMode::ATTACK;
-        }
-        return UnitVisualAnimationMode::READY;
     }
 
     if (behaviorCategory == CBehaviorCategory::RETURN_RESOURCES && isMoving) {
-        if (carriedType == CResourceType::GOLD) {
-            return UnitVisualAnimationMode::WALK_GOLD;
-        }
-        if (carriedType == CResourceType::LUMBER) {
-            return UnitVisualAnimationMode::WALK_LUMBER;
-        }
-        return UnitVisualAnimationMode::WALK;
+        return WalkModeForCarry(carriedType);
     }
 
     if (isMoving) {
-        if (carriedType == CResourceType::GOLD) {
-            return UnitVisualAnimationMode::WALK_GOLD;
-        }
-        if (carriedType == CResourceType::LUMBER) {
-            return UnitVisualAnimationMode::WALK_LUMBER;
-        }
-        return UnitVisualAnimationMode::WALK;
+        return WalkModeForCarry(carriedType);
     }
 
-    switch (carriedType) {
-        case CResourceType::GOLD:
-            return UnitVisualAnimationMode::READY_GOLD;
-        case CResourceType::LUMBER:
-            return UnitVisualAnimationMode::READY_LUMBER;
-        default:
-            return UnitVisualAnimationMode::READY;
-    }
+    return ReadyModeForCarry(carriedType);
 }
 
 } // namespace animation_utils

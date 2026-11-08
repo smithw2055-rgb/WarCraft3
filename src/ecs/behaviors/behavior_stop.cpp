@@ -14,3 +14,5 @@ bool CBehaviorStop::Update(CSimulation& simulation) {
     (void)simulation;
     return true; // completes immediately
 }
+
+std::unique_ptr<CBehavior> CBehavior::CreateStop() { return std::make_unique<CBehaviorStop>(); }

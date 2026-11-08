@@ -343,3 +343,5 @@ bool CBehaviorMove::Update(CSimulation& simulation) {
 
     return MoveTowardWaypoint(simulation);
 }
+
+std::unique_ptr<CBehavior> CBehavior::CreateMove() { return std::make_unique<CBehaviorMove>(); }

@@ -5,12 +5,13 @@
 #include "ecs/unit_attack.h"
 #include "ecs/widget.h"
 #include "ecs/player.h"
+#include "engine/simulation_module.h"
 #include <algorithm>
 #include <cmath>
 
 namespace {
 
-bool IsProjectileEnemy(CSimulation& sim, CUnit* attacker, CUnit* other) {
+bool IsProjectileEnemyFallback(CSimulation& sim, CUnit* attacker, CUnit* other) {
     if (!attacker || !other || other == attacker) return false;
     CPlayer* ownerPlayer = sim.GetPlayer(attacker->GetPlayerIndex());
     if (ownerPlayer) {
@@ -23,11 +24,23 @@ bool IsProjectileEnemy(CSimulation& sim, CUnit* attacker, CUnit* other) {
 }
 
 // Ground detonation shared by attack-ground shells and fire-stamped
-// artillery: splash rings and/or the line corridor at (px, py).
+// artillery: splash rings, line corridor, and optional custom archetype impact at (px, py).
 void DetonateGround(CSimulation& sim, CProjectile& shot, float px, float py) {
     CUnit* source = sim.GetUnit(shot.attackerHandleId);
+    if (shot.projectileTypeId.value != 0) {
+        if (auto* mod = sim.GetSimulationModule()) {
+            mod->OnProjectileCustomImpact(sim, shot, source, nullptr, px, py);
+        }
+        if (shot.customImpactOnly) {
+            if (shot.onHit) shot.onHit(sim, source, nullptr);
+            return;
+        }
+    }
     auto* combat = sim.GetCombatSystem();
-    if (!combat) return;
+    if (!combat) {
+        if (shot.onHit) shot.onHit(sim, source, nullptr);
+        return;
+    }
     if (shot.splashHalf > 0.0f) {
         CUnitAttack splashAttack;
         splashAttack.areaFull = shot.splashFull;
@@ -47,9 +60,67 @@ void DetonateGround(CSimulation& sim, CProjectile& shot, float px, float py) {
                                 shot.damage, 0, 0, 0,
                                 shot.spillDistance, shot.spillRadius);
     }
+    if (shot.onHit) shot.onHit(sim, source, nullptr);
 }
 
 } // namespace
+
+CProjectile CProjectile::MakeAttackProjectile(const CUnit* attacker,
+                                              const CUnitAttack& attack,
+                                              float damageAmount,
+                                              const std::string& weaponSound,
+                                              CWidget* target,
+                                              float targetX,
+                                              float targetY,
+                                              bool pointTarget) {
+    CProjectile shot;
+    shot.attackerHandleId = attacker ? attacker->GetHandleId() : -1;
+    shot.x = attacker ? attacker->GetX() : 0.0f;
+    shot.y = attacker ? attacker->GetY() : 0.0f;
+    shot.fx = shot.x;
+    shot.fy = shot.y;
+    shot.speed = attack.projectileSpeed;
+    shot.damage = damageAmount;
+    shot.attackType = attack.attackType;
+    shot.weaponSound = weaponSound;
+
+    const float aimX = (!pointTarget && target) ? target->GetX() : targetX;
+    const float aimY = (!pointTarget && target) ? target->GetY() : targetY;
+
+    if (pointTarget || attack.weaponType == CWeaponType::ARTILLERY || !target) {
+        shot.groundTarget = true;
+        shot.targetHandleId = -1;
+        shot.tx = aimX;
+        shot.ty = aimY;
+    } else {
+        shot.groundTarget = false;
+        shot.targetHandleId = target->GetHandleId();
+    }
+
+    if (CWeaponTypeInfo::IsSplashWeapon(attack.weaponType) && attack.areaHalf > 0.0f) {
+        shot.splashFull = attack.areaFull;
+        shot.splashHalf = attack.areaHalf;
+        shot.splashQuarter = attack.areaQuarter;
+        shot.splashFactorHalf = attack.damageFactorHalf;
+        shot.splashFactorQuarter = attack.damageFactorQuarter;
+        shot.splashBonus = attacker ? static_cast<float>(attacker->GetBonusDamage()) : 0.0f;
+    }
+    if (CWeaponTypeInfo::IsLineWeapon(attack.weaponType) &&
+        attack.damageSpillRadius > 0.0f && attack.damageSpillDistance > 0.0f) {
+        shot.spillDistance = attack.damageSpillDistance;
+        shot.spillRadius = attack.damageSpillRadius;
+    }
+    if (!shot.groundTarget && attack.weaponType == CWeaponType::MISSILE_BOUNCE && attack.targetCount > 0) {
+        shot.bouncesLeft = attack.targetCount;
+        shot.bounceRange = attack.areaHalf > 0.0f ? attack.areaHalf : 500.0f;
+        shot.bounceLossFactor = attack.damageLossFactor > 0.0f ? attack.damageLossFactor : 1.0f;
+    }
+
+    const float dx0 = aimX - shot.x;
+    const float dy0 = aimY - shot.y;
+    shot.maxTravel = std::sqrt(dx0 * dx0 + dy0 * dy0) + 512.0f;
+    return shot;
+}
 
 bool CProjectile::Update(CSimulation& sim) {
     // Ground shells fly to a fixed point and always detonate (ref ARTILLERY
@@ -95,22 +166,28 @@ bool CProjectile::Update(CSimulation& sim) {
         CUnit* source = sim.GetUnit(attackerHandleId);
         x = target->GetX();
         y = target->GetY();
-        if (checkEffectReaction) {
+
+        if (auto* mod = sim.GetSimulationModule()) {
+            bool terminate = true;
+            if (mod->OnProjectilePreImpact(sim, *this, source, target, terminate)) {
+                return terminate;
+            }
+        } else if (checkEffectReaction) {
             if (auto* victim = dynamic_cast<CUnit*>(target)) {
                 if (!victim->CheckSpellEffectReaction(sim, source)) return true;
             }
         }
-        if (!pierceReflected && attackType == CAttackType::PIERCE) {
-            if (auto* victim = dynamic_cast<CUnit*>(target)) {
-                if (victim->GetBuff(War3ID("BIdd")) && source
-                    && source->GetHandleId() != victim->GetHandleId()) {
-                    pierceReflected = true;
-                    targetHandleId = source->GetHandleId();
-                    attackerHandleId = victim->GetHandleId();
-                    return false;
-                }
+
+        if (projectileTypeId.value != 0) {
+            if (auto* mod = sim.GetSimulationModule()) {
+                mod->OnProjectileCustomImpact(sim, *this, source, target, x, y);
+            }
+            if (customImpactOnly) {
+                if (onHit) onHit(sim, source, target);
+                return true;
             }
         }
+
         if (splashHalf > 0.0f) {
             CUnitAttack splashAttack;
             splashAttack.areaFull = splashFull;
@@ -156,17 +233,21 @@ bool CProjectile::Update(CSimulation& sim) {
         // Bounce: chain to the nearest other enemy in range with falloff.
         if (bouncesLeft > 0 && source) {
             CUnit* next = nullptr;
-            float bestDistSq = bounceRange * bounceRange;
-            for (CUnit* other : sim.GetUnits()) {
-                if (!other || other->IsDead()) continue;
-                if (other->GetHandleId() == targetHandleId) continue;
-                if (!IsProjectileEnemy(sim, source, other)) continue;
-                const float ox = other->GetX() - x;
-                const float oy = other->GetY() - y;
-                const float dSq = ox * ox + oy * oy;
-                if (dSq < bestDistSq) {
-                    bestDistSq = dSq;
-                    next = other;
+            if (!sim.IsPureEngineMode() && sim.GetSimulationModule()) {
+                next = sim.GetSimulationModule()->OnFindProjectileBounceTarget(sim, *this, source, target);
+            } else {
+                float bestDistSq = bounceRange * bounceRange;
+                for (CUnit* other : sim.GetUnits()) {
+                    if (!other || other->IsDead()) continue;
+                    if (other->GetHandleId() == targetHandleId) continue;
+                    if (!IsProjectileEnemyFallback(sim, source, other)) continue;
+                    const float ox = other->GetX() - x;
+                    const float oy = other->GetY() - y;
+                    const float dSq = ox * ox + oy * oy;
+                    if (dSq < bestDistSq) {
+                        bestDistSq = dSq;
+                        next = other;
+                    }
                 }
             }
             if (next) {

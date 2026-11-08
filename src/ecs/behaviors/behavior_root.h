@@ -14,30 +14,21 @@ public:
 
     CBehaviorCategory GetCategory() const override { return CBehaviorCategory::ROOT; }
 
-    void SetDuration(float v) { duration_ = v; remaining_ = v; }
+    void SetDuration(float v) override { duration_ = v; remaining_ = v; }
+    float GetRemaining() const override { return remaining_; }
+    void SetRemaining(float v) override { remaining_ = v; }
 
     bool Update(CSimulation& simulation) override;
     void Begin(CSimulation& simulation) override;
     void End(CSimulation& simulation) override;
 
-private:
+protected:
     float duration_ = 0.5f;
     float remaining_ = 0.5f;
 };
 
-class CBehaviorUproot : public CBehavior {
+// Phase 23 de-redundancy: CBehaviorUproot shares CBehaviorRoot's timed morph logic directly.
+class CBehaviorUproot : public CBehaviorRoot {
 public:
-    explicit CBehaviorUproot(float durationSec = 0.5f);
-
-    CBehaviorCategory GetCategory() const override { return CBehaviorCategory::ROOT; }
-
-    void SetDuration(float v) { duration_ = v; remaining_ = v; }
-
-    bool Update(CSimulation& simulation) override;
-    void Begin(CSimulation& simulation) override;
-    void End(CSimulation& simulation) override;
-
-private:
-    float duration_ = 0.5f;
-    float remaining_ = 0.5f;
+    using CBehaviorRoot::CBehaviorRoot;
 };

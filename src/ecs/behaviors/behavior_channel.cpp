@@ -28,3 +28,10 @@ bool CBehaviorChannel::Update(CSimulation& simulation) {
     tick_.Run(simulation, caster, target, hasPoint_, x_, y_);
     return false;
 }
+
+std::unique_ptr<CBehavior> CreateChannelBehavior(ABEffectChain tick, ABEffectChain finish,
+                                                 int ticks, int targetHandle,
+                                                 bool hasPoint, float x, float y) {
+    return std::make_unique<CBehaviorChannel>(std::move(tick), std::move(finish),
+                                              ticks, targetHandle, hasPoint, x, y);
+}

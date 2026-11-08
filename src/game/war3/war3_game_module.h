@@ -79,7 +79,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 22u; }
+    uint32_t GetModuleVersion() const override { return 26u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -337,6 +337,174 @@ public:
                                   float durationOverride = 0.0f,
                                   int casterHandleId = -1) override;
 
+    // Phase 23: Engine-Level Pluggable Projectile & Unit Behavior State Machine
+    struct CustomProjectileSpec {
+        War3ID code;
+        float speed = 900.0f;
+        float damage = 0.0f;
+        CAttackType attackType = CAttackType::SPELLS;
+        CDamageType damageType = CDamageType::MAGIC;
+        bool isAttack = false;
+        bool isRanged = true;
+        bool groundTarget = false;
+        bool checkEffectReaction = false;
+        bool customImpactOnly = false;
+        float splashFull = 0.0f;
+        float splashHalf = 0.0f;
+        float splashQuarter = 0.0f;
+        float splashFactorHalf = 0.5f;
+        float splashFactorQuarter = 0.25f;
+        int bounces = 0;
+        float bounceRange = 500.0f;
+        float bounceLossFactor = 0.8f;
+        float spillDistance = 0.0f;
+        float spillRadius = 0.0f;
+        War3ID impactBuffCode;
+        float impactBuffDuration = 0.0f;
+        std::function<void(CSimulation& sim, CUnit* source, CWidget* target, float x, float y)> onImpact;
+    };
+
+    using ProjectileImpactFn = std::function<void(CSimulation& sim, CProjectile& proj, CUnit* source, CWidget* target, float x, float y)>;
+
+    void RegisterCustomProjectileSpec(const CustomProjectileSpec& spec);
+    void RegisterCustomProjectileImpact(War3ID projCode, ProjectileImpactFn fn);
+    bool UnregisterCustomProjectile(War3ID projCode);
+    bool HasCustomProjectile(War3ID projCode) const;
+
+    bool OnProjectilePreImpact(CSimulation& sim,
+                               CProjectile& proj,
+                               CUnit* source,
+                               CWidget* target,
+                               bool& outTerminate) override;
+
+    bool OnProjectileCustomImpact(CSimulation& sim,
+                                  CProjectile& proj,
+                                  CUnit* source,
+                                  CWidget* target,
+                                  float impactX,
+                                  float impactY) override;
+
+    CUnit* OnFindProjectileBounceTarget(CSimulation& sim,
+                                        const CProjectile& proj,
+                                        CUnit* source,
+                                        CWidget* currentTarget) override;
+
+    bool SpawnCustomProjectile(CSimulation& sim,
+                               uint32_t projRawcode,
+                               CUnit* source,
+                               CWidget* target,
+                               float targetX = 0.0f,
+                               float targetY = 0.0f) override;
+
+    struct CustomBehaviorSpec {
+        War3ID code;
+        int orderId = 0;
+        CBehaviorCategory category = CBehaviorCategory::CUSTOM;
+        float range = 128.0f;
+        float duration = 0.0f;
+        float tickInterval = 0.5f;
+        bool interruptable = true;
+        std::function<void(CSimulation& sim, CUnit* unit, CWidget* target, float tx, float ty)> onBegin;
+        std::function<bool(CSimulation& sim, CUnit* unit, CWidget* target, float tx, float ty, float elapsed)> onTick;
+        std::function<void(CSimulation& sim, CUnit* unit)> onEnd;
+    };
+
+    using BehaviorCreatorFn = std::function<CBehavior*(CSimulation& sim, CUnit* unit, const COrder& order)>;
+
+    void RegisterCustomBehaviorCreator(int orderId, BehaviorCreatorFn fn);
+    void RegisterCustomBehaviorSpec(const CustomBehaviorSpec& spec);
+    bool UnregisterCustomBehavior(int orderId);
+    bool HasCustomBehavior(int orderId) const;
+
+    CBehavior* CreateUnitBehavior(CBehaviorCategory category) const override;
+    CBehavior* CreateStunBehavior(float duration) const override;
+    CBehavior* TryCreateCustomOrderBehavior(CSimulation& sim,
+                                            CUnit* unit,
+                                            const COrder& order) override;
+
+    // Phase 24: Category Behavior Overrides & Pluggable Resource Dropoff / Harvest Rules
+    using CategoryBehaviorFactoryFn = std::function<CBehavior*()>;
+    void RegisterCategoryBehaviorOverride(CBehaviorCategory category, CategoryBehaviorFactoryFn fn);
+    bool UnregisterCategoryBehaviorOverride(CBehaviorCategory category);
+    bool HasCategoryBehaviorOverride(CBehaviorCategory category) const;
+
+    struct CustomDropoffRule {
+        bool acceptsGold = true;
+        bool acceptsLumber = true;
+    };
+    void RegisterCustomDropoffUnitType(War3ID unitTypeId, bool acceptsGold = true, bool acceptsLumber = true);
+    bool UnregisterCustomDropoffUnitType(War3ID unitTypeId);
+    bool HasCustomDropoffUnitType(War3ID unitTypeId) const;
+
+    bool CanUnitAcceptResourceDropoff(const CUnit& dropoffUnit,
+                                      int resourceTypeOrd) const override;
+    CUnit* OnFindNearestResourceDropoff(CSimulation& sim,
+                                        const CUnit& worker,
+                                        int resourceTypeOrd) override;
+    CWidget* OnFindNearestHarvestTarget(CSimulation& sim,
+                                        const CUnit& worker,
+                                        int resourceTypeOrd,
+                                        float refX,
+                                        float refY) override;
+
+    // Phase 25: Vision/Fog Multipliers & Extra Sight Sources, Custom Cell Passability, & Module Snapshot
+    void SetPlayerSightMultiplier(int playerIndex, float multiplier);
+    float GetPlayerSightMultiplier(int playerIndex) const;
+
+    void RegisterCustomSightSource(int sourceId, int playerIndex, float x, float y, float radius, bool isFlying = true);
+    bool UnregisterCustomSightSource(int sourceId);
+    bool HasCustomSightSource(int sourceId) const;
+
+    float OnComputeUnitSightRadius(const CSimulation& sim,
+                                   const CUnit& unit,
+                                   float baseSightRadius,
+                                   bool isNight) const override;
+
+    void OnCollectExtraSightSources(const CSimulation& sim,
+                                    std::vector<CFogSightSource>& outSources) const override;
+
+    struct CustomCellPassabilityRule {
+        bool walkable = true;
+        bool flyable = true;
+    };
+    void SetCustomCellPassabilityRule(int cellX, int cellY, bool walkable, bool flyable = true);
+    bool RemoveCustomCellPassabilityRule(int cellX, int cellY);
+    void ClearCustomCellPassabilityRules() { customCellPassabilityRules_.clear(); }
+
+    int OnCheckCustomCellPassability(int cellX,
+                                     int cellY,
+                                     int movementTypeOrd) const override;
+
+    void OnCaptureModuleSnapshot(const CSimulation& sim,
+                                 std::vector<uint8_t>& outBytes) const override;
+
+    bool OnRestoreModuleSnapshot(CSimulation& sim,
+                                 const uint8_t* data,
+                                 size_t size) override;
+
+    // Phase 26: Lockstep Command Validation, Global Allied Tribute & Custom SimCommands,
+    //           and Deterministic Module State Hashing
+    static constexpr int32_t kOrderTributeGold   = 0x54524744; // "TRGD"
+    static constexpr int32_t kOrderTributeLumber = 0x54524C4D; // "TRLM"
+
+    using CustomGlobalCommandFn = std::function<bool(CSimulation& sim, const SimCommand& cmd)>;
+
+    void SetPlayerCommandMuted(int playerIndex, bool muted);
+    bool IsPlayerCommandMuted(int playerIndex) const;
+
+    void RegisterCustomGlobalCommand(int32_t orderId, CustomGlobalCommandFn fn);
+    bool UnregisterCustomGlobalCommand(int32_t orderId);
+    bool HasCustomGlobalCommand(int32_t orderId) const;
+    uint32_t GetTributeCommandsExecuted() const { return tributeCommandsExecuted_; }
+
+    bool OnValidateLockstepCommand(const CSimulation& sim,
+                                   const SimCommand& cmd) const override;
+
+    bool OnExecuteCustomSimCommand(CSimulation& sim,
+                                   const SimCommand& cmd) override;
+
+    uint64_t OnComputeModuleStateHash(const CSimulation& sim) const override;
+
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 
     bool OnCheckSpellEffectReaction(CSimulation& sim,
@@ -391,6 +559,18 @@ private:
     std::unordered_map<uint32_t, int> customAutocastKinds_;
     std::unordered_map<uint32_t, BuffCreatorFn> customBuffCreators_;
     std::unordered_map<uint32_t, DataDrivenBuffSpec> customBuffSpecs_;
+    std::unordered_map<uint32_t, CustomProjectileSpec> customProjectileSpecs_;
+    std::unordered_map<uint32_t, ProjectileImpactFn> customProjectileImpacts_;
+    std::unordered_map<int, BehaviorCreatorFn> customBehaviorCreators_;
+    std::unordered_map<int, CustomBehaviorSpec> customBehaviorSpecs_;
+    std::unordered_map<uint8_t, CategoryBehaviorFactoryFn> customCategoryBehaviorOverrides_;
+    std::unordered_map<uint32_t, CustomDropoffRule> customDropoffTypes_;
+    std::unordered_map<int, float> playerSightMultipliers_;
+    std::unordered_map<int, CFogSightSource> customSightSources_;
+    std::unordered_map<int64_t, CustomCellPassabilityRule> customCellPassabilityRules_;
+    std::unordered_map<int32_t, CustomGlobalCommandFn> customGlobalCommands_;
+    uint32_t mutedPlayerMask_ = 0;
+    uint32_t tributeCommandsExecuted_ = 0;
     AttackDefenseTable combatTable_;
     float defenseArmorFactor_ = 0.06f;
     float bountyMultiplier_ = 1.0f;

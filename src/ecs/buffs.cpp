@@ -3,7 +3,7 @@
 #include "ecs/player.h"
 #include "ecs/unit_type.h"
 #include "ecs/csimulation.h"
-#include "ecs/behaviors/behavior_stun.h"
+#include "engine/simulation_module.h"
 #include "data/unitdata.h"
 #include <algorithm>
 #include <memory>
@@ -226,9 +226,36 @@ CBuffStun::CBuffStun(float duration)
 
 void CBuffStun::OnApply(CSimulation& game, CUnit* target) {
     if (!target) return;
+    if (CBehavior* cur = target->GetCurrentBehavior()) {
+        cur->End(game);
+    }
     target->ClearOrders();
-    auto stun = std::make_unique<CBehaviorStun>();
-    stun->SetDuration(GetRemaining() > 0 ? GetRemaining() : GetDuration());
+    const float dur = GetRemaining() > 0 ? GetRemaining() : GetDuration();
+    std::unique_ptr<CBehavior> stun;
+    if (auto* mod = game.GetSimulationModule()) {
+        stun.reset(mod->CreateStunBehavior(dur));
+    }
+    if (!stun) {
+        class CBehaviorEngineStun final : public CBehavior {
+        public:
+            explicit CBehaviorEngineStun(float d) : duration_(d), remaining_(d) {}
+            CBehaviorCategory GetCategory() const override { return CBehaviorCategory::STUN; }
+            bool IsInterruptable() const override { return false; }
+            void Begin(CSimulation&) override { remaining_ = duration_; }
+            void End(CSimulation&) override { remaining_ = 0.0f; }
+            bool Update(CSimulation& sim) override {
+                remaining_ -= sim.GetSimStepTime();
+                return remaining_ <= 0.0f;
+            }
+            void SetDuration(float d) override { duration_ = d; }
+            float GetRemaining() const override { return remaining_; }
+            void SetRemaining(float r) override { remaining_ = r; }
+        private:
+            float duration_ = 0.0f;
+            float remaining_ = 0.0f;
+        };
+        stun = std::make_unique<CBehaviorEngineStun>(dur);
+    }
     target->SetCurrentBehavior(std::move(stun));
     if (auto* behavior = target->GetCurrentBehavior()) {
         behavior->Begin(game);
@@ -248,8 +275,10 @@ void CBuffStun::OnRemove(CSimulation& game, CUnit* target) {
 void CBuffStun::OnRefresh(CSimulation& game, CUnit* target, const CBuff& newBuff) {
     CBuff::OnRefresh(game, target, newBuff);
     if (target) {
-        if (auto* stun = dynamic_cast<CBehaviorStun*>(target->GetCurrentBehavior())) {
-            stun->SetRemaining(std::max(stun->GetRemaining(), remaining_));
+        if (auto* beh = target->GetCurrentBehavior()) {
+            if (beh->GetCategory() == CBehaviorCategory::STUN) {
+                beh->SetRemaining(std::max(beh->GetRemaining(), remaining_));
+            }
         }
     }
 }
@@ -259,8 +288,10 @@ CBuffSleep::CBuffSleep(float duration)
     : CBuffCloneable(War3ID("BUsl"), duration, false) { sleep_ = true; }
 
 void CBuffSleep::OnApply(CSimulation& game, CUnit* target) {
-    (void)game;
     if (!target) return;
+    if (CBehavior* cur = target->GetCurrentBehavior()) {
+        cur->End(game);
+    }
     target->ClearOrders();
     target->SetCurrentBehavior(nullptr);
 }

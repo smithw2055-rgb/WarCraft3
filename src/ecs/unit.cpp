@@ -4,14 +4,7 @@
 #include "ecs/buff.h"
 #include "data/unitdata.h"
 #include "data/itemdata.h"
-#include "behaviors/behavior_move.h"
-#include "behaviors/behavior_attack.h"
-#include "behaviors/behavior_build.h"
-#include "behaviors/behavior_stop.h"
-#include "behaviors/behavior_hold_position.h"
-#include "behaviors/behavior_follow.h"
-#include "behaviors/behavior_patrol.h"
-#include "behaviors/behavior_attack_move.h"
+#include "engine/simulation_module.h"
 #include "ecs/orders/order.h"
 #include "debug/move_debug.h"
 #include "pathing/world_collision.h"
@@ -50,23 +43,23 @@ using unit_text_utils::BehaviorCategoryName;
 
 CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
              War3ID typeId, float x, float y, float facing)
-    : CWidget(handleId, x, y, (float)unitType->GetMaxLife())
+    : CWidget(handleId, x, y, unitType ? (float)unitType->GetMaxLife() : 100.0f)
     , unitType_(unitType), typeId_(typeId), playerIndex_(playerIndex)
     , facing_(facing)
-    , maxMana_(unitType->GetManaMaximum())
-    , turnRate_(unitType->GetTurnRate())
-    , movementType_(unitType->GetMovementType())
-    , collisionSize_(unitType->GetCollisionSize())
+    , maxMana_(unitType ? unitType->GetManaMaximum() : 0)
+    , turnRate_(unitType ? unitType->GetTurnRate() : 0.6f)
+    , movementType_(unitType ? unitType->GetMovementType() : PathingGridMovementType::FOOT)
+    , collisionSize_(unitType ? unitType->GetCollisionSize() : 32.0f)
     , stateFlags_(kDefaultUnitStateFlags)
 {
-    SetStateFlag(UnitStateFlag::Building, unitType->IsBuilding());
-    SetStateFlag(UnitStateFlag::Hero, unitType->IsHero());
+    SetStateFlag(UnitStateFlag::Building, unitType ? unitType->IsBuilding() : false);
+    SetStateFlag(UnitStateFlag::Hero, unitType ? unitType->IsHero() : false);
     attrs_.InitFromUnitType(unitType);
-    maxLife_ = (float)unitType->GetMaxLife();
-    mana_ = (float)unitType->GetManaInitial();
-    flyHeight_ = unitType->GetDefaultFlyingHeight();
-    foodUsed_ = unitType->GetFoodUsed();
-    foodMade_ = unitType->GetFoodMade();
+    maxLife_ = unitType ? (float)unitType->GetMaxLife() : 100.0f;
+    mana_ = unitType ? (float)unitType->GetManaInitial() : 0.0f;
+    flyHeight_ = unitType ? unitType->GetDefaultFlyingHeight() : 0.0f;
+    foodUsed_ = unitType ? unitType->GetFoodUsed() : 0;
+    foodMade_ = unitType ? unitType->GetFoodMade() : 0;
     dataDrivenBuffs_.reserve(16);
 }
 
@@ -1005,6 +998,9 @@ void CUnit::ClearOrders() {
 }
 
 void CUnit::Stop(CSimulation& simulation) {
+    if (currentBehavior_) {
+        currentBehavior_->End(simulation);
+    }
     ClearOrders();
     if (defaultBehavior_) {
         defaultBehavior_->SetUnit(this);
@@ -1014,27 +1010,27 @@ void CUnit::Stop(CSimulation& simulation) {
 }
 
 // Behavior storage setters
-void CUnit::SetMoveBehavior(std::unique_ptr<CBehaviorMove> b) {
+void CUnit::SetMoveBehavior(std::unique_ptr<CBehavior> b) {
     if (currentBehavior_ == moveBehavior_.get()) currentBehavior_ = nullptr;
     moveBehavior_ = std::move(b);
 }
-void CUnit::SetFollowBehavior(std::unique_ptr<CBehaviorFollow> b) {
+void CUnit::SetFollowBehavior(std::unique_ptr<CBehavior> b) {
     if (currentBehavior_ == followBehavior_.get()) currentBehavior_ = nullptr;
     followBehavior_ = std::move(b);
 }
-void CUnit::SetPatrolBehavior(std::unique_ptr<CBehaviorPatrol> b) {
+void CUnit::SetPatrolBehavior(std::unique_ptr<CBehavior> b) {
     if (currentBehavior_ == patrolBehavior_.get()) currentBehavior_ = nullptr;
     patrolBehavior_ = std::move(b);
 }
-void CUnit::SetHoldPositionBehavior(std::unique_ptr<CBehaviorHoldPosition> b) {
+void CUnit::SetHoldPositionBehavior(std::unique_ptr<CBehavior> b) {
     if (currentBehavior_ == holdPositionBehavior_.get()) currentBehavior_ = nullptr;
     holdPositionBehavior_ = std::move(b);
 }
-void CUnit::SetAttackBehavior(std::unique_ptr<CBehaviorAttack> b) {
+void CUnit::SetAttackBehavior(std::unique_ptr<CBehavior> b) {
     if (currentBehavior_ == attackBehavior_.get()) currentBehavior_ = nullptr;
     attackBehavior_ = std::move(b);
 }
-void CUnit::SetAttackMoveBehavior(std::unique_ptr<CBehaviorAttackMove> b) {
+void CUnit::SetAttackMoveBehavior(std::unique_ptr<CBehavior> b) {
     if (currentBehavior_ == attackMoveBehavior_.get()) currentBehavior_ = nullptr;
     attackMoveBehavior_ = std::move(b);
 }
@@ -1081,17 +1077,17 @@ void CUnit::ApplyRegen(CSimulation& simulation) {
 
     float dt = simulation.GetSimStepTime();
     bool isNight = simulation.IsNighttime();
-    CRegenType regenType = unitType_->GetLifeRegenType();
+    CRegenType regenType = unitType_ ? unitType_->GetLifeRegenType() : CRegenType::NONE;
 
     bool canRegen = (regenType == CRegenType::ALWAYS) ||
                     (regenType == CRegenType::ONLY_AT_NIGHT && isNight);
     if (canRegen && life_ < maxLife_) {
-        life_ += (unitType_->GetLifeRegen() + attrs_.GetBonusLifeRegen()) * dt;
+        life_ += ((unitType_ ? unitType_->GetLifeRegen() : 0.0f) + attrs_.GetBonusLifeRegen()) * dt;
         if (life_ > maxLife_) life_ = maxLife_;
     }
 
     if (mana_ < (float)maxMana_) {
-        mana_ += (unitType_->GetManaRegen() + attrs_.GetBonusManaRegen()) * dt;
+        mana_ += ((unitType_ ? unitType_->GetManaRegen() : 0.0f) + attrs_.GetBonusManaRegen()) * dt;
         if (mana_ > (float)maxMana_) mana_ = (float)maxMana_;
     }
 }
@@ -1178,13 +1174,13 @@ bool CUnit::Update(CSimulation& simulation) {
         if (CorpseDropComp().decaySuspended) return false;
 
         if (!CorpseDropComp().corpse) {
-            const int deathTicks = std::max(1, (int)std::ceil(unitType_->GetDeathTime() / simulation.GetSimStepTime()));
+            const int deathTicks = std::max(1, (int)std::ceil((unitType_ ? unitType_->GetDeathTime() : 1.0f) / simulation.GetSimStepTime()));
             if ((currentTick - CorpseDropComp().deathTurnTick) > deathTicks) {
                 CorpseDropComp().corpse = true;
-                if (!unitType_->CanRaise()) {
+                if (!unitType_ || !unitType_->CanRaise()) {
                     CorpseDropComp().boneCorpse = true;
                 }
-                if (!IsHero() && !unitType_->CanDecay()) {
+                if (!IsHero() && (!unitType_ || !unitType_->CanDecay())) {
                     return true;
                 }
                 CorpseDropComp().deathTurnTick = currentTick;
@@ -1225,11 +1221,8 @@ bool CUnit::Update(CSimulation& simulation) {
         const int frontId =
             orderQueue_.front() ? orderQueue_.front()->GetOrderId() : -1;
         if (frontId == OrderIds::CANCEL || frontId == OrderIds::CANCEL_BUILD) {
-            if (auto* build = dynamic_cast<CBehaviorBuild*>(currentBehavior_)) {
-                if (build->IsActivelyBuilding() || build->IsMovingToSite()) {
-                    orderQueue_.pop();
-                    build->CancelConstruction(simulation);
-                }
+            if (currentBehavior_->TryCancelConstruction(simulation)) {
+                orderQueue_.pop();
             }
         }
     }
@@ -1417,9 +1410,9 @@ void CUnit::MaybeReturnFire(CSimulation& simulation, CUnit* source) {
         isPeon = classes.find(CUnitClassification::PEON) != classes.end();
     }
 
-    if (hostile && !isPeon && !unitType_->GetAttacks().empty()) {
+    if (hostile && !isPeon && unitType_ && !unitType_->GetAttacks().empty()) {
         if (source->CanBeTargetedBy(simulation, this, {}) && !source->IsDead()) {
-            if (CBehaviorAttack* attack = GetAttackBehavior()) {
+            if (CBehavior* attack = GetAttackBehavior()) {
                 attack->SetTarget(source);
                 adoptBehavior(attack);
                 return;
@@ -1427,8 +1420,8 @@ void CUnit::MaybeReturnFire(CSimulation& simulation, CUnit* source) {
         }
     }
 
-    if (unitType_->CanFlee() && !IsRooted() && GetPlayerIndex() != source->GetPlayerIndex()) {
-        if (CBehaviorMove* move = GetMoveBehavior()) {
+    if (unitType_ && unitType_->CanFlee() && !IsRooted() && GetPlayerIndex() != source->GetPlayerIndex()) {
+        if (CBehavior* move = GetMoveBehavior()) {
             const float dx = GetX() - source->GetX();
             const float dy = GetY() - source->GetY();
             if (dx * dx + dy * dy > 0.01f) {
@@ -1516,6 +1509,9 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
                 }
                 newBehavior->SetUnit(this);
                 newBehavior->Begin(simulation);
+                if (!IsPersistentSlotBehavior(newBehavior)) {
+                    ownedCurrentBehavior_.reset(newBehavior);
+                }
                 currentBehavior_ = newBehavior;
                 return true;
             }
@@ -1525,6 +1521,26 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
 
     if (tryAbilityRange(false) || tryAbilityRange(true)) {
         return;
+    }
+
+    // Phase 23: Delegate to simulation module custom behavior registry if registered for orderId
+    if (auto* mod = simulation.GetSimulationModule()) {
+        if (CBehavior* customBeh = mod->TryCreateCustomOrderBehavior(simulation, this, *order)) {
+            if (currentBehavior_) {
+                currentBehavior_->End(simulation);
+                if (currentBehavior_ == ownedCurrentBehavior_.get()) {
+                    ownedCurrentBehavior_.reset();
+                }
+                currentBehavior_ = nullptr;
+            }
+            customBeh->SetUnit(this);
+            customBeh->Begin(simulation);
+            if (!IsPersistentSlotBehavior(customBeh)) {
+                ownedCurrentBehavior_.reset(customBeh);
+            }
+            currentBehavior_ = customBeh;
+            return;
+        }
     }
 
     if (orderId == OrderIds::SMART && order->GetTargetKind() == COrder::TargetKind::WIDGET) {
@@ -1537,7 +1553,19 @@ void CUnit::ConvertOrderToBehavior(CSimulation& simulation, std::unique_ptr<COrd
     if (orderId == OrderIds::STOP || orderId == OrderIds::HOLD_POSITION ||
         order->GetTargetKind() == COrder::TargetKind::POINT ||
         order->GetTargetKind() == COrder::TargetKind::WIDGET) {
-        auto behavior = std::make_unique<CBehaviorStop>();
+        class CBehaviorEngineStop final : public CBehavior {
+        public:
+            CBehaviorCategory GetCategory() const override { return CBehaviorCategory::STOP; }
+            void Begin(CSimulation&) override { if (unit_) unit_->ClearOrders(); }
+            bool Update(CSimulation&) override { return true; }
+        };
+        std::unique_ptr<CBehavior> behavior;
+        if (auto* mod = simulation.GetSimulationModule()) {
+            behavior.reset(mod->CreateUnitBehavior(CBehaviorCategory::STOP));
+        }
+        if (!behavior) {
+            behavior = std::make_unique<CBehaviorEngineStop>();
+        }
         behavior->SetUnit(this);
         behavior->Begin(simulation);
         ownedCurrentBehavior_ = std::move(behavior);

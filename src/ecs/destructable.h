@@ -8,6 +8,7 @@ public:
     CDestructable(int handleId, War3ID typeId, float x, float y, float life);
 
     War3ID GetTypeId() const { return typeId_; }
+    void SetPosition(float x, float y) { SetX(x); SetY(y); }
     float GetImpactZ() const override { return 0; }
     bool IsInvulnerable() const override { return invulnerable_; }
 
@@ -43,6 +44,8 @@ public:
     // Visibility (ref ShowDestructable; renderer hides flagged instances).
     bool IsHidden() const { return hidden_; }
     void SetHidden(bool v) { hidden_ = v; }
+    bool IsBlighted() const { return blighted_; }
+    void SetBlighted(bool v) { blighted_ = v; }
     // Occluder height for the renderer (ref Get/SetDestructableOccluderHeight).
     float GetOccluderHeight() const { return occluderHeight_; }
     void SetOccluderHeight(float v) { occluderHeight_ = v; }
@@ -70,8 +73,10 @@ public:
 
 private:
     War3ID typeId_;
-    bool invulnerable_ = false;
-    bool hidden_ = false;
+    uint8_t invulnerable_ : 1;
+    uint8_t hidden_ : 1;
+    uint8_t blighted_ : 1;
+    uint8_t reservedFlags_ : 5;
     float animationSpeed_ = 1.0f;
     float occluderHeight_ = 0.0f;
     std::string animation_;

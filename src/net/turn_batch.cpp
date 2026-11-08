@@ -7,57 +7,47 @@
 
 namespace {
 
-void WriteLE32(uint8_t* out, uint32_t v) {
-    out[0] = (uint8_t)(v & 0xFF);
-    out[1] = (uint8_t)((v >> 8) & 0xFF);
-    out[2] = (uint8_t)((v >> 16) & 0xFF);
-    out[3] = (uint8_t)((v >> 24) & 0xFF);
+void SerializeCommandArray(uint8_t* dst, const std::vector<SimCommand>& commands) {
+    for (size_t i = 0; i < commands.size(); ++i) {
+        commands[i].Serialize(dst + i * SimCommand::kWireSize);
+    }
 }
 
-uint32_t ReadLE32(const uint8_t* in) {
-    return (uint32_t)in[0] | ((uint32_t)in[1] << 8) |
-           ((uint32_t)in[2] << 16) | ((uint32_t)in[3] << 24);
-}
-
-void WriteLE64(uint8_t* out, uint64_t v) {
-    for (int i = 0; i < 8; i++) out[i] = (uint8_t)((v >> (i * 8)) & 0xFF);
-}
-
-uint64_t ReadLE64(const uint8_t* in) {
-    uint64_t v = 0;
-    for (int i = 0; i < 8; i++) v |= (uint64_t)in[i] << (i * 8);
-    return v;
+bool DeserializeCommandArray(const uint8_t* src, uint32_t count, std::vector<SimCommand>& outCommands) {
+    outCommands.clear();
+    outCommands.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        SimCommand cmd;
+        if (!SimCommand::Deserialize(src + static_cast<size_t>(i) * SimCommand::kWireSize,
+                                     SimCommand::kWireSize, cmd)) {
+            return false;
+        }
+        outCommands.push_back(cmd);
+    }
+    return true;
 }
 
 } // namespace
 
 std::vector<uint8_t> TurnBatch::Serialize() const {
-    std::vector<uint8_t> out(8 + commands.size() * SimCommand::kWireSize + 8);
-    WriteLE32(out.data() + 0, (uint32_t)turn);
-    WriteLE32(out.data() + 4, (uint32_t)commands.size());
-    for (size_t i = 0; i < commands.size(); i++) {
-        commands[i].Serialize(out.data() + 8 + i * SimCommand::kWireSize);
-    }
-    WriteLE64(out.data() + 8 + commands.size() * SimCommand::kWireSize, stateHash);
+    const size_t cmdBytes = commands.size() * SimCommand::kWireSize;
+    std::vector<uint8_t> out(8 + cmdBytes + 8);
+    SimWireWriteLE32(out.data() + 0, static_cast<uint32_t>(turn));
+    SimWireWriteLE32(out.data() + 4, static_cast<uint32_t>(commands.size()));
+    SerializeCommandArray(out.data() + 8, commands);
+    SimWireWriteLE64(out.data() + 8 + cmdBytes, stateHash);
     return out;
 }
 
 bool TurnBatch::Deserialize(const uint8_t* data, size_t size, TurnBatch& out) {
-    if (size < 16) return false;
-    const uint32_t count = ReadLE32(data + 4);
-    const size_t want = 8 + (size_t)count * SimCommand::kWireSize + 8;
-    if (size < want) return false;
-    out.turn = (int32_t)ReadLE32(data + 0);
-    out.commands.clear();
-    for (uint32_t i = 0; i < count; i++) {
-        SimCommand cmd;
-        if (!SimCommand::Deserialize(data + 8 + i * SimCommand::kWireSize,
-                                     SimCommand::kWireSize, cmd)) {
-            return false;
-        }
-        out.commands.push_back(cmd);
-    }
-    out.stateHash = ReadLE64(data + 8 + (size_t)count * SimCommand::kWireSize);
+    if (!data || size < 16) return false;
+    const uint32_t count = SimWireReadLE32(data + 4);
+    if (count > ResyncPackage::kMaxCommands) return false;
+    const size_t cmdBytes = static_cast<size_t>(count) * SimCommand::kWireSize;
+    if (size < 16 + cmdBytes) return false;
+    out.turn = static_cast<int32_t>(SimWireReadLE32(data + 0));
+    if (!DeserializeCommandArray(data + 8, count, out.commands)) return false;
+    out.stateHash = SimWireReadLE64(data + 8 + cmdBytes);
     return true;
 }
 
@@ -76,40 +66,30 @@ std::unique_ptr<COrder> OrderFromCommand(CSimulation& sim, const SimCommand& cmd
 int ApplyBatch(CSimulation& sim, const TurnBatch& batch) {
     int applied = 0;
     for (const auto& cmd : batch.commands) {
-        auto order = OrderFromCommand(sim, cmd);
-        if (!order) continue;
-        if (sim.IssueUnitOrder(cmd.unit, std::move(order))) applied++;
+        if (sim.ExecuteSimCommand(cmd)) {
+            applied++;
+        }
     }
     return applied;
 }
 
 std::vector<uint8_t> ResyncPackage::Serialize() const {
-    std::vector<uint8_t> out(8 + commands.size() * SimCommand::kWireSize);
-    WriteLE32(out.data() + 0, seed);
-    WriteLE32(out.data() + 4, (uint32_t)commands.size());
-    for (size_t i = 0; i < commands.size(); i++) {
-        commands[i].Serialize(out.data() + 8 + i * SimCommand::kWireSize);
-    }
+    const size_t cmdBytes = commands.size() * SimCommand::kWireSize;
+    std::vector<uint8_t> out(8 + cmdBytes);
+    SimWireWriteLE32(out.data() + 0, seed);
+    SimWireWriteLE32(out.data() + 4, static_cast<uint32_t>(commands.size()));
+    SerializeCommandArray(out.data() + 8, commands);
     return out;
 }
 
 bool ResyncPackage::Deserialize(const uint8_t* data, size_t size, ResyncPackage& out) {
-    if (size < 8) return false;
-    const uint32_t count = ReadLE32(data + 4);
+    if (!data || size < 8) return false;
+    const uint32_t count = SimWireReadLE32(data + 4);
     if (count > kMaxCommands) return false;
-    const size_t want = 8 + (size_t)count * SimCommand::kWireSize;
+    const size_t want = 8 + static_cast<size_t>(count) * SimCommand::kWireSize;
     if (size < want) return false;
-    out.seed = ReadLE32(data + 0);
-    out.commands.clear();
-    for (uint32_t i = 0; i < count; i++) {
-        SimCommand cmd;
-        if (!SimCommand::Deserialize(data + 8 + i * SimCommand::kWireSize,
-                                     SimCommand::kWireSize, cmd)) {
-            return false;
-        }
-        out.commands.push_back(cmd);
-    }
-    return true;
+    out.seed = SimWireReadLE32(data + 0);
+    return DeserializeCommandArray(data + 8, count, out.commands);
 }
 
 ResyncPackage ResyncPackage::FromHistory(uint32_t seed,
@@ -117,25 +97,25 @@ ResyncPackage ResyncPackage::FromHistory(uint32_t seed,
     ResyncPackage pkg;
     pkg.seed = seed;
     for (const auto& batch : history) {
-        for (const auto& cmd : batch.commands) pkg.commands.push_back(cmd);
+        pkg.commands.insert(pkg.commands.end(), batch.commands.begin(), batch.commands.end());
     }
     return pkg;
 }
 
 std::vector<uint8_t> StartGamePackage::Serialize() const {
     std::vector<uint8_t> out(16);
-    WriteLE32(out.data() + 0, seed);
-    WriteLE64(out.data() + 4, mapHash);
-    WriteLE32(out.data() + 12, (uint32_t)numPlayers);
+    SimWireWriteLE32(out.data() + 0, seed);
+    SimWireWriteLE64(out.data() + 4, mapHash);
+    SimWireWriteLE32(out.data() + 12, static_cast<uint32_t>(numPlayers));
     return out;
 }
 
 bool StartGamePackage::Deserialize(const uint8_t* data, size_t size,
                                    StartGamePackage& out) {
     if (size < 16 || !data) return false;
-    out.seed = ReadLE32(data + 0);
-    out.mapHash = ReadLE64(data + 4);
-    out.numPlayers = (int32_t)ReadLE32(data + 12);
+    out.seed = SimWireReadLE32(data + 0);
+    out.mapHash = SimWireReadLE64(data + 4);
+    out.numPlayers = static_cast<int32_t>(SimWireReadLE32(data + 12));
     if (out.numPlayers < 0 || out.numPlayers > 64) return false;
     return true;
 }

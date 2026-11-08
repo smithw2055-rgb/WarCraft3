@@ -1,5 +1,4 @@
 #include "ability_gold_mine.h"
-#include "ecs/behaviors/behavior_harvest.h"
 #include "ecs/unit.h"
 #include "ecs/csimulation.h"
 #include <algorithm>
@@ -7,10 +6,10 @@
 namespace {
 
 void TickActiveMiners(CSimulation& game,
-                      std::vector<CBehaviorHarvest*>& activeMiners,
+                      std::vector<CBehavior*>& activeMiners,
                       CAbility& mineAbility) {
     for (auto it = activeMiners.begin(); it != activeMiners.end();) {
-        CBehaviorHarvest* miner = *it;
+        CBehavior* miner = *it;
         if (!miner) {
             it = activeMiners.erase(it);
             continue;
@@ -30,9 +29,9 @@ void TickActiveMiners(CSimulation& game,
     }
 }
 
-void PushUniqueMiner(std::vector<CBehaviorHarvest*>& activeMiners,
+void PushUniqueMiner(std::vector<CBehavior*>& activeMiners,
                      int capacity,
-                     CBehaviorHarvest* miner) {
+                     CBehavior* miner) {
     if (!miner || static_cast<int>(activeMiners.size()) >= capacity) return;
     if (std::find(activeMiners.begin(), activeMiners.end(), miner) == activeMiners.end()) {
         activeMiners.push_back(miner);
@@ -57,11 +56,11 @@ void CAbilityGoldMine::OnTick(CSimulation& game, CUnit* unit) {
     }
 }
 
-void CAbilityGoldMine::AddMiner(CBehaviorHarvest* miner) {
+void CAbilityGoldMine::AddMiner(CBehavior* miner) {
     PushUniqueMiner(activeMiners_, miningCapacity_, miner);
 }
 
-void CAbilityGoldMine::RemoveMiner(CBehaviorHarvest* miner) {
+void CAbilityGoldMine::RemoveMiner(CBehavior* miner) {
     activeMiners_.erase(std::remove(activeMiners_.begin(), activeMiners_.end(), miner), activeMiners_.end());
 }
 
@@ -94,11 +93,11 @@ void CAbilityOverlayedGoldMine::SetGold(int v) {
     }
 }
 
-void CAbilityOverlayedGoldMine::AddMiner(CBehaviorHarvest* miner) {
+void CAbilityOverlayedGoldMine::AddMiner(CBehavior* miner) {
     PushUniqueMiner(activeMiners_, miningCapacity_, miner);
 }
 
-void CAbilityOverlayedGoldMine::RemoveMiner(CBehaviorHarvest* miner) {
+void CAbilityOverlayedGoldMine::RemoveMiner(CBehavior* miner) {
     activeMiners_.erase(std::remove(activeMiners_.begin(), activeMiners_.end(), miner),
                         activeMiners_.end());
 }
@@ -139,11 +138,11 @@ bool CMineAccess::CanAdd() const {
     return mine ? mine->CanAddMiner() : false;
 }
 
-void CMineAccess::Add(CBehaviorHarvest* miner) {
+void CMineAccess::Add(CBehavior* miner) {
     if (mine) mine->AddMiner(miner);
 }
 
-void CMineAccess::Remove(CBehaviorHarvest* miner) {
+void CMineAccess::Remove(CBehavior* miner) {
     if (mine) mine->RemoveMiner(miner);
 }
 

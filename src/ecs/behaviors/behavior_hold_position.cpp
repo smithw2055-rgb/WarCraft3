@@ -11,3 +11,5 @@ bool CBehaviorHoldPosition::Update(CSimulation& simulation) {
     (void)simulation;
     return false; // never completes
 }
+
+std::unique_ptr<CBehavior> CBehavior::CreateHoldPosition() { return std::make_unique<CBehaviorHoldPosition>(); }
