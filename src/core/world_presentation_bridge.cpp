@@ -1,4 +1,561 @@
-#include "core/game_controller_internal.h"
+#include "core/game_controller.h"
+#include "ecs/animation_utils.h"
+#include "ecs/behaviors/behavior.h"
+#include "ecs/destructable.h"
+#include "ecs/item.h"
+#include "ecs/unit_text_utils.h"
+#include "ecs/widget.h"
+#include "engine/simulation_module.h"
+#include "render/mdx_event_splat.h"
+#include "render/picking.h"
+#include "render/unit_selection_geom.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+namespace {
+
+std::string LowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    return value;
+}
+
+Vec4 MdxEventSplatTint(const std::array<std::array<float, 4>, 3>& colors,
+                       const std::array<float, 3>& intervalTimes,
+                       int intervalCount,
+                       float lifeSpanValue,
+                       float lifeRemaining) {
+    auto normalizeColor = [](const std::array<float, 4>& color) {
+        auto channel = [](float value) {
+            if (!std::isfinite(value)) {
+                return 1.0f;
+            }
+            return std::clamp(value / 255.0f, 0.0f, 1.0f);
+        };
+        return Vec4(channel(color[0]), channel(color[1]), channel(color[2]), channel(color[3]));
+    };
+    auto lerp = [](const Vec4& a, const Vec4& b, float t) {
+        t = std::clamp(t, 0.0f, 1.0f);
+        return Vec4(a.x + (b.x - a.x) * t,
+                    a.y + (b.y - a.y) * t,
+                    a.z + (b.z - a.z) * t,
+                    a.w + (b.w - a.w) * t);
+    };
+
+    const Vec4 start = normalizeColor(colors[0]);
+    const Vec4 middle = normalizeColor(colors[1]);
+    const Vec4 end = normalizeColor(colors[2]);
+    const float lifeSpan = std::max(lifeSpanValue, 0.0001f);
+    const float age = std::clamp(lifeSpan - lifeRemaining, 0.0f, lifeSpan);
+
+    if (intervalCount >= 3) {
+        const float birth = std::max(0.0f, intervalTimes[0]);
+        const float pause = std::max(0.0f, intervalTimes[1]);
+        const float decay = std::max(0.0f, intervalTimes[2]);
+        if (birth > 0.0001f && age < birth) {
+            return lerp(start, middle, age / birth);
+        }
+        if (age < birth + pause || decay <= 0.0001f) {
+            return middle;
+        }
+        return lerp(middle, end, (age - birth - pause) / decay);
+    }
+
+    if (intervalCount >= 2) {
+        const float sustain = std::max(0.0f, intervalTimes[0]);
+        const float decay = std::max(0.0f, intervalTimes[1]);
+        if (sustain > 0.0001f && age < sustain) {
+            return lerp(start, middle, age / sustain);
+        }
+        if (decay <= 0.0001f) {
+            return middle;
+        }
+        return lerp(middle, end, (age - sustain) / decay);
+    }
+
+    return start;
+}
+
+float MdxEventSplatCell(const std::array<std::array<float, 3>, 2>& uvIntervals,
+                        const std::array<float, 3>& intervalTimes,
+                        int intervalCount,
+                        int columns,
+                        int rows,
+                        float lifeSpanValue,
+                        float lifeRemaining) {
+    if (columns <= 1 && rows <= 1) {
+        return 0.0f;
+    }
+    const float lifeSpan = std::max(lifeSpanValue, 0.0001f);
+    const float age = std::clamp(lifeSpan - lifeRemaining, 0.0f, lifeSpan);
+    int intervalIndex = 0;
+    float factor = 0.0f;
+    if (intervalCount >= 2) {
+        const float sustain = std::max(0.0f, intervalTimes[0]);
+        const float decay = std::max(0.0f, intervalTimes[1]);
+        if (sustain > 0.0001f && age < sustain) {
+            factor = age / sustain;
+            intervalIndex = 0;
+        } else {
+            factor = decay > 0.0001f ? (age - sustain) / decay : 1.0f;
+            intervalIndex = 1;
+        }
+    }
+
+    const auto& interval = uvIntervals[intervalIndex];
+    const float start = interval[0];
+    const float end = interval[1];
+    const float repeat = interval[2];
+    const float spriteCount = end - start;
+    const float maxCell = (float)std::max(0, columns * rows - 1);
+    if (spriteCount > 0.0f) {
+        const float advanced = std::fmod(std::floor(spriteCount * repeat * std::clamp(factor, 0.0f, 1.0f)),
+                                         spriteCount);
+        return std::clamp(start + advanced, 0.0f, maxCell);
+    }
+    return std::clamp(start, 0.0f, maxCell);
+}
+
+Vec4 MdxEventSplatUvRect(const std::array<std::array<float, 3>, 2>& uvIntervals,
+                         const std::array<float, 3>& intervalTimes,
+                         int intervalCount,
+                         int columns,
+                         int rows,
+                         float lifeSpanValue,
+                         float lifeRemaining) {
+    columns = std::max(1, columns);
+    rows = std::max(1, rows);
+    const float cell = MdxEventSplatCell(uvIntervals, intervalTimes, intervalCount,
+                                         columns, rows, lifeSpanValue, lifeRemaining);
+    const float left = std::floor(std::fmod(cell, (float)columns)) / (float)columns;
+    const float top = std::floor(cell / (float)columns) / (float)rows;
+    return Vec4(left, top, left + (1.0f / (float)columns), top + (1.0f / (float)rows));
+}
+
+SplatModel::BlendMode MdxEventSplatBlendMode(int blendMode) {
+    switch (blendMode) {
+    case 1:
+        return SplatModel::BlendMode::AdditiveAlpha;
+    case 2:
+        return SplatModel::BlendMode::Modulate;
+    case 3:
+        return SplatModel::BlendMode::Modulate2x;
+    case 4:
+        return SplatModel::BlendMode::Blend;
+    case 0:
+    default:
+        return SplatModel::BlendMode::Blend;
+    }
+}
+
+// --- Helpers (animation / visual) ---
+
+bool CurrentAnimationRequestMatchesViewer(MdxViewer* viewer,
+                                          const animation_utils::PendingUnitAnimation& request) {
+    if (!viewer || !viewer->GetAnimator()) return false;
+    if (request.useTags) {
+        return viewer->IsPlayingSequenceByPrimaryAndTags(request.primaryTag.c_str(), request.secondaryTags);
+    }
+    const int currentSequence = viewer->GetAnimator()->GetCurrentSequence();
+    if (request.useSequenceIndex) {
+        return currentSequence == request.sequenceIndex;
+    }
+    if (request.sequenceName.empty()) {
+        return false;
+    }
+    std::string currentName;
+    if (!viewer->GetSequenceName(currentSequence, currentName)) {
+        return false;
+    }
+    const std::string requested = LowerAscii(request.sequenceName);
+    const std::string current = LowerAscii(currentName);
+    return current.find(requested) != std::string::npos;
+}
+
+bool ApplyAnimationRequestToViewer(int handleId,
+                                   MdxViewer* viewer,
+                                   const animation_utils::PendingUnitAnimation& request,
+                                   GameController* g) {
+    if (!viewer || !viewer->GetAnimator()) return false;
+    if (!request.force && CurrentAnimationRequestMatchesViewer(viewer, request)) return true;
+
+    bool loop = false;
+    bool queueStandAfterCurrent = true;
+    std::string lowerName;
+    if (request.useTags) {
+        lowerName = request.primaryTag;
+        for (const std::string& tag : request.secondaryTags) {
+            lowerName += " ";
+            lowerName += tag;
+        }
+        animation_utils::ClassifyScriptedAnimationName(lowerName, loop, queueStandAfterCurrent);
+    } else if (animation_utils::GetRequestedAnimationLowerName(viewer, request, lowerName)) {
+        animation_utils::ClassifyScriptedAnimationName(lowerName, loop, queueStandAfterCurrent);
+    }
+
+    bool played = false;
+    const float speedRatio = std::clamp(request.speedRatio, 0.1f, 4.0f);
+    if (request.useTags) {
+        if (!request.force && viewer->IsPlayingSequenceByPrimaryAndTags(request.primaryTag.c_str(), request.secondaryTags)) {
+            played = true;
+        } else if (request.durationSeconds > 0.0f) {
+            if (request.primaryTag == "attack") {
+                played = viewer->PlayAttackSequenceWithTagsAndDuration(request.secondaryTags, request.durationSeconds);
+            } else if (request.primaryTag == "spell" || request.primaryTag.empty()) {
+                played = viewer->PlaySpellSequenceWithTags(request.secondaryTags, request.durationSeconds);
+            } else if (request.primaryTag == "channel") {
+                played = viewer->PlayChannelSequenceWithTags(request.secondaryTags, request.durationSeconds);
+            } else if (request.primaryTag == "decay") {
+                played = viewer->PlayDecaySequenceWithTags(request.secondaryTags, request.durationSeconds);
+            } else if (request.primaryTag == "dissipate") {
+                played = viewer->PlayDissipateSequence(request.durationSeconds);
+            }
+        }
+        if (!played) {
+            played = viewer->PlaySequenceByPrimaryAndTags(request.primaryTag.c_str(), request.secondaryTags,
+                                                          loop, speedRatio, queueStandAfterCurrent, request.force);
+        }
+    } else if (request.useSequenceIndex) {
+        played = viewer->PlaySequenceByIndex(request.sequenceIndex, loop, speedRatio, queueStandAfterCurrent);
+    } else if (!request.sequenceName.empty()) {
+        played = viewer->PlaySequenceByName(request.sequenceName.c_str(), loop, speedRatio, queueStandAfterCurrent);
+    }
+
+    if (played) {
+        auto storedRequest = request;
+        storedRequest.force = false;
+        g->GetPresentation().unitScriptedAnimations[handleId] = {storedRequest, loop, queueStandAfterCurrent};
+    }
+    return played;
+}
+
+void ApplyPendingUnitAnimation(int handleId, MdxViewer* viewer, GameController* g) {
+    if (!viewer || !viewer->GetAnimator()) return;
+    const auto pendingIt = g->GetPresentation().unitPendingAnimations.find(handleId);
+    if (pendingIt == g->GetPresentation().unitPendingAnimations.end()) return;
+    ApplyAnimationRequestToViewer(handleId, viewer, pendingIt->second, g);
+    g->GetPresentation().unitPendingAnimations.erase(pendingIt);
+}
+
+void QueueUnitAnimationRequest(int handleId,
+                               const animation_utils::PendingUnitAnimation& request,
+                               GameController* g) {
+    if (!g) return;
+    g->GetPresentation().unitQueuedAnimations[handleId].push_back(request);
+}
+
+bool ApplyNextQueuedUnitAnimation(int handleId, MdxViewer* viewer, GameController* g) {
+    if (!viewer || !viewer->GetAnimator() || !g) return false;
+    auto queuedIt = g->GetPresentation().unitQueuedAnimations.find(handleId);
+    if (queuedIt == g->GetPresentation().unitQueuedAnimations.end() || queuedIt->second.empty()) {
+        return false;
+    }
+    auto request = queuedIt->second.front();
+    queuedIt->second.pop_front();
+    if (queuedIt->second.empty()) {
+        g->GetPresentation().unitQueuedAnimations.erase(queuedIt);
+    }
+    if (ApplyAnimationRequestToViewer(handleId, viewer, request, g)) {
+        g->GetPresentation().unitPendingAnimations.erase(handleId);
+        return true;
+    }
+    g->GetPresentation().unitPendingAnimations[handleId] = std::move(request);
+    return false;
+}
+
+void PlayResolvedUnitAnimation(CUnit* unit,
+                               MdxViewer* viewer,
+                               GameController* g,
+                               animation_utils::UnitVisualAnimationMode mode) {
+    if (!unit || !viewer) return;
+
+    const int handleId = unit->GetHandleId();
+    auto& splatMeta = g->GetSplatMeta();
+    const auto* scriptTags = &g->GetPresentation().unitAnimationPropertyTags;
+
+    // If script requested a specific animation, use it
+    ApplyPendingUnitAnimation(handleId, viewer, g);
+
+    const auto scriptIt = g->GetPresentation().unitScriptedAnimations.find(handleId);
+    if (scriptIt != g->GetPresentation().unitScriptedAnimations.end()) {
+        const auto& state = scriptIt->second;
+        if (CurrentAnimationRequestMatchesViewer(viewer, state.request)) {
+            return;
+        }
+        bool applied = false;
+        const float speedRatio = std::clamp(state.request.speedRatio, 0.1f, 4.0f);
+        if (state.request.useTags) {
+            applied = viewer->PlaySequenceByPrimaryAndTags(
+                state.request.primaryTag.c_str(), state.request.secondaryTags, state.loop, speedRatio,
+                state.queueStandAfterCurrent, state.request.force);
+        } else if (state.request.useSequenceIndex) {
+            applied = viewer->PlaySequenceByIndex(state.request.sequenceIndex, state.loop, speedRatio,
+                                                  state.queueStandAfterCurrent);
+        } else if (!state.request.sequenceName.empty()) {
+            applied = viewer->PlaySequenceByName(state.request.sequenceName.c_str(), state.loop, speedRatio,
+                                                 state.queueStandAfterCurrent);
+        }
+        if (applied) {
+            return;
+        }
+        g->GetPresentation().unitScriptedAnimations.erase(scriptIt);
+    }
+
+    const CBehaviorCategory behaviorCategory =
+        unit_text_utils::GetUnitCurrentBehaviorCategory(unit);
+    const CResourceType carriedType =
+        unit_text_utils::GetUnitCarriedResourceType(unit);
+
+    switch (mode) {
+        case animation_utils::UnitVisualAnimationMode::DEAD:
+        case animation_utils::UnitVisualAnimationMode::CORPSE:
+        case animation_utils::UnitVisualAnimationMode::BONE_CORPSE:
+        case animation_utils::UnitVisualAnimationMode::DISSIPATE:
+            animation_utils::PlayDeathVisualForUnit(unit, viewer, mode, g->GetSimulation());
+            return;
+        case animation_utils::UnitVisualAnimationMode::CONSTRUCT: {
+            const auto lastModeIt = g->GetPresentation().unitVisualAnimationModes.find(handleId);
+            if (lastModeIt == g->GetPresentation().unitVisualAnimationModes.end()
+                || lastModeIt->second != animation_utils::UnitVisualAnimationMode::CONSTRUCT) {
+                viewer->PlayBirthThenStandSequence();
+            }
+            float buildRatio = 0.0f;
+            if (const auto* unitType = unit->GetUnitType()) {
+                const float buildTime = static_cast<float>(unitType->GetBuildTime());
+                if (buildTime > 0.0f) {
+                    buildRatio = unit->GetConstructionProgress() / buildTime;
+                }
+            }
+            viewer->SetCurrentSequenceFrameByRatio(std::clamp(buildRatio, 0.0f, 1.0f));
+            return;
+        }
+        case animation_utils::UnitVisualAnimationMode::READY:
+            animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::NONE, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::READY_GOLD:
+            animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::GOLD, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::READY_LUMBER:
+            animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::LUMBER, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WALK:
+            animation_utils::PlayWalkVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::NONE, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WALK_GOLD:
+            animation_utils::PlayWalkVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::GOLD, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WALK_LUMBER:
+            animation_utils::PlayWalkVisualForUnit(unit, viewer, behaviorCategory,
+                CResourceType::LUMBER, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WALK_WORK:
+            animation_utils::PlayWalkWorkVisualForUnit(unit, viewer, behaviorCategory,
+                carriedType, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::WORK:
+            animation_utils::PlayWorkVisualForUnit(unit, viewer, behaviorCategory,
+                carriedType, splatMeta, scriptTags);
+            return;
+        case animation_utils::UnitVisualAnimationMode::SPELL:
+            if (!animation_utils::PlaySpellVisualForUnit(unit, viewer, scriptTags)) {
+                animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                    carriedType, splatMeta, scriptTags);
+            }
+            return;
+        case animation_utils::UnitVisualAnimationMode::ATTACK: {
+            const int currentTick = g->GetSimulation().GetGameTurnTick();
+            const CBehavior* attackBehavior = unit ? unit->GetCurrentBehavior() : nullptr;
+            const int behaviorAttackStartTick =
+                attackBehavior ? attackBehavior->GetAttackAnimationStartTick() : -1;
+            const float behaviorAttackDuration =
+                attackBehavior ? attackBehavior->GetAttackAnimationDuration() : 0.0f;
+            const auto lastAttackIt = g->GetPresentation().unitVisualLastAttackAnimationTicks.find(handleId);
+            const int lastAttackTick = (lastAttackIt != g->GetPresentation().unitVisualLastAttackAnimationTicks.end())
+                ? lastAttackIt->second
+                : std::numeric_limits<int>::min();
+            const bool shouldStartAttackAnimation = attackBehavior
+                && attackBehavior->IsAttackAnimationActive(currentTick)
+                && behaviorAttackStartTick >= 0
+                && behaviorAttackStartTick != lastAttackTick;
+            if (shouldStartAttackAnimation) {
+                const auto attackTags = animation_utils::BuildContextualAnimationTags(
+                    unit, scriptTags, CResourceType::NONE);
+                if (viewer->PlayAttackSequenceWithTagsAndDuration(
+                        attackTags, behaviorAttackDuration)) {
+                    g->GetPresentation().unitVisualLastAttackAnimationTicks[handleId] =
+                        behaviorAttackStartTick;
+                } else {
+                    animation_utils::PlayReadyVisualForUnit(unit, viewer, behaviorCategory,
+                        carriedType, splatMeta, scriptTags);
+                }
+            } else if (!attackBehavior || !attackBehavior->IsAttackAnimationActive(currentTick)) {
+                if (!viewer->IsPlayingSequenceWithToken("stand")
+                    || viewer->IsCurrentSequenceFinished()) {
+                    animation_utils::PlayReadyVisualForUnit(unit, viewer,
+                        CBehaviorCategory::ATTACK, carriedType, splatMeta, scriptTags);
+                }
+            }
+            return;
+        }
+        default:
+            return;
+    }
+}
+
+void SyncSimulationUnitAnimation(CUnit* unit, MdxViewer* viewer, GameController* g) {
+    if (!unit || !viewer) return;
+    const int handleId = unit->GetHandleId();
+
+    const auto lastPosIt = g->GetPresentation().unitVisualLastPositions.find(handleId);
+    bool posChanged = false;
+    if (lastPosIt != g->GetPresentation().unitVisualLastPositions.end()) {
+        float dx = unit->GetX() - lastPosIt->second.first;
+        float dy = unit->GetY() - lastPosIt->second.second;
+        posChanged = (dx * dx + dy * dy) > 0.01f;
+    } else {
+        posChanged = true;
+    }
+
+    if (posChanged) {
+        g->GetPresentation().unitVisualLastPositions[handleId] = {unit->GetX(), unit->GetY()};
+    }
+
+    // Re-evaluate animation from live behavior, work, and carried-resource
+    // state rather than only position changes.
+    const bool isMoving = animation_utils::ComputeUnitVisualIsMoving(
+        unit, g->GetPresentation().unitVisualLastPositions);
+    const bool wasMoving = g->GetPresentation().unitVisualMovingStates.count(handleId)
+        && g->GetPresentation().unitVisualMovingStates[handleId];
+    const CBehaviorCategory behaviorCategory =
+        unit_text_utils::GetUnitCurrentBehaviorCategory(unit);
+    const CResourceType carriedType =
+        unit_text_utils::GetUnitCarriedResourceType(unit);
+    const std::vector<std::string> currentPropertyTags =
+        animation_utils::CollectUnitAnimationPropertyTags(
+            unit, &g->GetPresentation().unitAnimationPropertyTags);
+
+    const auto lastModeIt = g->GetPresentation().unitVisualAnimationModes.find(handleId);
+    const auto lastMode = (lastModeIt != g->GetPresentation().unitVisualAnimationModes.end())
+        ? lastModeIt->second
+        : animation_utils::UnitVisualAnimationMode::NONE;
+
+    const auto lastPropertyTagsIt = g->GetPresentation().unitVisualPropertyTags.find(handleId);
+    const bool propertyTagsChanged = (lastPropertyTagsIt == g->GetPresentation().unitVisualPropertyTags.end())
+        || (lastPropertyTagsIt->second != currentPropertyTags);
+
+    const auto lastResourceIt = g->GetPresentation().unitVisualResourceTags.find(handleId);
+    const bool resourceChanged = (lastResourceIt == g->GetPresentation().unitVisualResourceTags.end())
+        || (lastResourceIt->second != carriedType);
+
+    const auto resolvedMode = animation_utils::ResolveUnitVisualAnimationMode(
+        unit, isMoving, behaviorCategory, carriedType,
+        g->GetSimulation().GetGameTurnTick());
+    const bool shouldRefreshAttack =
+        resolvedMode == animation_utils::UnitVisualAnimationMode::ATTACK
+        && viewer->IsCurrentSequenceFinished();
+
+    bool needsResolve = (isMoving != wasMoving)
+        || (resolvedMode != lastMode)
+        || propertyTagsChanged
+        || resourceChanged
+        || shouldRefreshAttack
+        || (g->GetPresentation().unitPendingAnimations.count(handleId) != 0);
+
+    if (needsResolve) {
+        PlayResolvedUnitAnimation(unit, viewer, g, resolvedMode);
+    }
+
+    g->GetPresentation().unitVisualConstructionStates[handleId] = unit->IsConstructing();
+    g->GetPresentation().unitVisualResourceTags[handleId] = carriedType;
+    g->GetPresentation().unitVisualPropertyTags[handleId] = currentPropertyTags;
+    g->GetPresentation().unitVisualAnimationModes[handleId] = resolvedMode;
+    g->GetPresentation().unitVisualMovingStates[handleId] = isMoving;
+    if (resolvedMode != animation_utils::UnitVisualAnimationMode::ATTACK) {
+        g->GetPresentation().unitVisualLastAttackAnimationTicks.erase(handleId);
+    }
+
+    // Handle queued animations
+    const auto queuedIt = g->GetPresentation().unitQueuedAnimations.find(handleId);
+    if (queuedIt != g->GetPresentation().unitQueuedAnimations.end() && !queuedIt->second.empty()) {
+        if (!viewer->IsCurrentSequenceLooping() && viewer->IsCurrentSequenceFinished()) {
+            ApplyNextQueuedUnitAnimation(handleId, viewer, g);
+        }
+    }
+
+    // Sync interpolated position/rotation/scale/tint via SceneManager & RenderInterpolationBuffer
+    render::RenderTransformSnapshot interpSnap;
+    const bool hasInterp = g->GetPresentation().SampleInterpolatedUnit(handleId, interpSnap);
+    const float sampleX = hasInterp ? interpSnap.position.x : unit->GetX();
+    const float sampleY = hasInterp ? interpSnap.position.z : unit->GetY();
+    const float sampleFacing = hasInterp ? interpSnap.facingDeg : unit->GetFacing();
+
+    float visualHeight = unit_selection_geom::ComputeUnitVisualHeight(
+        *unit, g->GetTexturedTerrain().IsValid(),
+        [&](float x, float z) { return g->GetTexturedTerrain().GetGroundHeight(x, z); });
+    if (hasInterp) {
+        const float groundH = g->GetTexturedTerrain().IsValid()
+            ? g->GetTexturedTerrain().GetGroundHeight(sampleX, sampleY)
+            : 0.0f;
+        visualHeight = groundH + interpSnap.flyHeight;
+    }
+    {
+        float pos[3] = {sampleX, visualHeight, sampleY};
+        auto vit = g->GetPresentation().unitToVisualIdx.find(handleId);
+        if (vit != g->GetPresentation().unitToVisualIdx.end()) {
+            g->GetScene().UpdateInstancePosition(vit->second, pos, sampleFacing);
+            // Script scale (SetUnitScale) and module visual scale rules multiply the seed scale.
+            float seedScale[3] = {1.0f, 1.0f, 1.0f};
+            auto seedIt = g->GetPresentation().unitVisualSeeds.find(handleId);
+            if (seedIt != g->GetPresentation().unitVisualSeeds.end()) {
+                seedScale[0] = seedIt->second.scale[0];
+                seedScale[1] = seedIt->second.scale[1];
+                seedScale[2] = seedIt->second.scale[2];
+            }
+            float modScaleMul = 1.0f;
+            uint32_t modTintRgba = 0xFFFFFFFFu;
+            if (!hasInterp) {
+                if (const auto* simMod = g->GetSimulation().GetSimulationModule()) {
+                    if (!simMod->OnResolveUnitVisualScaleAndTintForUnit(*unit, modScaleMul, modTintRgba)) {
+                        simMod->OnResolveUnitVisualScaleAndTint(unit->GetTypeId().value, modScaleMul, modTintRgba);
+                    }
+                }
+            }
+            const float s = hasInterp ? interpSnap.scale.x : (unit->GetScale() * modScaleMul);
+            const float scale[3] = {seedScale[0] * s, seedScale[1] * s, seedScale[2] * s};
+            g->GetScene().SetInstanceScale(vit->second, scale);
+
+            int vr = 255, vg = 255, vb = 255, va = 255;
+            unit->GetVertexColor(vr, vg, vb, va);
+            const float modR = static_cast<float>((modTintRgba >> 24) & 0xFFu) / 255.0f;
+            const float modG = static_cast<float>((modTintRgba >> 16) & 0xFFu) / 255.0f;
+            const float modB = static_cast<float>((modTintRgba >> 8) & 0xFFu) / 255.0f;
+            const float modA = static_cast<float>(modTintRgba & 0xFFu) / 255.0f;
+            g->GetScene().SetInstanceVertexColor(
+                vit->second,
+                hasInterp ? interpSnap.vertexColor.x : ((vr / 255.0f) * modR),
+                hasInterp ? interpSnap.vertexColor.y : ((vg / 255.0f) * modG),
+                hasInterp ? interpSnap.vertexColor.z : ((vb / 255.0f) * modB),
+                hasInterp ? interpSnap.vertexColor.w : ((va / 255.0f) * modA)
+            );
+        }
+    }
+}
+
+} // namespace
 
 void GameController::WireJassCallbacks() {
     if (!jassNatives_) return;
@@ -1243,8 +1800,15 @@ bool GameController::EnsureSimulationUnitVisual(CUnit* unit) {
         scale[0] = seedIt->second.scale[0]; scale[1] = seedIt->second.scale[1]; scale[2] = seedIt->second.scale[2];
         skinId = seedIt->second.skinId; hp = seedIt->second.hitpoints; flags = seedIt->second.flags;
     }
-    // Script unit scale multiplies the seed (per-frame sync keeps it live).
-    const float us = unit->GetScale();
+    // Script unit scale and module visual scale rules multiply the seed (per-frame sync keeps it live).
+    float modScaleMul = 1.0f;
+    uint32_t modTintRgba = 0xFFFFFFFFu;
+    if (const auto* simMod = simulation_.GetSimulationModule()) {
+        if (!simMod->OnResolveUnitVisualScaleAndTintForUnit(*unit, modScaleMul, modTintRgba)) {
+            simMod->OnResolveUnitVisualScaleAndTint(unit->GetTypeId().value, modScaleMul, modTintRgba);
+        }
+    }
+    const float us = unit->GetScale() * modScaleMul;
     scale[0] *= us;
     scale[1] *= us;
     scale[2] *= us;

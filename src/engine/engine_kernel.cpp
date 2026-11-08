@@ -12,7 +12,8 @@ bool EngineKernel::BootstrapStandardSubsystems(uint32_t workerThreads, float fix
     subsystems_.Register<ResourceEngineSubsystem>();
     subsystems_.Register<AudioEngineSubsystem>();
     subsystems_.Register<ScriptEngineSubsystem>();
-    subsystems_.Register<RenderEngineSubsystem>();
+    auto& renderSub = subsystems_.Register<RenderEngineSubsystem>();
+    subsystems_.Register<WorldPresentationSubsystem>(&stepper_, renderSub.GetRenderServer());
     subsystems_.Register<TelemetryEngineSubsystem>();
 
     initialized_ = subsystems_.InitializeAll();
@@ -26,7 +27,9 @@ bool EngineKernel::BindExternalServices(core::JobSystem* jobs,
                                         render::RenderGraph* renderGraph,
                                         core::InputActionMap* input,
                                         core::EngineProfiler* profiler,
-                                        float fixedStepSec) {
+                                        float fixedStepSec,
+                                        UnitPresentationSystem* presentation,
+                                        CSimulation* simulation) {
     Shutdown();
     stepper_.Configure(fixedStepSec, 3);
     stepper_.Reset();
@@ -35,6 +38,9 @@ bool EngineKernel::BindExternalServices(core::JobSystem* jobs,
     if (jobs) subsystems_.Register<JobEngineSubsystem>(jobs);
     if (resources) subsystems_.Register<ResourceEngineSubsystem>(resources);
     if (audio) subsystems_.Register<AudioEngineSubsystem>(audio);
+    if (presentation) {
+        subsystems_.Register<WorldPresentationSubsystem>(presentation, simulation, &stepper_, renderServer);
+    }
     if (renderServer && renderGraph) {
         subsystems_.Register<RenderEngineSubsystem>(renderServer, renderGraph);
     }
@@ -87,6 +93,9 @@ int EngineKernel::StepFrame(float dt, int screenW, int screenH) {
     }
 
     const float alpha = stepper_.GetInterpolationAlpha();
+    if (auto* pres = Presentation()) {
+        pres->SetInterpolationAlpha(alpha);
+    }
     {
         if (prof) prof->RecordZoneSample("EngineKernel::FrameUpdate", "Engine", frameCounter_ * 1000 + 20, 10, 1, 1);
         subsystems_.FrameUpdateAll(dt);
@@ -158,6 +167,11 @@ scripting::ScriptHostRouter* EngineKernel::Scripting() const {
 core::EngineProfiler* EngineKernel::Profiler() const {
     auto* sub = subsystems_.TryGet<TelemetryEngineSubsystem>();
     return sub ? sub->GetProfiler() : nullptr;
+}
+
+UnitPresentationSystem* EngineKernel::Presentation() const {
+    auto* sub = subsystems_.TryGet<WorldPresentationSubsystem>();
+    return sub ? sub->GetPresentation() : nullptr;
 }
 
 EngineKernelStats EngineKernel::GetStats() const {

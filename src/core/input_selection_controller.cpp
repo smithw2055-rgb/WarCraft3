@@ -1,4 +1,63 @@
-#include "core/game_controller_internal.h"
+#include "core/game_controller.h"
+#include "ecs/destructable.h"
+#include "ecs/orders/order.h"
+#include "ecs/unit_text_utils.h"
+#include "ecs/widget.h"
+#include "platform/platform.h"
+#include "render/picking.h"
+#include "render/unit_selection_geom.h"
+#include "third_party/sokol/sokol_app.h"
+
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <limits>
+#include <vector>
+
+namespace {
+
+bool RectanglesOverlap(const ScreenRect& a, const ScreenRect& b) {
+    if (!a.IsValid() || !b.IsValid()) return false;
+    return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
+}
+
+bool ComputeUnitSelectionScreenBounds(const CUnit& unit, const Mat4& view, const Mat4& proj,
+                                      int screenW, int screenH, ScreenRect& outRect,
+                                      GameController* g) {
+    float footX, footY, headX, headY, radiusPixels;
+    auto terrainH = [&](float x, float z) {
+        return g->GetTexturedTerrain().IsValid() ? g->GetTexturedTerrain().GetGroundHeight(x, z) : 0.0f;
+    };
+    if (!unit_selection_geom::ComputeUnitSelectionScreenShape(unit, view, proj, screenW, screenH,
+                                                              g->GetTexturedTerrain().IsValid(), terrainH,
+                                                              footX, footY, headX, headY, radiusPixels)) {
+        return false;
+    }
+    float minX = std::min(footX, headX) - radiusPixels;
+    float maxX = std::max(footX, headX) + radiusPixels;
+    float minY = std::min(footY, headY) - radiusPixels;
+    float maxY = std::max(footY, headY) + radiusPixels;
+    outRect = {minX, minY, maxX - minX, maxY - minY};
+    return outRect.IsValid();
+}
+
+std::vector<CUnit*> CollectUnitsInScreenRect(const ScreenRect& rect, const Mat4& view, const Mat4& proj,
+                                             int screenW, int screenH, CSimulation& sim, GameController* g) {
+    std::vector<CUnit*> result, buildingFallback;
+    if (!rect.IsValid()) return result;
+    for (auto* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->IsHidden()) continue;
+        ScreenRect unitRect;
+        if (!ComputeUnitSelectionScreenBounds(*unit, view, proj, screenW, screenH, unitRect, g)) continue;
+        if (RectanglesOverlap(rect, unitRect)) {
+            if (unit->IsBuilding()) buildingFallback.push_back(unit);
+            else result.push_back(unit);
+        }
+    }
+    return result.empty() ? buildingFallback : result;
+}
+
+} // namespace
 
 void GameController::OnEvent(const sapp_event* ev) {
     Platform::HandleEvent(ev);

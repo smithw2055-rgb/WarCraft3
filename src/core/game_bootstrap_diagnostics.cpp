@@ -1,4 +1,377 @@
-#include "core/game_controller_internal.h"
+#include "core/game_controller.h"
+#include "core/map_path_resolver.h"
+#include "core/path_utils.h"
+#include "debug/move_debug.h"
+#include "ecs/ability_factory.h"
+#include "ecs/behaviors/behavior.h"
+#include "ecs/destructable.h"
+#include "ecs/item.h"
+#include "ecs/orders/order.h"
+#include "ecs/unit_text_utils.h"
+#include "ecs/widget.h"
+#include "map/w3i.h"
+#include "third_party/sokol/sokol_app.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <functional>
+#include <iostream>
+#include <limits>
+#include <sstream>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+namespace {
+
+std::string LowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    return value;
+}
+
+void AddJassErrorStats(const std::vector<std::string>& errors,
+                       std::unordered_map<std::string, int>& unknownFunctions,
+                       std::unordered_map<std::string, int>& parserErrorCounts,
+                       int& parserErrors,
+                       int& lexerErrors,
+                       int& otherErrors) {
+    for (const std::string& error : errors) {
+        const std::string unknownPrefix = "Unknown function: ";
+        const size_t unknownPos = error.find(unknownPrefix);
+        if (unknownPos != std::string::npos) {
+            unknownFunctions[error.substr(unknownPos + unknownPrefix.size())]++;
+        } else if (error.rfind("Parser:", 0) == 0) {
+            parserErrors++;
+            parserErrorCounts[error.substr(8)]++;
+        } else if (error.rfind("Lexer:", 0) == 0) {
+            lexerErrors++;
+        } else {
+            otherErrors++;
+        }
+    }
+}
+
+void PrintTopJassUnknowns(const std::unordered_map<std::string, int>& unknownFunctions) {
+    std::vector<std::pair<std::string, int>> sorted(unknownFunctions.begin(), unknownFunctions.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+    const size_t limit = std::min<size_t>(sorted.size(), 25);
+    for (size_t i = 0; i < limit; ++i) {
+        std::cout << "  unknown_native " << sorted[i].first
+                  << " count=" << sorted[i].second << std::endl;
+    }
+    if (sorted.size() > limit) {
+        std::cout << "  unknown_native_more=" << (sorted.size() - limit) << std::endl;
+    }
+}
+
+void PrintTopJassParserErrors(const std::unordered_map<std::string, int>& parserErrorCounts) {
+    std::vector<std::pair<std::string, int>> sorted(parserErrorCounts.begin(), parserErrorCounts.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+    const size_t limit = std::min<size_t>(sorted.size(), 20);
+    for (size_t i = 0; i < limit; ++i) {
+        std::cout << "  parser_error " << sorted[i].second
+                  << "x " << sorted[i].first << std::endl;
+    }
+    if (sorted.size() > limit) {
+        std::cout << "  parser_error_more=" << (sorted.size() - limit) << std::endl;
+    }
+}
+
+std::string JassDiagnosticCategory(const std::string& name) {
+    const std::string lower = LowerAscii(name);
+    if (lower.find("ability") != std::string::npos || lower.find("abil") != std::string::npos) {
+        return "ability";
+    }
+    if (lower.find("triggerregister") != std::string::npos || lower.find("event") != std::string::npos) {
+        return "trigger_event";
+    }
+    if (lower.find("camera") != std::string::npos || lower.find("cinematic") != std::string::npos) {
+        return "camera_cinematic";
+    }
+    if (lower.find("timer") != std::string::npos) {
+        return "timer";
+    }
+    if (lower.find("destruct") != std::string::npos) {
+        return "destructable";
+    }
+    if (lower.find("item") != std::string::npos) {
+        return "item";
+    }
+    if (lower.find("unit") != std::string::npos || lower.find("corpse") != std::string::npos) {
+        return "unit";
+    }
+    if (lower.find("sound") != std::string::npos || lower.find("music") != std::string::npos) {
+        return "sound";
+    }
+    if (lower.rfind("create", 0) == 0 || lower.find("create") != std::string::npos) {
+        return "create";
+    }
+    return "other";
+}
+
+void PrintTopJassStaticEntries(const char* prefix,
+                               const std::unordered_map<std::string, int>& entries,
+                               size_t limit) {
+    std::vector<std::pair<std::string, int>> sorted(entries.begin(), entries.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+    const size_t count = std::min(limit, sorted.size());
+    for (size_t i = 0; i < count; ++i) {
+        std::cout << "  " << prefix << " " << sorted[i].first
+                  << " count=" << sorted[i].second
+                  << " category=" << JassDiagnosticCategory(sorted[i].first) << std::endl;
+    }
+    if (sorted.size() > count) {
+        std::cout << "  " << prefix << "_more=" << (sorted.size() - count) << std::endl;
+    }
+}
+
+void PrintJassStaticDiagnosticsForVm(const char* phase, const JassVM& vm) {
+    std::unordered_set<std::string> registered;
+    registered.reserve(vm.GetRegisteredNatives().size());
+    for (const auto& entry : vm.GetRegisteredNatives()) {
+        registered.insert(entry.first);
+    }
+    std::unordered_set<std::string> functions = vm.GetFunctionNames();
+
+    std::unordered_map<std::string, int> unsupportedCalls;
+    int totalCalls = 0;
+    for (const auto& entry : vm.GetFunctionCallCounts()) {
+        totalCalls += entry.second;
+        if (registered.count(entry.first) == 0 && functions.count(entry.first) == 0) {
+            unsupportedCalls[entry.first] += entry.second;
+        }
+    }
+
+    std::unordered_map<std::string, int> unsupportedNativeDecls;
+    for (const auto& entry : vm.GetNativeDeclarations()) {
+        if (registered.count(entry.first) == 0) {
+            unsupportedNativeDecls[entry.first] += entry.second;
+        }
+    }
+
+    std::unordered_map<std::string, int> callCategories;
+    std::unordered_map<std::string, int> declCategories;
+    int totalUnsupportedCalls = 0;
+    int totalUnsupportedDecls = 0;
+    for (const auto& entry : unsupportedCalls) {
+        callCategories[JassDiagnosticCategory(entry.first)] += entry.second;
+        totalUnsupportedCalls += entry.second;
+    }
+    for (const auto& entry : unsupportedNativeDecls) {
+        declCategories[JassDiagnosticCategory(entry.first)] += entry.second;
+        totalUnsupportedDecls += entry.second;
+    }
+
+    std::cout << "jass_static phase=" << phase
+              << " declared_natives=" << vm.GetNativeDeclarations().size()
+              << " registered_natives=" << registered.size()
+              << " function_defs=" << functions.size()
+              << " function_call_names=" << vm.GetFunctionCallCounts().size()
+              << " function_calls=" << totalCalls << std::endl;
+    std::cout << "jass_static_unsupported phase=" << phase
+              << " call_unique=" << unsupportedCalls.size()
+              << " call_total=" << totalUnsupportedCalls
+              << " native_decl_unique=" << unsupportedNativeDecls.size()
+              << " native_decl_total=" << totalUnsupportedDecls << std::endl;
+
+    std::vector<std::string> categories = {
+        "ability", "trigger_event", "camera_cinematic", "unit", "item",
+        "destructable", "create", "timer", "sound", "other"
+    };
+    for (const auto& category : categories) {
+        const int callCount = callCategories.count(category) ? callCategories[category] : 0;
+        const int declCount = declCategories.count(category) ? declCategories[category] : 0;
+        if (callCount || declCount) {
+            std::cout << "  jass_static_category phase=" << phase
+                      << " category=" << category
+                      << " unsupported_calls=" << callCount
+                      << " unsupported_native_decls=" << declCount << std::endl;
+        }
+    }
+
+    PrintTopJassStaticEntries("unsupported_static_call", unsupportedCalls, 25);
+    PrintTopJassStaticEntries("unsupported_native_decl", unsupportedNativeDecls, 25);
+}
+
+// --- Init helpers (melee start, etc.) ---
+
+bool IsHumanTownHallType(War3ID typeId) {
+    // Any-race town hall tier (ref melee starting town halls per race).
+    return typeId == War3ID("htow") || typeId == War3ID("hkee") || typeId == War3ID("hcas")
+        || typeId == War3ID("ogre") || typeId == War3ID("ofrt") || typeId == War3ID("ostr")
+        || typeId == War3ID("unpl") || typeId == War3ID("unp1") || typeId == War3ID("unp2")
+        || typeId == War3ID("etol") || typeId == War3ID("etoa") || typeId == War3ID("etoe");
+}
+
+int CountPlayerUnitsOfType(CSimulation& sim, int playerIndex, War3ID typeId) {
+    int count = 0;
+    for (auto* unit : sim.GetUnits())
+        if (unit && unit->GetPlayerIndex() == playerIndex && unit->GetTypeId() == typeId) ++count;
+    return count;
+}
+
+int CountPlayerTownHalls(CSimulation& sim, int playerIndex) {
+    int count = 0;
+    for (auto* unit : sim.GetUnits())
+        if (unit && unit->GetPlayerIndex() == playerIndex && IsHumanTownHallType(unit->GetTypeId())) ++count;
+    return count;
+}
+
+bool IsCampaignMapPath(const std::string& mapPath) {
+    std::string path = LowerAscii(mapPath);
+    std::replace(path.begin(), path.end(), '/', '\\');
+    return path.find("\\maps\\campaign\\") != std::string::npos
+        || path.find("\\maps\\frozenthrone\\campaign\\") != std::string::npos
+        || path.find("warsmash_mpq_map_maps_campaign_") != std::string::npos
+        || path.find("warsmash_mpq_map_maps_frozenthrone_campaign_") != std::string::npos
+        || path.rfind("maps\\campaign\\", 0) == 0
+        || path.rfind("maps\\frozenthrone\\campaign\\", 0) == 0;
+}
+
+bool FindPlayerTownHallPosition(CSimulation& sim, int playerIndex, float& outX, float& outY) {
+    for (auto* unit : sim.GetUnits())
+        if (unit && unit->GetPlayerIndex() == playerIndex && IsHumanTownHallType(unit->GetTypeId())) {
+            outX = unit->GetX(); outY = unit->GetY(); return true;
+        }
+    return false;
+}
+
+CUnit* FindGameplaySmokeWorker(CSimulation& sim, int playerIndex) {
+    CUnit* fallback = nullptr;
+    for (auto* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->IsHidden() || unit->GetPlayerIndex() != playerIndex) continue;
+        if (unit->GetAbility(War3ID("Ahar"))) {
+            if (unit->GetTypeId() == War3ID("hpea")) return unit;
+            if (!fallback) fallback = unit;
+        }
+    }
+    return fallback;
+}
+
+CUnit* FindNearestGoldMine(CSimulation& sim, const CUnit* worker) {
+    if (!worker) return nullptr;
+    CUnit* best = nullptr;
+    double bestDistSq = std::numeric_limits<double>::max();
+    for (auto* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead()) continue;
+        if (!unit->GetAbility(War3ID("Agld"))) continue;
+        const double distSq = unit->DistanceSquared(worker->GetX(), worker->GetY());
+        if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            best = unit;
+        }
+    }
+    return best;
+}
+
+CUnit* FindPlayerDropoff(CSimulation& sim, int playerIndex) {
+    CUnit* fallback = nullptr;
+    for (auto* unit : sim.GetUnits()) {
+        if (!unit || unit->IsDead() || unit->GetPlayerIndex() != playerIndex) continue;
+        if (unit->GetAbility(War3ID("Aret"))) {
+            if (IsHumanTownHallType(unit->GetTypeId())) return unit;
+            if (!fallback) fallback = unit;
+        }
+    }
+    return fallback;
+}
+
+bool FindGameplaySmokeBuildSite(CSimulation& sim, const CUnit* anchor, War3ID buildingTypeId,
+                                float& outX, float& outY) {
+    if (!anchor) return false;
+
+    const float offsets[][2] = {
+        {384.0f, 0.0f}, {-384.0f, 0.0f}, {0.0f, 384.0f}, {0.0f, -384.0f},
+        {384.0f, 384.0f}, {-384.0f, 384.0f}, {384.0f, -384.0f}, {-384.0f, -384.0f},
+        {512.0f, 0.0f}, {0.0f, 512.0f}, {-512.0f, 0.0f}, {0.0f, -512.0f}
+    };
+
+    for (const auto& offset : offsets) {
+        float x = anchor->GetX() + offset[0];
+        float y = anchor->GetY() + offset[1];
+        const CUnitType* buildType =
+            sim.GetUnitData() ? sim.GetUnitData()->GetUnitType(buildingTypeId) : nullptr;
+        if (auto* mod = sim.GetSimulationModule()) {
+            mod->OnSnapBuildPosition(buildType, x, y);
+        }
+        if (!sim.GetSimulationModule() ||
+            !sim.GetSimulationModule()->IsBuildLocationObstructed(sim, x, y, anchor->GetPlayerIndex(), buildingTypeId.value)) {
+            outX = x;
+            outY = y;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FindPlayerStartLocationPosition(const JassNativesData* data, int playerIndex, float& outX, float& outY) {
+    if (!data) return false;
+    if (playerIndex < 0 || playerIndex >= (int)data->playerMapConfig.size()) return false;
+    const auto& pc = data->playerMapConfig[playerIndex];
+    const int si = pc.startLocationIndex;
+    if (si < 0 || si >= (int)data->startLocations.size()) return false;
+    const auto& start = data->startLocations[si];
+    if (!start.defined) return false;
+    outX = start.x; outY = start.y; return true;
+}
+
+bool FindInitialSpawnFocusPosition(CSimulation& sim, GameController* g, float& outX, float& outY) {
+    const int local = g ? g->GetConfig().localPlayerIndex : -1;
+    // Prefer the local (human) slot: campaign maps put it off slot 0
+    // (Human01: Player 1). Fall back to the old slot-0-first order.
+    if (local >= 0) {
+        if (FindPlayerTownHallPosition(sim, local, outX, outY)) return true;
+    }
+    auto* data = g->GetJassNatives() ? g->GetJassNatives()->GetData().get() : nullptr;
+    if (local >= 0 && FindPlayerStartLocationPosition(data, local, outX, outY)) return true;
+    if (FindPlayerTownHallPosition(sim, 0, outX, outY)) return true;
+    if (FindPlayerStartLocationPosition(data, 0, outX, outY)) return true;
+    if (!data) return false;
+    int playerLimit = data->configuredPlayerCount > 0
+        ? std::min(data->configuredPlayerCount, (int)data->playerMapConfig.size())
+        : (int)data->playerMapConfig.size();
+    for (int pi = 0; pi < playerLimit; ++pi) {
+        if (FindPlayerTownHallPosition(sim, pi, outX, outY)) return true;
+        if (FindPlayerStartLocationPosition(data, pi, outX, outY)) return true;
+    }
+    return false;
+}
+
+War3ID RaceTownHallId(int race) {
+    switch (race) {
+        case 2: return War3ID("ogre");
+        case 3: return War3ID("unpl");
+        case 4: return War3ID("etol");
+        default: return War3ID("htow");
+    }
+}
+
+War3ID RaceWorkerId(int race) {
+    switch (race) {
+        case 2: return War3ID("opeo");
+        case 3: return War3ID("uaco");
+        case 4: return War3ID("ewsp");
+        default: return War3ID("hpea");
+    }
+}
+
+} // namespace
 
 void GameController::OpenDataSources() {
     fs::path projectRoot = PROJECT_SOURCE_DIR;

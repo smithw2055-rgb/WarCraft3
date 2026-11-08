@@ -3950,7 +3950,7 @@ bool TestPhase12StageFF1EngineKernelPluggableGameModuleAndRetailDriveMap() {
     TEST_ASSERT(kStats.fixedTicksExecuted == 1);
     TEST_ASSERT(kStats.hasMountedGameModule);
     TEST_ASSERT(kStats.activeGameModuleName == "ExperimentalWarcraft3Module");
-    TEST_ASSERT(kStats.activeSubsystems == 7);
+    TEST_ASSERT(kStats.activeSubsystems == 8);
 
     kernel.Shutdown();
     return true;
@@ -9215,7 +9215,7 @@ bool TestPhase31StageRRR2RefactoredJassNativesMathTimerLocationRectParity() {
 
 bool TestPhase31StageSSS1War3GameModuleV31CustomScriptNatives() {
     auto war3Mod = std::make_shared<war3::War3GameModule>();
-    TEST_ASSERT(war3Mod->GetModuleVersion() == 31u);
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 31u);
 
     CSimulation sim;
     sim.SetSimulationModule(war3Mod);
@@ -9271,7 +9271,7 @@ bool TestPhase31StageSSS2DynamicPluginSOV31AndCloudRetailMapsEndToEndSuite() {
         {
             auto dynSimMod = loader.CreateSimulationModule(pluginKey);
             TEST_ASSERT(dynSimMod != nullptr);
-            TEST_ASSERT(dynSimMod->GetModuleVersion() == 31u);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 31u);
         }
         TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
     }
@@ -9288,7 +9288,207 @@ bool TestPhase31StageSSS2DynamicPluginSOV31AndCloudRetailMapsEndToEndSuite() {
         std::fclose(mf);
 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
-        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 31u);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 31u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+    return true;
+}
+
+// ============================================================================
+// Phase 32 (Track D): WorldPresentationSubsystem & GameController Decoupling
+// ============================================================================
+
+bool TestPhase32StageTTT1WorldPresentationSubsystemAndEngineKernelIntegration() {
+    engine::EngineKernel kernel;
+    TEST_ASSERT(kernel.BootstrapStandardSubsystems(2, 0.05f));
+    TEST_ASSERT(kernel.Presentation() != nullptr);
+
+    auto* presSub = kernel.Subsystems().TryGet<engine::WorldPresentationSubsystem>();
+    TEST_ASSERT(presSub != nullptr);
+    TEST_ASSERT(presSub->GetPhase() == engine::SubsystemPhase::Presentation);
+
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    presSub->BindSimulation(&sim);
+    TEST_ASSERT(presSub->GetBoundSimulation() == &sim);
+
+    auto* u = sim.AdoptUnit(std::make_unique<CUnit>(93201, nullptr, 0, War3ID("hfoo"), 100.0f, 200.0f, 0.0f));
+    TEST_ASSERT(u != nullptr);
+    sim.Update();
+
+    // Step 1 frame of 0.075s (1 fixed step of 0.05s + alpha = 0.5)
+    const int steps = kernel.StepFrame(0.075f, 1280, 720);
+    TEST_ASSERT(steps == 1);
+    TEST_ASSERT(presSub->GetFixedCapturesCount() >= 1u);
+    TEST_ASSERT(presSub->GetFrameUpdatesCount() >= 1u);
+    TEST_ASSERT(presSub->GetInterpolatedUnitsLastTick() == 1u);
+    TEST_ASSERT(presSub->GetFramesPresented() >= 1u);
+    TEST_ASSERT(presSub->GetBonePaletteResetsCount() >= 1u);
+    TEST_ASSERT(std::fabs(kernel.Presentation()->GetInterpolationAlpha() - 0.5f) < 1e-3f);
+
+    // Reactive removal on unit destroy via bound WorldPresentationSubsystem
+    kernel.Presentation()->unitToVisualIdx[93201] = 7;
+    sim.RemoveUnit(u);
+    sim.Update();
+    TEST_ASSERT(kernel.Presentation()->GetUnitVisualIndex(93201) == -1);
+
+    kernel.Shutdown();
+    return true;
+}
+
+bool TestPhase32StageTTT2GameControllerInternalHeaderEliminationAudit() {
+    // 1. Verify that src/core/game_controller_internal.h has been physically eliminated
+    FILE* legacyHeader = std::fopen("src/core/game_controller_internal.h", "rb");
+    TEST_ASSERT(legacyHeader == nullptr);
+
+    // 2. Verify the 4 core implementation files exist and do not include game_controller_internal.h
+    const char* kCoreFiles[] = {
+        "src/core/game_controller.cpp",
+        "src/core/world_presentation_bridge.cpp",
+        "src/core/game_bootstrap_diagnostics.cpp",
+        "src/core/input_selection_controller.cpp"
+    };
+    auto readFileText = [](const char* path) -> std::string {
+        FILE* f = std::fopen(path, "rb");
+        if (!f) return {};
+        std::fseek(f, 0, SEEK_END);
+        const long sz = std::ftell(f);
+        std::fseek(f, 0, SEEK_SET);
+        std::string text;
+        if (sz > 0) {
+            text.resize(static_cast<size_t>(sz));
+            std::fread(text.data(), 1, static_cast<size_t>(sz), f);
+        }
+        std::fclose(f);
+        return text;
+    };
+    for (const char* p : kCoreFiles) {
+        const std::string content = readFileText(p);
+        TEST_ASSERT(!content.empty());
+        TEST_ASSERT(content.find("game_controller_internal.h") == std::string::npos);
+    }
+
+    // 3. Verify genuine orthogonal include decoupling across the 4 translation units
+    const std::string inputSrc = readFileText("src/core/input_selection_controller.cpp");
+    TEST_ASSERT(inputSrc.find("stb_image_write.h") == std::string::npos);
+    TEST_ASSERT(inputSrc.find("mdx_event_splat.h") == std::string::npos);
+
+    const std::string bridgeSrc = readFileText("src/core/world_presentation_bridge.cpp");
+    TEST_ASSERT(bridgeSrc.find("stb_image_write.h") == std::string::npos);
+    TEST_ASSERT(bridgeSrc.find("sokol_app.h") == std::string::npos);
+    return true;
+}
+
+bool TestPhase32StageUUU1War3GameModuleV32UnitVisualScaleAndTintRules() {
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() == 32u);
+
+    CSimulation sim;
+    sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
+    sim.SetSimulationModule(war3Mod);
+    const uint64_t hashBefore = war3Mod->OnComputeModuleStateHash(sim);
+
+    war3Mod->RegisterUnitVisualTintRule(War3ID("hfoo"), 1.35f, 0xFF4080FFu);
+    TEST_ASSERT(war3Mod->HasUnitVisualTintRule(War3ID("hfoo")));
+
+    float scaleMul = 1.0f;
+    uint32_t tintRgba = 0u;
+    TEST_ASSERT(war3Mod->OnResolveUnitVisualScaleAndTint(War3ID("hfoo").value, scaleMul, tintRgba));
+    TEST_ASSERT(std::fabs(scaleMul - 1.35f) < 1e-4f);
+    TEST_ASSERT(tintRgba == 0xFF4080FFu);
+
+    const uint64_t hashAfter = war3Mod->OnComputeModuleStateHash(sim);
+    TEST_ASSERT(hashAfter != hashBefore);
+
+    // Verify snapshot capture & restore preserves customUnitVisualTintRules_ and state hash
+    std::vector<uint8_t> modSnap;
+    war3Mod->OnCaptureModuleSnapshot(sim, modSnap);
+    TEST_ASSERT(war3Mod->UnregisterUnitVisualTintRule(War3ID("hfoo")));
+    TEST_ASSERT(!war3Mod->HasUnitVisualTintRule(War3ID("hfoo")));
+    TEST_ASSERT(war3Mod->OnComputeModuleStateHash(sim) == hashBefore);
+
+    TEST_ASSERT(war3Mod->OnRestoreModuleSnapshot(sim, modSnap.data(), modSnap.size()));
+    TEST_ASSERT(war3Mod->HasUnitVisualTintRule(War3ID("hfoo")));
+    TEST_ASSERT(war3Mod->OnComputeModuleStateHash(sim) == hashAfter);
+
+    // Verify end-to-end integration with UnitPresentationSystem::CaptureSimulationTick
+    auto* u = sim.AdoptUnit(std::make_unique<CUnit>(93210, nullptr, 0, War3ID("hfoo"), 250.0f, 350.0f, 0.0f));
+    TEST_ASSERT(u != nullptr);
+    sim.Update();
+
+    UnitPresentationSystem presentation;
+    presentation.CaptureSimulationTick(sim);
+    render::RenderTransformSnapshot snap;
+    TEST_ASSERT(presentation.SampleInterpolatedUnit(93210, snap));
+    TEST_ASSERT(std::fabs(snap.scale.x - 1.35f) < 1e-4f);
+    TEST_ASSERT(std::fabs(snap.vertexColor.y - (0x40 / 255.0f)) < 1e-3f);
+
+    // Verify instance-level status buff visual rules ('Bblo' Bloodlust = 1.30x scale + red tint)
+    DataDrivenBuffSpec bbloSpec{};
+    bbloSpec.id = War3ID("Bblo");
+    bbloSpec.duration = 10.0f;
+    TEST_ASSERT(u->ApplyDataDrivenBuff(bbloSpec, sim));
+    float instScale = 1.0f;
+    uint32_t instTint = 0u;
+    TEST_ASSERT(war3Mod->OnResolveUnitVisualScaleAndTintForUnit(*u, instScale, instTint));
+    TEST_ASSERT(std::fabs(instScale - (1.35f * 1.30f)) < 1e-4f);
+
+    TEST_ASSERT(war3Mod->UnregisterUnitVisualTintRule(War3ID("hfoo")));
+    TEST_ASSERT(war3Mod->OnComputeModuleStateHash(sim) == hashBefore);
+    return true;
+}
+
+bool TestPhase32StageUUU2DynamicPluginSOV32AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    std::string soPath32 = "./libwar3_module_plugin.so";
+    const char* kCandidatePluginPaths32[] = {
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll",
+        "./build/tests/warsmash_tests.exe",
+        "./warsmash_tests.exe"
+    };
+    for (const char* candidate : kCandidatePluginPaths32) {
+        if (FILE* probe = std::fopen(candidate, "rb")) {
+            std::fclose(probe);
+            soPath32 = candidate;
+            break;
+        }
+    }
+    if (FILE* f = std::fopen(soPath32.c_str(), "rb")) {
+        std::fclose(f);
+        const std::string pluginKey = "War3Phase32PluginSO";
+        TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, soPath32));
+        {
+            auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+            TEST_ASSERT(dynSimMod != nullptr);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() == 32u);
+        }
+        TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(2)TerenasStand.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(12)WormWar.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 32u);
 
         MpqManager mpq;
         CSimulation mapSim;

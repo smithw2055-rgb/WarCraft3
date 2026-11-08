@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -14,6 +15,8 @@
 #include "ecs/csimulation.h"
 #include "ecs/item.h"
 #include "ecs/unit.h"
+#include "engine/engine_subsystem.h"
+#include "engine/fixed_timestep_stepper.h"
 #include "render/scene.h"
 #include "render/render_server.h"
 
@@ -239,3 +242,126 @@ private:
     uint64_t removedUnitNotificationsCount_ = 0;
     uint64_t removedItemNotificationsCount_ = 0;
 };
+
+// ============================================================================
+// Phase 32 (Track D): WorldPresentationSubsystem (SubsystemPhase::Presentation = 500)
+// Integrates UnitPresentationSystem directly into EngineKernel's deterministic
+// 9-phase lifecycle bus, managing unit interpolation snapshots, 3D bone palette
+// frame resets, and world presentation frame statistics.
+// ============================================================================
+namespace engine {
+
+struct WorldPresentationStats {
+    size_t interpolatedUnitsLastTick = 0;
+    uint64_t framesPresented = 0;
+    uint64_t fixedCapturesCount = 0;
+    uint64_t frameUpdatesCount = 0;
+    uint64_t bonePaletteResetsCount = 0;
+};
+
+class WorldPresentationSubsystem final : public ISubsystem {
+public:
+    explicit WorldPresentationSubsystem(FixedTimestepStepper* stepper = nullptr,
+                                        render::RenderServer* renderServer = nullptr)
+        : ownedPresentation_(std::make_unique<UnitPresentationSystem>())
+        , presentation_(ownedPresentation_.get())
+        , stepper_(stepper)
+        , renderServer_(renderServer) {}
+
+    explicit WorldPresentationSubsystem(UnitPresentationSystem* externalPresentation,
+                                        CSimulation* boundSim = nullptr,
+                                        FixedTimestepStepper* stepper = nullptr,
+                                        render::RenderServer* renderServer = nullptr)
+        : presentation_(externalPresentation)
+        , sim_(boundSim)
+        , stepper_(stepper)
+        , renderServer_(renderServer) {}
+
+    const char* GetName() const override { return "WorldPresentationSubsystem"; }
+    SubsystemPhase GetPhase() const override { return SubsystemPhase::Presentation; }
+
+    bool OnInit() override {
+        if (presentation_ && sim_) {
+            presentation_->BindSimulationEvents(*sim_);
+        }
+        bonePaletteAtlas_.ResetFrame();
+        return presentation_ != nullptr;
+    }
+
+    void OnFixedUpdate(float /*fixedDt*/) override {
+        if (presentation_ && sim_) {
+            presentation_->CaptureSimulationTick(*sim_);
+            interpolatedUnitsLastTick_ = presentation_->InterpolationBuffer().TrackedEntityCount();
+            ++fixedCapturesCount_;
+        }
+    }
+
+    void OnFrameUpdate(float /*dt*/) override {
+        if (presentation_ && stepper_) {
+            presentation_->SetInterpolationAlpha(stepper_->GetInterpolationAlpha());
+        }
+        bonePaletteAtlas_.ResetFrame();
+        if (renderServer_) {
+            renderServer_->GetBoneAtlas().ResetFrame();
+        }
+        ++bonePaletteResetsCount_;
+        ++frameUpdatesCount_;
+        ++framesPresented_;
+    }
+
+    void OnShutdown() override {
+        if (presentation_) {
+            presentation_->UnbindSimulationEvents();
+            if (ownedPresentation_) {
+                presentation_->ClearAll();
+            }
+        }
+        interpolatedUnitsLastTick_ = 0;
+    }
+
+    void BindSimulation(CSimulation* sim) {
+        sim_ = sim;
+        if (presentation_ && sim_) {
+            presentation_->BindSimulationEvents(*sim_);
+        }
+    }
+
+    void BindStepper(FixedTimestepStepper* stepper) { stepper_ = stepper; }
+    void BindRenderServer(render::RenderServer* renderServer) { renderServer_ = renderServer; }
+
+    UnitPresentationSystem* GetPresentation() const { return presentation_; }
+    CSimulation* GetBoundSimulation() const { return sim_; }
+    render::BonePaletteAtlas& GetBonePaletteAtlas() { return bonePaletteAtlas_; }
+    const render::BonePaletteAtlas& GetBonePaletteAtlas() const { return bonePaletteAtlas_; }
+
+    uint64_t GetFixedCapturesCount() const { return fixedCapturesCount_; }
+    uint64_t GetFrameUpdatesCount() const { return frameUpdatesCount_; }
+    size_t GetInterpolatedUnitsLastTick() const { return interpolatedUnitsLastTick_; }
+    uint64_t GetFramesPresented() const { return framesPresented_; }
+    uint64_t GetBonePaletteResetsCount() const { return bonePaletteResetsCount_; }
+
+    WorldPresentationStats GetStats() const {
+        return WorldPresentationStats{
+            interpolatedUnitsLastTick_,
+            framesPresented_,
+            fixedCapturesCount_,
+            frameUpdatesCount_,
+            bonePaletteResetsCount_
+        };
+    }
+
+private:
+    std::unique_ptr<UnitPresentationSystem> ownedPresentation_;
+    UnitPresentationSystem* presentation_ = nullptr;
+    CSimulation* sim_ = nullptr;
+    FixedTimestepStepper* stepper_ = nullptr;
+    render::RenderServer* renderServer_ = nullptr;
+    render::BonePaletteAtlas bonePaletteAtlas_;
+    size_t interpolatedUnitsLastTick_ = 0;
+    uint64_t framesPresented_ = 0;
+    uint64_t fixedCapturesCount_ = 0;
+    uint64_t frameUpdatesCount_ = 0;
+    uint64_t bonePaletteResetsCount_ = 0;
+};
+
+} // namespace engine

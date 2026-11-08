@@ -22,6 +22,7 @@
 #include "core/engine_profiler.h"
 #include "core/input_action_map.h"
 #include "core/job_system.h"
+#include "core/unit_presentation_system.h"
 #include "engine/engine_subsystem.h"
 #include "engine/fixed_timestep_stepper.h"
 #include "engine/game_module.h"
@@ -256,7 +257,9 @@ public:
                               render::RenderGraph* renderGraph,
                               core::InputActionMap* input,
                               core::EngineProfiler* profiler,
-                              float fixedStepSec = 0.05f);
+                              float fixedStepSec = 0.05f,
+                              UnitPresentationSystem* presentation = nullptr,
+                              CSimulation* simulation = nullptr);
 
     // Mount a pluggable game module (e.g., War3GameModule or a custom game/test module)
     bool MountGameModule(std::unique_ptr<IGameModule> module);
@@ -282,6 +285,7 @@ public:
     core::InputActionMap* Input() const;
     scripting::ScriptHostRouter* Scripting() const;
     core::EngineProfiler* Profiler() const;
+    UnitPresentationSystem* Presentation() const;
 
     EngineKernelStats GetStats() const;
 

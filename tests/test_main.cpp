@@ -905,6 +905,10 @@ bool TestPhase31StageRRR1JassContextBinderTypedUnpackingAndNullShortCircuit();
 bool TestPhase31StageRRR2RefactoredJassNativesMathTimerLocationRectParity();
 bool TestPhase31StageSSS1War3GameModuleV31CustomScriptNatives();
 bool TestPhase31StageSSS2DynamicPluginSOV31AndCloudRetailMapsEndToEndSuite();
+bool TestPhase32StageTTT1WorldPresentationSubsystemAndEngineKernelIntegration();
+bool TestPhase32StageTTT2GameControllerInternalHeaderEliminationAudit();
+bool TestPhase32StageUUU1War3GameModuleV32UnitVisualScaleAndTintRules();
+bool TestPhase32StageUUU2DynamicPluginSOV32AndCloudRetailMapsEndToEndSuite();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1805,6 +1809,10 @@ int main(int argc, char** argv) {
         {"Phase31 Stage RRR2 Refactored JASS natives math timer location rect parity", TestPhase31StageRRR2RefactoredJassNativesMathTimerLocationRectParity},
         {"Phase31 Stage SSS1 War3GameModule v31 custom script natives", TestPhase31StageSSS1War3GameModuleV31CustomScriptNatives},
         {"Phase31 Stage SSS2 Dynamic plugin SO v31 and cloud retail maps end-to-end suite", TestPhase31StageSSS2DynamicPluginSOV31AndCloudRetailMapsEndToEndSuite},
+        {"Phase32 Stage TTT1 WorldPresentationSubsystem and EngineKernel integration", TestPhase32StageTTT1WorldPresentationSubsystemAndEngineKernelIntegration},
+        {"Phase32 Stage TTT2 game_controller_internal.h elimination audit", TestPhase32StageTTT2GameControllerInternalHeaderEliminationAudit},
+        {"Phase32 Stage UUU1 War3GameModule v32 unit visual scale and tint rules", TestPhase32StageUUU1War3GameModuleV32UnitVisualScaleAndTintRules},
+        {"Phase32 Stage UUU2 Dynamic plugin SO v32 and cloud retail maps end-to-end suite", TestPhase32StageUUU2DynamicPluginSOV32AndCloudRetailMapsEndToEndSuite},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

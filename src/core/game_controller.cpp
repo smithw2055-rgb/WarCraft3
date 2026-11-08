@@ -1,4 +1,450 @@
-#include "core/game_controller_internal.h"
+#include "core/game_controller.h"
+#include "asset/stb_image_write.h"
+#include "core/map_path_resolver.h"
+#include "debug/move_debug.h"
+#include "map/w3i.h"
+#include "map/wts.h"
+#include "platform/platform.h"
+#include "render/mdx_event_splat.h"
+#include "render/mdx_sequence_select.h"
+#include "render/renderer.h"
+#include "resource/slk.h"
+#include "third_party/sokol/sokol_app.h"
+#include "third_party/sokol/sokol_gfx.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+#ifndef GL_RGBA
+#define GL_RGBA 0x1908
+#endif
+#ifndef GL_UNSIGNED_BYTE
+#define GL_UNSIGNED_BYTE 0x1401
+#endif
+#ifndef GL_PACK_ALIGNMENT
+#define GL_PACK_ALIGNMENT 0x0D05
+#endif
+#ifndef APIENTRY
+#ifdef _WIN32
+#define APIENTRY __stdcall
+#else
+#define APIENTRY
+#endif
+#endif
+
+#ifdef _WIN32
+extern "C" __declspec(dllimport) void APIENTRY glReadPixels(int x, int y, int width, int height, unsigned int format, unsigned int type, void* data);
+extern "C" __declspec(dllimport) void APIENTRY glPixelStorei(unsigned int pname, int param);
+#else
+extern "C" void glReadPixels(int x, int y, int width, int height, unsigned int format, unsigned int type, void* data);
+extern "C" void glPixelStorei(unsigned int pname, int param);
+#endif
+
+namespace {
+
+const char* DEFAULT_MAP = "Maps/FrozenThrone/(4)Avalanche.w3x";
+
+std::string LowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    return value;
+}
+
+std::string TrimUiOnlyMapString(std::string value) {
+    auto isSpace = [](unsigned char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+    };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), [&](unsigned char c) {
+        return !isSpace(c);
+    }));
+    value.erase(std::find_if(value.rbegin(), value.rend(), [&](unsigned char c) {
+        return !isSpace(c);
+    }).base(), value.end());
+    return value;
+}
+
+int UiOnlyPlayerSlotsFromFileName(const std::string& fileName) {
+    if (fileName.size() <= 3 || fileName[0] != '(') return 0;
+    const size_t close = fileName.find(')');
+    if (close == std::string::npos || close <= 1) return 0;
+    return std::max(0, std::atoi(fileName.substr(1, close - 1).c_str()));
+}
+
+const char* UiOnlyTilesetName(char tileset) {
+    switch (tileset) {
+    case 'A': return "Ashenvale";
+    case 'B': return "Barrens";
+    case 'C': return "Felwood";
+    case 'D': return "Dungeon";
+    case 'F': return "Lordaeron Fall";
+    case 'G': return "Underground";
+    case 'I': return "Icecrown";
+    case 'J': return "Dalaran Ruins";
+    case 'K': return "Black Citadel";
+    case 'L': return "Lordaeron Summer";
+    case 'N': return "Northrend";
+    case 'O': return "Outland";
+    case 'Q': return "Village Fall";
+    case 'V': return "Village";
+    case 'W': return "Lordaeron Winter";
+    case 'X': return "Dalaran";
+    case 'Y': return "Cityscape";
+    case 'Z': return "Sunken Ruins";
+    default: return "Unknown";
+    }
+}
+
+std::string UiOnlyMapSizeLabel(int width, int height) {
+    if (width <= 0 || height <= 0) return {};
+    return std::to_string(width) + " x " + std::to_string(height);
+}
+
+std::string UiOnlySuggestedPlayersLabel(const std::string& value) {
+    std::string cleaned = TrimUiOnlyMapString(value);
+    if (cleaned.empty()) return {};
+    const std::string lower = LowerAscii(cleaned);
+    if (lower.rfind("suggested", 0) == 0 || lower.rfind("players", 0) == 0) {
+        return cleaned;
+    }
+    return "Suggested Players: " + cleaned;
+}
+
+bool ReadUiOnlyMapArchiveFile(const fs::path& mapPath, const char* fileName, std::vector<uint8_t>& out) {
+    return fileName && MpqManager::ReadSingleArchiveFile(mapPath.string(), fileName, out);
+}
+
+std::string ResolveUiOnlyTrigString(const WtsTable* wts, const std::string& value) {
+    if (!wts || value.empty()) return TrimUiOnlyMapString(value);
+    return TrimUiOnlyMapString(wts->Resolve(value));
+}
+
+bool IsUiOnlyTrigStringRef(const std::string& value) {
+    if (value.size() <= 8) return false;
+    std::string prefix = value.substr(0, 8);
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    if (prefix != "trigstr_") return false;
+    return std::all_of(value.begin() + 8, value.end(), [](unsigned char c) {
+        return std::isdigit(c) != 0;
+    });
+}
+
+std::string CleanUiOnlyResolvedMapString(const std::string& value) {
+    std::string cleaned = TrimUiOnlyMapString(value);
+    return IsUiOnlyTrigStringRef(cleaned) ? std::string() : cleaned;
+}
+
+void PopulateUiOnlyGlueMapInfo(const fs::path& mapPath, War3UI::GlueMapListItem& item) {
+    W3iInfo info;
+    if (!W3ILoadFromMpq(mapPath.string(), info)) {
+        return;
+    }
+
+    WtsTable wts;
+    WtsTable* wtsPtr = nullptr;
+    std::vector<uint8_t> wtsBytes;
+    if (ReadUiOnlyMapArchiveFile(mapPath, "war3map.wts", wtsBytes) && wts.Load(wtsBytes.data(), wtsBytes.size())) {
+        wtsPtr = &wts;
+    }
+
+    item.displayName = CleanUiOnlyResolvedMapString(ResolveUiOnlyTrigString(wtsPtr, info.name));
+    item.description = CleanUiOnlyResolvedMapString(ResolveUiOnlyTrigString(wtsPtr, info.description));
+    item.author = CleanUiOnlyResolvedMapString(ResolveUiOnlyTrigString(wtsPtr, info.author));
+    item.recommendedPlayers = UiOnlySuggestedPlayersLabel(
+        CleanUiOnlyResolvedMapString(ResolveUiOnlyTrigString(wtsPtr, info.recommendedPlayers)));
+    item.mapSize = UiOnlyMapSizeLabel(info.playableWidth, info.playableHeight);
+    item.tileset = UiOnlyTilesetName(info.tileset);
+    item.playerSlots = info.playableWidth > 0 ? std::max(item.playerSlots, UiOnlyPlayerSlotsFromFileName(item.fileName))
+                                               : UiOnlyPlayerSlotsFromFileName(item.fileName);
+}
+
+std::vector<War3UI::GlueMapListItem> DiscoverUiOnlyGlueMaps(const fs::path& projectRoot) {
+    std::vector<War3UI::GlueMapListItem> preferred;
+    std::vector<War3UI::GlueMapListItem> fallback;
+    const fs::path mapsRoot = projectRoot / "resources" / "Maps";
+    if (!fs::exists(mapsRoot)) {
+        return {};
+    }
+
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(mapsRoot, fs::directory_options::skip_permission_denied, ec), end;
+         !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        const fs::path path = it->path();
+        const std::string ext = LowerAscii(path.extension().string());
+        if (ext != ".w3x" && ext != ".w3m") continue;
+
+        fs::path relative = fs::relative(path, mapsRoot, ec);
+        if (ec) {
+            ec.clear();
+            relative = path.filename();
+        }
+        War3UI::GlueMapListItem item;
+        item.path = (fs::path("Maps") / relative).generic_string();
+        item.fileName = path.filename().string();
+        item.playerSlots = UiOnlyPlayerSlotsFromFileName(item.fileName);
+        PopulateUiOnlyGlueMapInfo(path, item);
+        fallback.push_back(item);
+
+        const std::string relLower = LowerAscii(relative.generic_string());
+        if (relLower.rfind("frozenthrone/", 0) == 0 && relLower.find("/scenario/") == std::string::npos) {
+            preferred.push_back(item);
+        }
+    }
+
+    auto byDisplayName = [](const War3UI::GlueMapListItem& a, const War3UI::GlueMapListItem& b) {
+        return LowerAscii(a.fileName) < LowerAscii(b.fileName);
+    };
+    std::sort(preferred.begin(), preferred.end(), byDisplayName);
+    std::sort(fallback.begin(), fallback.end(), byDisplayName);
+    return preferred.empty() ? fallback : preferred;
+}
+
+std::string StripUiOnlyCampaignToken(std::string value) {
+    value = TrimUiOnlyMapString(value);
+    if (value.size() >= 2) {
+        const char first = value.front();
+        const char last = value.back();
+        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+            value = value.substr(1, value.size() - 2);
+        }
+    }
+    return TrimUiOnlyMapString(value);
+}
+
+std::vector<std::string> SplitUiOnlyCampaignCsv(const std::string& value) {
+    std::vector<std::string> fields;
+    std::string field;
+    bool quoted = false;
+    char quoteChar = 0;
+    for (char c : value) {
+        if ((c == '"' || c == '\'') && (!quoted || c == quoteChar)) {
+            quoted = !quoted;
+            quoteChar = quoted ? c : 0;
+            field.push_back(c);
+            continue;
+        }
+        if (c == ',' && !quoted) {
+            fields.push_back(StripUiOnlyCampaignToken(field));
+            field.clear();
+            continue;
+        }
+        field.push_back(c);
+    }
+    fields.push_back(StripUiOnlyCampaignToken(field));
+    return fields;
+}
+
+std::string StripUiOnlySkinValue(std::string value) {
+    const size_t comment = value.find("//");
+    if (comment != std::string::npos) {
+        value.resize(comment);
+    }
+    return StripUiOnlyCampaignToken(value);
+}
+
+std::string ResolveUiOnlySkinField(const MpqManager& mpq,
+                                   const std::string& fieldName,
+                                   int gameVersion) {
+    std::vector<uint8_t> bytes;
+    if (!mpq.ReadFile("UI\\war3skins.txt", bytes)) {
+        return {};
+    }
+
+    const std::string versionedField = fieldName + "_V" + std::to_string(std::max(0, gameVersion));
+    const std::string betaField = versionedField + "Beta";
+    std::string betaValue;
+    std::string baseValue;
+
+    std::istringstream stream(std::string(bytes.begin(), bytes.end()));
+    std::string line;
+    while (std::getline(stream, line)) {
+        line = TrimUiOnlyMapString(line);
+        if (line.empty() || line.rfind("//", 0) == 0 || line.front() == '[') {
+            continue;
+        }
+
+        const size_t equals = line.find('=');
+        if (equals == std::string::npos) {
+            continue;
+        }
+
+        const std::string key = TrimUiOnlyMapString(line.substr(0, equals));
+        const std::string value = StripUiOnlySkinValue(line.substr(equals + 1));
+        if (key == versionedField) {
+            return value;
+        }
+        if (key == betaField && betaValue.empty()) {
+            betaValue = value;
+        } else if (key == fieldName && baseValue.empty()) {
+            baseValue = value;
+        }
+    }
+
+    return !betaValue.empty() ? betaValue : baseValue;
+}
+
+void AddUiOnlyCandidatePath(std::vector<std::string>& paths, const std::string& path) {
+    if (path.empty()) {
+        return;
+    }
+    if (std::find(paths.begin(), paths.end(), path) == paths.end()) {
+        paths.push_back(path);
+    }
+}
+
+std::string UiOnlyMdxPathFromModelField(std::string path) {
+    path = StripUiOnlySkinValue(path);
+    const std::string lower = LowerAscii(path);
+    if (lower.size() >= 4 && lower.substr(lower.size() - 4) == ".mdl") {
+        path.resize(path.size() - 4);
+        path += ".mdx";
+    }
+    return path;
+}
+
+Vec3 UiOnlyMdxPointToYUp(const float value[3]) {
+    return Vec3(value[0], value[2], -value[1]);
+}
+
+int UiOnlySelectStandSequenceIndex(const MdxModel& model) {
+    int sequenceIndex = MdxSelectSequenceIndexByPrimaryAndTags(model, "stand", {});
+    if (sequenceIndex >= 0) {
+        return sequenceIndex;
+    }
+    for (int i = 0; i < (int)model.sequences.size(); ++i) {
+        const MdxSequence& sequence = model.sequences[(size_t)i];
+        if (sequence.endFrame > sequence.startFrame) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+std::vector<War3UI::GlueCampaignListItem> LoadUiOnlyGlueCampaigns(const MpqManager& mpq,
+                                                                  int gameVersion) {
+    std::vector<uint8_t> bytes;
+    std::string loadedPath;
+    std::vector<std::string> candidatePaths;
+    const std::string skinCampaignFile = ResolveUiOnlySkinField(mpq, "CampaignFile", gameVersion);
+    AddUiOnlyCandidatePath(candidatePaths, skinCampaignFile);
+    if (gameVersion >= 1) {
+        AddUiOnlyCandidatePath(candidatePaths, "UI\\CampaignStrings_exp.txt");
+    }
+    AddUiOnlyCandidatePath(candidatePaths, "UI\\CampaignStrings.txt");
+    AddUiOnlyCandidatePath(candidatePaths, "UI\\CampaignInfoClassic.txt");
+    AddUiOnlyCandidatePath(candidatePaths, "UI\\CampaignInfo.txt");
+
+    if (!skinCampaignFile.empty()) {
+        std::cout << "UI-only mode: skin CampaignFile resolved to " << skinCampaignFile
+                  << " for gameVersion=" << gameVersion << std::endl;
+    }
+
+    for (const std::string& path : candidatePaths) {
+        if (mpq.ReadFile(path, bytes)) {
+            loadedPath = path;
+            break;
+        }
+    }
+    if (bytes.empty()) {
+        return {};
+    }
+
+    TxtTable table;
+    if (!table.Load(bytes.data(), bytes.size())) {
+        return {};
+    }
+
+    std::vector<War3UI::GlueCampaignListItem> campaigns;
+    const std::vector<std::string> ids = SplitUiOnlyCampaignCsv(table.GetString("Index", "CampaignList"));
+    for (const std::string& id : ids) {
+        if (id.empty() || !table.HasSection(id)) continue;
+
+        War3UI::GlueCampaignListItem campaign;
+        campaign.id = id;
+        campaign.header = StripUiOnlyCampaignToken(table.GetString(id, "Header"));
+        campaign.name = StripUiOnlyCampaignToken(table.GetString(id, "Name"));
+
+        for (int missionIndex = 0;; ++missionIndex) {
+            const std::string raw = table.GetString(id, "Mission" + std::to_string(missionIndex));
+            std::vector<std::string> fields = SplitUiOnlyCampaignCsv(raw);
+            if (fields.empty() || fields[0].empty()) break;
+
+            War3UI::GlueCampaignMission mission;
+            mission.header = fields.size() > 0 ? fields[0] : "";
+            mission.name = fields.size() > 1 ? fields[1] : "";
+            mission.mapPath = fields.size() > 2 ? fields[2] : "";
+            campaign.missions.push_back(mission);
+        }
+
+        if (!campaign.header.empty() || !campaign.name.empty() || !campaign.missions.empty()) {
+            campaigns.push_back(campaign);
+        }
+    }
+
+    if (!loadedPath.empty()) {
+        std::cout << "UI-only mode: loaded " << campaigns.size()
+                  << " campaign entries from " << loadedPath << std::endl;
+    }
+    return campaigns;
+}
+
+ScreenRect FallbackMinimapRect(int screenW, int screenH) {
+    if (screenW <= 0 || screenH <= 0) return {};
+    const float w = std::clamp((float)screenW * 0.105f, 190.0f, 360.0f);
+    const float h = std::clamp((float)screenH * 0.38f, 118.0f, 220.0f);
+    return ScreenRect{20.0f, (float)screenH - h - 24.0f, w, h};
+}
+
+void AppendCommaSeparatedArgs(std::vector<std::string>& out, const char* value) {
+    if (!value) return;
+
+    std::stringstream ss(value);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        item.erase(item.begin(), std::find_if(item.begin(), item.end(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }));
+        item.erase(std::find_if(item.rbegin(), item.rend(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }).base(), item.end());
+        if (!item.empty()) {
+            out.push_back(item);
+        }
+    }
+}
+
+bool ParseDebugUiResources(const char* value, int& gold, int& lumber, int& foodUsed, int& foodCap, std::string& timeText) {
+    std::vector<std::string> parts;
+    AppendCommaSeparatedArgs(parts, value);
+    if (parts.size() < 4) {
+        return false;
+    }
+
+    gold = std::atoi(parts[0].c_str());
+    lumber = std::atoi(parts[1].c_str());
+    foodUsed = std::atoi(parts[2].c_str());
+    foodCap = std::atoi(parts[3].c_str());
+    if (parts.size() >= 5) {
+        timeText = parts[4];
+    }
+    return true;
+}
+
+} // namespace
 
 GameController::GameController() {
     inputActionMap_.RegisterStandardWarcraftDefaults();
@@ -10,7 +456,9 @@ GameController::GameController() {
         &scene_.GetRenderGraph(),
         &inputActionMap_,
         &profiler_,
-        CSimulation::SIM_STEP_TIME);
+        CSimulation::SIM_STEP_TIME,
+        &presentation_,
+        &simulation_);
 }
 GameController::~GameController() = default;
 
@@ -594,13 +1042,19 @@ void GameController::StepSimulation(float dt) {
             jassNatives_->UpdateAI();
             jassNatives_->PumpQueuedThreads(1024);
         }
+        if (auto* presSub = engineKernel_.Subsystems().TryGet<engine::WorldPresentationSubsystem>()) {
+            presSub->OnFixedUpdate(simStep);
+        } else {
+            presentation_.CaptureSimulationTick(simulation_);
+        }
     });
     const bool ranSimulationStep = (subSteps > 0);
 
-    if (ranSimulationStep) {
-        presentation_.CaptureSimulationTick(simulation_);
+    if (auto* presSub = engineKernel_.Subsystems().TryGet<engine::WorldPresentationSubsystem>()) {
+        presSub->OnFrameUpdate(dt);
+    } else {
+        presentation_.SetInterpolationAlpha(engineKernel_.Stepper().GetInterpolationAlpha());
     }
-    presentation_.SetInterpolationAlpha(engineKernel_.Stepper().GetInterpolationAlpha());
 
     if (ranSimulationStep) {
         if (!debugHudGameMode_ && !diagnoseMapOnly_ && !debugGameplaySmoke_) {

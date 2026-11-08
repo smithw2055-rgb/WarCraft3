@@ -3269,6 +3269,17 @@ void War3GameModule::OnCaptureModuleSnapshot(const CSimulation& /*sim*/,
     for (uint32_t raw : spellKeys) {
         AppendModulePod(outBytes, customSpellArchetypeRules_.at(raw));
     }
+
+    const uint32_t visualRuleCount = static_cast<uint32_t>(customUnitVisualTintRules_.size());
+    AppendModulePod(outBytes, visualRuleCount);
+    std::vector<uint32_t> visualKeys;
+    visualKeys.reserve(customUnitVisualTintRules_.size());
+    for (const auto& [raw, _] : customUnitVisualTintRules_) visualKeys.push_back(raw);
+    std::sort(visualKeys.begin(), visualKeys.end());
+    for (uint32_t raw : visualKeys) {
+        AppendModulePod(outBytes, raw);
+        AppendModulePod(outBytes, customUnitVisualTintRules_.at(raw));
+    }
 }
 
 bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
@@ -3395,6 +3406,25 @@ bool War3GameModule::OnRestoreModuleSnapshot(CSimulation& /*sim*/,
                     spell->SetAlias(code);
                     return spell;
                 });
+        }
+    }
+
+    customUnitVisualTintRules_.clear();
+    if (offset + sizeof(uint32_t) <= size) {
+        uint32_t visualRuleCount = 0;
+        if (!ReadModulePod(data, size, offset, visualRuleCount)) {
+            return false;
+        }
+        for (uint32_t i = 0; i < visualRuleCount; ++i) {
+            uint32_t key = 0;
+            UnitVisualTintRule vrule{};
+            if (!ReadModulePod(data, size, offset, key) ||
+                !ReadModulePod(data, size, offset, vrule)) {
+                return false;
+            }
+            if (key != 0) {
+                customUnitVisualTintRules_[key] = vrule;
+            }
         }
     }
 
@@ -3656,6 +3686,21 @@ uint64_t War3GameModule::OnComputeModuleStateHash(const CSimulation& /*sim*/) co
             mixString(name);
         }
     }
+    if (!customUnitVisualTintRules_.empty()) {
+        std::vector<uint32_t> sortedVisuals;
+        sortedVisuals.reserve(customUnitVisualTintRules_.size());
+        for (const auto& [raw, _] : customUnitVisualTintRules_) sortedVisuals.push_back(raw);
+        std::sort(sortedVisuals.begin(), sortedVisuals.end());
+        for (uint32_t raw : sortedVisuals) {
+            const auto& r = customUnitVisualTintRules_.at(raw);
+            mixU32(raw);
+            if (r.requiredBuffId != 0) {
+                mixU32(r.requiredBuffId);
+            }
+            mixFloat(r.scaleMultiplier);
+            mixU32(r.tintRgba);
+        }
+    }
     return h;
 }
 
@@ -3888,6 +3933,130 @@ int War3GameModule::InvokeCustomScriptNative(const std::string& nativeName,
 
 bool War3GameModule::OnHasCustomScriptNative(const std::string& nativeName) const {
     return customScriptNatives_.count(nativeName) > 0;
+}
+
+// ============================================================================
+// Phase 32 (Track D): Pluggable Unit Visual Scale & Tint Presentation Rules
+// ============================================================================
+
+namespace {
+
+uint32_t ModulateRgba32(uint32_t a, uint32_t b) {
+    const auto mulChan = [](uint32_t c0, uint32_t c1) -> uint32_t {
+        return std::min<uint32_t>(255u, (c0 * c1 + 127u) / 255u);
+    };
+    const uint32_t r = mulChan((a >> 24) & 0xFFu, (b >> 24) & 0xFFu);
+    const uint32_t g = mulChan((a >> 16) & 0xFFu, (b >> 16) & 0xFFu);
+    const uint32_t bl = mulChan((a >> 8) & 0xFFu, (b >> 8) & 0xFFu);
+    const uint32_t al = mulChan(a & 0xFFu, b & 0xFFu);
+    return (r << 24) | (g << 16) | (bl << 8) | al;
+}
+
+} // namespace
+
+void War3GameModule::RegisterUnitVisualTintRule(War3ID unitTypeId,
+                                                float scaleMultiplier,
+                                                uint32_t tintRgba,
+                                                War3ID requiredBuffId) {
+    const uint32_t key = (unitTypeId.value != 0) ? unitTypeId.value : requiredBuffId.value;
+    if (key == 0) return;
+    customUnitVisualTintRules_[key] = UnitVisualTintRule{
+        unitTypeId.value,
+        requiredBuffId.value,
+        std::max(0.05f, scaleMultiplier),
+        tintRgba
+    };
+}
+
+void War3GameModule::RegisterUnitVisualTintRule(const UnitVisualTintRule& rule) {
+    const uint32_t key = (rule.unitTypeId != 0) ? rule.unitTypeId : rule.requiredBuffId;
+    if (key == 0) return;
+    UnitVisualTintRule sanitized = rule;
+    sanitized.scaleMultiplier = std::max(0.05f, sanitized.scaleMultiplier);
+    customUnitVisualTintRules_[key] = sanitized;
+}
+
+bool War3GameModule::UnregisterUnitVisualTintRule(War3ID unitTypeId) {
+    return customUnitVisualTintRules_.erase(unitTypeId.value) > 0;
+}
+
+bool War3GameModule::HasUnitVisualTintRule(War3ID unitTypeId) const {
+    return customUnitVisualTintRules_.count(unitTypeId.value) > 0;
+}
+
+bool War3GameModule::OnResolveUnitVisualScaleAndTint(uint32_t unitTypeRawcode,
+                                                     float& outScaleMultiplier,
+                                                     uint32_t& outTintRgba) const {
+    auto it = customUnitVisualTintRules_.find(unitTypeRawcode);
+    if (it == customUnitVisualTintRules_.end()) return false;
+    outScaleMultiplier = it->second.scaleMultiplier;
+    outTintRgba = it->second.tintRgba;
+    return true;
+}
+
+bool War3GameModule::OnResolveUnitVisualScaleAndTintForUnit(const CUnit& unit,
+                                                            float& outScaleMultiplier,
+                                                            uint32_t& outTintRgba) const {
+    float scale = 1.0f;
+    uint32_t tint = 0xFFFFFFFFu;
+    bool matchedAny = false;
+
+    const uint32_t unitRaw = unit.GetTypeId().value;
+    auto typeIt = customUnitVisualTintRules_.find(unitRaw);
+    if (typeIt != customUnitVisualTintRules_.end()) {
+        const auto& rule = typeIt->second;
+        if (rule.requiredBuffId == 0 || unit.HasBuff(War3ID(rule.requiredBuffId))) {
+            scale *= rule.scaleMultiplier;
+            tint = ModulateRgba32(tint, rule.tintRgba);
+            matchedAny = true;
+        }
+    }
+
+    // Check any custom buff-keyed visual rules (where unitTypeId == 0 and requiredBuffId != 0)
+    for (const auto& [key, rule] : customUnitVisualTintRules_) {
+        if (key == unitRaw) continue;
+        if (rule.requiredBuffId != 0 && (rule.unitTypeId == 0 || rule.unitTypeId == unitRaw)) {
+            if (unit.HasBuff(War3ID(rule.requiredBuffId))) {
+                scale *= rule.scaleMultiplier;
+                tint = ModulateRgba32(tint, rule.tintRgba);
+                matchedAny = true;
+            }
+        }
+    }
+
+    // Standard WarCraft III status-buff presentation overlays:
+    //   - 'Bblo' (Bloodlust): 1.30x scale + warm red tint
+    //   - 'Bfro' (Frost Slow): icy blue tint
+    //   - 'Bwkd' (Wind Walk): 50% translucent stealth alpha
+    //   - 'Bhex' (Hex): 0.65x critter polymorph scale
+    //   - 'Bavt' (Avatar): 1.40x giant mountain-king scale + stone tint
+    if (unit.HasBuff(War3ID("Bblo")) && customUnitVisualTintRules_.find(War3ID("Bblo").value) == customUnitVisualTintRules_.end()) {
+        scale *= 1.30f;
+        tint = ModulateRgba32(tint, 0xFFA0A0FFu);
+        matchedAny = true;
+    }
+    if (unit.HasBuff(War3ID("Bfro")) && customUnitVisualTintRules_.find(War3ID("Bfro").value) == customUnitVisualTintRules_.end()) {
+        tint = ModulateRgba32(tint, 0x80B8FFFFu);
+        matchedAny = true;
+    }
+    if (unit.HasBuff(War3ID("Bwkd")) && customUnitVisualTintRules_.find(War3ID("Bwkd").value) == customUnitVisualTintRules_.end()) {
+        tint = ModulateRgba32(tint, 0xFFFFFF80u);
+        matchedAny = true;
+    }
+    if (unit.HasBuff(War3ID("Bhex")) && customUnitVisualTintRules_.find(War3ID("Bhex").value) == customUnitVisualTintRules_.end()) {
+        scale *= 0.65f;
+        matchedAny = true;
+    }
+    if (unit.HasBuff(War3ID("Bavt")) && customUnitVisualTintRules_.find(War3ID("Bavt").value) == customUnitVisualTintRules_.end()) {
+        scale *= 1.40f;
+        tint = ModulateRgba32(tint, 0xE6D8C0FFu);
+        matchedAny = true;
+    }
+
+    if (!matchedAny) return false;
+    outScaleMultiplier = scale;
+    outTintRgba = tint;
+    return true;
 }
 
 } // namespace war3

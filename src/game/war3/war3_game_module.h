@@ -80,7 +80,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 31u; }
+    uint32_t GetModuleVersion() const override { return 32u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -586,6 +586,27 @@ public:
         }
     }
 
+    // Phase 32 (Track D): Pluggable Unit Visual Scale & Tint Rules
+    struct UnitVisualTintRule {
+        uint32_t unitTypeId = 0;
+        uint32_t requiredBuffId = 0;
+        float scaleMultiplier = 1.0f;
+        uint32_t tintRgba = 0xFFFFFFFFu;
+    };
+    void RegisterUnitVisualTintRule(War3ID unitTypeId,
+                                    float scaleMultiplier,
+                                    uint32_t tintRgba = 0xFFFFFFFFu,
+                                    War3ID requiredBuffId = War3ID(0u));
+    void RegisterUnitVisualTintRule(const UnitVisualTintRule& rule);
+    bool UnregisterUnitVisualTintRule(War3ID unitTypeId);
+    bool HasUnitVisualTintRule(War3ID unitTypeId) const;
+    bool OnResolveUnitVisualScaleAndTint(uint32_t unitTypeRawcode,
+                                         float& outScaleMultiplier,
+                                         uint32_t& outTintRgba) const override;
+    bool OnResolveUnitVisualScaleAndTintForUnit(const CUnit& unit,
+                                                float& outScaleMultiplier,
+                                                uint32_t& outTintRgba) const override;
+
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 
     bool OnCheckSpellEffectReaction(CSimulation& sim,
@@ -668,6 +689,7 @@ private:
     int winningPlayerIndex_ = -1;
     std::unordered_map<uint32_t, SpellArchetypeRule> customSpellArchetypeRules_;
     std::unordered_map<std::string, CustomScriptNativeFn> customScriptNatives_;
+    std::unordered_map<uint32_t, UnitVisualTintRule> customUnitVisualTintRules_;
 };
 
 } // namespace war3

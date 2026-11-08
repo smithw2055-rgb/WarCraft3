@@ -6,6 +6,7 @@
 #include "core/job_system.h"
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"
+#include "engine/simulation_module.h"
 #include "render/scene.h"
 
 namespace render {
@@ -213,15 +214,28 @@ void RenderInterpolationBuffer::CaptureSimulationTick(const CSimulation& sim) {
         RenderTransformSnapshot snap;
         // Warcraft 3 simulation X, Y map onto scene X, Z, while flyHeight maps onto Y
         const auto& vis = unit->VisualComp();
+        float modScaleMul = 1.0f;
+        uint32_t modTintRgba = 0xFFFFFFFFu;
+        if (const auto* simMod = sim.GetSimulationModule()) {
+            if (!simMod->OnResolveUnitVisualScaleAndTintForUnit(*unit, modScaleMul, modTintRgba)) {
+                simMod->OnResolveUnitVisualScaleAndTint(unit->GetTypeId().value, modScaleMul, modTintRgba);
+            }
+        }
+        const float effectiveScale = vis.scale * modScaleMul;
+        const float modR = static_cast<float>((modTintRgba >> 24) & 0xFFu) / 255.0f;
+        const float modG = static_cast<float>((modTintRgba >> 16) & 0xFFu) / 255.0f;
+        const float modB = static_cast<float>((modTintRgba >> 8) & 0xFFu) / 255.0f;
+        const float modA = static_cast<float>(modTintRgba & 0xFFu) / 255.0f;
+
         snap.flyHeight = unit->GetFlyHeight();
         snap.position = Vec3(unit->GetX(), unit->GetFlyHeight(), unit->GetY());
         snap.facingDeg = unit->GetFacing();
-        snap.scale = Vec3(vis.scale, vis.scale, vis.scale);
+        snap.scale = Vec3(effectiveScale, effectiveScale, effectiveScale);
         snap.vertexColor = Vec4(
-            static_cast<float>(vis.vertexR) / 255.0f,
-            static_cast<float>(vis.vertexG) / 255.0f,
-            static_cast<float>(vis.vertexB) / 255.0f,
-            static_cast<float>(vis.vertexA) / 255.0f
+            (static_cast<float>(vis.vertexR) / 255.0f) * modR,
+            (static_cast<float>(vis.vertexG) / 255.0f) * modG,
+            (static_cast<float>(vis.vertexB) / 255.0f) * modB,
+            (static_cast<float>(vis.vertexA) / 255.0f) * modA
         );
         snap.playerIndex = unit->GetPlayerIndex();
         snap.unitTypeId = unit->GetTypeId().value;

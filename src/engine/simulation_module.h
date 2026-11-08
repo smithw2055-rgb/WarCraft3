@@ -586,6 +586,21 @@ public:
         return false;
     }
 
+    // ========================================================================
+    // Phase 32 (Track D): Pluggable Unit Visual Scale & Tint Presentation Hook
+    // ========================================================================
+    virtual bool OnResolveUnitVisualScaleAndTint(uint32_t /*unitTypeRawcode*/,
+                                                 float& /*outScaleMultiplier*/,
+                                                 uint32_t& /*outTintRgba*/) const {
+        return false;
+    }
+
+    virtual bool OnResolveUnitVisualScaleAndTintForUnit(const CUnit& /*unit*/,
+                                                        float& /*outScaleMultiplier*/,
+                                                        uint32_t& /*outTintRgba*/) const {
+        return false;
+    }
+
     const SimulationModuleStats& GetModuleStats() const { return stats_; }
     void ResetModuleStats() { stats_ = {}; }
 
