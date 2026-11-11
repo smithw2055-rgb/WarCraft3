@@ -1,6 +1,6 @@
 #include "wave_builder.h"
 // Temporary rebuild anchor for MdxViewer layout debugging.
-#include "renderer.h"
+#include "render/rhi_device.h"
 #include "resource/slk.h"
 #include "resource/mpq_storm.h"
 #include "mdx_viewer.h"

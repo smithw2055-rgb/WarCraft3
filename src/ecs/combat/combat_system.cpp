@@ -128,14 +128,14 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
     // invulnerable targets for the miss text; splash secondaries skip it
     // via rollMiss=false after the single primary roll).
     if (rollMiss && isAttack && target != attacker) {
-        CUnit* targetUnit = dynamic_cast<CUnit*>(target);
+        CUnit* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
         if (targetUnit && CheckEvasion(targetUnit, attacker)) {
             result.isEvaded = true;
             return result;
         }
     }
     if (invulnerable) {
-        if (isAttack && attacker && attacker != dynamic_cast<CUnit*>(target)) {
+        if (isAttack && attacker && attacker != ((target) ? (target)->AsUnit() : nullptr)) {
             for (const auto& src : attacker->GetCritSources()) {
                 if (src.chance > 0.0f && CombatRand01() < src.chance) {
                     result.isCritical = true;
@@ -147,7 +147,7 @@ DamageResult CCombatSystem::CalculateDamage(CUnit* attacker, CWidget* target,
     }
 
     // Phase 15: Magic immunity & Ethereal rules delegated to active ISimulationModule when bound
-    CUnit* targetUnit = dynamic_cast<CUnit*>(target);
+    CUnit* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (targetUnit) {
         if (combatModule_) {
             if (combatModule_->ShouldResistMagicDamage(
@@ -257,7 +257,7 @@ bool CCombatSystem::RollAttackMiss(CSimulation& simulation, CUnit* attacker,
                                    CWidget* target, bool isAttack) {
     if (simulation.CheckHighlandMiss(attacker, target, isAttack)) return true;
     if (isAttack && target && target != attacker) {
-        if (CUnit* targetUnit = dynamic_cast<CUnit*>(target)) {
+        if (CUnit* targetUnit = ((target) ? (target)->AsUnit() : nullptr)) {
             if (CheckEvasion(targetUnit, attacker)) return true;
         }
     }

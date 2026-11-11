@@ -43,7 +43,7 @@ using unit_text_utils::BehaviorCategoryName;
 
 CUnit::CUnit(int handleId, CUnitType* unitType, int playerIndex,
              War3ID typeId, float x, float y, float facing)
-    : CWidget(handleId, x, y, unitType ? (float)unitType->GetMaxLife() : 100.0f)
+    : CWidget(handleId, x, y, unitType ? (float)unitType->GetMaxLife() : 100.0f, engine::world::WidgetKind::Unit)
     , unitType_(unitType), typeId_(typeId), playerIndex_(playerIndex)
     , facing_(facing)
     , maxMana_(unitType ? unitType->GetManaMaximum() : 0)

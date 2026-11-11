@@ -1,7 +1,7 @@
 #include "ButtonFrame.h"
 
-ButtonFrame::ButtonFrame(const std::string& name, UIFrame* parent)
-    : SimpleFrame(name, parent) {}
+ButtonFrame::ButtonFrame(const std::string& name, UIFrame* parent, engine::ui::FrameKind leafKind)
+    : SimpleFrame(name, parent, leafKind) {}
 
 void ButtonFrame::Render(UiRenderer& r) {
     if (!visible_) return;

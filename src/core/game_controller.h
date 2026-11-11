@@ -1,5 +1,12 @@
 #pragma once
-#include "game_state.h"
+enum class GameState : int {
+    BOOTSTRAP,
+    MENU,
+    MAP_CONFIG,
+    LOADING,
+    IN_GAME,
+    EXIT_GAME,
+};
 #include "warsmash_config.h"
 #include "unit_presentation_system.h"
 #include "world_scene_session.h"

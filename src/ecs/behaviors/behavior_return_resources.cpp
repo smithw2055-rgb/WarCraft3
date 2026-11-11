@@ -81,7 +81,7 @@ CUnit* FindNearestMine(CSimulation& simulation, const CUnit* worker) {
     if (auto* mod = simulation.GetSimulationModule()) {
         if (CWidget* customMine = mod->OnFindNearestHarvestTarget(
                 simulation, *worker, static_cast<int>(CResourceType::GOLD), worker->GetX(), worker->GetY())) {
-            if (auto* mineUnit = dynamic_cast<CUnit*>(customMine)) {
+            if (auto* mineUnit = ((customMine) ? (customMine)->AsUnit() : nullptr)) {
                 return mineUnit;
             }
         }
@@ -204,7 +204,7 @@ void CBehaviorReturnResources::DepositCarriedResources(CSimulation& simulation) 
     }
 
     CWidget* nextTarget = simulation.GetWidget(harvestAbility->GetLastTargetHandle());
-    if (auto* originUnit = dynamic_cast<CUnit*>(nextTarget)) {
+    if (auto* originUnit = ((nextTarget) ? (nextTarget)->AsUnit() : nullptr)) {
         if (type == CResourceType::GOLD && !HasActiveResourceMine(originUnit)) {
             nextTarget = nullptr;
         }
@@ -249,7 +249,7 @@ bool CBehaviorReturnResources::Update(CSimulation& simulation) {
     if (movingToDropoff_) {
         const float dist = MoveIntoRange::Distance2D(unit_->GetX(), unit_->GetY(), target_->GetX(), target_->GetY());
         float arrival = 128.0f;
-        if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+        if (auto* targetUnit = ((target_) ? (target_)->AsUnit() : nullptr)) {
             arrival = std::max(220.0f, targetUnit->GetCollisionSize() + 96.0f);
         }
 

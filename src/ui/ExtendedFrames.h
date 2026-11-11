@@ -16,8 +16,9 @@
 
 class CheckBoxFrame : public ButtonFrame {
 public:
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::CheckBox;
     CheckBoxFrame(const std::string& name, UIFrame* parent = nullptr)
-        : ButtonFrame(name, parent) {}
+        : ButtonFrame(name, parent, engine::ui::FrameKind::CheckBox) {}
     bool IsChecked() const { return checked_; }
     void SetChecked(bool v) { checked_ = v; }
 
@@ -50,8 +51,10 @@ private:
 
 class EditBoxFrame : public SimpleFrame {
 public:
-    EditBoxFrame(const std::string& name, UIFrame* parent = nullptr)
-        : SimpleFrame(name, parent) {}
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::EditBox;
+    EditBoxFrame(const std::string& name, UIFrame* parent = nullptr,
+                 engine::ui::FrameKind leafKind = engine::ui::FrameKind::EditBox)
+        : SimpleFrame(name, parent, leafKind) {}
     const std::string& GetText() const { return text_; }
     void SetText(const std::string& t) { text_ = t; cursor_ = (int)text_.size(); }
     int GetCursor() const { return cursor_; }
@@ -91,8 +94,10 @@ private:
 
 class ListBoxFrame : public SimpleFrame {
 public:
-    ListBoxFrame(const std::string& name, UIFrame* parent = nullptr)
-        : SimpleFrame(name, parent) {}
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::ListBox;
+    ListBoxFrame(const std::string& name, UIFrame* parent = nullptr,
+                 engine::ui::FrameKind leafKind = engine::ui::FrameKind::ListBox)
+        : SimpleFrame(name, parent, leafKind) {}
     void AddItem(const std::string& s) { items_.push_back(s); }
     void ClearItems() { items_.clear(); selected_ = -1; scrollOffset_ = 0; }
     int GetSelected() const { return selected_; }
@@ -127,8 +132,9 @@ private:
 
 class ScrollBarFrame : public SimpleFrame {
 public:
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::ScrollBar;
     ScrollBarFrame(const std::string& name, UIFrame* parent = nullptr)
-        : SimpleFrame(name, parent) {}
+        : SimpleFrame(name, parent, engine::ui::FrameKind::ScrollBar) {}
     float GetValue() const { return value_; }
     void SetValue(float v) {
         value_ = std::clamp(v, min_, max_);
@@ -173,8 +179,9 @@ private:
 
 class PopupMenuFrame : public ButtonFrame {
 public:
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::PopupMenu;
     PopupMenuFrame(const std::string& name, UIFrame* parent = nullptr)
-        : ButtonFrame(name, parent) {}
+        : ButtonFrame(name, parent, engine::ui::FrameKind::PopupMenu) {}
     void AddItem(const std::string& s) { items_.push_back(s); }
     void ClearItems() { items_.clear(); selected_ = -1; }
     int GetSelected() const { return selected_; }
@@ -209,8 +216,9 @@ public:
 
 class StatusBarFrame : public SimpleFrame {
 public:
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::StatusBar;
     StatusBarFrame(const std::string& name, UIFrame* parent = nullptr)
-        : SimpleFrame(name, parent) {}
+        : SimpleFrame(name, parent, engine::ui::FrameKind::StatusBar) {}
     float GetValue() const { return value_; }
     void SetValue(float v) { value_ = v; }
     float GetMax() const { return max_; }
@@ -223,8 +231,9 @@ private:
 
 class SpriteFrame : public SimpleFrame {
 public:
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::Sprite;
     SpriteFrame(const std::string& name, UIFrame* parent = nullptr)
-        : SimpleFrame(name, parent) {}
+        : SimpleFrame(name, parent, engine::ui::FrameKind::Sprite) {}
     const std::string& GetModel() const { return model_; }
     void SetModel(const std::string& m) { model_ = m; }
 
@@ -237,6 +246,7 @@ private:
 // and JASS dialog natives observe the same state.
 class MenuFrame : public ListBoxFrame {
 public:
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::Menu;
     MenuFrame(const std::string& name, UIFrame* parent = nullptr)
-        : ListBoxFrame(name, parent) {}
+        : ListBoxFrame(name, parent, engine::ui::FrameKind::Menu) {}
 };

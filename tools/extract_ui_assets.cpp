@@ -1,6 +1,6 @@
 #include "asset/BLP.h"
-#include "asset/stb_image.h"
-#include "asset/stb_image_write.h"
+#include "stb/stb_image.h"
+#include "stb/stb_image_write.h"
 #include "model/mdx.h"
 #include "resource/mpq_storm.h"
 #include "resource/slk.h"

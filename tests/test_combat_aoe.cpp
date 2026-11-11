@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "data/unitdata.h"
-#include "ecs/abilities/spells4.h"
+#include "game/war3/abilities/war3_spells.h"
 #include "ecs/combat/combat_system.h"
 #include "ecs/combat/projectile.h"
 #include "ecs/csimulation.h"

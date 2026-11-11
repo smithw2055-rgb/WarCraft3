@@ -192,20 +192,20 @@ bool TestExtendedFramesBuild() {
     check.name = "MyCheck";
     check.frameType = "CHECKBOX";
     UIFrame* f1 = builder.ConstructFrame(check, nullptr);
-    TEST_ASSERT(dynamic_cast<CheckBoxFrame*>(f1) != nullptr);
+    TEST_ASSERT(engine::ui::DynamicCastFrame<CheckBoxFrame>(f1) != nullptr);
     FrameDefinition edit;
     edit.name = "MyEdit";
     edit.frameType = "EDITBOX";
     UIFrame* f2 = builder.ConstructFrame(edit, nullptr);
-    TEST_ASSERT(dynamic_cast<EditBoxFrame*>(f2) != nullptr);
+    TEST_ASSERT(engine::ui::DynamicCastFrame<EditBoxFrame>(f2) != nullptr);
     FrameDefinition list;
     list.name = "MyList";
     list.frameType = "LISTBOX";
-    TEST_ASSERT(dynamic_cast<ListBoxFrame*>(builder.ConstructFrame(list, nullptr)) != nullptr);
+    TEST_ASSERT(engine::ui::DynamicCastFrame<ListBoxFrame>(builder.ConstructFrame(list, nullptr)) != nullptr);
     FrameDefinition bar;
     bar.name = "MyBar";
     bar.frameType = "SIMPLESTATUSBAR";
-    TEST_ASSERT(dynamic_cast<StatusBarFrame*>(builder.ConstructFrame(bar, nullptr)) != nullptr);
+    TEST_ASSERT(engine::ui::DynamicCastFrame<StatusBarFrame>(builder.ConstructFrame(bar, nullptr)) != nullptr);
     // MENU builds a MenuFrame fed by MenuItem entries (ref MenuFrame).
     FrameDefinition menu;
     menu.name = "MyMenu";
@@ -213,7 +213,7 @@ bool TestExtendedFramesBuild() {
     menu.menuItems.emplace_back("Okay", 0);
     menu.menuItems.emplace_back("Cancel", 1);
     UIFrame* fMenu = builder.ConstructFrame(menu, nullptr);
-    auto* menuFrame = dynamic_cast<MenuFrame*>(fMenu);
+    auto* menuFrame = engine::ui::DynamicCastFrame<MenuFrame>(fMenu);
     TEST_ASSERT(menuFrame != nullptr);
     TEST_ASSERT(menuFrame->GetCount() == 2);
     TEST_ASSERT(menuFrame->GetItem(0) == "Okay");
@@ -222,20 +222,20 @@ bool TestExtendedFramesBuild() {
     popup.name = "MyPopup";
     popup.frameType = "POPUPMENU";
     popup.menuItems.emplace_back("A", 0);
-    auto* popupFrame = dynamic_cast<PopupMenuFrame*>(builder.ConstructFrame(popup, nullptr));
+    auto* popupFrame = engine::ui::DynamicCastFrame<PopupMenuFrame>(builder.ConstructFrame(popup, nullptr));
     TEST_ASSERT(popupFrame != nullptr);
     TEST_ASSERT(popupFrame->GetCount() == 1);
     // GLUETEXTBUTTON maps to ButtonFrame (dead branch removed).
     FrameDefinition glue;
     glue.name = "MyGlue";
     glue.frameType = "GLUETEXTBUTTON";
-    TEST_ASSERT(dynamic_cast<ButtonFrame*>(builder.ConstructFrame(glue, nullptr)) != nullptr);
+    TEST_ASSERT(engine::ui::DynamicCastFrame<ButtonFrame>(builder.ConstructFrame(glue, nullptr)) != nullptr);
     // Extended state survives ApplyProperties.
     FrameDefinition checked;
     checked.name = "MyChecked";
     checked.frameType = "CHECKBOX";
     checked.flags.insert("Checked");
-    auto* checkFrame = dynamic_cast<CheckBoxFrame*>(builder.ConstructFrame(checked, nullptr));
+    auto* checkFrame = engine::ui::DynamicCastFrame<CheckBoxFrame>(builder.ConstructFrame(checked, nullptr));
     TEST_ASSERT(checkFrame != nullptr && checkFrame->IsChecked());
     FrameDefinition scroll;
     scroll.name = "MyScroll";
@@ -243,7 +243,7 @@ bool TestExtendedFramesBuild() {
     scroll.floatFields["MinValue"] = 10.0f;
     scroll.floatFields["MaxValue"] = 90.0f;
     scroll.floatFields["Value"] = 42.0f;
-    auto* scrollFrame = dynamic_cast<ScrollBarFrame*>(builder.ConstructFrame(scroll, nullptr));
+    auto* scrollFrame = engine::ui::DynamicCastFrame<ScrollBarFrame>(builder.ConstructFrame(scroll, nullptr));
     TEST_ASSERT(scrollFrame != nullptr);
     TEST_ASSERT(scrollFrame->GetMin() == 10.0f && scrollFrame->GetMax() == 90.0f);
     TEST_ASSERT(scrollFrame->GetValue() == 42.0f);
@@ -252,20 +252,20 @@ bool TestExtendedFramesBuild() {
     status.frameType = "STATUSBAR";
     status.floatFields["MaxValue"] = 500.0f;
     status.floatFields["Value"] = 123.0f;
-    auto* statusFrame = dynamic_cast<StatusBarFrame*>(builder.ConstructFrame(status, nullptr));
+    auto* statusFrame = engine::ui::DynamicCastFrame<StatusBarFrame>(builder.ConstructFrame(status, nullptr));
     TEST_ASSERT(statusFrame != nullptr);
     TEST_ASSERT(statusFrame->GetMax() == 500.0f && statusFrame->GetValue() == 123.0f);
     FrameDefinition editBox;
     editBox.name = "MyEditLen";
     editBox.frameType = "EDITBOX";
     editBox.floatFields["MaxLength"] = 32.0f;
-    auto* editFrame = dynamic_cast<EditBoxFrame*>(builder.ConstructFrame(editBox, nullptr));
+    auto* editFrame = engine::ui::DynamicCastFrame<EditBoxFrame>(builder.ConstructFrame(editBox, nullptr));
     TEST_ASSERT(editFrame != nullptr && editFrame->GetMaxLength() == 32);
     FrameDefinition sprite;
     sprite.name = "MySprite";
     sprite.frameType = "SPRITE";
     sprite.stringFields["Model"] = "UI\\Test.mdx";
-    auto* spriteFrame = dynamic_cast<SpriteFrame*>(builder.ConstructFrame(sprite, nullptr));
+    auto* spriteFrame = engine::ui::DynamicCastFrame<SpriteFrame>(builder.ConstructFrame(sprite, nullptr));
     TEST_ASSERT(spriteFrame != nullptr && spriteFrame->GetModel() == "UI\\Test.mdx");
     return true;
 }

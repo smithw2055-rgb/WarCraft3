@@ -277,19 +277,19 @@ bool CAbilityInventory::CheckBeforeQueue(CSimulation& game, CUnit* caster, int o
     // Item orders are executed by the inventory and consumed so they never
     // reach the generic order queue (ref inventory intercept).
     if (orderId == OrderIds::ITEM_USE) {
-        if (auto* item = dynamic_cast<CItem*>(target)) {
+        if (auto* item = ((target) ? (target)->AsItem() : nullptr)) {
             if (FindItemSlot(item) >= 0) UseItem(game, caster, item);
         }
         return false;
     }
     if (orderId == OrderIds::ITEM_DROP) {
-        if (auto* item = dynamic_cast<CItem*>(target)) {
+        if (auto* item = ((target) ? (target)->AsItem() : nullptr)) {
             if (FindItemSlot(item) >= 0) DropItem(game, caster, item);
         }
         return false;
     }
     if (orderId == OrderIds::ITEM_GIVE) {
-        if (auto* item = dynamic_cast<CItem*>(target)) {
+        if (auto* item = ((target) ? (target)->AsItem() : nullptr)) {
             // Giving is handled by the giver dropping; pickup is a separate
             // order on the receiver. Consume here to avoid double handling.
             (void)item;

@@ -1,5 +1,5 @@
 #include "light_manager.h"
-#include "renderer.h"
+#include "render/rhi_device.h"
 #include <cstring>
 #include <iostream>
 #include <algorithm>

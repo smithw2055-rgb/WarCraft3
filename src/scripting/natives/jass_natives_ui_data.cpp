@@ -172,7 +172,7 @@ void JassNatives::RegisterFrameNatives() {
             const float sh = (data && data->boundGameUi) ? (float)data->boundGameUi->screenH : 720.0f;
             f->uiNode->SetSize((f->width / 0.8f) * sw, (f->height / 0.6f) * sh);
         }
-        if (auto* btn = dynamic_cast<ButtonFrame*>(f->uiNode.get())) {
+        if (auto* btn = engine::ui::DynamicCastFrame<ButtonFrame>(f->uiNode.get())) {
             btn->SetText(f->text);
             btn->SetEnabled(f->enabled);
             btn->SetTextColor(f->textColor);
@@ -873,8 +873,8 @@ void JassNatives::RegisterMiscNatives() {
     vm_.RegisterNative("DoNotSaveReplay", [data = data_](const std::vector<JassValue>&) -> JassValue { data->noReplaySave = true; return JassValue::Null(); });
     vm_.RegisterNative("SyncSelections", [](const std::vector<JassValue>&) { return JassValue::Null(); });
     auto rallyTargetOf = [data = data_, sim = sim_](int unitHandle) -> CWidget* { if (!sim) return nullptr; const int simId = data->GetSimHandle(unitHandle, JassHandleInfo::UNIT); CUnit* unit = sim->GetUnit(simId); if (!unit) return nullptr; CAbility* rally = unit->GetAbility(War3ID("ARal")); if (!rally || !rally->IsExplicitlySet()) return nullptr; return rally->GetRallyTarget(); };
-    vm_.RegisterNative("GetUnitRallyUnit", [data = data_, rallyTargetOf](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); auto* target = rallyTargetOf(args[0].intVal); auto* unit = dynamic_cast<CUnit*>(target); if (!unit) return JassValue::Int(0); return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId())); });
-    vm_.RegisterNative("GetUnitRallyDestructable", [data = data_, rallyTargetOf](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); auto* target = rallyTargetOf(args[0].intVal); auto* dest = dynamic_cast<CDestructable*>(target); if (!dest) return JassValue::Int(0); return JassValue::Int(data->AllocHandle(JassHandleInfo::DESTRUCTABLE, dest->GetHandleId())); });
+    vm_.RegisterNative("GetUnitRallyUnit", [data = data_, rallyTargetOf](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); auto* target = rallyTargetOf(args[0].intVal); auto* unit = ((target) ? (target)->AsUnit() : nullptr); if (!unit) return JassValue::Int(0); return JassValue::Int(data->AllocHandle(JassHandleInfo::UNIT, unit->GetHandleId())); });
+    vm_.RegisterNative("GetUnitRallyDestructable", [data = data_, rallyTargetOf](const std::vector<JassValue>& args) -> JassValue { if (args.empty()) return JassValue::Int(0); auto* target = rallyTargetOf(args[0].intVal); auto* dest = ((target) ? (target)->AsDestructable() : nullptr); if (!dest) return JassValue::Int(0); return JassValue::Int(data->AllocHandle(JassHandleInfo::DESTRUCTABLE, dest->GetHandleId())); });
     vm_.RegisterNative("SetUnitMovementTypeNoCollision", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue { if (args.size() < 2 || !data) return JassValue::Null(); int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); if (uSim < 0) return JassValue::Null(); if (!sim || !sim->GetUnit(uSim)) return JassValue::Null(); if (args[1].boolVal) { data->noCollisionUnits.insert(uSim); } else { data->noCollisionUnits.erase(uSim); } return JassValue::Null(); });
     vm_.RegisterNative("IsUnitMovementDisabled", [data = data_](const std::vector<JassValue>& args) -> JassValue { if (args.empty() || !data) return JassValue::Bool(false); int uSim = data->GetSimHandle(args[0].intVal, JassHandleInfo::UNIT); return JassValue::Bool(uSim >= 0 && data->noCollisionUnits.count(uSim) > 0); });
     vm_.RegisterNative("GetPlayerTypedUnitCount", [data = data_, sim = sim_](const std::vector<JassValue>& args) -> JassValue {

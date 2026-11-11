@@ -1,10 +1,32 @@
 #include "widget.h"
 #include "csimulation.h"
+#include "unit.h"
+#include "item.h"
+#include "destructable.h"
 #include "../audio/AudioSystem.h"
 #include <cmath>
 
-CWidget::CWidget(int handleId, float x, float y, float life)
-    : handleId_(handleId), x_(x), y_(y), life_(life), maxLife_(life) {}
+CWidget::CWidget(int handleId, float x, float y, float life, engine::world::WidgetKind kind)
+    : handleId_(handleId), x_(x), y_(y), life_(life), maxLife_(life), widgetKind_(kind) {}
+
+CUnit* CWidget::AsUnit() noexcept {
+    return IsUnit() ? static_cast<CUnit*>(this) : nullptr;
+}
+const CUnit* CWidget::AsUnit() const noexcept {
+    return IsUnit() ? static_cast<const CUnit*>(this) : nullptr;
+}
+CItem* CWidget::AsItem() noexcept {
+    return IsItem() ? static_cast<CItem*>(this) : nullptr;
+}
+const CItem* CWidget::AsItem() const noexcept {
+    return IsItem() ? static_cast<const CItem*>(this) : nullptr;
+}
+CDestructable* CWidget::AsDestructable() noexcept {
+    return IsDestructable() ? static_cast<CDestructable*>(this) : nullptr;
+}
+const CDestructable* CWidget::AsDestructable() const noexcept {
+    return IsDestructable() ? static_cast<const CDestructable*>(this) : nullptr;
+}
 
 void CWidget::SetLife(CSimulation& simulation, float life) {
     bool wasAlive = life_ > 0;

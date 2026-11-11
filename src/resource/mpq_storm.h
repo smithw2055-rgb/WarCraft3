@@ -1,4 +1,5 @@
 #pragma once
+#ifndef WITHOUT_STORMLIB
 #ifndef __STORMLIB_NO_STATIC_LINK__
 #define __STORMLIB_NO_STATIC_LINK__
 #endif
@@ -9,16 +10,43 @@
 #ifdef near
 #undef near
 #endif
+#else
+using HANDLE = void*;
+#endif
+
 #include <cstdint>
+#include <memory>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "casc.h"
 
 struct MpqArchive {
     std::string path;
     HANDLE handle = nullptr;
+};
+
+// Direct streaming native MPQ v1/v2 reader exposed unconditionally for deterministic
+// regression testing (including PKWARE DCL, IMA ADPCM, and malformed header checks)
+// even when StormLib is linked as the primary archive backend.
+class NativeMpqArchiveReader {
+public:
+    NativeMpqArchiveReader();
+    ~NativeMpqArchiveReader();
+
+    NativeMpqArchiveReader(const NativeMpqArchiveReader&) = delete;
+    NativeMpqArchiveReader& operator=(const NativeMpqArchiveReader&) = delete;
+
+    bool Open(const std::string& filePath);
+    void Close();
+    bool HasFile(const std::string& filename) const;
+    bool ReadFile(const std::string& filename, std::vector<uint8_t>& out) const;
+    std::vector<std::string> ListFiles(const std::string& pattern = "*") const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 class MpqManager {
@@ -48,7 +76,7 @@ public:
     bool FileExists(const std::string& filename) const;
     bool ReadFile(const std::string& filename, std::vector<uint8_t>& out) const;
     // Phase 21 Stage XX: Unified single-archive file reader & JASS script resolver
-    // Encapsulates StormLib archive open/read/close so map/core/scripting layers
+    // Encapsulates archive open/read/close so map/core/scripting layers
     // never include <StormLib.h> or duplicate raw HANDLE lifecycle boilerplate.
     static bool ReadSingleArchiveFile(const std::string& archivePath,
                                       const std::string& filename,
@@ -60,6 +88,8 @@ public:
                             std::vector<uint8_t>& out) const;
     std::vector<std::string> ListFiles(const std::string& archivePath) const;
     std::vector<std::string> ListAllFiles(const std::string& pattern = "*") const;
+
+    std::weak_ptr<const int> GetLifetimeToken() const { return lifetimeToken_; }
 
     int ArchiveCount() const { return (int)archives_.size(); }
     HANDLE GetArchiveHandle(int index) const {
@@ -85,4 +115,5 @@ private:
     std::vector<MpqArchive> topArchives_; // map mounts shadow everything
     std::vector<CascStorage> cascStorages_;
     std::vector<std::string> folders_;
+    std::shared_ptr<const int> lifetimeToken_ = std::make_shared<int>(1);
 };

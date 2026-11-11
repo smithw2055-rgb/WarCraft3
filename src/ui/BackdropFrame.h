@@ -17,6 +17,8 @@ public:
         EdgeR = 1 << 7,
     };
 
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::Backdrop;
+
     BackdropFrame(const std::string& name, UIFrame* parent = nullptr);
 
     void SetBackground(const std::shared_ptr<Texture>& tex) { bgTex_ = tex; }

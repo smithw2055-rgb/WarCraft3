@@ -378,7 +378,7 @@ ABSpellDescriptor ABSpellDescriptor::MakeTargetChainBounceDamage(
     d.onEffect = [defaultInitialDamage, defaultTargets, damageDecayPerBounce, bounceRadius, dmgType](
                      const ABSpellEffectContext& ctx, CSimulation& game,
                      CUnit* caster, CWidget* target, bool, float, float) {
-        auto* firstUnit = dynamic_cast<CUnit*>(target);
+        auto* firstUnit = ((target) ? (target)->AsUnit() : nullptr);
         if (!firstUnit || firstUnit->IsDead()) return;
 
         float curDmg = ctx.data[0] > 0.0f ? ctx.data[0] : defaultInitialDamage;
@@ -517,13 +517,13 @@ bool ShouldVisitUnit(CUnit* caster, CUnit* unit, bool includeCaster,
 
 bool ABCondTargetAlive::Test(CSimulation&, CUnit*, CWidget* unitTarget,
                              bool, float, float) const {
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     return unit != nullptr && !unit->IsDead();
 }
 
 bool ABCondTargetUndead::Test(CSimulation&, CUnit*, CWidget* unitTarget,
                               bool, float, float) const {
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit || unit->IsDead()) return false;
     auto* type = unit->GetUnitType();
     return type != nullptr &&
@@ -533,7 +533,7 @@ bool ABCondTargetUndead::Test(CSimulation&, CUnit*, CWidget* unitTarget,
 bool ABCondTargetAllyOfCaster::Test(CSimulation& game, CUnit* caster,
                                     CWidget* unitTarget,
                                     bool, float, float) const {
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!caster || !unit) return false;
     auto* player = game.GetPlayer(caster->GetPlayerIndex());
     auto* targetPlayer = game.GetPlayer(unit->GetPlayerIndex());
@@ -565,7 +565,7 @@ void ABActionDamageTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTa
     if (!unitTarget || unitTarget->IsDead()) return;
     // Spell effect reaction (ref CheckUnitForAbilityEffectReaction): a
     // shielded enemy target consumes its shield and takes nothing.
-    if (auto* victim = dynamic_cast<CUnit*>(unitTarget)) {
+    if (auto* victim = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr)) {
         if (!victim->CheckSpellEffectReaction(game, caster)) return;
     }
     unitTarget->Damage(game, caster, false, ranged_, attackType_, damageType_, "",
@@ -589,7 +589,7 @@ ABActionHealTarget::ABActionHealTarget(float amount) : amount_(amount) {}
 void ABActionHealTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                              bool, float, float) {
     (void)caster;
-    HealUnitClamped(game, dynamic_cast<CUnit*>(unitTarget), amount_);
+    HealUnitClamped(game, ((unitTarget) ? (unitTarget)->AsUnit() : nullptr), amount_);
 }
 
 ABActionAddBuffTarget::ABActionAddBuffTarget(BuffFactory factory)
@@ -597,7 +597,7 @@ ABActionAddBuffTarget::ABActionAddBuffTarget(BuffFactory factory)
 
 void ABActionAddBuffTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                 bool, float, float) {
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit || unit->IsDead() || !factory_) return;
     if (!unit->CheckSpellEffectReaction(game, caster)) return;
     unit->AddBuff(factory_(), game);
@@ -607,7 +607,7 @@ ABActionStunTarget::ABActionStunTarget(float duration) : duration_(duration) {}
 
 void ABActionStunTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                              bool, float, float) {
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit || unit->IsDead()) return;
     if (!unit->CheckSpellEffectReaction(game, caster)) return;
     unit->AddBuff(std::make_unique<CBuffStun>(duration_), game);
@@ -616,7 +616,7 @@ void ABActionStunTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarg
 void ABActionKillTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                              bool, float, float) {
     (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit || unit->IsDead()) return;
     unit->SetLife(game, 0.0f);
 }
@@ -630,7 +630,7 @@ static bool CanResurrectCorpse(const CUnit* unit) {
 void ABActionResurrectTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                   bool, float, float) {
     (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!CanResurrectCorpse(unit)) return;
     unit->Revive(game, unit->GetX(), unit->GetY());
 }
@@ -645,7 +645,7 @@ ABActionSetLifeTarget::ABActionSetLifeTarget(float life) : life_(life) {}
 void ABActionSetLifeTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                 bool, float, float) {
     (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit) return;
     unit->SetLife(game, life_);
 }
@@ -655,7 +655,7 @@ ABActionSetManaTarget::ABActionSetManaTarget(float mana) : mana_(mana) {}
 void ABActionSetManaTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                 bool, float, float) {
     (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit) return;
     unit->SetMana(mana_);
 }
@@ -686,7 +686,7 @@ void ABActionTeleportTarget::Run(CSimulation& game, CUnit* caster, CWidget* unit
                                  bool hasPoint, float x, float y) {
     (void)game;
     (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     // MassTeleport relocates onto the clicked point; without a point (and
     // no fixed destination) there is nothing to do (matches the .j guard
     // on target location).
@@ -851,7 +851,7 @@ void ABActionManaSteal::Run(CSimulation& game, CUnit* caster, CWidget* unitTarge
                             bool, float, float) {
     (void)game;
     if (!unitTarget || !caster) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(unitTarget);
+    auto* targetUnit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!targetUnit || targetUnit->IsDead()) return;
     float stolen = maxAmount_;
     if (stolen > targetUnit->GetMana()) stolen = targetUnit->GetMana();
@@ -886,7 +886,7 @@ void ABActionAddGoldToCaster::Run(CSimulation& game, CUnit* caster, CWidget*,
 void ABActionRemoveTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                bool, float, float) {
     (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit) return;
     game.RemoveUnit(unit);
 }
@@ -897,7 +897,7 @@ ABActionDevourTarget::ABActionDevourTarget(float digestDuration, float digestPer
 void ABActionDevourTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                bool, float, float) {
     if (!unitTarget || !caster || unitTarget->IsDead() || unitTarget == caster) return;
-    auto* victim = dynamic_cast<CUnit*>(unitTarget);
+    auto* victim = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!victim || victim->IsHero()) return;
     if (victim->GetPlayerIndex() == caster->GetPlayerIndex()) return;
     if (!victim->GetUnitType()) return;
@@ -926,7 +926,7 @@ void ABActionCreateUnitWithBuff::Run(CSimulation& game, CUnit* caster, CWidget*,
 
 void ABActionTransferToCaster::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                    bool, float, float) {
-    TransferUnitOwnerToCaster(game, caster, dynamic_cast<CUnit*>(unitTarget), true);
+    TransferUnitOwnerToCaster(game, caster, ((unitTarget) ? (unitTarget)->AsUnit() : nullptr), true);
 }
 
 ABActionCreateUnitWithAbility::ABActionCreateUnitWithAbility(
@@ -952,7 +952,7 @@ ABActionSummonCopyOfTarget::ABActionSummonCopyOfTarget(War3ID buffAlias, float d
 
 void ABActionSummonCopyOfTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                      bool, float, float) {
-    auto* target = dynamic_cast<CUnit*>(unitTarget);
+    auto* target = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!caster || !target || target->IsDead()) return;
     CUnit* copy = SummonTimedUnit(game, caster, target->GetTypeId(), buffAlias_,
                                   target->GetX() + offsetX_, target->GetY() + offsetY_,
@@ -965,7 +965,7 @@ ABActionAnimateDeadCorpse::ABActionAnimateDeadCorpse(War3ID buffAlias, float dur
 
 void ABActionAnimateDeadCorpse::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                     bool, float, float) {
-    auto* target = dynamic_cast<CUnit*>(unitTarget);
+    auto* target = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!caster || !target || !target->IsDead()) return;
     target->Revive(game, target->GetX(), target->GetY());
     target->SetInvulnerable(true);
@@ -978,7 +978,7 @@ void ABActionAnimateDeadCorpse::Run(CSimulation& game, CUnit* caster, CWidget* u
 
 void ABActionAncestralRevive::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                   bool, float, float) {
-    auto* target = dynamic_cast<CUnit*>(unitTarget);
+    auto* target = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!caster || !target || !target->IsDead()) return;
     const War3ID typeId = target->GetTypeId();
     if (typeId != War3ID("otau") && typeId != War3ID("Otch")) return;
@@ -990,7 +990,7 @@ ABActionDevourMagic::ABActionDevourMagic(float manaPerBuff) : manaPerBuff_(manaP
 
 void ABActionDevourMagic::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                               bool, float, float) {
-    auto* target = dynamic_cast<CUnit*>(unitTarget);
+    auto* target = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!target || target->IsDead()) return;
     const size_t before = target->GetBuffs().size();
     target->RemoveBuffsIf(game, true, true, false, true);
@@ -1008,7 +1008,7 @@ ABActionManaBurn::ABActionManaBurn(int maxBurn, CAttackType attackType,
 
 void ABActionManaBurn::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                            bool, float, float) {
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit || unit->IsDead()) return;
     if (!unit->CheckSpellEffectReaction(game, caster)) return;
     const int burned = std::min(maxBurn_, static_cast<int>(unit->GetMana()));
@@ -1048,7 +1048,7 @@ ABActionMissileStun::ABActionMissileStun(float damage, float stunDuration, float
 
 void ABActionMissileStun::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                               bool, float, float) {
-    auto* target = dynamic_cast<CUnit*>(unitTarget);
+    auto* target = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!caster || !target || target->IsDead()) return;
     // StormBolt.j fidelity: the missile carries the damage AND the stun
     // lands on impact (no instant effect at cast; fizzle when the target
@@ -1068,7 +1068,7 @@ void ABActionMissileStun::Run(CSimulation& game, CUnit* caster, CWidget* unitTar
     missile.maxTravel = 4096.0f;
     const float stun = stunDuration_;
     missile.onHit = [stun](CSimulation& sim, CUnit*, CWidget* hit) {
-        auto* victim = dynamic_cast<CUnit*>(hit);
+        auto* victim = ((hit) ? (hit)->AsUnit() : nullptr);
         if (!victim || victim->IsDead()) return;
         victim->AddBuff(std::make_unique<CBuffStun>(stun), sim);
     };
@@ -1100,7 +1100,7 @@ ABActionDispelTarget::ABActionDispelTarget(bool removePositive, bool removeNegat
 void ABActionDispelTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                                bool, float, float) {
     (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit || unit->IsDead()) return;
     unit->RemoveBuffsIf(game, removePositive_, removeNegative_, false, true);
 }
@@ -1108,7 +1108,7 @@ void ABActionDispelTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTa
 void ABActionTauntTarget::Run(CSimulation& game, CUnit* caster, CWidget* unitTarget,
                               bool, float, float) {
     (void)caster;
-    auto* unit = dynamic_cast<CUnit*>(unitTarget);
+    auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
     if (!unit || unit->IsDead() || !foe_ || foe_->IsDead()) return;
     game.IssueUnitOrder(unit->GetHandleId(),
                         std::make_unique<COrderTargetWidget>(OrderIds::ATTACK, foe_));

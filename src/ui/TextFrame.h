@@ -11,6 +11,8 @@ enum class TextAlign {
 
 class TextFrame : public UIFrame {
 public:
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::Text;
+
     TextFrame(const std::string& name, UIFrame* parent = nullptr);
 
     void SetText(const std::string& t);

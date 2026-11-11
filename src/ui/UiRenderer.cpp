@@ -1,5 +1,5 @@
 #include "UiRenderer.h"
-#include "../render/renderer.h"
+#include "render/rhi_device.h"
 #include <cstring>
 #include <cstdio>
 #include <cmath>

@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-#include "ecs/abilities/auras.h"
+#include "game/war3/abilities/war3_spells.h"
 #include "ecs/buffs.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"

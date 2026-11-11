@@ -56,8 +56,8 @@ static const FramePointAssign* FindAssign(const std::unordered_map<FramePoint, F
     return nullptr;
 }
 
-UIFrame::UIFrame(const std::string& name, UIFrame* parent)
-    : name_(name), parent_(parent) {}
+UIFrame::UIFrame(const std::string& name, UIFrame* parent, engine::ui::FrameKind leafKind)
+    : name_(name), parent_(parent), frameKindMask_(engine::ui::ComputeFrameAncestryMask(leafKind)) {}
 
 void UIFrame::AddChild(UIFrame* child) {
     if (!child || child == this) return;

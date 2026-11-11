@@ -4,127 +4,14 @@ if(StormLib_FOUND)
     set(TEST_STORM_SOURCES test_mpq_storm.cpp)
 endif()
 
-add_executable(warsmash_tests
-    test_main.cpp
-    test_w3e.cpp
-    test_blp.cpp
-    test_mdx.cpp
-    test_mdx_attach.cpp
-    test_scene_matrix.cpp
-    test_mdl.cpp
-    test_jass_animation_tags.cpp
-    test_jass_vm.cpp
+set(WARSMASH_SHARED_PROD_SOURCES
     test_render_stubs.cpp
-    test_step1_bonuses.cpp
-    test_aura_fixes.cpp
-    test_region_events.cpp
-    test_destructable_enum.cpp
-    test_doodad_data.cpp
-    test_weather.cpp
-    test_texttag.cpp
-    test_casc.cpp
-    test_combat_aoe.cpp
-    test_object_mods.cpp
-    test_aura_combat.cpp
-    test_root_build.cpp
-    test_sync_sleep.cpp
-    test_lockstep_items.cpp
-    test_jass_effects_attach.cpp
-    test_net_lobby.cpp
-    test_lockstep_turns.cpp
-    test_lockstep_host.cpp
-    test_determinism.cpp
-    test_combat_magic.cpp
-    test_buffs_ack.cpp
-    test_combat_pipeline.cpp
-    test_maxlife_layers.cpp
-    test_gameplay_data.cpp
-    test_projectiles.cpp
-    test_transport.cpp
-    test_death_sequence.cpp
-    test_attack_bonus.cpp
-    test_damage_minors.cpp
-    test_techtree_avail.cpp
-    test_random_tables.cpp
-    test_pathing_types.cpp
-    test_destructable_targeting.cpp
-    test_spell_event.cpp
-    test_portrait.cpp
-    test_ability_builder.cpp
-    test_spells3.cpp
-    test_spells4.cpp
-    test_spells5.cpp
-    test_spells6.cpp
-    test_spells7.cpp
-    test_spells8.cpp
-    test_spells9.cpp
-    test_spells10.cpp
-    test_spells11.cpp
-    test_spells12.cpp
-    test_spells13.cpp
-    test_spells14.cpp
-    test_spells15.cpp
-    test_spells16.cpp
-    test_spells17.cpp
-    test_spells18.cpp
-    test_spells19.cpp
-    test_spells20.cpp
-    test_spells21.cpp
-    test_spells22.cpp
-    test_spells23.cpp
-    test_spells24.cpp
-    test_spells25.cpp
-    test_spells26.cpp
-    test_spells27.cpp
-    test_spells28.cpp
-    test_spells29.cpp
-    test_orders.cpp
-    test_fog.cpp
-    test_lightning.cpp
-    test_fdf.cpp
-    test_ability_levels.cpp
-    test_hero_carry.cpp
-    test_midi.cpp
-    test_techtree.cpp
-    test_vfs_overlay.cpp
-    test_map_data.cpp
-    test_jass_orders_terrain.cpp
-    test_jass_visuals.cpp
-    test_jass_pools.cpp
-    test_jass_unitstate.cpp
-    test_jass_gameflow.cpp
-    test_jass_uistate.cpp
-    test_jass_boards.cpp
-    test_jass_terrainedit.cpp
-    test_jass_struct.cpp
-    test_melee_ai.cpp
-    test_ribbons.cpp
-    test_jass_cache.cpp
-    test_jass_misc.cpp
-    test_jass_frames.cpp
-    test_jass_construct.cpp
-    test_jass_rescue.cpp
-    test_jass_queueevents.cpp
-    test_jass_heroavail.cpp
-    test_jass_preproc.cpp
-    test_jass_shopevents.cpp
-    test_jass_upkeep.cpp
-    test_jass_unimplemented.cpp
-    test_jass_p0.cpp
-    test_map_smoke.cpp
-    test_audit_fixes.cpp
-    test_phase1_modernization.cpp
-    test_phase2_modernization.cpp
-    test_phase3_modernization.cpp
-    test_phase4_modernization.cpp
-    test_phase5_modernization.cpp
     ../src/render/render_server.cpp
     ../src/render/render_graph.cpp
     ../src/render/texture_atlas_packer.cpp
     ../src/render/scene.cpp
     ../src/render/mdx_viewer.cpp
     ../src/render/mdx_particles.cpp
-    ${TEST_STORM_SOURCES}
     ../src/map/w3e.cpp
     ../src/map/w3i.cpp
     ../src/map/w3d.cpp
@@ -164,7 +51,6 @@ add_executable(warsmash_tests
     ../src/ui/FrameDefinition.cpp
     ../src/ui/FrameBuilder.cpp
     ../src/ui/UIFrame.cpp
-    ../src/ui/SimpleFrame.cpp
     ../src/ui/BackdropFrame.cpp
     ../src/ui/ButtonFrame.cpp
     ../src/ui/TextFrame.cpp
@@ -191,7 +77,6 @@ add_executable(warsmash_tests
     ../src/resource/slk.cpp
     ../src/resource/resource_server.cpp
     ../src/map/wpm.cpp
-    ../src/audio/AudioSystem.cpp
     ../src/audio/audio_server.cpp
     ../src/audio/UnitSoundset.cpp
     ../src/audio/AckSoundBank.cpp
@@ -279,44 +164,131 @@ add_executable(warsmash_tests
     ../src/ecs/abilities/ability_builder.cpp
 )
 
-target_include_directories(warsmash_tests PRIVATE ../src .. ../third_party)
-
-target_compile_definitions(warsmash_tests PRIVATE
-    PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+add_executable(warsmash_tests
+    test_main.cpp
+    test_w3e.cpp
+    test_blp.cpp
+    test_mdx.cpp
+    test_mdx_attach.cpp
+    test_scene_matrix.cpp
+    test_mdl.cpp
+    test_jass_animation_tags.cpp
+    test_jass_vm.cpp
+    test_step1_bonuses.cpp
+    test_aura_fixes.cpp
+    test_region_events.cpp
+    test_destructable_enum.cpp
+    test_doodad_data.cpp
+    test_weather.cpp
+    test_texttag.cpp
+    test_casc.cpp
+    test_combat_aoe.cpp
+    test_object_mods.cpp
+    test_aura_combat.cpp
+    test_root_build.cpp
+    test_sync_sleep.cpp
+    test_lockstep_items.cpp
+    test_jass_effects_attach.cpp
+    test_net_lobby.cpp
+    test_lockstep_turns.cpp
+    test_lockstep_host.cpp
+    test_determinism.cpp
+    test_combat_magic.cpp
+    test_buffs_ack.cpp
+    test_combat_pipeline.cpp
+    test_maxlife_layers.cpp
+    test_gameplay_data.cpp
+    test_projectiles.cpp
+    test_transport.cpp
+    test_death_sequence.cpp
+    test_attack_bonus.cpp
+    test_damage_minors.cpp
+    test_techtree_avail.cpp
+    test_random_tables.cpp
+    test_pathing_types.cpp
+    test_destructable_targeting.cpp
+    test_spell_event.cpp
+    test_portrait.cpp
+    test_ability_builder.cpp
+    test_war3_spells_catalog.cpp
+    test_orders.cpp
+    test_fog.cpp
+    test_lightning.cpp
+    test_fdf.cpp
+    test_ability_levels.cpp
+    test_hero_carry.cpp
+    test_midi.cpp
+    test_techtree.cpp
+    test_vfs_overlay.cpp
+    test_map_data.cpp
+    test_jass_orders_terrain.cpp
+    test_jass_visuals.cpp
+    test_jass_pools.cpp
+    test_jass_unitstate.cpp
+    test_jass_gameflow.cpp
+    test_jass_uistate.cpp
+    test_jass_boards.cpp
+    test_jass_terrainedit.cpp
+    test_jass_struct.cpp
+    test_melee_ai.cpp
+    test_ribbons.cpp
+    test_jass_cache.cpp
+    test_jass_misc.cpp
+    test_jass_frames.cpp
+    test_jass_construct.cpp
+    test_jass_rescue.cpp
+    test_jass_queueevents.cpp
+    test_jass_heroavail.cpp
+    test_jass_preproc.cpp
+    test_jass_shopevents.cpp
+    test_jass_upkeep.cpp
+    test_jass_unimplemented.cpp
+    test_jass_p0.cpp
+    test_map_smoke.cpp
+    test_audit_fixes.cpp
+    test_phase1_modernization.cpp
+    test_phase2_modernization.cpp
+    test_phase3_modernization.cpp
+    test_phase4_modernization.cpp
+    test_phase5_modernization.cpp
+    test_stage1_to_6_engine_evolution.cpp
+    ${TEST_STORM_SOURCES}
+    ${WARSMASH_SHARED_PROD_SOURCES}
 )
 
-# StormLib (optional)
-if(StormLib_FOUND)
-    target_link_libraries(warsmash_tests PRIVATE StormLib::storm)
-    if(PLATFORM_WINDOWS AND DEFINED VCPKG_TRIPLET)
-        set(VCPKG_BIN "${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET}/bin")
-        foreach(DLL_FILE stormlib.dll zlib1.dll bz2.dll)
-            set(DLL_PATH "${VCPKG_BIN}/${DLL_FILE}")
-            if(EXISTS "${DLL_PATH}")
-                add_custom_command(TARGET warsmash_tests POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${DLL_PATH}"
-                        "$<TARGET_FILE_DIR:warsmash_tests>/"
-                    COMMENT "Copying ${DLL_FILE} to test output"
-                )
-            endif()
-        endforeach()
-    endif()
-else()
-    message(STATUS "StormLib not found for tests")
-    target_compile_definitions(warsmash_tests PRIVATE WITHOUT_STORMLIB=1)
+target_include_directories(warsmash_tests PRIVATE ../src .. ../third_party)
+target_compile_definitions(warsmash_tests PRIVATE
+    PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    __STORMLIB_NO_STATIC_LINK__
+)
+target_link_libraries(warsmash_tests PRIVATE minimal_rts_module_static)
+link_stormlib(warsmash_tests)
+link_casclib(warsmash_tests)
+if(PLATFORM_LINUX)
+    target_link_libraries(warsmash_tests PRIVATE dl pthread m)
 endif()
 
-# CascLib (optional)
-if(CascLib_FOUND)
-    target_link_libraries(warsmash_tests PRIVATE CascLib::casc)
-else()
-    message(STATUS "CascLib not found for tests")
-    target_compile_definitions(warsmash_tests PRIVATE WITHOUT_CASCLIB=1)
+# Dedicated hardware-enforced Zero-RTTI test suite (/GR- on MSVC, -fno-rtti on GCC/Clang)
+# Compiles 100% of production `src/` + `engine/` + `projects/` + Stage 1-6 tests without RTTI!
+add_executable(warsmash_rtti_free_tests
+    test_rtti_free_audit.cpp
+    test_stage1_to_6_engine_evolution.cpp
+    ${WARSMASH_SHARED_PROD_SOURCES}
+)
+target_include_directories(warsmash_rtti_free_tests PRIVATE ../src .. ../third_party)
+target_compile_definitions(warsmash_rtti_free_tests PRIVATE
+    PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    __STORMLIB_NO_STATIC_LINK__
+)
+target_link_libraries(warsmash_rtti_free_tests PRIVATE minimal_rts_module_static)
+link_stormlib(warsmash_rtti_free_tests)
+link_casclib(warsmash_rtti_free_tests)
+if(PLATFORM_LINUX)
+    target_link_libraries(warsmash_rtti_free_tests PRIVATE dl pthread m)
 endif()
+enable_zero_rtti(warsmash_rtti_free_tests)
 
-if(ZLIB_FOUND)
-    target_link_libraries(warsmash_tests PRIVATE ${ZLIB_LIBRARIES})
-endif()
-
-add_test(NAME warsmash_tests COMMAND warsmash_tests)
+add_test(NAME warsmash_tests COMMAND warsmash_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME warsmash_rtti_free_tests COMMAND warsmash_rtti_free_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

@@ -909,6 +909,16 @@ bool TestPhase32StageTTT1WorldPresentationSubsystemAndEngineKernelIntegration();
 bool TestPhase32StageTTT2GameControllerInternalHeaderEliminationAudit();
 bool TestPhase32StageUUU1War3GameModuleV32UnitVisualScaleAndTintRules();
 bool TestPhase32StageUUU2DynamicPluginSOV32AndCloudRetailMapsEndToEndSuite();
+bool TestPhase33StageVVV1AudioServerUnificationAndPluggableBackends();
+bool TestPhase33StageVVV2RhiDeviceHeadlessLifecycleAndBackendIntegration();
+bool TestPhase33StageWWW1War3GameModuleV33TilesetEnvironmentAndAmbientMidiProfiles();
+bool TestPhase33StageWWW2DynamicPluginSOV33AndCloudRetailMapsEndToEndSuite();
+bool TestStage1CoreTypeIdTagIdManifestAndEnginePurity();
+bool TestStage2VfsMpqSecurityPkwareDclAndSchemaBinder();
+bool TestStage3RhiBackendIncrementalOverlayAndDiscreteSampler();
+bool TestStage4UiRttiFreeReactiveHudAndAudioUnification();
+bool TestStage5WidgetRttiFreeOverflowSafeReaderAndEsav();
+bool TestStage6MinimalRtsDualProjectReplayAndCloudMaps1000TickDeterminism();
 #ifndef WITHOUT_STORMLIB
 bool RunStormLibTests();
 #endif
@@ -1813,6 +1823,16 @@ int main(int argc, char** argv) {
         {"Phase32 Stage TTT2 game_controller_internal.h elimination audit", TestPhase32StageTTT2GameControllerInternalHeaderEliminationAudit},
         {"Phase32 Stage UUU1 War3GameModule v32 unit visual scale and tint rules", TestPhase32StageUUU1War3GameModuleV32UnitVisualScaleAndTintRules},
         {"Phase32 Stage UUU2 Dynamic plugin SO v32 and cloud retail maps end-to-end suite", TestPhase32StageUUU2DynamicPluginSOV32AndCloudRetailMapsEndToEndSuite},
+        {"Phase33 Stage VVV1 AudioServer unification and pluggable backends", TestPhase33StageVVV1AudioServerUnificationAndPluggableBackends},
+        {"Phase33 Stage VVV2 RhiDevice headless lifecycle and IRhiBackend integration", TestPhase33StageVVV2RhiDeviceHeadlessLifecycleAndBackendIntegration},
+        {"Phase33 Stage WWW1 War3GameModule v33 tileset environment and ambient MIDI profiles", TestPhase33StageWWW1War3GameModuleV33TilesetEnvironmentAndAmbientMidiProfiles},
+        {"Phase33 Stage WWW2 Dynamic plugin SO v33 and cloud retail maps end-to-end suite", TestPhase33StageWWW2DynamicPluginSOV33AndCloudRetailMapsEndToEndSuite},
+        {"Stage 1 Core TypeId, TagId, INI backslash round-trip and engine purity", TestStage1CoreTypeIdTagIdManifestAndEnginePurity},
+        {"Stage 2 Streaming MPQ security, PKWARE DCL, wildcard ListAllFiles and SchemaBinder", TestStage2VfsMpqSecurityPkwareDclAndSchemaBinder},
+        {"Stage 3 IRhiBackend, O(dirty_area) TerrainOverlayState and DiscreteStepTimelineSampler", TestStage3RhiBackendIncrementalOverlayAndDiscreteSampler},
+        {"Stage 4 RTTI-free UIFrame bitmask, live HudViewBinder and unified AudioServer", TestStage4UiRttiFreeReactiveHudAndAudioUnification},
+        {"Stage 5 WidgetKind RTTI-free casts, overflow-safe BinaryReader and ESAV archive", TestStage5WidgetRttiFreeOverflowSafeReaderAndEsav},
+        {"Stage 6 MinimalRTS bounds/JSON scoping and dual-project W3X determinism", TestStage6MinimalRtsDualProjectReplayAndCloudMaps1000TickDeterminism},
 #ifndef WITHOUT_STORMLIB
         {"StormLib enumerate war3.mpq and W3X maps", RunStormLibTests},
 #endif

@@ -27,7 +27,7 @@ namespace {
 
 void ParentTo(GameUI& gui, UIFrame* parent, UIFrame* child) {
     if (!parent || !child) return;
-    if (auto* s = dynamic_cast<SimpleFrame*>(parent)) s->AddChild(child);
+    if (auto* s = engine::ui::DynamicCastFrame<SimpleFrame>(parent)) s->AddChild(child);
     child->SetParent(parent);
     if (gui.frameRegistry.count(child->GetName()) == 0)
         gui.frameRegistry[child->GetName()] = child;
@@ -81,7 +81,7 @@ TextFrame* ConsoleHUD::CreateStringFrame(GameUI& gui, const std::string& name, U
                                          float fdfFontSize, int screenH, TextRenderer* textRenderer,
                                          std::vector<UIFrame*>& ownedOut) {
     if (auto it = gui.frameRegistry.find(name); it != gui.frameRegistry.end()) {
-        if (auto* t = dynamic_cast<TextFrame*>(it->second)) return t;
+        if (auto* t = engine::ui::DynamicCastFrame<TextFrame>(it->second)) return t;
     }
     auto* text = new TextFrame(name, nullptr);
     text->SetTextRenderer(textRenderer);
@@ -94,7 +94,7 @@ TextFrame* ConsoleHUD::CreateStringFrame(GameUI& gui, const std::string& name, U
 ButtonFrame* ConsoleHUD::CreateButton(GameUI& gui, const std::string& name, UIFrame* parent,
                                       TextRenderer* textRenderer, std::vector<UIFrame*>& ownedOut) {
     if (auto it = gui.frameRegistry.find(name); it != gui.frameRegistry.end()) {
-        if (auto* b = dynamic_cast<ButtonFrame*>(it->second)) return b;
+        if (auto* b = engine::ui::DynamicCastFrame<ButtonFrame>(it->second)) return b;
     }
     auto* btn = new ButtonFrame(name, nullptr);
     btn->SetTextRenderer(textRenderer);
@@ -111,20 +111,20 @@ bool ConsoleHUD::Build(GameUI& gui, FrameBuilder* builder, TextRenderer* textRen
     UIFrame* rootParent = root;
 
     // ---- ConsoleUI background (racial theme chrome) ----
-    refs.consoleUI = dynamic_cast<SimpleFrame*>(
+    refs.consoleUI = engine::ui::DynamicCastFrame<SimpleFrame>(
         CreateSimpleFrame(gui, builder, templates, "ConsoleUI", rootParent, ownedOut));
     if (!refs.consoleUI) return false;
     refs.consoleUI->SetAllPoints();
 
     // ---- ResourceBarFrame at TOPRIGHT (template has no position) ----
-    refs.resourceBar = dynamic_cast<SimpleFrame*>(
+    refs.resourceBar = engine::ui::DynamicCastFrame<SimpleFrame>(
         CreateSimpleFrame(gui, builder, templates, "ResourceBarFrame", refs.consoleUI, ownedOut));
     if (refs.resourceBar) {
         refs.resourceBar->AddSetPoint(FramePoint::TOPRIGHT, "ConsoleUI", FramePoint::TOPRIGHT, 0, 0);
     }
 
     // ---- UpperButtonBarFrame at TOPLEFT ----
-    refs.upperButtonBar = dynamic_cast<SimpleFrame*>(
+    refs.upperButtonBar = engine::ui::DynamicCastFrame<SimpleFrame>(
         CreateSimpleFrame(gui, builder, templates, "UpperButtonBarFrame", refs.consoleUI, ownedOut));
     if (refs.upperButtonBar) {
         refs.upperButtonBar->AddSetPoint(FramePoint::TOPLEFT, "ConsoleUI", FramePoint::TOPLEFT, 0, 0);
@@ -145,7 +145,7 @@ bool ConsoleHUD::Build(GameUI& gui, FrameBuilder* builder, TextRenderer* textRen
             fallback->SetText(kLabels[i]);
             fallback->SetEnabled(true);
             btn = fallback;
-        } else if (auto* bf = dynamic_cast<ButtonFrame*>(btn)) {
+        } else if (auto* bf = engine::ui::DynamicCastFrame<ButtonFrame>(btn)) {
             if (textRenderer) bf->SetTextRenderer(textRenderer);
             bf->SetText(kLabels[i]);
             bf->SetFontSize(11.0f);
@@ -159,7 +159,7 @@ bool ConsoleHUD::Build(GameUI& gui, FrameBuilder* builder, TextRenderer* textRen
     refs.timeIndicator = CreateFrame(gui, builder, templates, "TimeOfDayIndicator", rootParent, ownedOut);
 
     // ---- UnitPortrait (FDF-anchored; procedural fallback positioned in Layout) ----
-    refs.unitPortrait = dynamic_cast<SimpleFrame*>(
+    refs.unitPortrait = engine::ui::DynamicCastFrame<SimpleFrame>(
         CreateSimpleFrame(gui, builder, templates, "UnitPortrait", refs.consoleUI, ownedOut));
     refs.proceduralPortrait = templates.count("UnitPortrait") == 0;
 
@@ -182,7 +182,7 @@ bool ConsoleHUD::Build(GameUI& gui, FrameBuilder* builder, TextRenderer* textRen
     }
 
     // ---- SmashSimpleInfoPanel (always code-owned; explicit rect in Layout) ----
-    refs.smashSimpleInfoPanel = dynamic_cast<SimpleFrame*>(
+    refs.smashSimpleInfoPanel = engine::ui::DynamicCastFrame<SimpleFrame>(
         CreateSimpleFrame(gui, builder, templates, "SmashSimpleInfoPanel", rootParent, ownedOut));
     if (!refs.smashSimpleInfoPanel) {
         auto* panel = new SimpleFrame("SmashSimpleInfoPanel", nullptr);
@@ -192,7 +192,7 @@ bool ConsoleHUD::Build(GameUI& gui, FrameBuilder* builder, TextRenderer* textRen
     }
 
     // ---- SimpleInfoPanel*Detail children (retail templates) ----
-    refs.simpleInfoPanelUnitDetail = dynamic_cast<SimpleFrame*>(
+    refs.simpleInfoPanelUnitDetail = engine::ui::DynamicCastFrame<SimpleFrame>(
         CreateSimpleFrame(gui, builder, templates, "SimpleInfoPanelUnitDetail",
                           refs.smashSimpleInfoPanel, ownedOut));
     refs.proceduralUnitDetail = templates.count("SimpleInfoPanelUnitDetail") == 0;
@@ -231,7 +231,7 @@ bool ConsoleHUD::Build(GameUI& gui, FrameBuilder* builder, TextRenderer* textRen
     if (refs.hovertipFrame) refs.hovertipFrame->SetVisible(false);
     auto bindText = [&](const char* name) -> TextFrame* {
         if (UIFrame* f = Find(gui, builder, name)) {
-            if (auto* t = dynamic_cast<TextFrame*>(f)) return t;
+            if (auto* t = engine::ui::DynamicCastFrame<TextFrame>(f)) return t;
         }
         return nullptr;
     };
@@ -357,7 +357,7 @@ void ConsoleHUD::BuildInfoWrappers(GameUI& gui, FrameBuilder* builder,
     UIFrame* heroWrap = ensureWrapper("SmashSimpleInfoPanelIconHero");
     if (heroWrap && templates.count("SimpleInfoPanelIconHero") && builder) {
         bool present = false;
-        if (auto* s = dynamic_cast<SimpleFrame*>(heroWrap)) {
+        if (auto* s = engine::ui::DynamicCastFrame<SimpleFrame>(heroWrap)) {
             for (UIFrame* c : s->GetChildren()) {
                 if (c && c->GetName() == "SimpleInfoPanelIconHero") { present = true; break; }
             }
@@ -511,7 +511,7 @@ void ConsoleHUD::Layout(GameUI& gui, ConsoleHudRefs& refs, int screenW, int scre
         Place(unitDetail, panelX, panelY, panelW, panelH);
         detailBounds = unitDetail->GetBounds();
         // Children were positioned against the old (degenerate) rect.
-        if (auto* detailSimple = dynamic_cast<SimpleFrame*>(unitDetail)) {
+        if (auto* detailSimple = engine::ui::DynamicCastFrame<SimpleFrame>(unitDetail)) {
             detailSimple->PositionBounds(gui);
         }
     }

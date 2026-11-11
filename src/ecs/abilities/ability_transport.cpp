@@ -17,7 +17,7 @@ bool CAbilityLoad::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, C
     if (IsDisabled()) return false;
     if (!target || target->IsDead()) return false;
 
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
+    auto* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (!targetUnit) return false;
     if (targetUnit->IsBuilding()) return false; // can't load buildings
     if (targetUnit->GetPlayerIndex() != unit->GetPlayerIndex()) return false; // same player only
@@ -32,7 +32,7 @@ CBehavior* CAbilityLoad::Begin(CSimulation& game, CUnit* caster, int orderId, CW
     (void)orderId;
     if (!target) return nullptr;
 
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
+    auto* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (!targetUnit) return nullptr;
     if ((int)caster->GetCargoUnits().size() >= cargoCapacity_) return nullptr; // full
 

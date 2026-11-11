@@ -161,8 +161,8 @@ bool TestFdfBuilderSmoke() {
     TEST_ASSERT(builder.GetFrame("Ok") != nullptr);
     TEST_ASSERT(builder.GetFrame("Menu") != nullptr);
     // Unknown widget types degrade to SimpleFrame instead of failing.
-    TEST_ASSERT(dynamic_cast<SimpleFrame*>(builder.GetFrame("Opt")) != nullptr);
-    TEST_ASSERT(dynamic_cast<SimpleFrame*>(builder.GetFrame("List")) != nullptr);
+    TEST_ASSERT(engine::ui::DynamicCastFrame<SimpleFrame>(builder.GetFrame("Opt")) != nullptr);
+    TEST_ASSERT(engine::ui::DynamicCastFrame<SimpleFrame>(builder.GetFrame("List")) != nullptr);
     TEST_ASSERT(builder.GetFrame("Missing") == nullptr);
     return true;
 }

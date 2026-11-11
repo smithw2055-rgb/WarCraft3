@@ -2,10 +2,19 @@
 
 #include <algorithm>
 #include <cmath>
+
 #include "ecs/player.h"
 #include "ecs/unit.h"
 
 namespace ui {
+
+UIDataBinder::UIDataBinder() {
+    hudBinder_.AttachListener(this);
+}
+
+UIDataBinder::~UIDataBinder() {
+    hudBinder_.DetachListener(this);
+}
 
 void UIDataBinder::BindResourceFrames(TextFrame* goldFrame,
                                       TextFrame* lumberFrame,
@@ -62,12 +71,91 @@ void UIDataBinder::ApplyTextFrameUpdate(TextFrame* frame,
     inoutAnyChanged = true;
 }
 
+void UIDataBinder::OnHudResourcesChanged(const engine::ui::HudViewModel& vm) {
+    const int gold = vm.PrimaryResource();
+    const int lumber = vm.SecondaryResource();
+    const int foodUsed = vm.SupplyUsed();
+    const int foodCap = vm.SupplyCap();
+
+    if (!lastState_.initialized || gold != lastState_.gold) {
+        lastState_.gold = gold;
+        ApplyTextFrameUpdate(goldFrame_, std::to_string(gold), dispatchAnyChanged_);
+    }
+    if (!lastState_.initialized || lumber != lastState_.lumber) {
+        lastState_.lumber = lumber;
+        ApplyTextFrameUpdate(lumberFrame_, std::to_string(lumber), dispatchAnyChanged_);
+    }
+    if (!lastState_.initialized || foodUsed != lastState_.foodUsed || foodCap != lastState_.foodCap) {
+        lastState_.foodUsed = foodUsed;
+        lastState_.foodCap = foodCap;
+        ApplyTextFrameUpdate(foodFrame_,
+                             std::to_string(foodUsed) + "/" + std::to_string(foodCap),
+                             dispatchAnyChanged_);
+    }
+}
+
+void UIDataBinder::OnHudUpkeepChanged(const engine::ui::HudViewModel& vm) {
+    const int upkeep = vm.UpkeepLevel();
+    const std::string& upkeepLabel = vm.UpkeepLabel();
+    if (!lastState_.initialized || upkeep != lastState_.upkeepLevel || upkeepLabel != lastState_.upkeepLabel) {
+        lastState_.upkeepLevel = upkeep;
+        lastState_.upkeepLabel = upkeepLabel;
+        ApplyTextFrameUpdate(upkeepFrame_, upkeepLabel, dispatchAnyChanged_);
+    }
+}
+
+void UIDataBinder::OnHudSelectionChanged(const engine::ui::HudViewModel& vm) {
+    const int selectedHandle = vm.SelectedHandle();
+    const std::string& unitName = vm.SelectedName();
+    if (!lastState_.initialized || selectedHandle != lastState_.selectedUnitHandle ||
+        unitName != lastState_.selectedUnitName) {
+        lastState_.selectedUnitHandle = selectedHandle;
+        lastState_.selectedUnitName = unitName;
+        ApplyTextFrameUpdate(unitNameFrame_, unitName, dispatchAnyChanged_);
+    }
+}
+
+void UIDataBinder::OnHudVitalsChanged(const engine::ui::HudViewModel& vm) {
+    const int hp = vm.Hp();
+    const int maxHp = vm.MaxHp();
+    const int mp = vm.Energy();
+    const int maxMp = vm.MaxEnergy();
+
+    if (!lastState_.initialized || hp != lastState_.selectedUnitHp || maxHp != lastState_.selectedUnitMaxHp) {
+        lastState_.selectedUnitHp = hp;
+        lastState_.selectedUnitMaxHp = maxHp;
+        ApplyTextFrameUpdate(
+            unitHpFrame_,
+            currentHasSelectedUnit_ ? (std::to_string(hp) + " / " + std::to_string(maxHp)) : "",
+            dispatchAnyChanged_);
+    }
+    if (!lastState_.initialized || mp != lastState_.selectedUnitMana || maxMp != lastState_.selectedUnitMaxMana) {
+        lastState_.selectedUnitMana = mp;
+        lastState_.selectedUnitMaxMana = maxMp;
+        ApplyTextFrameUpdate(
+            unitManaFrame_,
+            (currentHasSelectedUnit_ && maxMp > 0) ? (std::to_string(mp) + " / " + std::to_string(maxMp)) : "",
+            dispatchAnyChanged_);
+    }
+}
+
+void UIDataBinder::OnHudCustomPropertiesChanged(const engine::ui::HudViewModel& vm) {
+    for (auto& cp : customProperties_) {
+        const std::string val = vm.GetCustomProperty(cp.key);
+        if (!cp.initialized || val != cp.lastValue) {
+            cp.initialized = true;
+            cp.lastValue = val;
+            ApplyTextFrameUpdate(cp.frame, val, dispatchAnyChanged_);
+        }
+    }
+}
+
 bool UIDataBinder::SyncAndRelayoutIfChanged(const CSimulation& sim,
                                             int localPlayerIndex,
                                             int selectedUnitHandle,
                                             GameUI& gui) {
     stats_.totalSyncCalls++;
-    bool anyChanged = false;
+    dispatchAnyChanged_ = false;
 
     const CPlayer* player = sim.GetPlayer(localPlayerIndex);
     const int gold = player ? player->GetGold() : 0;
@@ -80,87 +168,55 @@ bool UIDataBinder::SyncAndRelayoutIfChanged(const CSimulation& sim,
         ? mod->GetUpkeepDisplayLabel(upkeep)
         : ((upkeep == 2) ? "High Upkeep" : (upkeep == 1) ? "Low Upkeep" : "No Upkeep");
 
-    if (!lastState_.initialized || gold != lastState_.gold) {
-        lastState_.gold = gold;
-        ApplyTextFrameUpdate(goldFrame_, std::to_string(gold), anyChanged);
-    } else {
-        stats_.skippedRedundantFieldChecks++;
-    }
-
-    if (!lastState_.initialized || lumber != lastState_.lumber) {
-        lastState_.lumber = lumber;
-        ApplyTextFrameUpdate(lumberFrame_, std::to_string(lumber), anyChanged);
-    } else {
-        stats_.skippedRedundantFieldChecks++;
-    }
-
-    if (!lastState_.initialized || foodUsed != lastState_.foodUsed || foodCap != lastState_.foodCap) {
-        lastState_.foodUsed = foodUsed;
-        lastState_.foodCap = foodCap;
-        ApplyTextFrameUpdate(foodFrame_, std::to_string(foodUsed) + "/" + std::to_string(foodCap), anyChanged);
-    } else {
-        stats_.skippedRedundantFieldChecks++;
-    }
-
-    if (!lastState_.initialized || upkeep != lastState_.upkeepLevel || upkeepLabel != lastState_.upkeepLabel) {
-        lastState_.upkeepLevel = upkeep;
-        lastState_.upkeepLabel = upkeepLabel;
-        ApplyTextFrameUpdate(upkeepFrame_, upkeepLabel, anyChanged);
-    } else {
-        stats_.skippedRedundantFieldChecks++;
-    }
-
     const CUnit* sel = (selectedUnitHandle > 0) ? sim.GetUnit(selectedUnitHandle) : nullptr;
+    currentHasSelectedUnit_ = (sel != nullptr);
     const std::string unitName = (sel && sel->GetUnitType()) ? sel->GetUnitType()->GetName() : "";
     const int hp = sel ? static_cast<int>(std::round(sel->GetLife())) : 0;
     const int maxHp = sel ? static_cast<int>(std::round(sel->GetMaxLife())) : 0;
     const int mp = sel ? static_cast<int>(std::round(sel->GetMana())) : 0;
     const int maxMp = sel ? sel->GetMaxMana() : 0;
 
-    if (!lastState_.initialized || selectedUnitHandle != lastState_.selectedUnitHandle ||
-        unitName != lastState_.selectedUnitName) {
-        lastState_.selectedUnitHandle = selectedUnitHandle;
-        lastState_.selectedUnitName = unitName;
-        ApplyTextFrameUpdate(unitNameFrame_, unitName, anyChanged);
-    } else {
-        stats_.skippedRedundantFieldChecks++;
+    // Count redundant field checks accurately before dispatching MVVM notifications
+    if (lastState_.initialized) {
+        if (gold == lastState_.gold) stats_.skippedRedundantFieldChecks++;
+        if (lumber == lastState_.lumber) stats_.skippedRedundantFieldChecks++;
+        if (foodUsed == lastState_.foodUsed && foodCap == lastState_.foodCap) stats_.skippedRedundantFieldChecks++;
+        if (upkeep == lastState_.upkeepLevel && upkeepLabel == lastState_.upkeepLabel) stats_.skippedRedundantFieldChecks++;
+        if (selectedUnitHandle == lastState_.selectedUnitHandle && unitName == lastState_.selectedUnitName) {
+            stats_.skippedRedundantFieldChecks++;
+        }
+        if (hp == lastState_.selectedUnitHp && maxHp == lastState_.selectedUnitMaxHp) stats_.skippedRedundantFieldChecks++;
+        if (mp == lastState_.selectedUnitMana && maxMp == lastState_.selectedUnitMaxMana) stats_.skippedRedundantFieldChecks++;
     }
 
-    if (!lastState_.initialized || hp != lastState_.selectedUnitHp || maxHp != lastState_.selectedUnitMaxHp) {
-        lastState_.selectedUnitHp = hp;
-        lastState_.selectedUnitMaxHp = maxHp;
-        ApplyTextFrameUpdate(unitHpFrame_, sel ? (std::to_string(hp) + " / " + std::to_string(maxHp)) : "", anyChanged);
-    } else {
-        stats_.skippedRedundantFieldChecks++;
-    }
-
-    if (!lastState_.initialized || mp != lastState_.selectedUnitMana || maxMp != lastState_.selectedUnitMaxMana) {
-        lastState_.selectedUnitMana = mp;
-        lastState_.selectedUnitMaxMana = maxMp;
-        ApplyTextFrameUpdate(unitManaFrame_, (sel && maxMp > 0) ? (std::to_string(mp) + " / " + std::to_string(maxMp)) : "", anyChanged);
-    } else {
-        stats_.skippedRedundantFieldChecks++;
-    }
+    hudViewModel_.SetPrimaryResource(gold);
+    hudViewModel_.SetSecondaryResource(lumber);
+    hudViewModel_.SetSupply(foodUsed, foodCap);
+    hudViewModel_.SetUpkeep(upkeep, upkeepLabel);
+    hudViewModel_.SetSelectedEntity(selectedUnitHandle, unitName);
+    hudViewModel_.SetSelectedVitals(hp, maxHp, mp, maxMp);
 
     for (auto& cp : customProperties_) {
         if (!cp.getter) continue;
         const std::string val = cp.getter(sim, localPlayerIndex, selectedUnitHandle);
-        if (!cp.initialized || val != cp.lastValue) {
-            cp.initialized = true;
-            cp.lastValue = val;
-            ApplyTextFrameUpdate(cp.frame, val, anyChanged);
-        } else {
+        if (cp.initialized && val == cp.lastValue) {
             stats_.skippedRedundantFieldChecks++;
         }
+        hudViewModel_.SetCustomProperty(cp.key, val);
     }
 
+    if (!lastState_.initialized) {
+        hudViewModel_.MarkAllDirty();
+    }
+
+    hudBinder_.Dispatch(hudViewModel_);
     lastState_.initialized = true;
 
-    if (anyChanged && gui.rootFrame && gui.rootFrame->IsLayoutDirty()) {
+    if (dispatchAnyChanged_ && gui.rootFrame && gui.rootFrame->IsLayoutDirty()) {
         gui.rootFrame->PositionBounds(gui);
         stats_.layoutPassesTriggered++;
     }
-    return anyChanged;
+    return dispatchAnyChanged_;
 }
 
 } // namespace ui

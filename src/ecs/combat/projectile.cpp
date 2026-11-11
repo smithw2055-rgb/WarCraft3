@@ -173,7 +173,7 @@ bool CProjectile::Update(CSimulation& sim) {
                 return terminate;
             }
         } else if (checkEffectReaction) {
-            if (auto* victim = dynamic_cast<CUnit*>(target)) {
+            if (auto* victim = ((target) ? (target)->AsUnit() : nullptr)) {
                 if (!victim->CheckSpellEffectReaction(sim, source)) return true;
             }
         }

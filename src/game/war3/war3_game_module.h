@@ -80,7 +80,7 @@ public:
 
     // --- engine::ISimulationModule interface ---
     const char* GetModuleId() const override { return kModuleId; }
-    uint32_t GetModuleVersion() const override { return 32u; }
+    uint32_t GetModuleVersion() const override { return 33u; }
 
     void OnAttachToSimulation(CSimulation& sim) override;
     void OnDetachFromSimulation(CSimulation& sim) override;
@@ -607,6 +607,13 @@ public:
                                                 float& outScaleMultiplier,
                                                 uint32_t& outTintRgba) const override;
 
+    // Phase 33 (Track E + F): Pluggable Tileset Environment Fog, Water & MIDI Profile
+    void RegisterTilesetEnvironmentProfile(const TilesetEnvironmentProfile& profile);
+    bool UnregisterTilesetEnvironmentProfile(char tilesetCode);
+    bool HasTilesetEnvironmentProfile(char tilesetCode) const;
+    bool OnResolveTilesetEnvironmentProfile(char tilesetCode,
+                                            TilesetEnvironmentProfile& outProfile) const override;
+
     float GetNegativeBuffDurationMultiplier(const CUnit& target) const override;
 
     bool OnCheckSpellEffectReaction(CSimulation& sim,
@@ -690,6 +697,7 @@ private:
     std::unordered_map<uint32_t, SpellArchetypeRule> customSpellArchetypeRules_;
     std::unordered_map<std::string, CustomScriptNativeFn> customScriptNatives_;
     std::unordered_map<uint32_t, UnitVisualTintRule> customUnitVisualTintRules_;
+    std::unordered_map<char, TilesetEnvironmentProfile> customTilesetProfiles_;
 };
 
 } // namespace war3

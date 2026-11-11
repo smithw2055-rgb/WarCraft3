@@ -20,7 +20,11 @@ public:
         bool valid = false;
     };
 
-    ButtonFrame(const std::string& name, UIFrame* parent = nullptr);
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::Button;
+
+    ButtonFrame(const std::string& name,
+                UIFrame* parent = nullptr,
+                engine::ui::FrameKind leafKind = engine::ui::FrameKind::Button);
 
     void SetText(const std::string& t) { text_ = t; }
     const std::string& GetText() const { return text_; }

@@ -1,7 +1,7 @@
 #include "asset/BLP.h"
 #include "asset/DDS.h"
 #include "asset/MipChain.h"
-#include "asset/stb_image.h"
+#include "stb/stb_image.h"
 
 #include <cstdint>
 #include <vector>

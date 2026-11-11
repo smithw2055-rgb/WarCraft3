@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <typeindex>
+#include "engine/core/type_id.h"
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -121,7 +121,7 @@ public:
 
     template <typename T>
     SparseComponentPool<T>& Pool() {
-        const std::type_index key(typeid(T));
+        const engine::TypeId key = engine::StaticTypeId<T>();
         auto it = pools_.find(key);
         if (it == pools_.end()) {
             auto pool = std::make_unique<SparseComponentPool<T>>();
@@ -134,7 +134,7 @@ public:
 
     template <typename T>
     const SparseComponentPool<T>* TryPool() const {
-        const std::type_index key(typeid(T));
+        const engine::TypeId key = engine::StaticTypeId<T>();
         auto it = pools_.find(key);
         if (it == pools_.end()) return nullptr;
         return static_cast<const SparseComponentPool<T>*>(it->second.get());
@@ -200,5 +200,5 @@ public:
     }
 
 private:
-    std::unordered_map<std::type_index, std::unique_ptr<ISparseComponentPool>> pools_;
+    std::unordered_map<engine::TypeId, std::unique_ptr<ISparseComponentPool>> pools_;
 };

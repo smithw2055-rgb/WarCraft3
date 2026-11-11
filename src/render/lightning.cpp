@@ -1,6 +1,5 @@
 #include "lightning.h"
-#include "render/renderer.h"
-#include "render/shader.h"
+#include "render/rhi_device.h"
 #include "resource/slk.h"
 
 #include <algorithm>

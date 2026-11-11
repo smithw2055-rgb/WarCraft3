@@ -48,7 +48,7 @@ void CBehaviorRepair::RefreshRepairRates() {
     lumberPerUpdate_ = 0.0f;
     hpPerUpdate_ = 0.0f;
 
-    auto* targetUnit = dynamic_cast<CUnit*>(target_);
+    auto* targetUnit = ((target_) ? (target_)->AsUnit() : nullptr);
     if (!repairAbility_ || !targetUnit) {
         return;
     }
@@ -105,7 +105,7 @@ bool CBehaviorRepair::Update(CSimulation& simulation) {
         return true;
     }
 
-    auto* targetUnit = dynamic_cast<CUnit*>(target_);
+    auto* targetUnit = ((target_) ? (target_)->AsUnit() : nullptr);
     if (!targetUnit || targetUnit->IsDead() || targetUnit->GetLife() >= targetUnit->GetMaxLife()) {
         propelling_ = false;
         movingToTarget_ = false;

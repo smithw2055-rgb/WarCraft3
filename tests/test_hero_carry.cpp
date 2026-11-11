@@ -9,7 +9,7 @@
 #include "data/unitdata.h"
 #include "ecs/abilities/ability_hero.h"
 #include "ecs/abilities/ability_inventory.h"
-#include "ecs/abilities/spells.h"
+#include "game/war3/abilities/war3_spells.h"
 #include "ecs/csimulation.h"
 #include "ecs/hero_carry.h"
 #include "ecs/item.h"

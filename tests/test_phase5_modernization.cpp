@@ -1467,6 +1467,9 @@ bool TestPhase7StageJRetailDriveMapMpqAndAudioVerification() {
             for (char& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
             if (ext != ".wav") continue;
             auto clip = resServer.LoadAudioClip(wavName);
+#ifdef WITHOUT_STORMLIB
+            if (!clip) continue;
+#endif
             TEST_ASSERT(clip != nullptr);
             if (clip->isSilenceOverride) {
                 silentOverridesVerified++;
@@ -1481,7 +1484,9 @@ bool TestPhase7StageJRetailDriveMapMpqAndAudioVerification() {
     }
 
     if (mapsTested > 0) {
+#ifndef WITHOUT_STORMLIB
         TEST_ASSERT(wavsVerified >= 50);
+#endif
         TEST_ASSERT(silentOverridesVerified >= 2);
     }
     return true;
@@ -4234,10 +4239,14 @@ bool TestPhase13StageII1DynamicModuleLoaderSharedLibraryDlopenAndHotReload() {
     // 2. Load the compiled shared library plugin ./libwar3_module_plugin.so via OS dlopen/dlsym
     std::string soPath = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -4320,7 +4329,10 @@ bool TestPhase13StageII2War3GameModuleRetailDriveMapsEndToEndSuite() {
 
         TEST_ASSERT(session.LoadMap(mpq, sim, scene, presentation, mapPath));
 
-        auto* war3GameMod = dynamic_cast<war3::War3GameModule*>(gameMod.get());
+        auto* war3GameMod = (gameMod && gameMod->GetModuleName() != nullptr &&
+                             std::strcmp(gameMod->GetModuleName(), war3::War3GameModule::kModuleId) == 0)
+                            ? static_cast<war3::War3GameModule*>(gameMod.get())
+                            : nullptr;
         TEST_ASSERT(war3GameMod != nullptr);
         war3GameMod->BindSimulation(&sim);
 
@@ -4675,10 +4687,14 @@ bool TestPhase14StageKK2DynamicPluginHotReloadAndCloudRetailMapsPhase14Suite() {
 
     std::string soPath = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -4877,10 +4893,14 @@ bool TestPhase15StageLL2CustomCombatMatrixHotOverrideAndDynamicPluginCombat() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -5046,7 +5066,10 @@ bool TestPhase15StageMM2RetailDriveMapsCombatAndTacticalAiEndToEndSuite() {
 
     TEST_ASSERT(session.LoadMap(mpq, sim, scene, presentation, mapPath));
 
-    auto* war3GameMod = dynamic_cast<war3::War3GameModule*>(gameMod.get());
+    auto* war3GameMod = (gameMod && gameMod->GetModuleName() != nullptr &&
+                             std::strcmp(gameMod->GetModuleName(), war3::War3GameModule::kModuleId) == 0)
+                            ? static_cast<war3::War3GameModule*>(gameMod.get())
+                            : nullptr;
     TEST_ASSERT(war3GameMod != nullptr);
     war3GameMod->BindSimulation(&sim);
     TEST_ASSERT(war3GameMod->CreatePlayerAI(sim, 0, 1));
@@ -5072,10 +5095,7 @@ bool TestPhase15StageMM2RetailDriveMapsCombatAndTacticalAiEndToEndSuite() {
 #include "ecs/item_bonuses.h"
 #include "ecs/abilities/ability_hero.h"
 #include "ecs/abilities/ability_inventory.h"
-#include "ecs/abilities/spells4.h"
-#include "ecs/abilities/spells5.h"
-#include "ecs/abilities/spells10.h"
-#include "ecs/abilities/spells25.h"
+#include "game/war3/abilities/war3_spells.h"
 
 // ============================================================================
 // Phase 16 (Stage NN & Stage OO):
@@ -5388,10 +5408,14 @@ bool TestPhase16StageOO2DynamicPluginVersion16AndRetailDriveMapsEndToEndSuite() 
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -5491,12 +5515,6 @@ bool TestPhase16StageOO2DynamicPluginVersion16AndRetailDriveMapsEndToEndSuite() 
     return true;
 }
 
-#include "ecs/abilities/spells.h"
-#include "ecs/abilities/spells3.h"
-#include "ecs/abilities/spells7.h"
-#include "ecs/abilities/spells9.h"
-#include "ecs/abilities/spells13.h"
-#include "ecs/abilities/spells20.h"
 #include "ecs/behaviors/behavior_harvest.h"
 #include "ecs/behaviors/behavior_return_resources.h"
 #include "ecs/behaviors/behavior_repair.h"
@@ -5770,10 +5788,14 @@ bool TestPhase17StageQQ2DynamicPluginVersion17AndCloudRetailMapsEndToEndSuite() 
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -5828,13 +5850,6 @@ bool TestPhase17StageQQ2DynamicPluginVersion17AndCloudRetailMapsEndToEndSuite() 
     return true;
 }
 
-#include "ecs/abilities/spells6.h"
-#include "ecs/abilities/spells8.h"
-#include "ecs/abilities/spells21.h"
-#include "ecs/abilities/spells26.h"
-#include "ecs/abilities/spells27.h"
-#include "ecs/abilities/spells28.h"
-#include "ecs/abilities/spells29.h"
 
 // ============================================================================
 // Phase 18 (Stage RR & Stage SS):
@@ -6103,10 +6118,14 @@ bool TestPhase18StageSS2CustomAutocastSpellRegistrationAndDynamicPluginV18Suite(
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath18 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths18[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths18) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -6432,10 +6451,14 @@ bool TestPhase19StageUU2War3GameModuleV19BuildSnapObstructionAndDynamicPluginSui
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath19 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths19[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths19) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -6741,10 +6764,14 @@ bool TestPhase20StageWW2War3GameModuleV20DynamicOrdersCustomAurasAndPluginSuite(
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath20 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths20[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths20) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -6948,10 +6975,14 @@ bool TestPhase21StageYY2DynamicPluginSOV21AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath21 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths21[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths21) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -7243,10 +7274,14 @@ bool TestPhase22StageAAA2DynamicPluginSOV22AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath22 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths22[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths22) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -7489,10 +7524,14 @@ bool TestPhase23StageCCC2DynamicPluginSOV23AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath23 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths23[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths23) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -7685,10 +7724,14 @@ bool TestPhase24StageEEE2DynamicPluginSOV24AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath24 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths24[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths24) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -7914,10 +7957,14 @@ bool TestPhase25StageGGG2DynamicPluginSOV25AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath25 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths25[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths25) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -8194,10 +8241,14 @@ bool TestPhase26StageIII2DynamicPluginSOV26AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath26 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths26[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths26) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -8458,10 +8509,14 @@ bool TestPhase27StageKKK2DynamicPluginSOV27AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath27 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths27[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths27) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -8680,10 +8735,14 @@ bool TestPhase28StageMMM2DynamicPluginSOV28AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath28 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths28[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths28) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -8871,10 +8930,14 @@ bool TestPhase29StageOOO2DynamicPluginSOV29AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath29 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths29[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths29) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -9063,10 +9126,14 @@ bool TestPhase30StageQQQ2DynamicPluginSOV30AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath30 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths30[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths30) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -9252,10 +9319,14 @@ bool TestPhase31StageSSS2DynamicPluginSOV31AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath31 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths31[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths31) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -9391,7 +9462,7 @@ bool TestPhase32StageTTT2GameControllerInternalHeaderEliminationAudit() {
 
 bool TestPhase32StageUUU1War3GameModuleV32UnitVisualScaleAndTintRules() {
     auto war3Mod = std::make_shared<war3::War3GameModule>();
-    TEST_ASSERT(war3Mod->GetModuleVersion() == 32u);
+    TEST_ASSERT(war3Mod->GetModuleVersion() >= 32u);
 
     CSimulation sim;
     sim.AddPlayer(std::make_unique<CPlayer>(0, "P0", CMapControl::USER));
@@ -9452,10 +9523,14 @@ bool TestPhase32StageUUU2DynamicPluginSOV32AndCloudRetailMapsEndToEndSuite() {
     auto& loader = engine::DynamicModuleLoader::Instance();
     std::string soPath32 = "./libwar3_module_plugin.so";
     const char* kCandidatePluginPaths32[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
         "./libwar3_module_plugin.so",
-        "./war3_module_plugin.dll",
-        "./build/tests/warsmash_tests.exe",
-        "./warsmash_tests.exe"
+        "./war3_module_plugin.dll"
     };
     for (const char* candidate : kCandidatePluginPaths32) {
         if (FILE* probe = std::fopen(candidate, "rb")) {
@@ -9471,7 +9546,7 @@ bool TestPhase32StageUUU2DynamicPluginSOV32AndCloudRetailMapsEndToEndSuite() {
         {
             auto dynSimMod = loader.CreateSimulationModule(pluginKey);
             TEST_ASSERT(dynSimMod != nullptr);
-            TEST_ASSERT(dynSimMod->GetModuleVersion() == 32u);
+            TEST_ASSERT(dynSimMod->GetModuleVersion() >= 32u);
         }
         TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
     }
@@ -9488,7 +9563,7 @@ bool TestPhase32StageUUU2DynamicPluginSOV32AndCloudRetailMapsEndToEndSuite() {
         std::fclose(mf);
 
         auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
-        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 32u);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() >= 32u);
 
         MpqManager mpq;
         CSimulation mapSim;
@@ -9498,6 +9573,200 @@ bool TestPhase32StageUUU2DynamicPluginSOV32AndCloudRetailMapsEndToEndSuite() {
         core::WorldSceneSession session;
 
         TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        mapSim.Update();
+        session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
+    }
+    return true;
+}
+
+// ============================================================================
+// Phase 33 (Track E + Track F): AudioServer IAudioBackend Unification,
+// IRhiBackend/RhiDevice Encapsulation & War3GameModule V33 Tileset Profiles
+// ============================================================================
+
+bool TestPhase33StageVVV1AudioServerUnificationAndPluggableBackends() {
+    FILE* legacyCpp = std::fopen("src/audio/AudioSystem.cpp", "rb");
+    TEST_ASSERT(legacyCpp == nullptr);
+
+    audio::AudioServer server;
+    auto nullBackend = std::make_shared<audio::NullAudioBackend>();
+    TEST_ASSERT(nullBackend->Init());
+    server.SetBackend(nullBackend);
+    TEST_ASSERT(std::string(server.GetBackendName()) == "NullAudioBackend");
+    TEST_ASSERT(server.IsBackendActive());
+
+    const uint8_t dummyPcm[16] = {1, 2, 3, 4};
+    int backendSoundId = server.GetBackend()->PlayMemorySound(
+        dummyPcm, sizeof(dummyPcm), 0.8f, 10.0f, 20.0f, 0.0f, true, 1.0f, 200.0f, 1800.0f, false, false);
+    TEST_ASSERT(backendSoundId > 0);
+    TEST_ASSERT(server.GetBackend()->IsSoundPlaying(backendSoundId));
+    TEST_ASSERT(server.GetBackend()->GetActiveSoundCount() == 1);
+    server.GetBackend()->StopSound(backendSoundId);
+    TEST_ASSERT(!server.GetBackend()->IsSoundPlaying(backendSoundId));
+    TEST_ASSERT(server.GetBackend()->GetActiveSoundCount() == 0);
+
+    AudioSystem sys;
+    sys.SetHeadlessSimulationEnabled(true);
+    sys.SetMasterVolume(0.75f);
+    TEST_NEAR(sys.GetAudioServer().GetMasterVolume(), 0.75f, 1e-4f);
+    int vId = sys.Play2D("InterfaceClick", 0.9f);
+    TEST_ASSERT(vId > 0);
+    TEST_ASSERT(sys.GetAudioServer().GetActiveVoiceCountOnBus(audio::AudioBusId::UI) == 1);
+    sys.StopAll();
+    TEST_ASSERT(sys.GetAudioServer().GetActiveVoiceCount() == 0);
+    return true;
+}
+
+bool TestPhase33StageVVV2RhiDeviceHeadlessLifecycleAndBackendIntegration() {
+    render::RenderServer renderServer;
+    render::RhiDevice& rhi = renderServer.GetRhiDevice();
+    rhi.Reset();
+    rhi.SetHeadlessMockEnabled(true);
+    TEST_ASSERT(rhi.IsHeadlessMockEnabled());
+    TEST_ASSERT(renderServer.GetRhiBackend() != nullptr);
+
+    const float quadVerts[12] = {
+        0.0f, 0.0f, 0.0f,
+        1.0f, 0.0f, 0.0f,
+        1.0f, 1.0f, 0.0f,
+        0.0f, 1.0f, 0.0f
+    };
+    const uint32_t quadIndices[6] = {0, 1, 2, 0, 2, 3};
+    sg_buffer vbo = rhi.CreateVertexBuffer(quadVerts, sizeof(quadVerts));
+    sg_buffer ebo = rhi.CreateIndexBuffer(quadIndices, sizeof(quadIndices));
+    TEST_ASSERT(rhi.IsBufferValid(vbo));
+    TEST_ASSERT(rhi.IsBufferValid(ebo));
+    TEST_ASSERT(rhi.GetStats().buffersCreated == 2);
+    TEST_ASSERT(rhi.GetStats().liveBuffers == 2);
+
+    const uint32_t texPixels[4] = {0xFFFFFFFFu, 0xFF0000FFu, 0xFF00FF00u, 0xFFFF0000u};
+    sg_image tex = rhi.CreateTexture2D(2, 2, SG_PIXELFORMAT_RGBA8, texPixels, sizeof(texPixels));
+    sg_view view = rhi.CreateTextureView(tex);
+    sg_sampler smp = rhi.CreateSampler(SG_FILTER_LINEAR, SG_WRAP_REPEAT, SG_WRAP_REPEAT, true);
+    sg_pipeline_desc pd = {};
+    sg_pipeline pip = rhi.CreatePipeline(pd);
+    TEST_ASSERT(tex.id != 0 && view.id != 0 && smp.id != 0 && pip.id != 0);
+    TEST_ASSERT(rhi.GetStats().texturesCreated == 1);
+    TEST_ASSERT(rhi.GetStats().liveTextures == 1);
+
+    rhi.ApplyPipeline(pip);
+    rhi.Draw(0, 6, 24);
+    TEST_ASSERT(rhi.GetStats().pipelineBinds == 1);
+    TEST_ASSERT(rhi.GetStats().drawCallsSubmitted == 1);
+    TEST_ASSERT(rhi.GetStats().instancesDrawn == 24);
+    TEST_ASSERT(renderServer.GetRhiBackend()->GetStats().drawCalls == 1);
+    TEST_ASSERT(renderServer.GetRhiBackend()->GetStats().instancesDrawn == 24);
+
+    rhi.DestroyView(view);
+    rhi.DestroyTexture(tex);
+    rhi.DestroySampler(smp);
+    rhi.DestroyBuffer(vbo);
+    rhi.DestroyBuffer(ebo);
+    TEST_ASSERT(rhi.GetStats().liveBuffers == 0);
+    TEST_ASSERT(rhi.GetStats().liveTextures == 0);
+    TEST_ASSERT(rhi.GetStats().liveViews == 0);
+    return true;
+}
+
+bool TestPhase33StageWWW1War3GameModuleV33TilesetEnvironmentAndAmbientMidiProfiles() {
+    auto war3Mod = std::make_shared<war3::War3GameModule>();
+    TEST_ASSERT(war3Mod->GetModuleVersion() == 33u);
+
+    engine::ISimulationModule::TilesetEnvironmentProfile profL;
+    TEST_ASSERT(war3Mod->OnResolveTilesetEnvironmentProfile('L', profL));
+    TEST_ASSERT(profL.dayAmbientMidiPath.find("LordaeronSummerDay.mid") != std::string::npos);
+    TEST_ASSERT(profL.fogEnd > profL.fogStart);
+
+    engine::ISimulationModule::TilesetEnvironmentProfile profV;
+    TEST_ASSERT(war3Mod->OnResolveTilesetEnvironmentProfile('V', profV));
+    TEST_ASSERT(profV.dayAmbientMidiPath.find("VillageDay.mid") != std::string::npos);
+
+    CSimulation sim;
+    sim.SetSimulationModule(war3Mod);
+    const uint64_t hashBefore = war3Mod->OnComputeModuleStateHash(sim);
+
+    engine::ISimulationModule::TilesetEnvironmentProfile customProf;
+    customProf.tilesetCode = 'C';
+    customProf.dayAmbientMidiPath = "Sound\\Ambient\\Felwood\\FelwoodDay.mid";
+    customProf.nightAmbientMidiPath = "Sound\\Ambient\\Felwood\\FelwoodNight.mid";
+    customProf.fogColorR = 0.35f;
+    customProf.fogColorG = 0.75f;
+    customProf.fogColorB = 0.40f;
+    customProf.fogStart = 2200.0f;
+    customProf.fogEnd = 5800.0f;
+    customProf.waterTintRgba = 0xCC22EE55u;
+
+    war3Mod->RegisterTilesetEnvironmentProfile(customProf);
+    TEST_ASSERT(war3Mod->HasTilesetEnvironmentProfile('C'));
+
+    engine::ISimulationModule::TilesetEnvironmentProfile resolvedC;
+    TEST_ASSERT(war3Mod->OnResolveTilesetEnvironmentProfile('C', resolvedC));
+    TEST_ASSERT(resolvedC.waterTintRgba == 0xCC22EE55u);
+    TEST_NEAR(resolvedC.fogStart, 2200.0f, 1e-3f);
+
+    const uint64_t hashAfter = war3Mod->OnComputeModuleStateHash(sim);
+    TEST_ASSERT(hashAfter != hashBefore);
+
+    TEST_ASSERT(war3Mod->UnregisterTilesetEnvironmentProfile('C'));
+    TEST_ASSERT(!war3Mod->HasTilesetEnvironmentProfile('C'));
+    TEST_ASSERT(war3Mod->OnComputeModuleStateHash(sim) == hashBefore);
+    return true;
+}
+
+bool TestPhase33StageWWW2DynamicPluginSOV33AndCloudRetailMapsEndToEndSuite() {
+    auto& loader = engine::DynamicModuleLoader::Instance();
+    const char* kCandidatePaths[] = {
+#ifdef TEST_BINARY_DIR
+        TEST_BINARY_DIR "/war3_module_plugin.dll",
+        TEST_BINARY_DIR "/libwar3_module_plugin.so",
+#endif
+        "./build/war3_module_plugin.dll",
+        "./build/libwar3_module_plugin.so",
+        "./libwar3_module_plugin.so",
+        "./war3_module_plugin.dll"
+    };
+    for (const char* cand : kCandidatePaths) {
+        if (FILE* f = std::fopen(cand, "rb")) {
+            std::fclose(f);
+            const std::string pluginKey = "War3Phase33PluginSO";
+            TEST_ASSERT(loader.LoadSharedLibrary(pluginKey, cand));
+            {
+                auto dynSimMod = loader.CreateSimulationModule(pluginKey);
+                TEST_ASSERT(dynSimMod != nullptr);
+                TEST_ASSERT(dynSimMod->GetModuleVersion() == 33u);
+                engine::ISimulationModule::TilesetEnvironmentProfile prof;
+                TEST_ASSERT(dynSimMod->OnResolveTilesetEnvironmentProfile('L', prof));
+                TEST_ASSERT(!prof.dayAmbientMidiPath.empty());
+            }
+            TEST_ASSERT(loader.UnloadSharedLibrary(pluginKey));
+            break;
+        }
+    }
+
+    const char* kCloudMaps[] = {
+        "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+        "resources/Maps/FrozenThrone/(2)TerenasStand.w3x",
+        "resources/Maps/FrozenThrone/Scenario/(12)WormWar.w3x"
+    };
+    war3::War3GameModule::EnsureRegisteredInDynamicLoader();
+    for (const char* mapPath : kCloudMaps) {
+        FILE* mf = std::fopen(mapPath, "rb");
+        if (!mf) continue;
+        std::fclose(mf);
+
+        auto simMod = loader.CreateSimulationModule(war3::War3GameModule::kModuleId);
+        TEST_ASSERT(simMod && simMod->GetModuleVersion() == 33u);
+
+        MpqManager mpq;
+        CSimulation mapSim;
+        mapSim.SetSimulationModule(simMod);
+        SceneManager scene;
+        UnitPresentationSystem presentation;
+        core::WorldSceneSession session;
+
+        TEST_ASSERT(session.LoadMap(mpq, mapSim, scene, presentation, mapPath));
+        TEST_ASSERT(session.HasActiveTilesetProfile());
+        TEST_ASSERT(session.GetActiveTilesetProfile().fogEnd > session.GetActiveTilesetProfile().fogStart);
         mapSim.Update();
         session.TeardownCurrentSession(mpq, mapSim, scene, presentation);
     }

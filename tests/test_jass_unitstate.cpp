@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "ecs/abilities/ability_hero.h"
-#include "ecs/abilities/spells2.h"
+#include "game/war3/abilities/war3_spells.h"
 #include "ecs/buffs.h"
 #include "ecs/csimulation.h"
 #include "ecs/player.h"

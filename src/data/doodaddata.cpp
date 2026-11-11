@@ -1,9 +1,31 @@
 #include "doodaddata.h"
-#include "data/slk_merge.h"
-#include "map/object_mods.h"
-#include "resource/mpq_storm.h"
+
 #include <iostream>
 #include <set>
+#include <string>
+#include <unordered_map>
+
+#include "data/slk_merge.h"
+#include "engine/resource/table_schema_binder.h"
+#include "map/object_mods.h"
+#include "resource/mpq_storm.h"
+
+namespace {
+
+const engine::resource::TableSchemaBinder<CDoodadType>& GetDoodadSchemaBinder() {
+    static const auto kSchema = []() {
+        engine::resource::TableSchemaBinder<CDoodadType> binder;
+        binder.BindString("file", &CDoodadType::file, "");
+        binder.BindBool("walkable", &CDoodadType::walkable, false);
+        binder.BindString("pathTex", &CDoodadType::pathTex, "");
+        binder.BindBool("selectable", &CDoodadType::selectable, false);
+        binder.BindString("doodClass", &CDoodadType::doodClass, "");
+        return binder;
+    }();
+    return kSchema;
+}
+
+} // namespace
 
 CDoodadData CDoodadData::LoadFromMpq(const MpqManager& mpq,
                                      const std::string& mapPath) {
@@ -36,6 +58,16 @@ CDoodadData CDoodadData::LoadFromMpq(const MpqManager& mpq,
     auto colOf = [](const SlkTable& slk, const char* name) -> int {
         return slk.FindColumn(name);
     };
+
+    const auto& schema = GetDoodadSchemaBinder();
+    struct DoodadRowScratch {
+        std::string file;
+        std::string walkable;
+        std::string pathTex;
+        std::string selectable;
+        std::string doodClass;
+    } rowScratch;
+
     for (const std::string& sid : ids) {
         if (sid.size() != 4) continue;
         // Prefer the dedicated doodad row; fall back to destructable row.
@@ -58,14 +90,23 @@ CDoodadData CDoodadData::LoadFromMpq(const MpqManager& mpq,
             row = -1;
         }
 
+        rowScratch.file = GetMergedString(*srcSlk, row, colOf(*srcSlk, "file"), skinTbl, sid, "file");
+        rowScratch.walkable = GetMergedString(*srcSlk, row, colOf(*srcSlk, "walkable"), skinTbl, sid, "walkable");
+        rowScratch.pathTex = GetMergedString(*srcSlk, row, colOf(*srcSlk, "pathTex"), skinTbl, sid, "pathTex");
+        rowScratch.selectable = GetMergedString(*srcSlk, row, colOf(*srcSlk, "selectable"), skinTbl, sid, "selectable");
+        rowScratch.doodClass = GetMergedString(*srcSlk, row, colOf(*srcSlk, "doodClass"), skinTbl, sid, "doodClass");
+
         auto d = std::make_unique<CDoodadType>();
         d->id = War3ID::FromString(sid);
         d->name = GetMergedString(*srcSlk, row, colOf(*srcSlk, "Name"), skinTbl, sid, "Name", sid);
-        d->file = GetMergedString(*srcSlk, row, colOf(*srcSlk, "file"), skinTbl, sid, "file");
-        d->walkable = GetMergedInt(*srcSlk, row, colOf(*srcSlk, "walkable"), skinTbl, sid, "walkable", 0) != 0;
-        d->pathTex = GetMergedString(*srcSlk, row, colOf(*srcSlk, "pathTex"), skinTbl, sid, "pathTex");
-        d->selectable = GetMergedInt(*srcSlk, row, colOf(*srcSlk, "selectable"), skinTbl, sid, "selectable", 0) != 0;
-        d->doodClass = GetMergedString(*srcSlk, row, colOf(*srcSlk, "doodClass"), skinTbl, sid, "doodClass");
+        schema.HydrateRow(*d, [&](std::string_view col) -> std::string_view {
+            if (col == "file") return rowScratch.file;
+            if (col == "walkable") return rowScratch.walkable;
+            if (col == "pathTex") return rowScratch.pathTex;
+            if (col == "selectable") return rowScratch.selectable;
+            if (col == "doodClass") return rowScratch.doodClass;
+            return std::string_view{};
+        });
 
         data.doodads_[d->id] = std::move(d);
     }

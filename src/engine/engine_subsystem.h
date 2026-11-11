@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <typeindex>
+#include "engine/core/type_id.h"
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -75,7 +75,7 @@ public:
 
     template <typename T, typename... Args>
     T& Register(Args&&... args) {
-        const std::type_index key(typeid(T));
+        const TypeId key = StaticTypeId<T>();
         auto it = byType_.find(key);
         if (it != byType_.end()) {
             return *static_cast<T*>(it->second);
@@ -91,7 +91,7 @@ public:
 
     template <typename T>
     T* TryGet() const {
-        const auto it = byType_.find(std::type_index(typeid(T)));
+        const auto it = byType_.find(StaticTypeId<T>());
         return (it != byType_.end()) ? static_cast<T*>(it->second) : nullptr;
     }
 
@@ -189,7 +189,7 @@ private:
     }
 
     std::vector<std::unique_ptr<ISubsystem>> ordered_;
-    std::unordered_map<std::type_index, ISubsystem*> byType_;
+    std::unordered_map<TypeId, ISubsystem*> byType_;
     SubsystemRegistryStats stats_{};
 };
 

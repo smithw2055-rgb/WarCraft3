@@ -10,6 +10,7 @@
 
 #include "core/unit_presentation_system.h"
 #include "ecs/csimulation.h"
+#include "engine/simulation_module.h"
 #include "ecs/hero_carry.h"
 #include "map/unitsdoo.h"
 #include "map/w3d.h"
@@ -70,6 +71,10 @@ public:
     const render::TerrainChunkGrid& GetTerrainChunkGrid() const { return terrainChunks_; }
     const std::vector<CarriedHero>& GetCarriedHeroes() const { return carriedHeroes_; }
     const WorldSceneSessionStats& GetStats() const { return stats_; }
+    bool HasActiveTilesetProfile() const { return hasActiveTilesetProfile_; }
+    const engine::ISimulationModule::TilesetEnvironmentProfile& GetActiveTilesetProfile() const {
+        return activeTilesetProfile_;
+    }
 
 private:
     std::string currentMapPath_;
@@ -81,6 +86,8 @@ private:
     render::TerrainChunkGrid terrainChunks_;
     std::vector<CarriedHero> carriedHeroes_;
     WorldSceneSessionStats stats_{};
+    bool hasActiveTilesetProfile_ = false;
+    engine::ISimulationModule::TilesetEnvironmentProfile activeTilesetProfile_{};
 };
 
 } // namespace core

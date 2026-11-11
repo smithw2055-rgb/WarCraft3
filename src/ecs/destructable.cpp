@@ -6,7 +6,7 @@
 #include "map/wpm.h"
 
 CDestructable::CDestructable(int handleId, War3ID typeId, float x, float y, float life)
-    : CWidget(handleId, x, y, life), typeId_(typeId), invulnerable_(0), hidden_(0), blighted_(0), reservedFlags_(0) {}
+    : CWidget(handleId, x, y, life, engine::world::WidgetKind::Destructable), typeId_(typeId), invulnerable_(0), hidden_(0), blighted_(0), reservedFlags_(0) {}
 
 namespace {
 

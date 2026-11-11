@@ -9,6 +9,7 @@
 #include "light_manager.h"
 #include "splat_model.h"
 #include "render/render_graph.h"
+#include "engine/render/standard_render_passes.h"
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -141,6 +142,8 @@ public:
     int GetLastCulledCliffCount() const { return lastCulledCliffs_; }
     const render::TerrainChunkGrid& GetTerrainChunkGrid() const { return terrainChunkGrid_; }
     const render::TerrainCullStats& GetLastChunkCullStats() const { return lastChunkCullStats_; }
+    engine::render::TerrainOverlayState& GetOverlayState() { return overlayState_; }
+    const engine::render::TerrainOverlayState& GetOverlayState() const { return overlayState_; }
 
 private:
     void Release();
@@ -304,4 +307,6 @@ private:
     render::TerrainChunkGrid terrainChunkGrid_;
     render::TerrainCullStats lastChunkCullStats_{};
     std::vector<int> visibleTerrainChunks_;
+    engine::render::TerrainOverlayState overlayState_;
+    int nextShadowFootprintId_ = 1;
 };

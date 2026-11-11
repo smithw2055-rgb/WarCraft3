@@ -136,6 +136,10 @@ public:
 
     // Timing
     int GetGameTurnTick() const { return gameTurnTick_; }
+
+    // Stage 5: Chunked ESAV deterministic save/load archive API
+    std::vector<uint8_t> SaveDeterministicEsavArchive() const;
+    bool LoadDeterministicEsavArchive(const std::vector<uint8_t>& archiveBytes);
     float GetSimStepTime() const { return SIM_STEP_TIME; }
     static constexpr float SIM_STEP_TIME = 1.0f / 20.0f;
 

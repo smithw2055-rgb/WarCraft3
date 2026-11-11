@@ -47,7 +47,7 @@ bool CAbilityMove::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId, C
     if ((orderId != OrderIds::SMART) && (orderId != OrderIds::MOVE) && (orderId != OrderIds::PATROL)) {
         return false;
     }
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
+    auto* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
     return (targetUnit != nullptr) && (targetUnit != unit) && !targetUnit->IsDead();
 }
 
@@ -71,7 +71,7 @@ CBehavior* CAbilityMove::Begin(CSimulation& game, CUnit* caster, int orderId, CW
     // SMART right-click boarding: passenger walks to a friendly transport
     // with cargo space (ref CBehaviorLoad passenger perspective).
     if (orderId == OrderIds::SMART) {
-        if (auto* transport = dynamic_cast<CUnit*>(target)) {
+        if (auto* transport = ((target) ? (target)->AsUnit() : nullptr)) {
             if (transport != caster && !transport->IsDead() && !caster->IsBuilding() &&
                 !caster->IsLoadedAboard() &&
                 transport->GetPlayerIndex() == caster->GetPlayerIndex() &&

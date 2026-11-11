@@ -583,7 +583,16 @@ void GameController::WireJassCallbacks() {
                 w3i_.fogColor[2] / 255.0f, w3i_.fogDensity);
             dayNight_.SetMapFogRange(w3i_.fogHeight[0], w3i_.fogHeight[1]);
         } else {
-            dayNight_.SetMapFog(false, 0.5f, 0.5f, 0.5f, 0.0f);
+            engine::ISimulationModule::TilesetEnvironmentProfile tsProf;
+            const auto* simMod = simulation_.GetSimulationModule();
+            const char tsCode = map_.tileset ? map_.tileset : w3i_.tileset;
+            if (simMod && tsCode != 0 &&
+                simMod->OnResolveTilesetEnvironmentProfile(tsCode, tsProf)) {
+                dayNight_.SetMapFog(false, tsProf.fogColorR, tsProf.fogColorG, tsProf.fogColorB, 0.0f);
+                dayNight_.SetMapFogRange(tsProf.fogStart, tsProf.fogEnd);
+            } else {
+                dayNight_.SetMapFog(false, 0.5f, 0.5f, 0.5f, 0.0f);
+            }
         }
     };
     // Ref GetLocationZ reads the map terrain height; route JASS queries to
@@ -1241,7 +1250,7 @@ void GameController::SyncJassEffectVisuals() {
         if (idx < 0) {
             int player = 0;
             if (CWidget* w = simulation_.GetWidget(e->targetSimHandle)) {
-                if (auto* u = dynamic_cast<CUnit*>(w)) player = u->GetPlayerIndex();
+                if (auto* u = ((w) ? (w)->AsUnit() : nullptr)) player = u->GetPlayerIndex();
             }
             idx = scene_.AddAttachedModel(e->modelPath, player);
             if (idx < 0) continue; // model missing; retry next frame
@@ -1258,7 +1267,7 @@ void GameController::SyncJassEffectVisuals() {
             float angle = 0.0f;
             MdxViewer* viewer = nullptr;
             int viewerIdx = -1;
-            if (auto* u = dynamic_cast<CUnit*>(w)) {
+            if (auto* u = ((w) ? (w)->AsUnit() : nullptr)) {
                 angle = u->GetFacing();
                 h = unit_selection_geom::ComputeUnitVisualHeight(
                     *u, texturedTerrain_.IsValid(),
@@ -1637,6 +1646,24 @@ void GameController::UpdateMidiAmbient(float dt) {
         env = jassNatives_->GetData()->music.soundEnvironment;
     } else if (!w3i_.soundEnvironment.empty()) {
         env = w3i_.soundEnvironment;
+    }
+    engine::ISimulationModule::TilesetEnvironmentProfile tsAmbientProf;
+    bool hasTilesetAmbient = false;
+    if (const auto* simMod = simulation_.GetSimulationModule(); simMod != nullptr) {
+        const char tsCode = map_.tileset ? map_.tileset : w3i_.tileset;
+        if (tsCode != 0) {
+            hasTilesetAmbient = simMod->OnResolveTilesetEnvironmentProfile(tsCode, tsAmbientProf);
+        }
+    }
+    if (env.empty() && hasTilesetAmbient) {
+        const std::string& fallbackMidi =
+            simulation_.IsDaytime() ? tsAmbientProf.dayAmbientMidiPath : tsAmbientProf.nightAmbientMidiPath;
+        if (!fallbackMidi.empty() && mpq_.FileExists(fallbackMidi)) {
+            if (!audio_.IsMidiAmbientPlaying(fallbackMidi)) {
+                audio_.PlayMidiAmbient(fallbackMidi, &mpq_, 0.45f);
+            }
+            return;
+        }
     }
     if (env.empty()) {
         audio_.StopMidiAmbient();

@@ -278,7 +278,7 @@ void CAbilityEarthquake::DoEffect(CSimulation& game, CUnit* caster, float x, flo
     perUnit.Add(std::make_unique<ABActionIf>(
         std::make_shared<ABCondFunc>(
             [](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
                 return unit != nullptr && !unit->IsDead() && unit->IsBuilding();
             }),
         std::move(smash)));
@@ -302,7 +302,7 @@ void CAbilitySleep::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) 
     ABActionIf sleep(
         std::make_shared<ABCondFunc>(
             [](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
                 return unit != nullptr && !unit->IsDead() && unit->CanSleep();
             }),
         std::move(doze));
@@ -353,7 +353,7 @@ void CAbilityFingerOfDeath::DoEffect(CSimulation& game, CUnit* caster, CWidget* 
     ABActionIf finger(
         std::make_shared<ABCondFunc>(
             [](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
                 return unit != nullptr && unit->IsHero();
             }),
         std::move(heroic), std::move(lethal));
@@ -496,7 +496,7 @@ void CAbilityReincarnation::OnTick(CSimulation& game, CUnit* unit) {
 CAbilityCharm::CAbilityCharm(int handleId) : CAbilitySpellBase(handleId, War3ID("ANch"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(600.0f); SetCooldown(7.0f); SetManaCost(70); }
 void CAbilityCharm::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || target->IsDead()) return;
-    auto* victim = dynamic_cast<CUnit*>(target);
+    auto* victim = ((target) ? (target)->AsUnit() : nullptr);
     if (!victim) return;
     ABEffectChain convert;
     convert.Add(std::make_unique<ABActionTransferToCaster>());
@@ -504,7 +504,7 @@ void CAbilityCharm::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) 
         std::make_shared<ABCondFunc>(
             [maxLevel = maxLevel_](CSimulation&, CUnit*, CWidget* unitTarget,
                                    bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
                 if (!unit || unit->IsDead() || unit->IsHero()) return false;
                 const CUnitType* type = unit->GetUnitType();
                 return type == nullptr || type->GetLevel() <= maxLevel;
@@ -548,7 +548,7 @@ void CAbilityFaerieFire::ApplyEffectData(const CAbilityDefFull& def, int level) 
 CAbilityDeathPact::CAbilityDeathPact(int handleId) : CAbilitySpellBase(handleId, War3ID("AUdp"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(500.0f); SetCooldown(10.0f); SetManaCost(25); }
 void CAbilityDeathPact::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || target->IsDead() || target == caster) return;
-    auto* victim = dynamic_cast<CUnit*>(target);
+    auto* victim = ((target) ? (target)->AsUnit() : nullptr);
     if (!victim) return;
     const float heal = victim->GetMaxLife();
     ABEffectChain sacrifice;
@@ -558,7 +558,7 @@ void CAbilityDeathPact::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
     ABActionIf pact(
         std::make_shared<ABCondFunc>(
             [caster](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
                 return unit != nullptr && !unit->IsHero() && unit != caster &&
                        unit->GetPlayerIndex() == caster->GetPlayerIndex();
             }),
@@ -627,7 +627,7 @@ void CAbilitySpikedCarapace::OnRemove(CSimulation& game, CUnit* unit) { (void)ga
 CAbilityDarkRitual::CAbilityDarkRitual(int handleId) : CAbilitySpellBase(handleId, War3ID("AUdr"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(500.0f); SetCooldown(10.0f); SetManaCost(25); }
 void CAbilityDarkRitual::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || target->IsDead() || target == caster) return;
-    auto* victim = dynamic_cast<CUnit*>(target);
+    auto* victim = ((target) ? (target)->AsUnit() : nullptr);
     if (!victim || victim->IsHero()) return;
     if (victim->GetPlayerIndex() != caster->GetPlayerIndex()) return;
     const float mana = std::min(caster->GetMana() + victim->GetLife(),
@@ -672,7 +672,7 @@ void CAbilityChemicalRage::DoEffect(CSimulation& game, CUnit* caster) {
 CAbilityTransmute::CAbilityTransmute(int handleId) : CAbilitySpellBase(handleId, War3ID("ANtm"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(500.0f); SetCooldown(10.0f); SetManaCost(25); }
 void CAbilityTransmute::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || target->IsDead()) return;
-    auto* victim = dynamic_cast<CUnit*>(target);
+    auto* victim = ((target) ? (target)->AsUnit() : nullptr);
     if (!victim) return;
     ABEffectChain kill;
     kill.Add(std::make_unique<ABActionDamageTarget>(
@@ -681,7 +681,7 @@ void CAbilityTransmute::DoEffect(CSimulation& game, CUnit* caster, CWidget* targ
     ABActionIf transmute(
         std::make_shared<ABCondFunc>(
             [caster](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
                 return unit != nullptr && !unit->IsHero() &&
                        unit->GetPlayerIndex() != caster->GetPlayerIndex();
             }),
@@ -696,7 +696,7 @@ void CAbilityBloodlustCast::DoEffect(CSimulation& game, CUnit* caster, CWidget* 
     ABActionIf blood(
         std::make_shared<ABCondFunc>(
             [](CSimulation&, CUnit*, CWidget* target, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(target);
+                auto* unit = ((target) ? (target)->AsUnit() : nullptr);
                 if (!unit || unit->IsDead()) return false;
                 auto* type = unit->GetUnitType();
                 return type == nullptr ||
@@ -720,7 +720,7 @@ void CAbilityPurge::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) 
     chain.Add(std::make_unique<ABActionIf>(
         std::make_shared<ABCondFunc>(
             [](CSimulation&, CUnit*, CWidget* target, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(target);
+                auto* unit = ((target) ? (target)->AsUnit() : nullptr);
                 return unit != nullptr && unit->IsSummoned();
             }),
         std::move(burn)));
@@ -769,7 +769,7 @@ void CAbilityDispelMagic::DoEffect(CSimulation& game, CUnit* caster, float x, fl
     perUnit.Add(std::make_unique<ABActionIf>(
         std::make_shared<ABCondFunc>(
             [](CSimulation&, CUnit*, CWidget* target, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(target);
+                auto* unit = ((target) ? (target)->AsUnit() : nullptr);
                 return unit != nullptr && unit->IsSummoned();
             }),
         std::move(burn)));
@@ -1028,7 +1028,7 @@ void CAbilityBurrow::DoEffect(CSimulation& game, CUnit* caster) {
 CAbilityCannibalize::CAbilityCannibalize(int handleId) : CAbilitySpellBase(handleId, War3ID("Acan"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(300.0f); SetCooldown(5.0f); }
 void CAbilityCannibalize::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || !target->IsDead()) return;
-    auto* corpse = dynamic_cast<CUnit*>(target);
+    auto* corpse = ((target) ? (target)->AsUnit() : nullptr);
     if (!corpse || corpse == caster) return;
     const float heal = healAmount_;
     ABEffectChain feast;
@@ -1037,7 +1037,7 @@ void CAbilityCannibalize::DoEffect(CSimulation& game, CUnit* caster, CWidget* ta
     ABActionIf cannibal(
         std::make_shared<ABCondFunc>(
             [caster](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
                 return unit != nullptr && unit->IsDead() && unit != caster;
             }),
         std::move(feast));
@@ -1051,7 +1051,7 @@ void CAbilityCarrionBeetles::DoEffect(CSimulation& game, CUnit* caster, CWidget*
     ABActionIf beetles(
         std::make_shared<ABCondFunc>(
             [](CSimulation&, CUnit*, CWidget* unitTarget, bool, float, float) {
-                auto* corpse = dynamic_cast<CUnit*>(unitTarget);
+                auto* corpse = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
                 return corpse != nullptr && corpse->IsDead();
             }),
         std::move(rise));
@@ -1065,7 +1065,7 @@ void CAbilityWeb::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     ABActionIf web(
         std::make_shared<ABCondFunc>(
             [](CSimulation&, CUnit*, CWidget* target, bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(target);
+                auto* unit = ((target) ? (target)->AsUnit() : nullptr);
                 if (!unit || unit->IsDead() || !unit->GetUnitType()) return false;
                 return unit->GetUnitType()->GetMovementType() == PathingGridMovementType::FLY;
             }),
@@ -1257,7 +1257,7 @@ void CAbilityMonsoon::ApplyEffectData(const CAbilityDefFull& def, int level) { d
 CAbilityAbsorbMana::CAbilityAbsorbMana(int handleId) : CAbilitySpellBase(handleId, War3ID("Aabs"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(600.0f); SetCooldown(8.0f); }
 void CAbilityAbsorbMana::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || target->IsDead()) return;
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
+    auto* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (!targetUnit || !targetUnit->IsSummoned()) return;
     const float mana = std::min(caster->GetMana() + manaGain_, static_cast<float>(caster->GetMaxMana()));
     ABActionKillTarget kill;
@@ -1465,7 +1465,7 @@ void CAbilityAntiMagicShell::ApplyEffectData(const CAbilityDefFull& def, int lev
 CAbilityPossession::CAbilityPossession(int handleId) : CAbilitySpellBase(handleId, War3ID("Apos"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(500.0f); SetCooldown(10.0f); SetManaCost(150); }
 void CAbilityPossession::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     if (!target || !caster || target->IsDead()) return;
-    auto* victim = dynamic_cast<CUnit*>(target);
+    auto* victim = ((target) ? (target)->AsUnit() : nullptr);
     if (!victim) return;
     const int beforePlayer = victim->GetPlayerIndex();
     ABEffectChain convert;
@@ -1474,7 +1474,7 @@ void CAbilityPossession::DoEffect(CSimulation& game, CUnit* caster, CWidget* tar
         std::make_shared<ABCondFunc>(
             [maxLevel = maxLevel_](CSimulation&, CUnit*, CWidget* unitTarget,
                                    bool, float, float) {
-                auto* unit = dynamic_cast<CUnit*>(unitTarget);
+                auto* unit = ((unitTarget) ? (unitTarget)->AsUnit() : nullptr);
                 if (!unit || unit->IsDead() || unit->IsHero()) return false;
                 const CUnitType* type = unit->GetUnitType();
                 return type == nullptr || type->GetLevel() <= maxLevel;
@@ -1636,7 +1636,7 @@ void ApplyUnitStatSlotDelta(CUnit* unit, CAbilityItemStatBonus::StatSlot slot, i
 }
 CAbilityCurse::CAbilityCurse(int handleId) : CAbilitySpellBase(handleId, War3ID("Acrs"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(600.0f); SetCooldown(8.0f); SetManaCost(50); }
 void CAbilityCurse::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    auto* unit = dynamic_cast<CUnit*>(target);
+    auto* unit = ((target) ? (target)->AsUnit() : nullptr);
     if (!unit || unit->IsDead()) return;
     (void)caster;
     unit->AddBuff(std::make_unique<CBuffCurse>(duration_, missChance_), game);
@@ -1644,7 +1644,7 @@ void CAbilityCurse::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) 
 void CAbilityCurse::ApplyEffectData(const CAbilityDefFull& def, int level) { missChance_ = def.DataFloatAt(level, 0, missChance_); duration_ = def.DurationAt(level); }
 CAbilityMoonWell::CAbilityMoonWell(int handleId) : CAbilitySpellBase(handleId, War3ID("Ambt"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(600.0f); }
 void CAbilityMoonWell::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    auto* unit = dynamic_cast<CUnit*>(target);
+    auto* unit = ((target) ? (target)->AsUnit() : nullptr);
     if (!caster || !unit || unit->IsDead()) return;
     float mana = caster->GetMana();
     if (manaPerLife_ > 0.0f) {
@@ -1668,7 +1668,7 @@ void CAbilityMoonWell::DoEffect(CSimulation& game, CUnit* caster, CWidget* targe
 void CAbilityMoonWell::ApplyEffectData(const CAbilityDefFull& def, int level) { manaPerMana_ = def.DataFloatAt(level, 0, manaPerMana_); manaPerLife_ = def.DataFloatAt(level, 1, manaPerLife_); }
 CAbilityEatTree::CAbilityEatTree(int handleId) : CAbilitySpellBase(handleId, War3ID("Aeat"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(150.0f); }
 void CAbilityEatTree::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    auto* tree = dynamic_cast<CDestructable*>(target);
+    auto* tree = ((target) ? (target)->AsDestructable() : nullptr);
     if (!caster || !tree || tree->IsDead()) return;
     tree->Damage(game, caster, false, false, CAttackType::NORMAL, CDamageType::NORMAL,
                  "", tree->GetLife() + 1.0f, 0);
@@ -1678,7 +1678,7 @@ void CAbilityEatTree::DoEffect(CSimulation& game, CUnit* caster, CWidget* target
 void CAbilityEatTree::ApplyEffectData(const CAbilityDefFull& def, int level) { hitPointsGained_ = def.DataFloatAt(level, 2, hitPointsGained_); }
 CAbilitySacrifice::CAbilitySacrifice(int handleId) : CAbilitySpellBase(handleId, War3ID("Asac"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(100000.0f); }
 void CAbilitySacrifice::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    auto* victim = dynamic_cast<CUnit*>(target);
+    auto* victim = ((target) ? (target)->AsUnit() : nullptr);
     if (!victim) return;
     const float x = victim->GetX();
     const float y = victim->GetY();
@@ -1946,7 +1946,7 @@ void CAbilityMagicDefense::OnRemove(CSimulation& game, CUnit* unit) { TurnOff(ga
 void CAbilityMagicDefense::ApplyEffectData(const CAbilityDefFull& def, int level) { speedPenalty_ = def.DataFloatAt(level, 3, speedPenalty_); }
 CAbilityMagicLeash::CAbilityMagicLeash(int handleId) : CAbilitySpellBase(handleId, War3ID("Amls"), CAbilityCategory::SPELL) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(600.0f); SetCooldown(12.0f); SetManaCost(50); }
 void CAbilityMagicLeash::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    auto* unit = dynamic_cast<CUnit*>(target);
+    auto* unit = ((target) ? (target)->AsUnit() : nullptr);
     if (!unit || unit->IsDead()) return;
     if (!unit->CheckSpellEffectReaction(game, caster)) return;
     unit->AddBuff(std::make_unique<CBuffStun>(duration_), game);
@@ -2158,7 +2158,7 @@ void CAbilityPairing::DoEffect(CSimulation& game, CUnit* caster) {
     }
 }
 void CAbilityPairing::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    auto* unit = dynamic_cast<CUnit*>(target);
+    auto* unit = ((target) ? (target)->AsUnit() : nullptr);
     if (mode_ == CPairMode::LoadPartner && caster && unit && unit->GetAbility(partnerCode_)) {
         if (caster->LoadUnit(unit)) {
             MorphIfKnown(game, caster, resultId_);
@@ -2204,7 +2204,7 @@ CAbilityAcolyteHarvest::CAbilityAcolyteHarvest(int handleId) : CAbilitySpellBase
 bool CAbilityAcolyteHarvest::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
                                            CWidget* target) const {
     if (!CAbilitySpellBase::CheckCanTarget(game, unit, orderId, target)) return false;
-    auto* mineUnit = dynamic_cast<CUnit*>(target);
+    auto* mineUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (!mineUnit || !unit) return false;
     if (mineUnit->GetPlayerIndex() != unit->GetPlayerIndex()) return false;
     return mineUnit->GetAbility(War3ID("Abgm")) != nullptr;
@@ -2219,7 +2219,7 @@ void CAbilityAcolyteHarvest::Unbind(CSimulation& game) {
     mineUnitHandle_ = -1;
 }
 void CAbilityAcolyteHarvest::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    auto* mineUnit = dynamic_cast<CUnit*>(target);
+    auto* mineUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (!caster || !mineUnit) return;
     CAbility* mine = mineUnit->GetAbility(War3ID("Abgm"));
     if (!mine) return;
@@ -2233,7 +2233,7 @@ void CAbilityAcolyteHarvest::OnRemove(CSimulation& game, CUnit* unit) { (void)un
 CAbilityWispHarvest::CAbilityWispHarvest(int handleId) : CAbilitySpellBase(handleId, War3ID("Awha"), CAbilityCategory::HARVEST) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(100.0f); SetManaCost(0); }
 void CAbilityWispHarvest::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
     (void)game;
-    auto* tree = dynamic_cast<CDestructable*>(target);
+    auto* tree = ((target) ? (target)->AsDestructable() : nullptr);
     if (!caster || !tree || tree->IsDead()) return;
     treeHandle_ = tree->GetHandleId();
     accum_ = interval_;
@@ -2259,7 +2259,7 @@ void CAbilityWispHarvest::OnTick(CSimulation& game, CUnit* unit) {
 }
 CAbilityHarvestLumber::CAbilityHarvestLumber(int handleId) : CAbilitySpellBase(handleId, War3ID("Ahrl"), CAbilityCategory::HARVEST) { SetTargetType(CSpellTargetType::TARGET_UNIT); SetCastRange(128.0f); SetManaCost(0); }
 void CAbilityHarvestLumber::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    auto* tree = dynamic_cast<CDestructable*>(target);
+    auto* tree = ((target) ? (target)->AsDestructable() : nullptr);
     if (!caster || !tree || tree->IsDead()) return;
     tree->Damage(game, caster, false, false, CAttackType::NORMAL, CDamageType::NORMAL,
                  "", damageToTree_, 0);
@@ -2335,12 +2335,12 @@ bool CAbilityWayGate::TryTeleport(CUnit* gate, CUnit* target) const {
 }
 bool CAbilityWayGate::CheckCanTarget(CSimulation&, CUnit* unit, int orderId, CWidget* target) const {
     if (!enabled_ || orderId != OrderIds::SMART) return false;
-    auto* unitTarget = dynamic_cast<CUnit*>(target);
+    auto* unitTarget = ((target) ? (target)->AsUnit() : nullptr);
     if (!unitTarget || unitTarget->IsDead() || unitTarget->IsBuilding()) return false;
     return Inside(unit, unitTarget);
 }
-bool CAbilityWayGate::CheckBeforeQueue(CSimulation&, CUnit* caster, int orderId, CWidget* target) { if (orderId != OrderIds::SMART) return true; TryTeleport(caster, dynamic_cast<CUnit*>(target)); return false; }
-CBehavior* CAbilityWayGate::Begin(CSimulation&, CUnit* caster, int, CWidget* target) { TryTeleport(caster, dynamic_cast<CUnit*>(target)); return nullptr; }
+bool CAbilityWayGate::CheckBeforeQueue(CSimulation&, CUnit* caster, int orderId, CWidget* target) { if (orderId != OrderIds::SMART) return true; TryTeleport(caster, ((target) ? (target)->AsUnit() : nullptr)); return false; }
+CBehavior* CAbilityWayGate::Begin(CSimulation&, CUnit* caster, int, CWidget* target) { TryTeleport(caster, ((target) ? (target)->AsUnit() : nullptr)); return nullptr; }
 CAbilityShopPurchase::CAbilityShopPurchase(int handleId) : CAbility(handleId, War3ID("Apit"), CAbilityCategory::SELL_ITEMS) { iconShowing_ = false; permanent_ = true; }
 CAbilityNeutralBuilding::CAbilityNeutralBuilding(int handleId, War3ID code, bool onlyAllies) : CAbility(handleId, code, CAbilityCategory::NEUTRAL_BUILDING), onlyAllies_(onlyAllies) { iconShowing_ = false; permanent_ = true; }
 void CAbilityNeutralBuilding::OnTick(CSimulation& game, CUnit* unit) {
@@ -2398,14 +2398,14 @@ bool CAbilityNeutralBuilding::CheckCanTarget(CSimulation& game, CUnit* unit, int
                                              CWidget* target) const {
     if (orderId != OrderIds::NEUTRALINTERACT) {
         if (orderId < 852462 || orderId > 852465) return false;
-        auto* hero = dynamic_cast<CUnit*>(target);
+        auto* hero = ((target) ? (target)->AsUnit() : nullptr);
         return hero && !hero->IsDead() && hero->IsHero();
     }
-    return CanSelect(game, unit, dynamic_cast<CUnit*>(target));
+    return CanSelect(game, unit, ((target) ? (target)->AsUnit() : nullptr));
 }
 CBehavior* CAbilityNeutralBuilding::Begin(CSimulation& game, CUnit* caster, int orderId,
                                           CWidget* target) {
-    auto* unitTarget = dynamic_cast<CUnit*>(target);
+    auto* unitTarget = ((target) ? (target)->AsUnit() : nullptr);
     if (orderId >= 852462 && orderId <= 852465 && unitTarget) {
         HireFromTavern(game, caster, unitTarget);
         return nullptr;
@@ -2499,7 +2499,7 @@ bool CAbilityEntangleGoldMine::CheckCanTarget(CSimulation& game, CUnit* unit, in
                                              CWidget* target) const {
     if (replacement_ && !replacement_->IsDead()) return false;
     if (!CAbilitySpellBase::CheckCanTarget(game, unit, orderId, target)) return false;
-    auto* mine = dynamic_cast<CUnit*>(target);
+    auto* mine = ((target) ? (target)->AsUnit() : nullptr);
     if (!mine) return false;
     return mine->GetAbility(War3ID("Agld")) != nullptr;
 }
@@ -2517,7 +2517,7 @@ void CAbilityEntangleGoldMine::Release(CSimulation& game, bool killReplacement) 
 }
 CBehavior* CAbilityEntangleGoldMine::Begin(CSimulation& game, CUnit* caster, int orderId, CWidget* target) { instant_ = (orderId == kEntangleInstant); return CAbilitySpellBase::Begin(game, caster, orderId, target); }
 void CAbilityEntangleGoldMine::DoEffect(CSimulation& game, CUnit* caster, CWidget* target) {
-    auto* mineUnit = dynamic_cast<CUnit*>(target);
+    auto* mineUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (!caster || !mineUnit || mineUnit->IsDead()) return;
     CAbility* gold = mineUnit->GetAbility(War3ID("Agld"));
     if (!gold || !gold->IsResourceMine()) return;

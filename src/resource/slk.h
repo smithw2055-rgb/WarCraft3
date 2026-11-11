@@ -1,4 +1,5 @@
 #pragma once
+#include "engine/core/tag_id.h"
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -61,6 +62,8 @@ struct War3ID {
     War3ID() = default;
     explicit War3ID(uint32_t v) : value(v) {}
     War3ID(const char* str); // e.g. War3ID("hfoo")
+    constexpr War3ID(engine::TagId tag) noexcept : value(tag.Value()) {}
+    constexpr operator engine::TagId() const noexcept { return engine::TagId(value); }
 
     bool operator==(War3ID o) const { return value == o.value; }
     bool operator!=(War3ID o) const { return value != o.value; }

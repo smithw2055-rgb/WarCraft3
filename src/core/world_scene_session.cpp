@@ -38,8 +38,9 @@ void WorldSceneSession::TeardownCurrentSession(MpqManager& mpq,
     sim.SpatialGrid().Clear();
     sim.InvalidateNavigationCaches();
 
-    // Reclaim unreferenced resources in ResourceServer upon map teardown
+    // Reclaim unreferenced resources and unbind transient MpqManager upon map teardown
     stats_.resourcesPrunedOnTeardown += scene.GetResourceServer().PruneUnusedResources();
+    scene.GetResourceServer().SetMpqManager(nullptr);
 
     mpq.CloseTop();
 
@@ -48,6 +49,8 @@ void WorldSceneSession::TeardownCurrentSession(MpqManager& mpq,
     wpm_ = WpmData{};
     unitsDoo_ = UnitsDooData{};
     doodadsDoo_ = W3dData{};
+    hasActiveTilesetProfile_ = false;
+    activeTilesetProfile_ = {};
 }
 
 bool WorldSceneSession::LoadMap(MpqManager& mpq,
@@ -73,6 +76,11 @@ bool WorldSceneSession::LoadMap(MpqManager& mpq,
             stats_.terrainChunksBuilt = terrainChunks_.GetChunkCount();
             sim.SetTerrainMap(&w3e_);
             scene.SetBoundTerrainChunkGrid(&terrainChunks_);
+            if (const auto* mod = sim.GetSimulationModule()) {
+                const char tsCode = w3e_.tileset ? w3e_.tileset : 'L';
+                hasActiveTilesetProfile_ =
+                    mod->OnResolveTilesetEnvironmentProfile(tsCode, activeTilesetProfile_);
+            }
         }
     }
 

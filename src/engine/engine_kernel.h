@@ -73,10 +73,10 @@ private:
 class ResourceEngineSubsystem final : public ISubsystem {
 public:
     ResourceEngineSubsystem()
-        : ownedServer_(std::make_unique<resource::ResourceServer>())
+        : ownedServer_(std::make_unique<::resource::ResourceServer>())
         , server_(ownedServer_.get()) {}
 
-    explicit ResourceEngineSubsystem(resource::ResourceServer* externalServer)
+    explicit ResourceEngineSubsystem(::resource::ResourceServer* externalServer)
         : server_(externalServer) {}
 
     const char* GetName() const override { return "ResourceEngineSubsystem"; }
@@ -97,11 +97,11 @@ public:
         }
     }
 
-    resource::ResourceServer* GetResourceServer() const { return server_; }
+    ::resource::ResourceServer* GetResourceServer() const { return server_; }
 
 private:
-    std::unique_ptr<resource::ResourceServer> ownedServer_;
-    resource::ResourceServer* server_ = nullptr;
+    std::unique_ptr<::resource::ResourceServer> ownedServer_;
+    ::resource::ResourceServer* server_ = nullptr;
 };
 
 class AudioEngineSubsystem final : public ISubsystem {
@@ -185,12 +185,12 @@ private:
 class RenderEngineSubsystem final : public ISubsystem {
 public:
     RenderEngineSubsystem()
-        : ownedRenderServer_(std::make_unique<render::RenderServer>())
-        , ownedRenderGraph_(std::make_unique<render::RenderGraph>())
+        : ownedRenderServer_(std::make_unique<::render::RenderServer>())
+        , ownedRenderGraph_(std::make_unique<::render::RenderGraph>())
         , renderServer_(ownedRenderServer_.get())
         , renderGraph_(ownedRenderGraph_.get()) {}
 
-    RenderEngineSubsystem(render::RenderServer* externalServer, render::RenderGraph* externalGraph)
+    RenderEngineSubsystem(::render::RenderServer* externalServer, ::render::RenderGraph* externalGraph)
         : renderServer_(externalServer)
         , renderGraph_(externalGraph) {}
 
@@ -199,14 +199,14 @@ public:
 
     bool OnInit() override { return renderServer_ != nullptr && renderGraph_ != nullptr; }
 
-    render::RenderServer* GetRenderServer() const { return renderServer_; }
-    render::RenderGraph* GetRenderGraph() const { return renderGraph_; }
+    ::render::RenderServer* GetRenderServer() const { return renderServer_; }
+    ::render::RenderGraph* GetRenderGraph() const { return renderGraph_; }
 
 private:
-    std::unique_ptr<render::RenderServer> ownedRenderServer_;
-    std::unique_ptr<render::RenderGraph> ownedRenderGraph_;
-    render::RenderServer* renderServer_ = nullptr;
-    render::RenderGraph* renderGraph_ = nullptr;
+    std::unique_ptr<::render::RenderServer> ownedRenderServer_;
+    std::unique_ptr<::render::RenderGraph> ownedRenderGraph_;
+    ::render::RenderServer* renderServer_ = nullptr;
+    ::render::RenderGraph* renderGraph_ = nullptr;
 };
 
 class TelemetryEngineSubsystem final : public ISubsystem {
@@ -251,10 +251,10 @@ public:
 
     // 2. Non-owning bind: attaches existing servers (e.g., from GameController) to the kernel
     bool BindExternalServices(core::JobSystem* jobs,
-                              resource::ResourceServer* resources,
+                              ::resource::ResourceServer* resources,
                               audio::AudioServer* audio,
-                              render::RenderServer* renderServer,
-                              render::RenderGraph* renderGraph,
+                              ::render::RenderServer* renderServer,
+                              ::render::RenderGraph* renderGraph,
                               core::InputActionMap* input,
                               core::EngineProfiler* profiler,
                               float fixedStepSec = 0.05f,
@@ -278,10 +278,10 @@ public:
     const FixedTimestepStepper& Stepper() const { return stepper_; }
 
     core::JobSystem* Jobs() const;
-    resource::ResourceServer* Resources() const;
+    ::resource::ResourceServer* Resources() const;
     audio::AudioServer* Audio() const;
-    render::RenderServer* RenderServer() const;
-    render::RenderGraph* RenderGraph() const;
+    ::render::RenderServer* RenderServer() const;
+    ::render::RenderGraph* RenderGraph() const;
     core::InputActionMap* Input() const;
     scripting::ScriptHostRouter* Scripting() const;
     core::EngineProfiler* Profiler() const;

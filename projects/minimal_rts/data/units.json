@@ -1,0 +1,44 @@
+{
+  "prototypes": [
+    {
+      "id": "hq_nexus",
+      "role": "dropoff",
+      "maxHp": 1200,
+      "moveSpeed": 0.0,
+      "attackDamage": 0,
+      "attackRange": 0.0,
+      "carryCapacity": 0
+    },
+    {
+      "id": "crystal_node",
+      "role": "resource",
+      "maxHp": 5000,
+      "moveSpeed": 0.0,
+      "attackDamage": 0,
+      "attackRange": 0.0,
+      "carryCapacity": 1500
+    },
+    {
+      "id": "drone_harvester",
+      "role": "harvester",
+      "maxHp": 80,
+      "moveSpeed": 180.0,
+      "attackDamage": 5,
+      "attackRange": 64.0,
+      "carryCapacity": 25
+    },
+    {
+      "id": "pulse_trooper",
+      "role": "combat",
+      "maxHp": 140,
+      "moveSpeed": 220.0,
+      "attackDamage": 18,
+      "attackRange": 320.0,
+      "carryCapacity": 0
+    }
+  ],
+  "metadata": {
+    "schemaVersion": 2,
+    "author": "Engine Evolution Stage 6"
+  }
+}

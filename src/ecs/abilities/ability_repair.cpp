@@ -23,7 +23,7 @@ bool CAbilityRepair::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
     if (!target || target->IsDead()) return false;
 
     // Can only repair buildings owned by the same player
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
+    auto* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (!targetUnit) return false;
     if (!targetUnit->IsBuilding()) return false;
     if (targetUnit->GetPlayerIndex() != unit->GetPlayerIndex()) return false;

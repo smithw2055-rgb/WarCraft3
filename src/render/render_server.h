@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "render/math.h"
+#include "render/rhi_device.h"
+#include "engine/render/standard_render_passes.h"
 
 class CSimulation;
 class CUnit;
@@ -421,6 +423,18 @@ public:
     const RenderFrameStats& GetStats() const { return stats_; }
     const Frustum& GetFrustum() const { return frustum_; }
 
+    RhiDevice& GetRhiDevice() { return RhiDevice::Instance(); }
+    const RhiDevice& GetRhiDevice() const { return RhiDevice::Instance(); }
+    std::shared_ptr<engine::render::IRhiBackend> GetRhiBackend() const {
+        return RhiDevice::Instance().GetBackend();
+    }
+    engine::render::StandardRenderPassPipeline& GetStandardPassPipeline() {
+        return standardPipeline_;
+    }
+    engine::render::TerrainOverlayState& GetTerrainOverlayState() {
+        return overlayState_;
+    }
+
 private:
     Mat4 view_ = Mat4::Identity();
     Mat4 proj_ = Mat4::Identity();
@@ -438,6 +452,9 @@ private:
     uint32_t nextMaterialHandle_ = 1;
     std::unordered_map<uint32_t, ShaderMaterial> materialsById_;
     std::unordered_map<std::string, uint32_t> materialIdsByName_;
+    engine::render::StandardRenderPassPipeline standardPipeline_ =
+        engine::render::StandardRenderPassPipeline::CreateStandardRtsPipeline();
+    engine::render::TerrainOverlayState overlayState_;
 };
 
 } // namespace render

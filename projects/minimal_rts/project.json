@@ -1,0 +1,24 @@
+{
+  "projectId": "minimal_rts",
+  "title": "Minimal Sci-Fi Crystal Harvester RTS (Pure Engine Demo)",
+  "engineVersion": "0.2.0",
+  "modulePlugin": "minimal_rts_module",
+  "entryModuleId": "MinimalRtsModule",
+  "defaultScene": "projects/minimal_rts/data/units.json",
+  "fixedTickHz": 20,
+  "windowWidth": 1280,
+  "windowHeight": 720,
+  "vfsMounts": [
+    {
+      "type": "folder",
+      "path": "projects/minimal_rts/data",
+      "mountPoint": "/data",
+      "priority": 100,
+      "optional": false
+    }
+  ],
+  "customSettings": {
+    "startingCrystals": "500",
+    "victoryTargetCrystals": "1000"
+  }
+}

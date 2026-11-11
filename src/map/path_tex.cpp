@@ -5,7 +5,7 @@
 #include <iostream>
 
 #include "asset/BLP.h"
-#include "asset/stb_image.h"
+#include "stb/stb_image.h"
 #include "map/wpm.h"
 #include "resource/mpq_storm.h"
 

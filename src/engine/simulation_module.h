@@ -601,6 +601,26 @@ public:
         return false;
     }
 
+    // ========================================================================
+    // Phase 33 (Track E + F): Pluggable Tileset Environment Fog, Water & MIDI Profile
+    // ========================================================================
+    struct TilesetEnvironmentProfile {
+        char tilesetCode = 'L';
+        std::string dayAmbientMidiPath;
+        std::string nightAmbientMidiPath;
+        float fogColorR = 0.78f;
+        float fogColorG = 0.84f;
+        float fogColorB = 0.94f;
+        float fogStart = 3000.0f;
+        float fogEnd = 7000.0f;
+        uint32_t waterTintRgba = 0xBF408CD9u;
+    };
+
+    virtual bool OnResolveTilesetEnvironmentProfile(char /*tilesetCode*/,
+                                                    TilesetEnvironmentProfile& /*outProfile*/) const {
+        return false;
+    }
+
     const SimulationModuleStats& GetModuleStats() const { return stats_; }
     void ResetModuleStats() { stats_ = {}; }
 

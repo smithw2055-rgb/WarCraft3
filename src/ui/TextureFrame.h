@@ -5,6 +5,8 @@
 
 class TextureFrame : public UIFrame {
 public:
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::Texture;
+
     TextureFrame(const std::string& name, UIFrame* parent = nullptr);
 
     void SetTexture(const std::shared_ptr<Texture>& tex) { texture_ = tex; }

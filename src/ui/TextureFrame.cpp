@@ -1,7 +1,7 @@
 #include "TextureFrame.h"
 
 TextureFrame::TextureFrame(const std::string& name, UIFrame* parent)
-    : UIFrame(name, parent) {}
+    : UIFrame(name, parent, engine::ui::FrameKind::Texture) {}
 
 void TextureFrame::Render(UiRenderer& r) {
     if (!visible_) return;

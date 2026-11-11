@@ -1,3 +1,4 @@
+#include <cstring>
 #include "scripting/jass_natives_internal.h"
 #include "game/war3/war3_game_module.h"
 void JassNatives::RegisterTimerNatives() {
@@ -584,7 +585,11 @@ void JassNatives::RegisterGameNatives() {
             controller->SetDifficulty(data->playerAI[playerId].difficulty);
             auto paused = data->compAIpaused.find(playerId);
             if (paused != data->compAIpaused.end() && paused->second) { controller->SetEnabled(false); }
-            if (auto* war3Mod = dynamic_cast<war3::War3GameModule*>(sim->GetSimulationModule())) { war3Mod->AttachPlayerAI(playerId, controller); }
+            if (auto* simMod = sim->GetSimulationModule();
+                simMod && simMod->GetModuleId() != nullptr &&
+                std::strcmp(simMod->GetModuleId(), war3::War3GameModule::kModuleId) == 0) {
+                static_cast<war3::War3GameModule*>(simMod)->AttachPlayerAI(playerId, controller);
+            }
             data->aiControllers[playerId] = std::move(controller);
         }
         return JassValue::Null();

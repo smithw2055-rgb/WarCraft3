@@ -27,6 +27,7 @@ public:
 
     void AddItem(CItem* item);
     void RemoveItem(CItem* item);
+    void Rebuild(const std::vector<CUnit*>& units, const std::vector<CItem*>& items);
 
     void EnumUnitsInRect(float x, float y, float w, float h,
                          std::vector<CUnit*>& out) const;

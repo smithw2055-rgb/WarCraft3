@@ -9,6 +9,8 @@
 
 #include "ecs/destructable.h"
 #include "ecs/item.h"
+#include "ecs/pathing/pathfinding.h"
+#include "ecs/pathing/world_collision.h"
 #include "ecs/player.h"
 #include "ecs/unit.h"
 
@@ -129,6 +131,7 @@ SimHotFleetMetrics SimHotComponentSystem::ComputeFleetMetricsFromHotPools(const 
 SimStateSnapshot SimStateSnapshot::Capture(const CSimulation& sim) {
     SimStateSnapshot snap;
     snap.gameTurnTick = sim.gameTurnTick_;
+    snap.nextHandleId = sim.handleIdAlloc_.PeekNextId();
     snap.simRandState = sim.simRandState_;
     snap.combatRandState = sim.combatSystem_.GetRandState();
     snap.gameTimeOfDay = sim.gameTimeOfDay_;
@@ -304,6 +307,7 @@ bool SimStateSnapshot::Restore(CSimulation& sim) const {
         if (targetUnitsByHandle.find(it->first) == targetUnitsByHandle.end()) {
             const int deadHandle = it->first;
             if (CUnit* u = it->second.get()) {
+                u->KillPathingInstance(sim);
                 if (CPlayer* owner = sim.GetPlayer(u->GetPlayerIndex())) {
                     owner->RemoveUnit(u);
                     owner->RemoveHero(u);
@@ -318,9 +322,14 @@ bool SimStateSnapshot::Restore(CSimulation& sim) const {
 
     sim.units_.clear();
     sim.units_.reserve(units.size());
+    int maxNextHandleId = std::max<int>(0x100000, nextHandleId);
 
     for (const SimUnitSnapshot& us : units) {
+        if (us.handleId + 1 > maxNextHandleId) {
+            maxNextHandleId = us.handleId + 1;
+        }
         CUnit* u = nullptr;
+        bool createdNewUnit = false;
         auto it = sim.unitMap_.find(us.handleId);
         if (it != sim.unitMap_.end() && it->second) {
             u = it->second.get();
@@ -336,12 +345,16 @@ bool SimStateSnapshot::Restore(CSimulation& sim) const {
             auto newUnit = std::make_unique<CUnit>(
                 us.handleId, uType, us.playerIndex, War3ID(us.typeId), us.x, us.y, us.facingDeg);
             newUnit->BindRegistry(&sim.ecsRegistry_);
+            if (uType && sim.GetSimulationModule()) {
+                sim.GetSimulationModule()->OnAssembleUnitAbilities(sim, *newUnit, *uType);
+            }
             sim.InstallUnitHooks(newUnit.get());
             u = newUnit.get();
             sim.unitMap_[us.handleId] = std::move(newUnit);
             if (CPlayer* owner = sim.GetPlayer(us.playerIndex)) {
                 owner->AddUnit(u);
             }
+            createdNewUnit = true;
         }
 
         u->SetPlayerIndex(us.playerIndex);
@@ -380,35 +393,107 @@ bool SimStateSnapshot::Restore(CSimulation& sim) const {
             sim.ecsRegistry_.Remove<UnitStructureNavComponent>(us.handleId);
         }
 
+        if (createdNewUnit && !us.isDead && us.pathingEnabled &&
+            sim.GetPathfinding() && sim.GetPathfinding()->HasPathingMap()) {
+            u->RegeneratePathingInstance(sim);
+            u->SetPosition(us.x, us.y);
+        }
+
         sim.units_.push_back(u);
     }
 
-    // 5. Restore items & destructables state flags and vitals
-    for (const SimItemSnapshot& is : items) {
-        auto it = sim.itemMap_.find(is.handleId);
-        if (it != sim.itemMap_.end() && it->second) {
-            CItem* item = it->second.get();
-            item->SetPosition(is.x, is.y);
-            item->SetMaxLife(is.maxLife);
-            item->CWidget::SetLife(sim, is.life);
-            item->SetCharges(is.charges);
-            item->SetHidden(is.hidden != 0);
-            item->SetInvulnerable(is.invulnerable != 0);
+    // 5. Restore items & destructables (reconstructing missing instances on cold ESAV load)
+    std::unordered_map<int, const SimItemSnapshot*> targetItemsByHandle;
+    for (const auto& is : items) {
+        targetItemsByHandle[is.handleId] = &is;
+    }
+    for (auto it = sim.itemMap_.begin(); it != sim.itemMap_.end();) {
+        if (targetItemsByHandle.find(it->first) == targetItemsByHandle.end()) {
+            it = sim.itemMap_.erase(it);
+        } else {
+            ++it;
         }
     }
+    sim.items_.clear();
+    sim.removedItems_.clear();
+    for (const SimItemSnapshot& is : items) {
+        if (is.handleId + 1 > maxNextHandleId) {
+            maxNextHandleId = is.handleId + 1;
+        }
+        CItem* item = nullptr;
+        auto it = sim.itemMap_.find(is.handleId);
+        if (it != sim.itemMap_.end() && it->second) {
+            item = it->second.get();
+        } else {
+            auto created = std::make_unique<CItem>(is.handleId, War3ID(is.typeId), is.x, is.y);
+            if (sim.GetSimulationModule()) {
+                sim.GetSimulationModule()->OnConfigureCreatedItem(sim, *created);
+            }
+            item = created.get();
+            sim.itemMap_[is.handleId] = std::move(created);
+        }
+        item->SetPosition(is.x, is.y);
+        item->SetMaxLife(is.maxLife);
+        item->CWidget::SetLife(sim, is.life);
+        item->SetCharges(is.charges);
+        item->SetHidden(is.hidden != 0);
+        item->SetInvulnerable(is.invulnerable != 0);
+        sim.items_.push_back(item);
+    }
 
+    std::unordered_map<int, const SimDestructableSnapshot*> targetDestsByHandle;
+    for (const auto& ds : destructables) {
+        targetDestsByHandle[ds.handleId] = &ds;
+    }
+    for (auto it = sim.destructableMap_.begin(); it != sim.destructableMap_.end();) {
+        if (targetDestsByHandle.find(it->first) == targetDestsByHandle.end()) {
+            if (it->second) {
+                it->second->UnbindPathing(sim);
+            }
+            it = sim.destructableMap_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    sim.destructables_.clear();
+    sim.newDestructables_.clear();
+    sim.removedDestructables_.clear();
     for (const SimDestructableSnapshot& ds : destructables) {
+        if (ds.handleId + 1 > maxNextHandleId) {
+            maxNextHandleId = ds.handleId + 1;
+        }
+        CDestructable* d = nullptr;
+        bool createdNewDest = false;
         auto it = sim.destructableMap_.find(ds.handleId);
         if (it != sim.destructableMap_.end() && it->second) {
-            CDestructable* d = it->second.get();
-            d->SetPosition(ds.x, ds.y);
-            d->SetMaxLife(ds.maxLife);
-            d->CWidget::SetLife(sim, ds.life);
-            d->SetOccluderHeight(ds.occluderHeight);
-            d->SetInvulnerable(ds.invulnerable != 0);
-            d->SetHidden(ds.hidden != 0);
-            d->SetBlighted(ds.blighted != 0);
+            d = it->second.get();
+        } else {
+            auto created = std::make_unique<CDestructable>(ds.handleId, War3ID(ds.typeId), ds.x, ds.y, ds.maxLife);
+            if (sim.GetSimulationModule()) {
+                sim.GetSimulationModule()->OnConfigureCreatedDestructable(sim, *created, ds.maxLife, 0);
+            }
+            d = created.get();
+            sim.destructableMap_[ds.handleId] = std::move(created);
+            createdNewDest = true;
         }
+        d->SetPosition(ds.x, ds.y);
+        d->SetMaxLife(ds.maxLife);
+        d->CWidget::SetLife(sim, ds.life);
+        d->SetOccluderHeight(ds.occluderHeight);
+        d->SetInvulnerable(ds.invulnerable != 0);
+        d->SetHidden(ds.hidden != 0);
+        d->SetBlighted(ds.blighted != 0);
+        if (createdNewDest) {
+            d->BindPathing(sim, 0);
+        } else {
+            d->RefreshPathingAfterLifeChange(sim);
+        }
+        sim.destructables_.push_back(d);
+    }
+
+    sim.handleIdAlloc_.SetNextId(maxNextHandleId);
+    if (sim.worldCollision_) {
+        sim.worldCollision_->Rebuild(sim.units_, sim.items_);
     }
 
     sim.projectiles_ = projectiles;
@@ -448,6 +533,7 @@ std::vector<uint8_t> SimStateSnapshot::SerializeBinary() const {
     AppendPod(out, kMagic);
     AppendPod(out, kVersion);
     AppendPod(out, gameTurnTick);
+    AppendPod(out, nextHandleId);
     AppendPod(out, simRandState);
     AppendPod(out, combatRandState);
     AppendPod(out, gameTimeOfDay);
@@ -495,10 +581,13 @@ bool SimStateSnapshot::DeserializeBinary(const uint8_t* data, size_t size, SimSt
     size_t offset = 0;
     uint32_t magic = 0, version = 0;
     if (!ReadPod(data, size, offset, magic) || magic != kMagic) return false;
-    if (!ReadPod(data, size, offset, version) || version != kVersion) return false;
+    if (!ReadPod(data, size, offset, version) || (version != 2u && version != kVersion)) return false;
 
     out = SimStateSnapshot{};
     if (!ReadPod(data, size, offset, out.gameTurnTick)) return false;
+    if (version >= 3u) {
+        if (!ReadPod(data, size, offset, out.nextHandleId)) return false;
+    }
     if (!ReadPod(data, size, offset, out.simRandState)) return false;
     if (!ReadPod(data, size, offset, out.combatRandState)) return false;
     if (!ReadPod(data, size, offset, out.gameTimeOfDay)) return false;

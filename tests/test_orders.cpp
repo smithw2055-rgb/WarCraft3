@@ -8,11 +8,7 @@
 #include <vector>
 
 #include "data/combat_types.h"
-#include "ecs/abilities/spells.h"
-#include "ecs/abilities/spells3.h"
-#include "ecs/abilities/spells4.h"
-#include "ecs/abilities/spells5.h"
-#include "ecs/abilities/spells18.h"
+#include "game/war3/abilities/war3_spells.h"
 #include "ecs/ability_factory.h"
 #include "ecs/csimulation.h"
 #include "ecs/orders/order.h"

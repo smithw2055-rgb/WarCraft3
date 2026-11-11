@@ -1,9 +1,9 @@
 #include "TileSet.h"
 #include "BLP.h"
 #include "DDS.h"
-#include "stb_image.h"
+#include "stb/stb_image.h"
 #include "resource/slk.h"
-#include "../render/renderer.h"
+#include "render/rhi_device.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>

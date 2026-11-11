@@ -1,8 +1,12 @@
 #pragma once
 // ============================================================================
-// Stage O2 & Phase 28: UIDataBinder — Reactive MVVM Data-Binding Pipeline
-// for UIFrame Tree with Pluggable Upkeep Formatting & Custom Property Bindings
-// (Inspired by Godot Control Signals & Unity UI Toolkit Data Binding)
+// Stage O2, Phase 28 & Stage 4: UIDataBinder — Reactive MVVM Data-Binding
+// Pipeline Powered by `engine::ui::HudViewModel` & `HudViewBinder`
+//
+// `UIDataBinder` implements `engine::ui::IHudViewListener` and subscribes to
+// `hudBinder_` so every resource, upkeep, selection, vital, and custom property
+// update flows reactively through `HudViewModel -> HudViewBinder::Dispatch ->
+// IHudViewListener` before mutating dirty `TextFrame` nodes.
 // ============================================================================
 #include <cstdint>
 #include <functional>
@@ -11,6 +15,7 @@
 #include <vector>
 
 #include "ecs/csimulation.h"
+#include "engine/ui/hud_view_model.h"
 #include "ui/TextFrame.h"
 #include "ui/UIFrame.h"
 
@@ -39,11 +44,16 @@ struct UIDataBinderStats {
     uint64_t layoutPassesTriggered = 0;
 };
 
-class UIDataBinder {
+class UIDataBinder final : public engine::ui::IHudViewListener {
 public:
-    using CustomTextPropertyFn = std::function<std::string(const CSimulation& sim, int localPlayerIndex, int selectedUnitHandle)>;
+    using CustomTextPropertyFn =
+        std::function<std::string(const CSimulation& sim, int localPlayerIndex, int selectedUnitHandle)>;
 
-    UIDataBinder() = default;
+    UIDataBinder();
+    ~UIDataBinder() override;
+
+    UIDataBinder(const UIDataBinder&) = delete;
+    UIDataBinder& operator=(const UIDataBinder&) = delete;
 
     void BindResourceFrames(TextFrame* goldFrame,
                             TextFrame* lumberFrame,
@@ -61,9 +71,22 @@ public:
     bool UnbindCustomTextProperty(const std::string& propKey);
     size_t GetCustomPropertyCount() const { return customProperties_.size(); }
 
-    // Evaluates current player, selected unit & custom properties against `lastState_`.
-    // Only mutates TextFrame nodes whose bound value actually changed, and
-    // triggers `rootFrame->PositionBounds(gui)` only when a bound frame dirtied layout!
+    // Subscribe additional external MVVM listeners (e.g., ConsoleHUD / HUD telemetry)
+    void AttachHudListener(engine::ui::IHudViewListener* listener) {
+        hudBinder_.AttachListener(listener);
+    }
+    void DetachHudListener(engine::ui::IHudViewListener* listener) {
+        if (listener != this) {
+            hudBinder_.DetachListener(listener);
+        }
+    }
+
+    const engine::ui::HudViewModel& GetHudViewModel() const { return hudViewModel_; }
+    const engine::ui::HudViewBinder& GetHudViewBinder() const { return hudBinder_; }
+
+    // Evaluates current player, selected unit & custom properties into `hudViewModel_`,
+    // dispatches dirty flags through `hudBinder_`, mutates only changed `TextFrame` nodes,
+    // and triggers `rootFrame->PositionBounds(gui)` only when layout was dirtied.
     bool SyncAndRelayoutIfChanged(const CSimulation& sim,
                                   int localPlayerIndex,
                                   int selectedUnitHandle,
@@ -71,13 +94,22 @@ public:
 
     void InvalidateAll() {
         lastState_ = HudBoundStateSnapshot{};
+        hudViewModel_ = engine::ui::HudViewModel{};
         for (auto& cp : customProperties_) {
             cp.initialized = false;
             cp.lastValue.clear();
         }
     }
+
     const HudBoundStateSnapshot& GetLastSnapshot() const { return lastState_; }
     const UIDataBinderStats& GetStats() const { return stats_; }
+
+    // engine::ui::IHudViewListener callbacks invoked during `hudBinder_.Dispatch(hudViewModel_)`
+    void OnHudResourcesChanged(const engine::ui::HudViewModel& vm) override;
+    void OnHudUpkeepChanged(const engine::ui::HudViewModel& vm) override;
+    void OnHudSelectionChanged(const engine::ui::HudViewModel& vm) override;
+    void OnHudVitalsChanged(const engine::ui::HudViewModel& vm) override;
+    void OnHudCustomPropertiesChanged(const engine::ui::HudViewModel& vm) override;
 
 private:
     struct CustomBoundProperty {
@@ -98,6 +130,11 @@ private:
     TextFrame* unitHpFrame_ = nullptr;
     TextFrame* unitManaFrame_ = nullptr;
     std::vector<CustomBoundProperty> customProperties_;
+
+    engine::ui::HudViewModel hudViewModel_;
+    engine::ui::HudViewBinder hudBinder_;
+    bool dispatchAnyChanged_ = false;
+    bool currentHasSelectedUnit_ = false;
 
     HudBoundStateSnapshot lastState_{};
     UIDataBinderStats stats_{};

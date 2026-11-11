@@ -36,6 +36,11 @@ void CWorldCollision::RemoveItem(CItem* item) {
     }
 }
 
+void CWorldCollision::Rebuild(const std::vector<CUnit*>& units, const std::vector<CItem*>& items) {
+    allUnits_ = units;
+    allItems_ = items;
+}
+
 void CWorldCollision::EnumUnitsInRect(float x, float y, float w, float h,
                                       std::vector<CUnit*>& out) const {
     ++rangeQueriesPerformed_;

@@ -132,10 +132,10 @@ public:
 
     float GetInterpolationAlpha() const { return interpolationAlpha_; }
 
-    render::RenderInterpolationBuffer& InterpolationBuffer() { return interpolationBuffer_; }
-    const render::RenderInterpolationBuffer& InterpolationBuffer() const { return interpolationBuffer_; }
+    ::render::RenderInterpolationBuffer& InterpolationBuffer() { return interpolationBuffer_; }
+    const ::render::RenderInterpolationBuffer& InterpolationBuffer() const { return interpolationBuffer_; }
 
-    bool SampleInterpolatedUnit(int handleId, render::RenderTransformSnapshot& outSnap) const {
+    bool SampleInterpolatedUnit(int handleId, ::render::RenderTransformSnapshot& outSnap) const {
         return interpolationBuffer_.SampleEntity(handleId, interpolationAlpha_, outSnap);
     }
 
@@ -234,7 +234,7 @@ public:
     std::unordered_set<int> itemVisualRegistrationFailed;
 
 private:
-    render::RenderInterpolationBuffer interpolationBuffer_;
+    ::render::RenderInterpolationBuffer interpolationBuffer_;
     float interpolationAlpha_ = 1.0f;
     CSimulation* boundSim_ = nullptr;
     SignalConnectionId connUnitRemoved_ = 0;
@@ -262,7 +262,7 @@ struct WorldPresentationStats {
 class WorldPresentationSubsystem final : public ISubsystem {
 public:
     explicit WorldPresentationSubsystem(FixedTimestepStepper* stepper = nullptr,
-                                        render::RenderServer* renderServer = nullptr)
+                                        ::render::RenderServer* renderServer = nullptr)
         : ownedPresentation_(std::make_unique<UnitPresentationSystem>())
         , presentation_(ownedPresentation_.get())
         , stepper_(stepper)
@@ -271,7 +271,7 @@ public:
     explicit WorldPresentationSubsystem(UnitPresentationSystem* externalPresentation,
                                         CSimulation* boundSim = nullptr,
                                         FixedTimestepStepper* stepper = nullptr,
-                                        render::RenderServer* renderServer = nullptr)
+                                        ::render::RenderServer* renderServer = nullptr)
         : presentation_(externalPresentation)
         , sim_(boundSim)
         , stepper_(stepper)
@@ -327,12 +327,12 @@ public:
     }
 
     void BindStepper(FixedTimestepStepper* stepper) { stepper_ = stepper; }
-    void BindRenderServer(render::RenderServer* renderServer) { renderServer_ = renderServer; }
+    void BindRenderServer(::render::RenderServer* renderServer) { renderServer_ = renderServer; }
 
     UnitPresentationSystem* GetPresentation() const { return presentation_; }
     CSimulation* GetBoundSimulation() const { return sim_; }
-    render::BonePaletteAtlas& GetBonePaletteAtlas() { return bonePaletteAtlas_; }
-    const render::BonePaletteAtlas& GetBonePaletteAtlas() const { return bonePaletteAtlas_; }
+    ::render::BonePaletteAtlas& GetBonePaletteAtlas() { return bonePaletteAtlas_; }
+    const ::render::BonePaletteAtlas& GetBonePaletteAtlas() const { return bonePaletteAtlas_; }
 
     uint64_t GetFixedCapturesCount() const { return fixedCapturesCount_; }
     uint64_t GetFrameUpdatesCount() const { return frameUpdatesCount_; }
@@ -355,8 +355,8 @@ private:
     UnitPresentationSystem* presentation_ = nullptr;
     CSimulation* sim_ = nullptr;
     FixedTimestepStepper* stepper_ = nullptr;
-    render::RenderServer* renderServer_ = nullptr;
-    render::BonePaletteAtlas bonePaletteAtlas_;
+    ::render::RenderServer* renderServer_ = nullptr;
+    ::render::BonePaletteAtlas bonePaletteAtlas_;
     size_t interpolatedUnitsLastTick_ = 0;
     uint64_t framesPresented_ = 0;
     uint64_t fixedCapturesCount_ = 0;

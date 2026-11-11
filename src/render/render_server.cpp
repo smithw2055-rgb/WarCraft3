@@ -611,12 +611,21 @@ void RenderServer::BuildAndSortBatches() {
 }
 
 void RenderServer::ExecuteBatches(const std::function<void(const RenderBatchGroup&)>& drawCallback) {
-    if (!drawCallback) return;
+    RhiDevice& rhi = RhiDevice::Instance();
+    const bool recordHeadlessDraws = rhi.IsHeadlessMockEnabled() && !rhi.IsGpuActive();
     for (const auto& batch : opaqueBatches_) {
-        drawCallback(batch);
+        if (drawCallback) {
+            drawCallback(batch);
+        } else if (recordHeadlessDraws && !batch.instances.empty()) {
+            rhi.Draw(0, 36, static_cast<int>(batch.instances.size()));
+        }
     }
     for (const auto& batch : transparentBatches_) {
-        drawCallback(batch);
+        if (drawCallback) {
+            drawCallback(batch);
+        } else if (recordHeadlessDraws && !batch.instances.empty()) {
+            rhi.Draw(0, 36, static_cast<int>(batch.instances.size()));
+        }
     }
     stats_.boneAtlasRowsAllocated = boneAtlas_.GetActiveRowCount();
 }

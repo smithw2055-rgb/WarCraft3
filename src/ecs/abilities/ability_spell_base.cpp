@@ -512,7 +512,7 @@ void SpellArchetypeRule::Execute(CSimulation& game, CUnit* caster, CWidget* targ
         });
         break;
     case K::TARGET_CURSE_BUFF:
-        if (auto* unit = dynamic_cast<CUnit*>(target)) {
+        if (auto* unit = ((target) ? (target)->AsUnit() : nullptr)) {
             if (!unit->IsDead()) {
                 unit->AddBuff(std::make_unique<CBuffCurse>(duration, param0), game);
             }

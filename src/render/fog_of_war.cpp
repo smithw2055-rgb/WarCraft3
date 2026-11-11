@@ -1,5 +1,5 @@
 #include "fog_of_war.h"
-#include "renderer.h"
+#include "render/rhi_device.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>

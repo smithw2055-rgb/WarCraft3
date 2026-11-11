@@ -1,7 +1,7 @@
 #include "item.h"
 
 CItem::CItem(int handleId, War3ID typeId, float x, float y)
-    : CWidget(handleId, x, y, 50.0f)
+    : CWidget(handleId, x, y, 50.0f, engine::world::WidgetKind::Item)
     , typeId_(typeId)
     , isPowerup_(0)
     , isPermanent_(0)

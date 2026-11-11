@@ -1,5 +1,5 @@
 #include "mdx_animator.h"
-#include "renderer.h"
+#include "render/rhi_device.h"
 #include <iostream>
 #include <cctype>
 #include <cmath>

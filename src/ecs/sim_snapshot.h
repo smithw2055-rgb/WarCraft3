@@ -243,9 +243,10 @@ static_assert(std::is_trivially_copyable_v<SimProjectileSnapshot>,
 class SimStateSnapshot {
 public:
     static constexpr uint32_t kMagic = 0x53533357u; // "W3SS"
-    static constexpr uint32_t kVersion = 2u;
+    static constexpr uint32_t kVersion = 3u;
 
     int32_t gameTurnTick = 0;
+    int32_t nextHandleId = 0x100000;
     uint32_t simRandState = 0;
     uint32_t combatRandState = 0;
     float gameTimeOfDay = 12.0f;

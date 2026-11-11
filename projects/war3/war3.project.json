@@ -1,0 +1,53 @@
+{
+  "projectId": "war3_tft",
+  "title": "WarCraft III: The Frozen Throne (Warsmash Experimental Engine Host)",
+  "engineVersion": "0.2.0",
+  "modulePlugin": "war3_module_plugin",
+  "entryModuleId": "War3GameModule",
+  "defaultScene": "resources/Maps/FrozenThrone/(2)EchoIsles.w3x",
+  "fixedTickHz": 20,
+  "windowWidth": 1280,
+  "windowHeight": 720,
+  "vfsMounts": [
+    {
+      "type": "folder",
+      "path": "resources/Maps/FrozenThrone",
+      "mountPoint": "/maps",
+      "priority": 500,
+      "optional": true
+    },
+    {
+      "type": "mpq",
+      "path": "resources/War3Patch.mpq",
+      "mountPoint": "/",
+      "priority": 400,
+      "optional": true
+    },
+    {
+      "type": "mpq",
+      "path": "resources/War3xLocal.mpq",
+      "mountPoint": "/",
+      "priority": 300,
+      "optional": true
+    },
+    {
+      "type": "mpq",
+      "path": "resources/War3x.mpq",
+      "mountPoint": "/",
+      "priority": 200,
+      "optional": true
+    },
+    {
+      "type": "mpq",
+      "path": "resources/war3.mpq",
+      "mountPoint": "/",
+      "priority": 100,
+      "optional": true
+    }
+  ],
+  "customSettings": {
+    "cameraDistance": "1650",
+    "fogOfWarEnabled": "true",
+    "ruleset": "FrozenThrone_1_27"
+  }
+}

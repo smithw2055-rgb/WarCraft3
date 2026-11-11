@@ -1,5 +1,6 @@
 #include "ecs/sim_snapshot.h"
 #include "csimulation.h"
+#include "projects/war3/war3_save_contributor.h"
 #include "player.h"
 #include "unit.h"
 #include "destructable.h"
@@ -52,7 +53,8 @@ void CSimulation::SetSimulationModule(std::shared_ptr<engine::ISimulationModule>
         simModule_->OnDetachFromSimulation(*this);
     }
     simModule_ = std::move(module);
-    pureEngineMode_ = (dynamic_cast<engine::NullSimulationModule*>(simModule_.get()) != nullptr);
+    pureEngineMode_ = (simModule_ && simModule_->GetModuleId() != nullptr &&
+                       std::strcmp(simModule_->GetModuleId(), "NullPureEngineModule") == 0);
     combatSystem_.SetCombatModule(simModule_.get(), pureEngineMode_);
     if (simModule_) {
         simModule_->OnAttachToSimulation(*this);
@@ -405,7 +407,7 @@ int CSimulation::GetTerrainHeight(float x, float y) const {
 
 bool CSimulation::CheckHighlandMiss(CUnit* attacker, const CWidget* target, bool isAttack) {
     if (!isAttack || !attacker || !target) return false;
-    if (dynamic_cast<const CUnit*>(target) == nullptr) return false;
+    if (((target) ? (target)->AsUnit() : nullptr) == nullptr) return false;
     if (GetTerrainHeight(attacker->GetX(), attacker->GetY()) <
         GetTerrainHeight(target->GetX(), target->GetY())) {
         if (SimRand01() < gameplayConstants_.chanceToMiss) return true;
@@ -481,6 +483,7 @@ void CSimulation::InstallUnitHooks(CUnit* ptr) {
 CUnit* CSimulation::AdoptUnit(std::unique_ptr<CUnit> unit) {
     if (!unit) return nullptr;
     CUnit* ptr = unit.get();
+    handleIdAlloc_.AdvanceAtLeast(ptr->GetHandleId() + 1);
     InstallUnitHooks(ptr);
     unitMap_[ptr->GetHandleId()] = std::move(unit);
     newUnits_.push_back(ptr);
@@ -957,4 +960,23 @@ uint64_t CSimulation::HashState() const {
         }
     }
     return h;
+}
+
+std::vector<uint8_t> CSimulation::SaveDeterministicEsavArchive() const {
+    projects::war3::War3SaveContributor contrib(const_cast<CSimulation*>(this));
+    engine::world::DeterministicSaveArchive archive;
+    archive.RegisterContributor(&contrib);
+    return archive.SaveAll(static_cast<uint64_t>(std::max(0, gameTurnTick_)));
+}
+
+bool CSimulation::LoadDeterministicEsavArchive(const std::vector<uint8_t>& archiveBytes) {
+    projects::war3::War3SaveContributor contrib(this);
+    engine::world::DeterministicSaveArchive archive;
+    archive.RegisterContributor(&contrib);
+    uint64_t restoredTick = 0;
+    if (!archive.LoadAll(archiveBytes, &restoredTick)) {
+        return false;
+    }
+    gameTurnTick_ = static_cast<int>(restoredTick);
+    return true;
 }

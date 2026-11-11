@@ -62,7 +62,7 @@ bool CAbilityHarvest::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId
     if (!target || target->IsDead()) return false;
 
     // Can target units (gold mines, town halls) or destructables (trees)
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
+    auto* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (targetUnit) {
         if (CAbility* mine = targetUnit->GetGoldMineAbility()) {
             return goldCapacity_ > 0 && mine->GetGold() > 0;
@@ -73,7 +73,7 @@ bool CAbilityHarvest::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId
         }
     }
 
-    auto* targetDestructable = dynamic_cast<CDestructable*>(target);
+    auto* targetDestructable = ((target) ? (target)->AsDestructable() : nullptr);
     if (targetDestructable) {
         if (lumberCapacity_ <= 0) {
             return false;
@@ -99,7 +99,7 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
     (void)orderId;
     if (!target) return nullptr;
 
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
+    auto* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
     if (targetUnit) {
         CAbility* mine = targetUnit->GetGoldMineAbility();
         if (mine && goldCapacity_ > 0 && mine->GetGold() > 0) {
@@ -117,7 +117,7 @@ CBehavior* CAbilityHarvest::Begin(CSimulation& game, CUnit* caster, int orderId,
         }
     }
 
-    auto* targetDestructable = dynamic_cast<CDestructable*>(target);
+    auto* targetDestructable = ((target) ? (target)->AsDestructable() : nullptr);
     if (targetDestructable) {
         auto* destructableData = game.GetDestructableData();
         if (destructableData) {

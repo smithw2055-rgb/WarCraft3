@@ -1,16 +1,15 @@
 #include "render/render_server.h"
 #include "textured_terrain.h"
 // Keep this TU easy to touch when validating GPU-handle initialization fixes.
-#include "shader.h"
+#include "render/rhi_device.h"
 #include "terrain_shader.h"
-#include "renderer.h"
 #include "shapes.h"
 #include "splat_model.h"
 #include "mdx_viewer.h"
 #include "variations.h"
 #include "asset/TileSet.h"
 #include "asset/BLP.h"
-#include "asset/stb_image.h"
+#include "stb/stb_image.h"
 #include "model/mdx.h"
 #include <iostream>
 #include <cmath>
@@ -154,6 +153,9 @@ void TexturedTerrain::Release() {
     destroyBuf(pathingIB_);
     destroyBuf(regionVB_);
     destroyBuf(regionIB_);
+
+    overlayState_ = engine::render::TerrainOverlayState{};
+    nextShadowFootprintId_ = 1;
 }
 
 // ---- Data texture creation helpers ----
@@ -800,6 +802,7 @@ bool TexturedTerrain::Build(const W3EMap& map, TileSet* tileset) {
     tilesetChar_ = map.tileset;
     buildStats_ = TerrainBuildStats{};
     terrainChunkGrid_.BuildFromW3E(map, 16);
+    overlayState_.Resize(map.tileWidth, map.tileHeight);
     RebuildCornerData(map);
     BuildCliffsFromMdx(map);
     BuildGroundGPU(map);
@@ -1531,6 +1534,11 @@ void TexturedTerrain::AddUberSplatMesh(const std::string& path, const std::vecto
 }
 
 void TexturedTerrain::CreateUnitShadow(float x, float y, const std::string& shadowFile) {
+    if (overlayState_.Width() > 0 && overlayState_.Height() > 0) {
+        const int gx = static_cast<int>((x - mapOffsetX_) / 128.0f);
+        const int gy = static_cast<int>((y - mapOffsetY_) / 128.0f);
+        overlayState_.AddShadowFootprint({nextShadowFootprintId_++, gx, gy, 2, 2, 180});
+    }
     if (!mpq_ || shadowFile.empty()) return;
 
     static std::unordered_map<std::string, sg_image> shadowTexCache;

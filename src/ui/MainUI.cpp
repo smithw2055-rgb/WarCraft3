@@ -1,4 +1,5 @@
 #include "MainUI.h"
+#include "render/rhi_device.h"
 #include "FdfHudHost.h"
 #include "../data/unitdata.h"
 #include "../data/upgradedata.h"
@@ -10,8 +11,8 @@
 #include "../ecs/player.h"
 #include "../ecs/item.h"
 #include "../asset/BLP.h"
-#include "../asset/stb_image.h"
-#include "../asset/stb_image_write.h"
+#include "stb/stb_image.h"
+#include "stb/stb_image_write.h"
 #include "third_party/sokol/sokol_app.h"
 #include <algorithm>
 #include <cctype>
@@ -566,14 +567,14 @@ void MainUI::Update(int screenW, int screenH) {
 void MainUI::RenderHudOffscreen() {
     if (hudHost_) {
         hudHost_->RenderOffscreen();
-        sg_reset_state_cache();
+        render::RhiDevice::Instance().ResetStateCache();
     }
 }
 
 void MainUI::RenderHudOnly() {
     if (!hudHost_) return;
     hudHost_->Render();
-    sg_reset_state_cache();
+    render::RhiDevice::Instance().ResetStateCache();
 }
 
 void MainUI::Render() {

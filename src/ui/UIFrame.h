@@ -1,6 +1,7 @@
 #pragma once
 #include "UiRenderer.h"
 #include "UiTypes.h"
+#include "engine/ui/ui_frame_rtti_free.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -52,7 +53,11 @@ struct FramePointAssign {
 
 class UIFrame {
 public:
-    UIFrame(const std::string& name, UIFrame* parent = nullptr);
+    static constexpr engine::ui::FrameKind kStaticFrameKind = engine::ui::FrameKind::Base;
+
+    UIFrame(const std::string& name,
+            UIFrame* parent = nullptr,
+            engine::ui::FrameKind leafKind = engine::ui::FrameKind::Base);
     virtual ~UIFrame() = default;
 
     virtual void Render(UiRenderer& r);
@@ -144,6 +149,12 @@ public:
     }
     UiRect GetBounds() const { return bounds_; }
 
+    uint32_t GetFrameKindMask() const noexcept { return frameKindMask_; }
+    template <typename T>
+    T* As() noexcept { return engine::ui::DynamicCastFrame<T>(this); }
+    template <typename T>
+    const T* As() const noexcept { return engine::ui::DynamicCastFrame<const T>(this); }
+
 protected:
     void SortChildrenByZOrderIfNeeded();
     void ComputeSelfPositionBounds(GameUI& gui);
@@ -160,4 +171,5 @@ protected:
     UiRect bounds_;
     float assignedW_ = 0, assignedH_ = 0;
     std::unordered_map<FramePoint, FramePointAssign> assignments_;
+    uint32_t frameKindMask_ = engine::ui::ComputeFrameAncestryMask(engine::ui::FrameKind::Base);
 };

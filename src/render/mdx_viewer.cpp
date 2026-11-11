@@ -1,13 +1,13 @@
 #include "mdx_viewer.h"
-#include "shader.h"
-#include "renderer.h"
+#include "render/rhi_device.h"
+#include "engine/render/standard_render_passes.h"
 #include "replaceable_ids.h"
 #include "mdx_sequence_select.h"
 #include "mdx_collision.h"
 #include "asset/BLP.h"
 #include "asset/DDS.h"
 #include "asset/MipChain.h"
-#include "asset/stb_image.h"
+#include "stb/stb_image.h"
 #include <algorithm>
 #include <iostream>
 #include <cctype>
@@ -2147,6 +2147,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
                     batch.textureAnimationId = textureAnimationId;
                     if (textureIdTimeline) {
                         batch.textureIdTimeline = *textureIdTimeline;
+                        batch.textureIdTimeline.interpolationType = MdxInterpolation::None;
                         batch.hasTextureIdTimeline = true;
                     }
                     batch.replaceableId = replaceableId;
@@ -2258,6 +2259,7 @@ bool MdxViewer::Load(const MdxModel& model, MpqManager* mpq, bool cliffMode, boo
                 batch.textureAnimationId = textureAnimationId;
                 if (textureIdTimeline) {
                     batch.textureIdTimeline = *textureIdTimeline;
+                    batch.textureIdTimeline.interpolationType = MdxInterpolation::None;
                     batch.hasTextureIdTimeline = true;
                 }
                 batch.replaceableId = replaceableId;
@@ -3270,7 +3272,7 @@ void MdxViewer::RenderWithModelMatrix(const Mat4& model, const Mat4& view, const
             float sampledTextureId = (float)activeTextureId;
             if (SampleTimelineForModel(batch.textureIdTimeline, modelSource_, currentFrame, elapsedMs_,
                     &sampledTextureId, 1, (float)activeTextureId, currentSequenceIndex)) {
-                activeTextureId = (int)std::lround(sampledTextureId);
+                activeTextureId = engine::render::DiscreteStepTimelineSampler::TruncateFloatTrackToIndex(sampledTextureId);
             }
         }
 

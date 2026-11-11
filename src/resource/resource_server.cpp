@@ -1,4 +1,5 @@
 #include "resource/resource_server.h"
+#include "projects/war3/mpq_vfs_provider.h"
 
 #include <algorithm>
 #include <cctype>
@@ -114,7 +115,11 @@ bool AudioClipResource::ParseAudioContainer(const std::string& pathHint,
     return false;
 }
 
-ResourceServer::ResourceServer() = default;
+ResourceServer::ResourceServer() {
+    projects::war3::MpqArchiveProvider::RegisterInVfs(vfsRegistry_);
+    formatRegistry_.RegisterLoader(
+        std::make_shared<engine::resource::RawBytesFormatLoader>(), -100);
+}
 
 ResourceServer::~ResourceServer() {
     StopAsyncWorker();
@@ -182,7 +187,24 @@ std::string ResourceServer::SiblingModelExtensionPath(const std::string& archive
 
 void ResourceServer::SetMpqManager(const MpqManager* mpq) {
     std::lock_guard<std::mutex> lock(mutex_);
+    vfsRegistry_.UnmountBySource("mpq://bound");
     mpq_ = mpq;
+    mpqLifetime_ = mpq ? mpq->GetLifetimeToken() : std::weak_ptr<const int>{};
+    if (mpq_) {
+        // Priority 450 sits above manifest base MPQs (100..400) so map overrides
+        // (`mpq_.OpenOnTop` / `war3mapImported\`) shadow base MPQs while explicit
+        // high-priority VFS overlays (>= 500, e.g. `/maps` or memory patches) win.
+        vfsRegistry_.Mount(
+            std::make_shared<projects::war3::MpqArchiveProvider>(mpq_, "mpq://bound"),
+            450,
+            "/");
+    }
+}
+
+bool ResourceServer::MountProjectManifest(const engine::ProjectManifest& manifest,
+                                          const std::string& baseDir) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return vfsRegistry_.MountFromManifest(manifest, baseDir);
 }
 
 void ResourceServer::SetCustomByteReader(ByteReaderFn reader) {
@@ -258,12 +280,19 @@ bool ResourceServer::ReadRawBytes(const std::string& uriOrPath, std::vector<uint
             outBytes = memIt->second;
             return true;
         }
-        mpq = mpq_;
+        mpq = (!mpqLifetime_.expired()) ? mpq_ : nullptr;
         customReader = customReader_;
     }
 
     if (customReader && customReader(parsed.rawArchivePath, outBytes)) {
         return true;
+    }
+
+    if (parsed.scheme != VfsScheme::Local) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (vfsRegistry_.MountCount() > 0 && vfsRegistry_.ReadFile(parsed.rawArchivePath, outBytes)) {
+            return true;
+        }
     }
 
     if (mpq && parsed.scheme != VfsScheme::Local) {
@@ -296,7 +325,7 @@ bool ResourceServer::FileExists(const std::string& uriOrPath) const {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (memoryFiles_.count(parsed.canonicalCacheKey) > 0) return true;
-        mpq = mpq_;
+        mpq = (!mpqLifetime_.expired()) ? mpq_ : nullptr;
         hasCustom = static_cast<bool>(customReader_);
     }
 
@@ -305,6 +334,12 @@ bool ResourceServer::FileExists(const std::string& uriOrPath) const {
         if (ReadRawBytes(uriOrPath, tmp)) return true;
     }
 
+    if (parsed.scheme != VfsScheme::Local) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (vfsRegistry_.MountCount() > 0 && vfsRegistry_.Exists(parsed.rawArchivePath)) {
+            return true;
+        }
+    }
     if (mpq && parsed.scheme != VfsScheme::Local && mpq->FileExists(parsed.rawArchivePath)) {
         return true;
     }

@@ -1,8 +1,8 @@
 #include "Texture.h"
 #include "BLP.h"
 #include "MipChain.h"
-#include "../render/renderer.h"
-#include "stb_image.h"
+#include "render/rhi_device.h"
+#include "stb/stb_image.h"
 #include <cstring>
 #include <iostream>
 

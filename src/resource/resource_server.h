@@ -36,6 +36,9 @@
 #include "model/mdx.h"
 #include "resource/mpq_storm.h"
 #include "resource/slk.h"
+#include "engine/core/project_manifest.h"
+#include "engine/resource/format_loader.h"
+#include "engine/resource/vfs_archive.h"
 
 namespace resource {
 
@@ -132,6 +135,7 @@ using ResourceRef = std::shared_ptr<T>;
 
 class RawBinaryResource final : public Resource {
 public:
+    static constexpr ResourceKind kStaticKind = ResourceKind::RawBinary;
     RawBinaryResource() { kind_ = ResourceKind::RawBinary; }
     std::vector<uint8_t> bytes;
     size_t EstimateMemoryBytes() const override { return sizeof(*this) + bytes.capacity(); }
@@ -139,6 +143,7 @@ public:
 
 class SlkTableResource final : public Resource {
 public:
+    static constexpr ResourceKind kStaticKind = ResourceKind::SlkTable;
     SlkTableResource() { kind_ = ResourceKind::SlkTable; }
     SlkTable table;
     size_t byteSize = 0;
@@ -147,6 +152,7 @@ public:
 
 class TxtTableResource final : public Resource {
 public:
+    static constexpr ResourceKind kStaticKind = ResourceKind::TxtTable;
     TxtTableResource() { kind_ = ResourceKind::TxtTable; }
     TxtTable table;
     size_t byteSize = 0;
@@ -155,6 +161,7 @@ public:
 
 class BlpImageResource final : public Resource {
 public:
+    static constexpr ResourceKind kStaticKind = ResourceKind::BlpImage;
     BlpImageResource() { kind_ = ResourceKind::BlpImage; }
     BLPImage baseImage{};
     std::vector<BLPImage> mipChain;
@@ -167,6 +174,7 @@ public:
 
 class MdxModelResource final : public Resource {
 public:
+    static constexpr ResourceKind kStaticKind = ResourceKind::MdxModel;
     MdxModelResource() { kind_ = ResourceKind::MdxModel; }
     MdxModel model;
     size_t sourceByteSize = 0;
@@ -182,6 +190,7 @@ public:
 // Stage J: Managed Audio Clip Resource (WAV RIFF/WAVE chunk parser + MP3/FLAC/OGG container support)
 class AudioClipResource final : public Resource {
 public:
+    static constexpr ResourceKind kStaticKind = ResourceKind::AudioClip;
     AudioClipResource() { kind_ = ResourceKind::AudioClip; }
 
     std::vector<uint8_t> bytes;
@@ -230,6 +239,12 @@ public:
 
     // Bind an MpqManager data source or a custom virtual byte provider (for tests / memory VFS)
     void SetMpqManager(const MpqManager* mpq);
+    bool MountProjectManifest(const engine::ProjectManifest& manifest,
+                              const std::string& baseDir = ".");
+    engine::vfs::VfsMountRegistry& Vfs() { return vfsRegistry_; }
+    const engine::vfs::VfsMountRegistry& Vfs() const { return vfsRegistry_; }
+    engine::resource::FormatLoaderRegistry& FormatLoaders() { return formatRegistry_; }
+    const engine::resource::FormatLoaderRegistry& FormatLoaders() const { return formatRegistry_; }
     const MpqManager* GetMpqManager() const { return mpq_; }
 
     void SetCustomByteReader(ByteReaderFn reader);
@@ -265,7 +280,11 @@ public:
 
     template <typename T>
     ResourceRef<T> GetTypedByRid(RID rid) const {
-        return std::dynamic_pointer_cast<T>(GetByRid(rid));
+        auto base = GetByRid(rid);
+        if (base && base->GetKind() == T::kStaticKind) {
+            return std::static_pointer_cast<T>(base);
+        }
+        return nullptr;
     }
 
     // Asynchronous preload queue: decodes resource on background worker thread and invokes
@@ -295,6 +314,7 @@ private:
 
     mutable std::mutex mutex_;
     const MpqManager* mpq_ = nullptr;
+    std::weak_ptr<const int> mpqLifetime_;
     ByteReaderFn customReader_;
     std::unordered_map<std::string, std::vector<uint8_t>> memoryFiles_;
 
@@ -330,6 +350,8 @@ private:
     bool workerBusy_ = false;
     std::thread workerThread_;
     std::unordered_map<std::string, std::string> pathAliases_;
+    engine::vfs::VfsMountRegistry vfsRegistry_;
+    engine::resource::FormatLoaderRegistry formatRegistry_;
 
     template <typename T, typename BuilderFn>
     ResourceRef<T> LoadOrInsertCached(const std::string& typedKey,

@@ -39,12 +39,12 @@ bool CAbilityAttack::CheckCanTarget(CSimulation& game, CUnit* unit, int orderId,
 
     // Invisible units cannot be ordered against (ref invisibility).
     // Detectors (shades, sentry wards) see through stealth in range.
-    if (auto* targetUnit = dynamic_cast<CUnit*>(target)) {
+    if (auto* targetUnit = ((target) ? (target)->AsUnit() : nullptr)) {
         if (targetUnit->IsInvisibleTo(unit)) return false;
     }
 
-    auto* targetUnit = dynamic_cast<CUnit*>(target);
-    auto* targetDest = dynamic_cast<CDestructable*>(target);
+    auto* targetUnit = ((target) ? (target)->AsUnit() : nullptr);
+    auto* targetDest = ((target) ? (target)->AsDestructable() : nullptr);
 
     // On SMART order, right-clicking destructables (trees) or gold mines never attacks
     if (orderId == OrderIds::SMART) {

@@ -1,5 +1,5 @@
 #include "core/game_controller.h"
-#include "asset/stb_image_write.h"
+#include "stb/stb_image_write.h"
 #include "core/map_path_resolver.h"
 #include "debug/move_debug.h"
 #include "map/w3i.h"
@@ -7,7 +7,7 @@
 #include "platform/platform.h"
 #include "render/mdx_event_splat.h"
 #include "render/mdx_sequence_select.h"
-#include "render/renderer.h"
+#include "render/rhi_device.h"
 #include "resource/slk.h"
 #include "third_party/sokol/sokol_app.h"
 #include "third_party/sokol/sokol_gfx.h"
@@ -448,6 +448,32 @@ bool ParseDebugUiResources(const char* value, int& gold, int& lumber, int& foodU
 
 GameController::GameController() {
     inputActionMap_.RegisterStandardWarcraftDefaults();
+    {
+        engine::ProjectManifest war3Manifest;
+        std::string baseDir = ".";
+        bool loadedManifest =
+            engine::ProjectManifest::LoadFromFile("projects/war3/war3.project.json", war3Manifest);
+#ifdef PROJECT_SOURCE_DIR
+        if (!loadedManifest) {
+            const std::filesystem::path srcManifest =
+                std::filesystem::path(PROJECT_SOURCE_DIR) / "projects/war3/war3.project.json";
+            if (engine::ProjectManifest::LoadFromFile(srcManifest.string(), war3Manifest)) {
+                baseDir = PROJECT_SOURCE_DIR;
+                loadedManifest = true;
+            }
+        }
+#endif
+        if (loadedManifest) {
+            // Retain only non-MPQ mounts (e.g. `/maps` folder); retail MPQs are opened
+            // once via `OpenDataSources()` (`warsmash.ini`) and bound through `scene_.Init(mpq_)`.
+            war3Manifest.vfsMounts.erase(
+                std::remove_if(war3Manifest.vfsMounts.begin(),
+                               war3Manifest.vfsMounts.end(),
+                               [](const engine::VfsMountSpec& s) { return s.type == "mpq"; }),
+                war3Manifest.vfsMounts.end());
+            scene_.GetResourceServer().MountProjectManifest(war3Manifest, baseDir);
+        }
+    }
     engineKernel_.BindExternalServices(
         &scene_.GetJobSystem(),
         &scene_.GetResourceServer(),
@@ -1082,9 +1108,7 @@ void GameController::Render(int screenW, int screenH) {
         const float hudDebugClearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         Renderer::SetClearColor(hudDebugClearColor);
         Renderer::BeginFrame();
-        sg_reset_state_cache();
-        sg_apply_viewport(0, 0, screenW, screenH, true);
-        sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+        render::RhiDevice::Instance().ResetFullViewport(screenW, screenH);
         ui_.RenderHudOnly();
         if (screenshotFrame >= 0) {
             screenshotFrame = std::min(screenshotFrame, frameCount_);
@@ -1106,9 +1130,7 @@ void GameController::Render(int screenW, int screenH) {
             ui_.Update(screenW, screenH);
 
             Renderer::BeginFrame();
-            sg_reset_state_cache();
-            sg_apply_viewport(0, 0, screenW, screenH, true);
-            sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+            render::RhiDevice::Instance().ResetFullViewport(screenW, screenH);
             ui_.RenderHudOnly();
             CaptureScreenshotIfNeeded(screenW, screenH);
             Renderer::EndFrame();
@@ -1134,9 +1156,7 @@ void GameController::Render(int screenW, int screenH) {
         texturedTerrain_.Render(view, proj, frameCount_ * 0.016f);
     }
 
-    sg_reset_state_cache();
-    sg_apply_viewport(0, 0, screenW, screenH, true);
-    sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+    render::RhiDevice::Instance().ResetFullViewport(screenW, screenH);
     if (!terrainOnly_) {
             WARSMASH_PROFILE_SCOPE(profiler_, "SceneRenderAll", "Render");
             if (texturedTerrain_.IsValid()) {
@@ -1232,12 +1252,10 @@ void GameController::Render(int screenW, int screenH) {
 
     if (!hideHud_ && showMinimap && minimap_.IsValid()) {
         SyncMinimapLayer();
-        sg_reset_state_cache();
-        sg_apply_viewport(0, 0, screenW, screenH, true);
-        sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+        render::RhiDevice::Instance().ResetFullViewport(screenW, screenH);
         Vec3 cp = camera_.GetPosition();
         minimap_.Render(screenW, screenH, cp.x, cp.z, camera_.GetYaw(), 0, 0, 45.0f, aspect);
-        sg_reset_state_cache();
+        render::RhiDevice::Instance().ResetStateCache();
     }
 
     if (!hideHud_) {
@@ -1246,9 +1264,7 @@ void GameController::Render(int screenW, int screenH) {
         CollectTextTagOverlays(screenW, screenH);
         SyncLeaderboard();
         SyncMultiboard();
-        sg_reset_state_cache();
-        sg_apply_viewport(0, 0, screenW, screenH, true);
-        sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+        render::RhiDevice::Instance().ResetFullViewport(screenW, screenH);
         ui_.Render();
 
         ui_.RenderHudOnly();
@@ -1268,13 +1284,9 @@ void GameController::RenderUiOnly(int screenW, int screenH) {
     const float glueClearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     Renderer::SetClearColor(glueClearColor);
     Renderer::BeginFrame();
-    sg_reset_state_cache();
-    sg_apply_viewport(0, 0, screenW, screenH, true);
-    sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+    render::RhiDevice::Instance().ResetFullViewport(screenW, screenH);
 
-    sg_reset_state_cache();
-    sg_apply_viewport(0, 0, screenW, screenH, true);
-    sg_apply_scissor_rect(0, 0, screenW, screenH, true);
+    render::RhiDevice::Instance().ResetFullViewport(screenW, screenH);
 
     ui_.SetExternalMinimapVisible(false);
     ui_.RenderHudOnly();

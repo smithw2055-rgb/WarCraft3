@@ -1,6 +1,6 @@
 #include "TextRenderer.h"
 #include "../resource/mpq_storm.h"
-#include "../render/renderer.h"
+#include "render/rhi_device.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../asset/stb_truetype.h"

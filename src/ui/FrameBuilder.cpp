@@ -135,7 +135,7 @@ UIFrame* FrameBuilder::ConstructFrame(const FrameDefinition& def, UIFrame* paren
         frame->SetParent(parent);
         UIFrame* p = parent;
         while (p) {
-            if (auto* parentSimple = dynamic_cast<SimpleFrame*>(p)) {
+            if (auto* parentSimple = engine::ui::DynamicCastFrame<SimpleFrame>(p)) {
                 parentSimple->AddChild(frame);
                 break;
             }
@@ -155,8 +155,8 @@ UIFrame* FrameBuilder::ConstructFrame(const FrameDefinition& def, UIFrame* paren
     }
 
     // Construct inner frames
-    auto* btn = dynamic_cast<ButtonFrame*>(frame);
-    auto* check = dynamic_cast<CheckBoxFrame*>(frame);
+    auto* btn = engine::ui::DynamicCastFrame<ButtonFrame>(frame);
+    auto* check = engine::ui::DynamicCastFrame<CheckBoxFrame>(frame);
     for (const auto& inner : def.innerFrames) {
         UIFrame* child = ConstructFrame(inner, frame);
         if (child) {
@@ -177,7 +177,7 @@ UIFrame* FrameBuilder::ConstructFrame(const FrameDefinition& def, UIFrame* paren
                     child->SetAllPoints();
                     child->SetWidth(0);
                     child->SetHeight(0);
-                    if (auto* tf = dynamic_cast<TextFrame*>(child)) {
+                    if (auto* tf = engine::ui::DynamicCastFrame<TextFrame>(child)) {
                         tf->SetAlign(TextAlign::CENTER);
                     }
                 }
@@ -221,7 +221,7 @@ UIFrame* FrameBuilder::ConstructFrame(const FrameDefinition& def, UIFrame* paren
                     it->second->SetAllPoints();
                     it->second->SetWidth(0);
                     it->second->SetHeight(0);
-                    if (auto* tf = dynamic_cast<TextFrame*>(it->second)) {
+                    if (auto* tf = engine::ui::DynamicCastFrame<TextFrame>(it->second)) {
                         tf->SetAlign(TextAlign::CENTER);
                     }
                 }
@@ -247,7 +247,7 @@ UIFrame* FrameBuilder::ConstructFrame(const FrameDefinition& def, UIFrame* paren
         wireCheckHighlight("CheckBoxDisabledCheckHighlight", &CheckBoxFrame::SetCheckBoxDisabledCheckHighlight);
     }
 
-    if (auto* popup = dynamic_cast<PopupMenuFrame*>(frame)) {
+    if (auto* popup = engine::ui::DynamicCastFrame<PopupMenuFrame>(frame)) {
         float inset = def.GetFloat("PopupButtonInset", 0.01f);
         if (def.HasField("PopupArrowFrame")) {
             std::string arrowName = def.GetString("PopupArrowFrame");
@@ -322,7 +322,7 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
     }
     else if (type == "SINGLESTRING" || type == "SINGLE_STRING") {
         frame = new TextFrame(def.name, parent);
-        auto* txtFrame = dynamic_cast<TextFrame*>(frame);
+        auto* txtFrame = engine::ui::DynamicCastFrame<TextFrame>(frame);
         if (txtFrame && textRenderer_) txtFrame->SetTextRenderer(textRenderer_);
         if (def.HasField("Text")) {
             std::string text = DecorateText(def.GetString("Text", ""));
@@ -346,7 +346,7 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
     else if (type == "BUTTON" || type == "GLUEBUTTON" || type == "GLUETEXTBUTTON" ||
              type == "TEXTBUTTON" || type == "SIMPLEBUTTON") {
         frame = new ButtonFrame(def.name, parent);
-        auto* btn = dynamic_cast<ButtonFrame*>(frame);
+        auto* btn = engine::ui::DynamicCastFrame<ButtonFrame>(frame);
         if (btn && textRenderer_) btn->SetTextRenderer(textRenderer_);
 
         // Button state art (ref SIMPLEBUTTON NormalTexture/PushedTexture/
@@ -387,7 +387,7 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
         if (def.HasField("Text")) {
             std::string text = DecorateText(def.GetString("Text", ""));
             if (!text.empty()) {
-                auto* btnFrame = dynamic_cast<ButtonFrame*>(frame);
+                auto* btnFrame = engine::ui::DynamicCastFrame<ButtonFrame>(frame);
                 if (btnFrame) btnFrame->SetText(text);
             }
         }
@@ -396,25 +396,25 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
         if (HasFontHeight(def)) {
             float fH = ResolveFontHeight(def, 0.014f);
             float fontPx = (fH < 1.0f) ? (fH * cvtH) : fH;
-            auto* btnFrame = dynamic_cast<ButtonFrame*>(frame);
+            auto* btnFrame = engine::ui::DynamicCastFrame<ButtonFrame>(frame);
             if (btnFrame) btnFrame->SetFontSize(fontPx);
         }
     }
     else if (type == "TEXT" || def.frameClass == FrameClass::String) {
         frame = new TextFrame(def.name, parent);
-        auto* txtFrame = dynamic_cast<TextFrame*>(frame);
+        auto* txtFrame = engine::ui::DynamicCastFrame<TextFrame>(frame);
         if (txtFrame && textRenderer_) txtFrame->SetTextRenderer(textRenderer_);
 
         if (def.HasField("Text")) {
             std::string text = DecorateText(def.GetString("Text", ""));
-            auto* txtFrame = dynamic_cast<TextFrame*>(frame);
+            auto* txtFrame = engine::ui::DynamicCastFrame<TextFrame>(frame);
             if (txtFrame) txtFrame->SetText(text);
         }
 
         if (HasFontHeight(def)) {
             float fH = ResolveFontHeight(def, 0.014f);
             float fontPx = (fH < 1.0f) ? (fH * cvtH) : fH;
-            auto* txtFrame = dynamic_cast<TextFrame*>(frame);
+            auto* txtFrame = engine::ui::DynamicCastFrame<TextFrame>(frame);
             if (txtFrame) txtFrame->SetFontSize(fontPx);
         }
     }
@@ -423,7 +423,7 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
     }
     else if (type == "HIGHLIGHT") {
         frame = new TextureFrame(def.name, parent);
-        auto* tf = dynamic_cast<TextureFrame*>(frame);
+        auto* tf = engine::ui::DynamicCastFrame<TextureFrame>(frame);
         if (tf && mpq_) {
             std::string file = def.GetString("HighlightAlphaFile", def.GetString("File", def.GetString("Texture", "")));
             if (!file.empty()) {
@@ -471,10 +471,10 @@ UIFrame* FrameBuilder::CreateFrameByClass(const FrameDefinition& def, UIFrame* p
     }
 
     // FDF MenuItem entries feed list-like frames (ref MenuItemFrameDefinitionField).
-    if (auto* list = dynamic_cast<ListBoxFrame*>(frame)) {
+    if (auto* list = engine::ui::DynamicCastFrame<ListBoxFrame>(frame)) {
         for (const auto& item : def.menuItems) list->AddItem(item.first);
     }
-    if (auto* popup = dynamic_cast<PopupMenuFrame*>(frame)) {
+    if (auto* popup = engine::ui::DynamicCastFrame<PopupMenuFrame>(frame)) {
         for (const auto& item : def.menuItems) popup->AddItem(item.first);
     }
 
@@ -505,7 +505,7 @@ void FrameBuilder::ApplyProperties(UIFrame* frame, const FrameDefinition& def) {
 
     // Backdrop-specific (skin-resolved, ref GameUI BACKDROP case with
     // DecorateFileNames -> trySkinField for both background and edge).
-    auto* backdrop = dynamic_cast<BackdropFrame*>(frame);
+    auto* backdrop = engine::ui::DynamicCastFrame<BackdropFrame>(frame);
     if (backdrop && mpq_) {
         // Background texture
         if (def.HasField("BackdropBackground")) {
@@ -544,7 +544,7 @@ void FrameBuilder::ApplyProperties(UIFrame* frame, const FrameDefinition& def) {
     }
 
     // Button-specific
-    auto* button = dynamic_cast<ButtonFrame*>(frame);
+    auto* button = engine::ui::DynamicCastFrame<ButtonFrame>(frame);
     if (button) {
         if (def.HasFlag("Enabled")) button->SetEnabled(true);
         if (def.HasFlag("Disabled")) button->SetEnabled(false);
@@ -555,7 +555,7 @@ void FrameBuilder::ApplyProperties(UIFrame* frame, const FrameDefinition& def) {
     }
 
     // Text-specific
-    auto* text = dynamic_cast<TextFrame*>(frame);
+    auto* text = engine::ui::DynamicCastFrame<TextFrame>(frame);
     if (text) {
         if (def.HasField("Color") || def.HasField("FontColor")) {
             auto col = def.HasField("Color") ? def.GetVector4("Color") : def.GetVector4("FontColor");
@@ -590,7 +590,7 @@ void FrameBuilder::ApplyProperties(UIFrame* frame, const FrameDefinition& def) {
 
     // TextureFrame-specific (ref GameUI Texture case: File + TexCoord,
     // resolved through the skin when decorated).
-    auto* texFrame = dynamic_cast<TextureFrame*>(frame);
+    auto* texFrame = engine::ui::DynamicCastFrame<TextureFrame>(frame);
     if (texFrame) {
         if (def.HasField("Color")) {
             auto col = def.GetVector4("Color");
@@ -615,22 +615,22 @@ void FrameBuilder::ApplyProperties(UIFrame* frame, const FrameDefinition& def) {
 
     // Extended-frame state (ref parsers/fdf/frames/*). Field keys are the
     // FDF attribute names; numeric defaults preserve previous behavior.
-    if (auto* check = dynamic_cast<CheckBoxFrame*>(frame)) {
+    if (auto* check = engine::ui::DynamicCastFrame<CheckBoxFrame>(frame)) {
         if (def.HasFlag("Checked")) check->SetChecked(true);
     }
-    if (auto* edit = dynamic_cast<EditBoxFrame*>(frame)) {
+    if (auto* edit = engine::ui::DynamicCastFrame<EditBoxFrame>(frame)) {
         if (def.HasField("MaxLength")) edit->SetMaxLength((int)def.GetFloat("MaxLength", 256));
     }
-    if (auto* scroll = dynamic_cast<ScrollBarFrame*>(frame)) {
+    if (auto* scroll = engine::ui::DynamicCastFrame<ScrollBarFrame>(frame)) {
         if (def.HasField("MinValue") || def.HasField("MaxValue"))
             scroll->SetRange(def.GetFloat("MinValue", 0), def.GetFloat("MaxValue", 1));
         if (def.HasField("Value")) scroll->SetValue(def.GetFloat("Value", 0));
     }
-    if (auto* status = dynamic_cast<StatusBarFrame*>(frame)) {
+    if (auto* status = engine::ui::DynamicCastFrame<StatusBarFrame>(frame)) {
         if (def.HasField("MaxValue")) status->SetMax(def.GetFloat("MaxValue", 1));
         if (def.HasField("Value")) status->SetValue(def.GetFloat("Value", 1));
     }
-    if (auto* sprite = dynamic_cast<SpriteFrame*>(frame)) {
+    if (auto* sprite = engine::ui::DynamicCastFrame<SpriteFrame>(frame)) {
         if (def.HasField("Model")) sprite->SetModel(def.GetString("Model", ""));
     }
 }

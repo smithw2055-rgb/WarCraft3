@@ -1,6 +1,7 @@
 // FDF-backed HUD host: retail FrameDef layout + Java-faithful console HUD.
 // Ref: warsmash_ref/core/src/com/etheller/warsmash/viewer5/handlers/w3x/ui/MeleeUI.java
 #include "FdfHudHost.h"
+#include "render/rhi_device.h"
 #include "BackdropFrame.h"
 #include "ButtonFrame.h"
 #include "ConsoleHUD.h"
@@ -47,7 +48,7 @@ bool ReadMpqText(MpqManager* mpq, const std::string& path, std::string& out) {
 void HideSubtree(UIFrame* f) {
     if (!f) return;
     f->SetVisible(false);
-    if (auto* s = dynamic_cast<SimpleFrame*>(f)) {
+    if (auto* s = engine::ui::DynamicCastFrame<SimpleFrame>(f)) {
         for (UIFrame* c : s->GetChildren()) HideSubtree(c);
     }
 }
@@ -221,7 +222,7 @@ BackdropFrame* FdfHudHost::MakeMenuBackdrop(const std::string& name, const std::
 }
 void FdfHudHost::ClearOwnedFrames() {
     for (auto& f : ownedFrames_) {
-        if (auto* s = dynamic_cast<SimpleFrame*>(f.get())) {
+        if (auto* s = engine::ui::DynamicCastFrame<SimpleFrame>(f.get())) {
             // Copy: RemoveChild mutates the list.
             const auto kids = s->GetChildren();
             for (UIFrame* k : kids) s->RemoveChild(k);
@@ -414,7 +415,7 @@ bool FdfHudHost::LoadRetailConsole() {
         // procedural SmashConsoleUI-equivalent below.
         if (!builder_->BuildFromTemplates(templates, templates.begin()->first)) return false;
     }
-    root_ = dynamic_cast<SimpleFrame*>(builder_->GetFrame("ConsoleUI"));
+    root_ = engine::ui::DynamicCastFrame<SimpleFrame>(builder_->GetFrame("ConsoleUI"));
     if (!root_) {
         // Retail ConsoleUI may be a plain FRAME; wrap lookup fallback.
         if (UIFrame* any = builder_->GetFrame("ConsoleUI")) {
@@ -477,7 +478,7 @@ bool FdfHudHost::LoadRetailConsole() {
     // SimpleInfoPanel action labels): Java overwrites these on selection
     // change; blank them so they never render literally.
     for (const auto& [name, frame] : builder_->GetAllFrames()) {
-        if (auto* text = dynamic_cast<TextFrame*>(frame)) {
+        if (auto* text = engine::ui::DynamicCastFrame<TextFrame>(frame)) {
             if (text->GetText() == "Retarded text") text->SetText("");
         }
     }
@@ -519,10 +520,10 @@ bool FdfHudHost::LoadRetailConsole() {
             UIFrame* f = FindFrame(name);
             UiRect b = f ? f->GetBounds() : UiRect{};
             std::string extra;
-            if (auto* tf = dynamic_cast<TextureFrame*>(f)) {
+            if (auto* tf = engine::ui::DynamicCastFrame<TextureFrame>(f)) {
                 extra = tf->HasTexture() ? " textured" : " NO-TEXTURE";
             }
-            if (auto* tf = dynamic_cast<TextFrame*>(f)) {
+            if (auto* tf = engine::ui::DynamicCastFrame<TextFrame>(f)) {
                 extra = " text='" + tf->GetText().substr(0, 24) + "'";
             }
             std::cout << "  '" << name << "' " << b.x << "," << b.y << " " << b.w << "x" << b.h
@@ -549,7 +550,7 @@ bool FdfHudHost::LoadRetailConsole() {
             if (name.rfind("ConsoleUI/@anon", 0) != 0) continue;
             UiRect b = frame ? frame->GetBounds() : UiRect{};
             std::string extra;
-            if (auto* tf = dynamic_cast<TextureFrame*>(frame)) {
+            if (auto* tf = engine::ui::DynamicCastFrame<TextureFrame>(frame)) {
                 extra = tf->HasTexture() ? " textured" : " NO-TEXTURE";
             }
             std::cout << "  '" << name << "' " << b.x << "," << b.y << " " << b.w << "x" << b.h
@@ -563,19 +564,19 @@ bool FdfHudHost::LoadRetailConsole() {
             if (name.rfind("ConsoleUI/@anon", 0) == 0) continue;
             std::string kind = "frame";
             std::string extra;
-            if (dynamic_cast<SimpleFrame*>(frame)) kind = "simple";
-            if (auto* tf = dynamic_cast<TextureFrame*>(frame)) {
+            if (engine::ui::DynamicCastFrame<SimpleFrame>(frame)) kind = "simple";
+            if (auto* tf = engine::ui::DynamicCastFrame<TextureFrame>(frame)) {
                 kind = "texture";
                 extra = tf->HasTexture() ? " textured" : " NO-TEXTURE";
             }
-            if (dynamic_cast<BackdropFrame*>(frame)) kind = "backdrop";
-            if (dynamic_cast<ButtonFrame*>(frame)) kind = "button";
-            if (dynamic_cast<TextFrame*>(frame)) kind = "text";
+            if (engine::ui::DynamicCastFrame<BackdropFrame>(frame)) kind = "backdrop";
+            if (engine::ui::DynamicCastFrame<ButtonFrame>(frame)) kind = "button";
+            if (engine::ui::DynamicCastFrame<TextFrame>(frame)) kind = "text";
             std::cout << "  BIG '" << name << "' [" << kind << "] " << b.x << "," << b.y << " "
                       << b.w << "x" << b.h << extra << std::endl;
         }
         for (const auto& [name, frame] : gui_.frameRegistry) {
-            auto* tf = dynamic_cast<TextFrame*>(frame);
+            auto* tf = engine::ui::DynamicCastFrame<TextFrame>(frame);
             if (!tf || !frame->IsVisible() || tf->GetText().empty()) continue;
             UiRect b = frame->GetBounds();
             std::cout << "  TEXT '" << name << "' " << b.x << "," << b.y << " " << b.w << "x" << b.h
@@ -591,7 +592,7 @@ bool FdfHudHost::LoadRetailConsole() {
                 UiRect b = f->GetBounds();
                 std::cout << std::string(depth * 2, ' ') << name << " " << b.x << "," << b.y << " "
                           << b.w << "x" << b.h << (f->IsVisible() ? "" : " HID") << std::endl;
-                if (auto* s = dynamic_cast<SimpleFrame*>(f)) {
+                if (auto* s = engine::ui::DynamicCastFrame<SimpleFrame>(f)) {
                     for (UIFrame* c : s->GetChildren()) {
                         if (c) self(c->GetName().empty() ? std::string("@noname") : c->GetName(), self,
                                     depth + 1);
@@ -807,7 +808,7 @@ std::shared_ptr<Texture> FdfHudHost::ResolveIcon(const std::string& uri) {
 
 bool FdfHudHost::BindText(const std::string& name, const std::string& value) {
     UIFrame* f = FindFrame(name);
-    auto* text = dynamic_cast<TextFrame*>(f);
+    auto* text = engine::ui::DynamicCastFrame<TextFrame>(f);
     if (!text) return false;
     text->SetText(value);
     return true;
@@ -820,10 +821,10 @@ bool FdfHudHost::BindIcon(std::initializer_list<const char*> names,
     for (const char* name : names) {
         UIFrame* f = FindFrame(name);
         if (!f) continue;
-        if (auto* tf = dynamic_cast<TextureFrame*>(f)) {
+        if (auto* tf = engine::ui::DynamicCastFrame<TextureFrame>(f)) {
             tf->SetTexture(tex);
             bound = true;
-        } else if (auto* bf = dynamic_cast<BackdropFrame*>(f)) {
+        } else if (auto* bf = engine::ui::DynamicCastFrame<BackdropFrame>(f)) {
             bf->SetBackground(tex);
             bound = true;
         }
@@ -857,7 +858,7 @@ void FdfHudHost::SetUpkeepLevel(int level) {
     }
     if (!BindText("ResourceBarUpkeepText", text)) return;
     if (UIFrame* f = FindFrame("ResourceBarUpkeepText")) {
-        if (auto* tf = dynamic_cast<TextFrame*>(f)) tf->SetColor(color);
+        if (auto* tf = engine::ui::DynamicCastFrame<TextFrame>(f)) tf->SetColor(color);
     }
 }
 
@@ -885,7 +886,7 @@ void FdfHudHost::SetSelection(const std::string& name, int level, float hp, floa
     if (maxHp_ > 0) {
         std::snprintf(statBuf, sizeof(statBuf), "%.0f / %.0f", hp_, maxHp_);
         BindText("UnitPortraitHitPointText", statBuf);
-        if (auto* tf = dynamic_cast<TextFrame*>(FindFrame("UnitPortraitHitPointText"))) {
+        if (auto* tf = engine::ui::DynamicCastFrame<TextFrame>(FindFrame("UnitPortraitHitPointText"))) {
             tf->SetVisible(true);
         }
     } else {
@@ -895,7 +896,7 @@ void FdfHudHost::SetSelection(const std::string& name, int level, float hp, floa
     if (maxMp_ > 0) {
         std::snprintf(statBuf, sizeof(statBuf), "%.0f / %.0f", mp_, maxMp_);
         BindText("UnitPortraitManaPointText", statBuf);
-        if (auto* tf = dynamic_cast<TextFrame*>(FindFrame("UnitPortraitManaPointText"))) {
+        if (auto* tf = engine::ui::DynamicCastFrame<TextFrame>(FindFrame("UnitPortraitManaPointText"))) {
             tf->SetVisible(true);
         }
     } else {
@@ -914,7 +915,7 @@ void FdfHudHost::SetSelection(const std::string& name, int level, float hp, floa
         BindText("InfoPanelIconHeroAgilityValue", attrBuf);
         std::snprintf(attrBuf, sizeof(attrBuf), "%d", heroIntBase_ + heroIntBonus_);
         BindText("InfoPanelIconHeroIntellectValue", attrBuf);
-        if (auto* xp = dynamic_cast<StatusBarFrame*>(FindFrame("SimpleHeroLevelBar"))) {
+        if (auto* xp = engine::ui::DynamicCastFrame<StatusBarFrame>(FindFrame("SimpleHeroLevelBar"))) {
             xp->SetMax(heroMaxXp_ > 0 ? (float)heroMaxXp_ : 1.0f);
             xp->SetValue((float)heroXp_);
         }
@@ -981,7 +982,7 @@ void FdfHudHost::SetSelection(const std::string& name, int level, float hp, floa
 
             if (!infoStats_.attackIconKey.empty() && builder_) {
                 auto tex = builder_->LoadSkinTexture(infoStats_.attackIconKey);
-                if (auto* tf = dynamic_cast<TextureFrame*>(consoleRefs_.attack1IconBackdrop)) {
+                if (auto* tf = engine::ui::DynamicCastFrame<TextureFrame>(consoleRefs_.attack1IconBackdrop)) {
                     tf->SetTexture(tex);
                 }
                 BindIcon({"InfoPanelIconBackdrop", "Attack1IconBackdrop"}, tex);
@@ -996,7 +997,7 @@ void FdfHudHost::SetSelection(const std::string& name, int level, float hp, floa
 
             if (!infoStats_.armorIconKey.empty() && builder_) {
                 auto tex = builder_->LoadSkinTexture(infoStats_.armorIconKey);
-                if (auto* tf = dynamic_cast<TextureFrame*>(consoleRefs_.armorIconBackdrop)) {
+                if (auto* tf = engine::ui::DynamicCastFrame<TextureFrame>(consoleRefs_.armorIconBackdrop)) {
                     tf->SetTexture(tex);
                 }
                 BindIcon({"SmashArmorIconBackdrop", "ArmorIconBackdrop"}, tex);
@@ -1404,7 +1405,7 @@ void FdfHudHost::DrawTexts() {
 void FdfHudHost::SetDialogVisible(UIFrame* dialog, bool visible) {
     if (!dialog) return;
     dialog->SetVisible(visible);
-    if (auto* s = dynamic_cast<SimpleFrame*>(dialog)) {
+    if (auto* s = engine::ui::DynamicCastFrame<SimpleFrame>(dialog)) {
         // Children keep their own FDF visibility (e.g. sub-panels stay
         // hidden); only the dialog root toggles. Ensure positioned bounds
         // are fresh when shown.
@@ -1761,7 +1762,7 @@ void FdfHudHost::Render() {
     if (gameMenuOpen_) DrawGameMenu();
     if (glueActive_) DrawGlueMenu();
     gui_.renderer.EndFrame();
-    sg_reset_state_cache();
+    render::RhiDevice::Instance().ResetStateCache();
 }
 
 bool FdfHudHost::HandleEvent(const sapp_event* /*e*/) { return false; }

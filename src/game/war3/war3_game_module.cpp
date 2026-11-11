@@ -2516,7 +2516,7 @@ bool War3GameModule::OnProjectilePreImpact(CSimulation& sim,
                                            bool& outTerminate) {
     ++stats_.projectilePreImpactsEvaluated;
     outTerminate = true;
-    auto* victim = dynamic_cast<CUnit*>(target);
+    auto* victim = ((target) ? (target)->AsUnit() : nullptr);
     if (!victim) return false;
 
     if (proj.checkEffectReaction) {
@@ -2562,7 +2562,7 @@ bool War3GameModule::OnProjectileCustomImpact(CSimulation& sim,
     if (specIt != customProjectileSpecs_.end()) {
         const CustomProjectileSpec& spec = specIt->second;
         if (spec.impactBuffCode.value != 0) {
-            if (auto* victim = dynamic_cast<CUnit*>(target)) {
+            if (auto* victim = ((target) ? (target)->AsUnit() : nullptr)) {
                 TryApplyCustomBuffByCode(sim, *victim, spec.impactBuffCode.value,
                                          spec.impactBuffDuration,
                                          source ? source->GetHandleId() : -1);
@@ -3701,6 +3701,26 @@ uint64_t War3GameModule::OnComputeModuleStateHash(const CSimulation& /*sim*/) co
             mixU32(r.tintRgba);
         }
     }
+    if (!customTilesetProfiles_.empty()) {
+        std::vector<char> sortedCodes;
+        sortedCodes.reserve(customTilesetProfiles_.size());
+        for (const auto& [code, _] : customTilesetProfiles_) {
+            sortedCodes.push_back(code);
+        }
+        std::sort(sortedCodes.begin(), sortedCodes.end());
+        for (char code : sortedCodes) {
+            const auto& p = customTilesetProfiles_.at(code);
+            mixU32(static_cast<uint32_t>(static_cast<unsigned char>(code)));
+            mixString(p.dayAmbientMidiPath);
+            mixString(p.nightAmbientMidiPath);
+            mixFloat(p.fogColorR);
+            mixFloat(p.fogColorG);
+            mixFloat(p.fogColorB);
+            mixFloat(p.fogStart);
+            mixFloat(p.fogEnd);
+            mixU32(p.waterTintRgba);
+        }
+    }
     return h;
 }
 
@@ -4057,6 +4077,121 @@ bool War3GameModule::OnResolveUnitVisualScaleAndTintForUnit(const CUnit& unit,
     outScaleMultiplier = scale;
     outTintRgba = tint;
     return true;
+}
+
+// ============================================================================
+// Phase 33 (Track E + F): Pluggable Tileset Environment Fog, Water & MIDI Profile
+// ============================================================================
+
+void War3GameModule::RegisterTilesetEnvironmentProfile(const TilesetEnvironmentProfile& profile) {
+    if (profile.tilesetCode == 0) {
+        return;
+    }
+    customTilesetProfiles_[profile.tilesetCode] = profile;
+}
+
+bool War3GameModule::UnregisterTilesetEnvironmentProfile(char tilesetCode) {
+    return customTilesetProfiles_.erase(tilesetCode) > 0;
+}
+
+bool War3GameModule::HasTilesetEnvironmentProfile(char tilesetCode) const {
+    return customTilesetProfiles_.count(tilesetCode) > 0;
+}
+
+bool War3GameModule::OnResolveTilesetEnvironmentProfile(
+    char tilesetCode,
+    TilesetEnvironmentProfile& outProfile) const {
+    const auto customIt = customTilesetProfiles_.find(tilesetCode);
+    if (customIt != customTilesetProfiles_.end()) {
+        outProfile = customIt->second;
+        return true;
+    }
+
+    struct CanonicalTilesetEntry {
+        char code;
+        const char* dayMidi;
+        const char* nightMidi;
+        float fogR;
+        float fogG;
+        float fogB;
+        float fogStart;
+        float fogEnd;
+        uint32_t waterRgba;
+    };
+
+    static constexpr CanonicalTilesetEntry kCanonicalTilesets[] = {
+        {'L', "Sound\\Ambient\\LordaeronSummer\\LordaeronSummerDay.mid",
+              "Sound\\Ambient\\LordaeronSummer\\LordaeronSummerNight.mid",
+              0.78f, 0.84f, 0.94f, 3000.0f, 7000.0f, 0xBF408CD9u},
+        {'F', "Sound\\Ambient\\LordaeronFall\\LordaeronFallDay.mid",
+              "Sound\\Ambient\\LordaeronFall\\LordaeronFallNight.mid",
+              0.84f, 0.72f, 0.56f, 2800.0f, 6800.0f, 0xBF4A7AB5u},
+        {'W', "Sound\\Ambient\\LordaeronWinter\\LordaeronWinterDay.mid",
+              "Sound\\Ambient\\LordaeronWinter\\LordaeronWinterNight.mid",
+              0.86f, 0.90f, 0.96f, 2600.0f, 6400.0f, 0xBF5898DCu},
+        {'V', "Sound\\Ambient\\Village\\VillageDay.mid",
+              "Sound\\Ambient\\Village\\VillageNight.mid",
+              0.76f, 0.82f, 0.90f, 3000.0f, 7000.0f, 0xBF4488D0u},
+        {'Q', "Sound\\Ambient\\VillageFall\\VillageFallDay.mid",
+              "Sound\\Ambient\\VillageFall\\VillageFallNight.mid",
+              0.82f, 0.70f, 0.55f, 2800.0f, 6600.0f, 0xBF4E7CB0u},
+        {'A', "Sound\\Ambient\\Ashenvale\\AshenvaleDay.mid",
+              "Sound\\Ambient\\Ashenvale\\AshenvaleNight.mid",
+              0.42f, 0.58f, 0.74f, 2600.0f, 6500.0f, 0xBF3878B8u},
+        {'B', "Sound\\Ambient\\Barrens\\BarrensDay.mid",
+              "Sound\\Ambient\\Barrens\\BarrensNight.mid",
+              0.92f, 0.78f, 0.55f, 3200.0f, 7400.0f, 0xBF5094C8u},
+        {'N', "Sound\\Ambient\\Northrend\\NorthrendDay.mid",
+              "Sound\\Ambient\\Northrend\\NorthrendNight.mid",
+              0.74f, 0.85f, 0.95f, 2500.0f, 6200.0f, 0xBF488ED8u},
+        {'C', "Sound\\Ambient\\Felwood\\FelwoodDay.mid",
+              "Sound\\Ambient\\Felwood\\FelwoodNight.mid",
+              0.40f, 0.62f, 0.42f, 2400.0f, 6000.0f, 0xBF348450u},
+        {'Y', "Sound\\Ambient\\CityScape\\CityScapeDay.mid",
+              "Sound\\Ambient\\CityScape\\CityScapeNight.mid",
+              0.80f, 0.84f, 0.92f, 3000.0f, 7200.0f, 0xBF448CD8u},
+        {'X', "Sound\\Ambient\\Dalaran\\DalaranDay.mid",
+              "Sound\\Ambient\\Dalaran\\DalaranNight.mid",
+              0.76f, 0.72f, 0.90f, 2900.0f, 6900.0f, 0xBF5878D4u},
+        {'Z', "Sound\\Ambient\\SunkenRuins\\SunkenRuinsDay.mid",
+              "Sound\\Ambient\\SunkenRuins\\SunkenRuinsNight.mid",
+              0.52f, 0.82f, 0.80f, 2800.0f, 6800.0f, 0xBF30A8B8u},
+        {'I', "Sound\\Ambient\\IceCrown\\IceCrownDay.mid",
+              "Sound\\Ambient\\IceCrown\\IceCrownNight.mid",
+              0.68f, 0.80f, 0.94f, 2400.0f, 6000.0f, 0xBF4284D4u},
+        {'O', "Sound\\Ambient\\Outland\\OutlandDay.mid",
+              "Sound\\Ambient\\Outland\\OutlandNight.mid",
+              0.78f, 0.44f, 0.36f, 2600.0f, 6400.0f, 0xBF883830u},
+        {'K', "Sound\\Ambient\\BlackCitadel\\BlackCitadelDay.mid",
+              "Sound\\Ambient\\BlackCitadel\\BlackCitadelNight.mid",
+              0.56f, 0.38f, 0.36f, 2400.0f, 5800.0f, 0xBF643430u},
+        {'D', "Sound\\Ambient\\Dungeon\\DungeonDay.mid",
+              "Sound\\Ambient\\Dungeon\\DungeonNight.mid",
+              0.46f, 0.36f, 0.32f, 2200.0f, 5600.0f, 0xBF54382Cu},
+        {'G', "Sound\\Ambient\\Underground\\UndergroundDay.mid",
+              "Sound\\Ambient\\Underground\\UndergroundNight.mid",
+              0.38f, 0.44f, 0.54f, 2200.0f, 5600.0f, 0xBF384C68u},
+        {'J', "Sound\\Ambient\\DalaranRuins\\DalaranRuinsDay.mid",
+              "Sound\\Ambient\\DalaranRuins\\DalaranRuinsNight.mid",
+              0.62f, 0.66f, 0.78f, 2600.0f, 6400.0f, 0xBF4C6894u},
+    };
+
+    const char upperCode = static_cast<char>(std::toupper(static_cast<unsigned char>(tilesetCode)));
+    for (const auto& entry : kCanonicalTilesets) {
+        if (entry.code == upperCode) {
+            outProfile.tilesetCode = entry.code;
+            outProfile.dayAmbientMidiPath = entry.dayMidi;
+            outProfile.nightAmbientMidiPath = entry.nightMidi;
+            outProfile.fogColorR = entry.fogR;
+            outProfile.fogColorG = entry.fogG;
+            outProfile.fogColorB = entry.fogB;
+            outProfile.fogStart = entry.fogStart;
+            outProfile.fogEnd = entry.fogEnd;
+            outProfile.waterTintRgba = entry.waterRgba;
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace war3

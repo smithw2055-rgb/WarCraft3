@@ -21,10 +21,10 @@ bool EngineKernel::BootstrapStandardSubsystems(uint32_t workerThreads, float fix
 }
 
 bool EngineKernel::BindExternalServices(core::JobSystem* jobs,
-                                        resource::ResourceServer* resources,
+                                        ::resource::ResourceServer* resources,
                                         audio::AudioServer* audio,
-                                        render::RenderServer* renderServer,
-                                        render::RenderGraph* renderGraph,
+                                        ::render::RenderServer* renderServer,
+                                        ::render::RenderGraph* renderGraph,
                                         core::InputActionMap* input,
                                         core::EngineProfiler* profiler,
                                         float fixedStepSec,
@@ -134,7 +134,7 @@ core::JobSystem* EngineKernel::Jobs() const {
     return sub ? sub->GetJobSystem() : nullptr;
 }
 
-resource::ResourceServer* EngineKernel::Resources() const {
+::resource::ResourceServer* EngineKernel::Resources() const {
     auto* sub = subsystems_.TryGet<ResourceEngineSubsystem>();
     return sub ? sub->GetResourceServer() : nullptr;
 }
@@ -144,12 +144,12 @@ audio::AudioServer* EngineKernel::Audio() const {
     return sub ? sub->GetAudioServer() : nullptr;
 }
 
-render::RenderServer* EngineKernel::RenderServer() const {
+::render::RenderServer* EngineKernel::RenderServer() const {
     auto* sub = subsystems_.TryGet<RenderEngineSubsystem>();
     return sub ? sub->GetRenderServer() : nullptr;
 }
 
-render::RenderGraph* EngineKernel::RenderGraph() const {
+::render::RenderGraph* EngineKernel::RenderGraph() const {
     auto* sub = subsystems_.TryGet<RenderEngineSubsystem>();
     return sub ? sub->GetRenderGraph() : nullptr;
 }

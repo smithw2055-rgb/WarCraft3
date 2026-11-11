@@ -1,7 +1,7 @@
 #include "TextFrame.h"
 
 TextFrame::TextFrame(const std::string& name, UIFrame* parent)
-    : UIFrame(name, parent) {}
+    : UIFrame(name, parent, engine::ui::FrameKind::Text) {}
 
 void TextFrame::SetText(const std::string& t) {
     text_ = t;

@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cmath>
 
-#include "stb_image.h"
+#include "stb/stb_image.h"
 
 // -----------------------------------------------------------------------
 // DXT (S3TC) decompression helpers

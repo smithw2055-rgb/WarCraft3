@@ -1,6 +1,5 @@
 #include "splat_model.h"
-#include "shader.h"
-#include "renderer.h"
+#include "render/rhi_device.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>

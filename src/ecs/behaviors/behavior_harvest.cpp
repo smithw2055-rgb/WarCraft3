@@ -70,7 +70,7 @@ void CBehaviorHarvest::Begin(CSimulation& simulation) {
 
 void CBehaviorHarvest::End(CSimulation& simulation) {
     if (resourceType_ == CResourceType::GOLD && inMine_) {
-        if (auto* targetUnit = (targetHandle_ >= 0 && simulation.GetUnit(targetHandle_)) ? simulation.GetUnit(targetHandle_) : dynamic_cast<CUnit*>(target_)) {
+        if (auto* targetUnit = (targetHandle_ >= 0 && simulation.GetUnit(targetHandle_)) ? simulation.GetUnit(targetHandle_) : ((target_) ? (target_)->AsUnit() : nullptr)) {
             if (CAbility* mine = ResolveMineAbility(targetUnit)) {
                 mine->RemoveMiner(this);
             }
@@ -120,7 +120,7 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
         const float dist = MoveIntoRange::Distance2D(unit_->GetX(), unit_->GetY(), target_->GetX(), target_->GetY());
 
         float arrival = 128.0f;
-        if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+        if (auto* targetUnit = ((target_) ? (target_)->AsUnit() : nullptr)) {
             arrival = std::max(220.0f, targetUnit->GetCollisionSize() + 96.0f);
             if (resourceType_ == CResourceType::GOLD || ResolveMineAbility(targetUnit) || targetUnit->GetTypeId() == War3ID("ngol")) {
                 arrival = 256.0f;
@@ -132,7 +132,7 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             unit_->TurnTowardPoint(target_->GetX(), target_->GetY());
 
             if (resourceType_ == CResourceType::GOLD) {
-                if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+                if (auto* targetUnit = ((target_) ? (target_)->AsUnit() : nullptr)) {
                     if (CAbility* goldMine = ResolveMineAbility(targetUnit)) {
                         if (goldMine->GetGold() <= 0) {
                             return true;
@@ -174,7 +174,7 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             gatherTimer_ = 0;
 
             if (resourceType_ == CResourceType::GOLD) {
-                if (auto* targetUnit = dynamic_cast<CUnit*>(target_)) {
+                if (auto* targetUnit = ((target_) ? (target_)->AsUnit() : nullptr)) {
                     if (CAbility* goldMine = ResolveMineAbility(targetUnit)) {
                         if (goldMine->GetGold() <= 0) {
                             return true;
@@ -193,7 +193,7 @@ bool CBehaviorHarvest::Update(CSimulation& simulation) {
             } else if (resourceType_ == CResourceType::LUMBER) {
                 constexpr int chopAmount = 2;
                 gatheredAmount_ = std::min(gatheredAmount_ + chopAmount, capacity_);
-                if (auto* tree = dynamic_cast<CDestructable*>(target_)) {
+                if (auto* tree = ((target_) ? (target_)->AsDestructable() : nullptr)) {
                     tree->Damage(simulation, unit_, true, false, CAttackType::NORMAL, CDamageType::NORMAL, "", (float)chopAmount);
                     if (tree->IsDead() && gatheredAmount_ < capacity_) {
                         FindNearestTree(simulation);

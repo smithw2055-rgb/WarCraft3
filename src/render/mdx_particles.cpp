@@ -1,12 +1,11 @@
 #include "mdx_particles.h"
 #include "mdx_animator.h"
-#include "shader.h"
+#include "render/rhi_device.h"
 #include "resource/mpq_storm.h"
-#include "renderer.h"
 #include "asset/BLP.h"
 #include "asset/DDS.h"
 #include "asset/MipChain.h"
-#include "asset/stb_image.h"
+#include "stb/stb_image.h"
 #include "replaceable_ids.h"
 #include <iostream>
 #include <cmath>

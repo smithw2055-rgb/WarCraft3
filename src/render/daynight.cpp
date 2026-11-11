@@ -1,6 +1,6 @@
 #include "daynight.h"
 #include "textured_terrain.h"
-#include "renderer.h"
+#include "render/rhi_device.h"
 #include "mdx_viewer.h"
 #include <cmath>
 #include <algorithm>

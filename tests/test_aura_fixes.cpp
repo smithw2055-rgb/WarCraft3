@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "ecs/abilities/ability_aura.h"
-#include "ecs/abilities/auras.h"
+#include "game/war3/abilities/war3_spells.h"
 #include "ecs/buffs.h"
 #include "ecs/csimulation.h"
 #include "ecs/unit.h"

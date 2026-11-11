@@ -169,7 +169,7 @@ bool TestBlzFrameLiveUIFrameBridgeAndEvents() {
     TEST_ASSERT(liveNode->IsVisible());
     TEST_ASSERT(liveNode->GetWidth() > 300.0f);
 
-    auto* btnNode = dynamic_cast<ButtonFrame*>(liveNode);
+    auto* btnNode = engine::ui::DynamicCastFrame<ButtonFrame>(liveNode);
     TEST_ASSERT(btnNode != nullptr);
     TEST_ASSERT(btnNode->GetText() == "Launch Modern Engine");
 

@@ -88,10 +88,25 @@ void sg_apply_uniforms(int, const sg_range*) {
 void sg_draw(int, int, int) {
 }
 
+void sg_apply_viewport(int, int, int, int, bool) {
+}
+
+void sg_apply_scissor_rect(int, int, int, int, bool) {
+}
+
 namespace Renderer {
 
 bool IsActive() {
     return false;
+}
+
+void BeginFrame() {
+}
+
+void EndFrame() {
+}
+
+void SetClearColor(const float[4]) {
 }
 
 }

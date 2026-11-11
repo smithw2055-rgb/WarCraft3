@@ -19,7 +19,7 @@ void CBehaviorBoardTransport::End(CSimulation& simulation) {
 bool CBehaviorBoardTransport::TryLoadNow(CSimulation& simulation) {
     (void)simulation;
     if (!unit_ || !target_) return true; // nothing to do
-    auto* passenger = dynamic_cast<CUnit*>(target_);
+    auto* passenger = ((target_) ? (target_)->AsUnit() : nullptr);
     if (!passenger || passenger->IsDead() || passenger == unit_) return true;
     if (passenger->IsLoadedAboard()) return true;
     if ((int)unit_->GetCargoUnits().size() >= cargoCapacity_) return true; // full
@@ -69,7 +69,7 @@ void CBehaviorLoad::End(CSimulation& simulation) { (void)simulation; }
 
 bool CBehaviorLoad::Update(CSimulation& simulation) {
     if (!unit_ || !target_ || target_->IsDead()) return true;
-    auto* transport = dynamic_cast<CUnit*>(target_);
+    auto* transport = ((target_) ? (target_)->AsUnit() : nullptr);
     if (!transport || transport->IsDead()) return true;
     if (unit_->IsLoadedAboard()) return true;
     if (unit_->IsBuilding()) return true;
